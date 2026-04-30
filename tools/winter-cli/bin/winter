@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Resolve which winter-cli source tree to run, then exec it via mise+uv.
+#
+# Default: walks up from $PWD, finds the workspace root (the dir containing
+# both .winter/config.toml and tools/winter-cli/), and runs the winter-cli
+# that lives there.
+#
+# Override: if the FIRST arg is --winter=PATH, run the winter-cli inside
+# `PATH/tools/winter-cli` instead. The workspace root is still discovered
+# from $PWD; only the source tree is swapped. Useful for testing a
+# feature-branch checkout against the current workspace, e.g.:
+#   winter --winter=./alpha/winter dashboard
+#
+# Python's CWD is fixed to the workspace's own tools/winter-cli/. This
+# matters because gitpython resolves the relative `gitdir:` references in
+# worktree `.git` files against `process.cwd()` (not the worktree's
+# location), so we anchor cwd at the well-known two-deep location the
+# workspace's git layout was built around.
+
+set -euo pipefail
+
+# Locate the workspace root by walking up from $PWD.
+ws=""
+dir="$PWD"
+while [[ "$dir" != "/" ]]; do
+  if [[ -f "$dir/.winter/config.toml" && -d "$dir/tools/winter-cli" ]]; then
+    ws="$dir"
+    break
+  fi
+  dir="$(dirname "$dir")"
+done
+if [[ -z "$ws" ]]; then
+  echo "Not inside a winter workspace" >&2
+  exit 1
+fi
+
+# Pick which source tree to run.
+if [[ "${1:-}" == --winter=* ]]; then
+  override="${1#--winter=}"
+  shift
+  abs="$(cd "$override" 2>/dev/null && pwd -P)" || {
+    echo "winter: --winter=$override: directory not found" >&2
+    exit 1
+  }
+  cli="$abs/tools/winter-cli"
+  if [[ ! -d "$cli" ]]; then
+    echo "winter: --winter=$override: no tools/winter-cli inside $abs" >&2
+    exit 1
+  fi
+else
+  cli="$ws/tools/winter-cli"
+fi
+
+cd "$ws/tools/winter-cli"
+exec mise -C "$cli" exec -- uv run --project "$cli" winter "$@"

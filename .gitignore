@@ -1,0 +1,8 @@
+# Local-only winter config (git identity, machine-specific overrides)
+/.winter/config.local.toml
+
+# Auto-managed by `winter ws init` — extension list imported from CLAUDE.md
+/CLAUDE.winter.md
+
+# User/machine-specific Claude Code overrides imported from CLAUDE.md
+/CLAUDE.local.md

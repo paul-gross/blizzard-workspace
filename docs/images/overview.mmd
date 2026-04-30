@@ -1,0 +1,56 @@
+flowchart TB
+    subgraph ws["my-project/ — Winter Workspace"]
+        direction TB
+
+        subgraph root["workspace root ./ — winter.git workspace branch"]
+            direction LR
+            adm["<b>.claude/agents/</b><br/>agentic-development-manager<br/>product-engineer, product-specialist<br/>project/ → project:.claude/agents"]
+            skills["<b>.claude/skills/</b><br/>commit, todo, ws, ws-setup,<br/>ws-status, ws-sync, ws-work<br/>project/ → project:.claude/skills"]
+            ai_proj["<b>ai/project/</b><br/>→ project:ai/winter/"]
+            workflow["<b>workflow/</b><br/>up, down, status"]
+        end
+
+        subgraph product_wt["product/ — project.git product branch worktree"]
+            direction LR
+            product_content["<b>plans/ & todos/</b><br/>product backlog"]
+        end
+
+        subgraph project_wt["project/ — project.git main branch clone"]
+            direction LR
+            proj_claude["<b>.claude/</b><br/>project-specific<br/>agents & skills"]
+            proj_ai["<b>ai/winter/</b><br/>branches.md<br/>contributing.md<br/>project-setup.md<br/>workflow.sh"]
+            proj_scripts["<b>up</b> → workflow/up<br/><b>down</b> → workflow/down<br/><b>status</b> → workflow/status"]
+        end
+
+        subgraph alpha_wt["alpha/ — project.git feature branch worktree"]
+            direction LR
+            alpha_desc["Isolated feature development"]
+            alpha_scripts["<b>up</b> → workflow/up &nbsp; <b>down</b> → workflow/down &nbsp; <b>status</b> → workflow/status"]
+        end
+
+        subgraph beta_wt["beta/ — project.git feature branch worktree"]
+            direction LR
+            beta_desc["Parallel feature development"]
+            beta_scripts["<b>up</b> → workflow/up &nbsp; <b>down</b> → workflow/down &nbsp; <b>status</b> → workflow/status"]
+        end
+    end
+
+    root ~~~ product_wt
+    root ~~~ project_wt
+    product_wt ~~~ alpha_wt
+    project_wt ~~~ beta_wt
+
+    classDef winterNode fill:#533483,stroke:#e94560,color:#fff
+    classDef projectNode fill:#1a6fb5,stroke:#53a8e2,color:#fff
+    classDef winterContainer fill:#1c1040,stroke:#e94560,color:#eee
+    classDef projectContainer fill:#0a2744,stroke:#53a8e2,color:#eee
+
+    class root winterContainer
+    class product_wt winterContainer
+    class project_wt,alpha_wt,beta_wt projectContainer
+    class adm,skills,ai_proj,workflow winterNode
+    class product_content winterNode
+    class proj_claude,proj_ai,proj_scripts projectNode
+    class alpha_desc,alpha_scripts,beta_desc,beta_scripts projectNode
+
+    style ws fill:#0d1117,stroke:#30363d,color:#c9d1d9

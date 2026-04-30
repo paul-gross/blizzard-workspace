@@ -1,0 +1,33 @@
+from __future__ import annotations
+
+from textual.app import App
+from textual.binding import Binding
+
+from winter_cli.container import Container
+from winter_cli.modules.tui.screen_factory import ScreenFactory
+from winter_cli.plugins.loader import PluginRegistry
+
+
+class WinterDashboardApp(App):
+
+    ENABLE_COMMAND_PALETTE = False
+
+    CSS_PATH = "styles/app.tcss"
+
+    TITLE = "Winter Dashboard"
+
+    BINDINGS = [
+        Binding("q", "quit", "Quit"),
+    ]
+
+    def __init__(self, container: Container, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.screen_factory = ScreenFactory(container)
+
+        plugin_registry = container.plugin_registry()
+        for i, screen_cls in enumerate(plugin_registry.screens):
+            screen_name = getattr(screen_cls, "SCREEN_NAME", f"plugin-{i}")
+            self.install_screen(screen_cls, name=screen_name)
+
+    def on_mount(self) -> None:
+        self.push_screen(self.screen_factory.workspace_screen())

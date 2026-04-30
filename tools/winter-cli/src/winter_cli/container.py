@@ -1,0 +1,161 @@
+from __future__ import annotations
+
+import click
+from dependency_injector import containers, providers
+
+from winter_cli.config.workspace import WorkspaceConfigService
+from winter_cli.config.internal.write_winter_configuration_repository import WriteWinterConfigurationRepository
+from winter_cli.modules.workspace.internal.read_workspace_repository import ReadWorkspaceRepository
+from winter_cli.modules.workspace.internal.write_repo_repository import WriteRepoRepository
+from winter_cli.modules.workspace.drift import DriftWarningService
+from winter_cli.modules.workspace.extensions import ExtensionService
+from winter_cli.modules.workspace.handlers.init_handler import InitHandler
+from winter_cli.modules.workspace.handlers.repo_handler import RepoHandler
+from winter_cli.modules.workspace.handlers.workspace_handler import WorkspaceHandler
+from winter_cli.modules.workspace.init_reporter import JsonReporter, StreamReporter
+from winter_cli.modules.workspace.init_service import InitService
+from winter_cli.modules.workspace.prune_service import PruneService
+from winter_cli.modules.workspace.reporter_factory import ReporterFactory
+from winter_cli.modules.workspace.repository_factory import RepositoryFactory
+from winter_cli.modules.workspace.workspace_service import WorkspaceService
+from winter_cli.cli_output_service import CliOutputService
+from winter_cli.cli_input_validation_service import CliInputValidationService
+from winter_cli.modules.tui.screens.workspace import WorkspaceScreen
+from winter_cli.modules.tui.screens.worktree_detail import WorktreeDetailScreen
+from winter_cli.plugins.loader import PluginRegistry
+
+
+class Container(containers.DeclarativeContainer):
+    """DI container for the winter CLI."""
+
+    __self__ = providers.Self()
+
+    cli_output_svc = providers.Singleton(CliOutputService)
+    cli_input_validation_svc = providers.Singleton(CliInputValidationService)
+
+    workspace_config_svc = providers.Singleton(WorkspaceConfigService)
+    workspace_config = providers.Singleton(workspace_config_svc.provided.load.call())
+
+    write_winter_config_repo = providers.Factory(
+        WriteWinterConfigurationRepository,
+        workspace_config=workspace_config,
+    )
+
+    repo_repo = providers.Factory(WriteRepoRepository)
+    workspace = providers.Singleton(
+        repo_repo.provided.get_workspace.call(
+            workspace_config.provided.workspace_root,
+            workspace_config.provided.session_prefix,
+            workspace_config.provided.main_branch,
+        ),
+    )
+
+    repo_factory = providers.Singleton(
+        RepositoryFactory,
+        config=workspace_config,
+    )
+
+    plugin_registry = providers.Singleton(
+        PluginRegistry.load,
+        workspace=workspace,
+        standalone_repos=repo_factory.provided.get_standalone_repos.call(),
+    )
+
+    worktree_repo = providers.Factory(ReadWorkspaceRepository)
+
+    drift_warning_svc = providers.Factory(
+        DriftWarningService,
+        workspace=workspace,
+        repo_factory=repo_factory,
+        click=providers.Object(click),
+    )
+
+    workspace_svc = providers.Factory(
+        WorkspaceService,
+        worktree_repo=worktree_repo,
+        repo_repo=repo_repo,
+        repo_factory=repo_factory,
+        workspace=workspace,
+    )
+
+    extension_svc = providers.Singleton(
+        ExtensionService,
+        config=workspace_config,
+    )
+
+    prune_svc = providers.Factory(
+        PruneService,
+        config=workspace_config,
+        repo_factory=repo_factory,
+        extension_svc=extension_svc,
+    )
+
+    init_svc = providers.Factory(
+        InitService,
+        config=workspace_config,
+        repo_factory=repo_factory,
+        extension_svc=extension_svc,
+    )
+
+    stream_reporter = providers.Factory(
+        StreamReporter,
+        click=providers.Object(click),
+    )
+
+    json_reporter = providers.Factory(
+        JsonReporter,
+        click=providers.Object(click),
+    )
+
+    reporter_factory = providers.Singleton(
+        ReporterFactory,
+        container=__self__,
+    )
+
+    workspace_handler = providers.Factory(
+        WorkspaceHandler,
+        workspace_svc=workspace_svc,
+        workspace_repo=worktree_repo,
+        repo_repo=repo_repo,
+        repo_factory=repo_factory,
+        drift_warning_svc=drift_warning_svc,
+        prune_svc=prune_svc,
+        reporter_factory=reporter_factory,
+        workspace=workspace,
+    )
+
+    repo_handler = providers.Factory(
+        RepoHandler,
+        repo_factory=repo_factory,
+        drift_warning_svc=drift_warning_svc,
+        cli_output_svc=cli_output_svc,
+        cli_input_validation_svc=cli_input_validation_svc,
+        write_winter_config_repo=write_winter_config_repo,
+        workspace=workspace,
+    )
+
+    init_handler = providers.Factory(
+        InitHandler,
+        init_service=init_svc,
+        reporter_factory=reporter_factory,
+    )
+
+    workspace_screen = providers.Factory(
+        WorkspaceScreen,
+        workspace_svc=workspace_svc,
+        workspace_repo=worktree_repo,
+        repo_repo=repo_repo,
+        repo_factory=repo_factory,
+        workspace=workspace,
+        plugin_registry=plugin_registry,
+    )
+
+    worktree_detail_screen = providers.Factory(
+        WorktreeDetailScreen,
+        workspace_svc=workspace_svc,
+        workspace_repo=worktree_repo,
+        repo_repo=repo_repo,
+        repo_factory=repo_factory,
+        workspace=workspace,
+        plugin_registry=plugin_registry,
+    )
