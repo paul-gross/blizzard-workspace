@@ -14,6 +14,13 @@ from winter_cli.modules.workspace.models import (
     DiffMode,
     FeatureEnvironmentOverview,
     FeatureEnvironmentStatus,
+    FetchReport,
+    PinnedScope,
+    PullMode,
+    PullReport,
+    PushReport,
+    RepoScope,
+    SyncResult,
     Workspace,
     WorktreeDiffResult,
     WorktreeRepoStatus,
@@ -61,8 +68,25 @@ class WorktreeDisconnectParams:
 
 @dataclasses.dataclass
 class WorktreePushParams:
-    worktree: str
-    repo_names: list[str] | None
+    patterns: list[str]
+    scope: RepoScope
+    pinned_scope: PinnedScope
+    output_json: bool
+
+
+@dataclasses.dataclass
+class WorktreeFetchParams:
+    patterns: list[str]
+    scope: RepoScope
+    output_json: bool
+
+
+@dataclasses.dataclass
+class WorktreePullParams:
+    patterns: list[str]
+    scope: RepoScope
+    mode: PullMode
+    autostash: bool
     output_json: bool
 
 
@@ -109,6 +133,7 @@ class WorkspaceHandler:
         self._prune_svc = prune_svc
         self._reporter_factory = reporter_factory
         self._workspace = workspace
+        self._console = Console()
 
     def list(self, params: WorktreeListParams) -> None:
         project_repos = self._repo_factory.get_project_repos()
@@ -131,7 +156,7 @@ class WorkspaceHandler:
             status_text = " ".join(v for v in s.extensions.values() if v) or "-"
             table.add_row(s.environment.name, feature_branch, status_text)
 
-        Console().print(table)
+        self._console.print(table)
 
     def status(self, params: WorktreeStatusParams) -> None:
         project_repos = self._repo_factory.get_project_repos()
@@ -165,7 +190,7 @@ class WorkspaceHandler:
                 sys.exit(1)
             return
 
-        console = Console()
+        console = self._console
         table = Table(show_header=True, header_style="bold")
         table.add_column("REPO")
         table.add_column("RESULT")
@@ -208,7 +233,7 @@ class WorkspaceHandler:
             _echo_json({"worktree": params.worktree, "feature_branch": params.feature_branch, "repos_configured": count})
             return
 
-        Console().print(f"[green]✓[/green] Connected [bold]{params.worktree}[/bold] → [bold]{params.feature_branch}[/bold] ({count} repos)")
+        self._console.print(f"[green]✓[/green] Connected [bold]{params.worktree}[/bold] → [bold]{params.feature_branch}[/bold] ({count} repos)")
 
     def disconnect(self, params: WorktreeDisconnectParams) -> None:
         env = self._workspace_repo.get_environment(self._workspace, params.worktree)
@@ -221,41 +246,58 @@ class WorkspaceHandler:
             _echo_json({"worktree": params.worktree, "repos_configured": count})
             return
 
-        Console().print(f"[green]✓[/green] Disconnected [bold]{params.worktree}[/bold] ({count} repos)")
+        self._console.print(f"[green]✓[/green] Disconnected [bold]{params.worktree}[/bold] ({count} repos)")
 
-    def push(self, params: WorktreePushParams) -> None:
-        env = self._workspace_repo.get_environment(self._workspace, params.worktree)
-        project_repos = self._repo_factory.get_project_repos()
-        env_status = self._workspace_repo.get_environment_status(env, project_repos)
-        if not env_status.feature_branch:
-            raise click.ClickException(
-                f"Environment '{params.worktree}' has no feature branch set. "
-                f"Run 'winter ws connect {params.worktree} <branch>' first."
-            )
+    def fetch(self, params: WorktreeFetchParams) -> None:
         self._drift_warning_svc.raise_warning()
-        env_worktrees = self._workspace_svc.get_feature_environment_worktrees(env, project_repos)
-        results = self._workspace_svc.push_worktree(env_worktrees, env_status.feature_branch, params.repo_names)
+        report = self._workspace_svc.fetch_all(scope=params.scope, patterns=params.patterns)
 
         if params.output_json:
-            _echo_json(results)
+            _echo_json(_to_dict(report))
+            if not report.success:
+                sys.exit(1)
             return
 
-        console = Console()
-        if not results:
-            console.print("[dim]No repos with commits to push[/dim]")
+        self._render_fetch_report(report, params.scope)
+        if not report.success:
+            sys.exit(1)
+
+    def pull(self, params: WorktreePullParams) -> None:
+        self._drift_warning_svc.raise_warning()
+        report = self._workspace_svc.pull_all(
+            scope=params.scope,
+            patterns=params.patterns,
+            mode=params.mode,
+            autostash=params.autostash,
+        )
+
+        if params.output_json:
+            _echo_json(_to_dict(report))
+            if not report.success:
+                sys.exit(1)
             return
 
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("REPO")
-        table.add_column("PUSHED")
-        table.add_column("COMMITS", justify="right")
+        self._render_pull_report(report, params.scope, params.mode)
+        if not report.success:
+            sys.exit(1)
 
-        for r in results:
-            pushed = "[green]yes[/green]" if r.get("pushed") else "[red]failed[/red]"
-            commits = str(r.get("commits", 0)) if r.get("pushed") else r.get("error", "")
-            table.add_row(r["repo_name"], pushed, commits)
+    def push(self, params: WorktreePushParams) -> None:
+        self._drift_warning_svc.raise_warning()
+        report = self._workspace_svc.push_all(
+            scope=params.scope,
+            patterns=params.patterns,
+            pinned_scope=params.pinned_scope,
+        )
 
-        console.print(table)
+        if params.output_json:
+            _echo_json(_to_dict(report))
+            if not report.success:
+                sys.exit(1)
+            return
+
+        self._render_push_report(report, params.scope)
+        if not report.success:
+            sys.exit(1)
 
     def index(self, params: WorktreeIndexParams) -> None:
         idx = resolve_worktree_index(params.name)
@@ -400,6 +442,157 @@ class WorkspaceHandler:
             if i < len(result.repos) - 1:
                 click.echo()
 
+    def _render_fetch_report(self, report: FetchReport, scope: RepoScope) -> None:
+        console = self._console
+        sectioned = self._is_sectioned(envs=len(report.envs), include_standalone=scope.includes_standalone)
+
+        if not report.envs and not report.standalone:
+            console.print("[dim]Nothing to fetch[/dim]")
+            return
+
+        for env_report in report.envs:
+            if sectioned:
+                console.print(f"[bold]{env_report.worktree}[/bold]")
+            console.print(self._fetch_table(env_report.repos))
+            if sectioned:
+                console.print()
+
+        if scope.includes_standalone:
+            if sectioned:
+                console.print("[bold]standalone[/bold]")
+            if report.standalone:
+                console.print(self._fetch_table(report.standalone))
+            else:
+                console.print("[dim]No standalone repos[/dim]")
+
+        if report.success:
+            console.print("\n[green]✓[/green] fetch complete")
+        else:
+            console.print("\n[yellow]![/yellow] fetch had errors")
+
+    def _render_pull_report(self, report: PullReport, scope: RepoScope, mode: PullMode) -> None:
+        console = self._console
+        sectioned = self._is_sectioned(envs=len(report.envs), include_standalone=scope.includes_standalone)
+
+        if not report.envs and not report.standalone and not report.skipped:
+            console.print("[dim]Nothing to pull[/dim]")
+            return
+
+        for env_report in report.envs:
+            if sectioned:
+                console.print(f"[bold]{env_report.worktree}[/bold]")
+            if env_report.repos:
+                console.print(self._sync_table(env_report.repos))
+            else:
+                console.print("[dim](no repos pulled)[/dim]")
+            if sectioned:
+                console.print()
+
+        for skip in report.skipped:
+            console.print(f"[yellow]![/yellow] {skip.worktree}: {skip.reason}")
+
+        if scope.includes_standalone:
+            if sectioned:
+                console.print("[bold]standalone[/bold]")
+            if report.standalone:
+                console.print(self._sync_table(report.standalone))
+            else:
+                console.print("[dim]No standalone repos[/dim]")
+
+        if report.success:
+            console.print("\n[green]✓[/green] pull complete")
+        elif mode == PullMode.ff_only:
+            console.print("\n[yellow]![/yellow] pull had diverged repos — retry with --merge or --rebase, or resolve with raw git")
+        else:
+            console.print("\n[yellow]![/yellow] pull had diverged repos or skipped envs")
+
+    def _render_push_report(self, report: PushReport, scope: RepoScope) -> None:
+        console = self._console
+        sectioned = self._is_sectioned(envs=len(report.envs), include_standalone=scope.includes_standalone)
+
+        any_pushed = any(r for env in report.envs for r in env.repos) or bool(report.standalone)
+        if not any_pushed and not report.skipped:
+            console.print("[dim]No repos with commits to push[/dim]")
+            return
+
+        for env_report in report.envs:
+            if sectioned:
+                console.print(f"[bold]{env_report.worktree}[/bold]")
+            if env_report.repos:
+                console.print(self._push_table(env_report.repos))
+            else:
+                console.print("[dim](nothing to push)[/dim]")
+            if sectioned:
+                console.print()
+
+        for skip in report.skipped:
+            console.print(f"[yellow]![/yellow] {skip.worktree}: {skip.reason}")
+
+        if scope.includes_standalone:
+            if sectioned:
+                console.print("[bold]standalone[/bold]")
+            if report.standalone:
+                console.print(self._push_table(report.standalone))
+            else:
+                console.print("[dim]No standalone repos to push[/dim]")
+
+        if report.success:
+            console.print("\n[green]✓[/green] push complete")
+        else:
+            console.print("\n[yellow]![/yellow] push had errors or skipped envs")
+
+    @staticmethod
+    def _is_sectioned(envs: int, include_standalone: bool) -> bool:
+        return envs > 1 or (envs > 0 and include_standalone)
+
+    @staticmethod
+    def _fetch_table(rows) -> Table:
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("REPO")
+        table.add_column("RESULT")
+        table.add_column("ERROR")
+        for r in rows:
+            if r.success:
+                table.add_row(r.repo_name, "ok", "", style="green")
+            else:
+                table.add_row(r.repo_name, "error", r.error or "", style="red")
+        return table
+
+    @staticmethod
+    def _sync_table(rows) -> Table:
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("REPO")
+        table.add_column("RESULT")
+        table.add_column("NOTES")
+        for outcome in rows:
+            result = outcome.sync_result
+            if result == SyncResult.fast_forwarded:
+                style, notes = "green", ""
+            elif result == SyncResult.up_to_date:
+                style, notes = "dim", ""
+            elif result == SyncResult.merged:
+                style, notes = "cyan", "merge commit created"
+            elif result == SyncResult.rebased:
+                style, notes = "cyan", "local commits rebased on upstream"
+            elif result == SyncResult.no_upstream:
+                style, notes = "yellow", "no upstream — set one with `git branch --set-upstream-to`"
+            else:  # diverged
+                style, notes = "yellow", f"+{outcome.ahead} / -{outcome.behind}"
+            table.add_row(outcome.repo_name, result.value, notes, style=style)
+        return table
+
+    @staticmethod
+    def _push_table(rows) -> Table:
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("REPO")
+        table.add_column("PUSHED")
+        table.add_column("COMMITS", justify="right")
+        for r in rows:
+            pushed = "[green]yes[/green]" if r.pushed else "[red]failed[/red]"
+            commits = str(r.commits) if r.pushed else (r.error or "")
+            table.add_row(r.repo_name, pushed, commits)
+        return table
+
     def _render_single(
         self,
         env_status: FeatureEnvironmentStatus,
@@ -410,7 +603,7 @@ class WorkspaceHandler:
             _echo_json({"environment": _to_dict(env_status), "repos": _to_dict(repo_statuses)})
             return
 
-        console = Console()
+        console = self._console
         console.print(f"[bold]Worktree:[/bold] {env_status.environment.name}")
         if env_status.feature_branch:
             console.print(f"[bold]Branch:[/bold]   {env_status.feature_branch}")
@@ -479,7 +672,7 @@ class WorkspaceHandler:
             _echo_json([{"environment": _to_dict(o.status), "repos": _to_dict(o.repo_statuses)} for o in overviews])
             return
 
-        console = Console()
+        console = self._console
         repo_names: list[str] = []
         if overviews:
             repo_names = [rs.worktree.repository.name for rs in overviews[0].repo_statuses]

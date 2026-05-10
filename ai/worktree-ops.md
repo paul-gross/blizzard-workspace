@@ -11,8 +11,9 @@ Some repos are **pinned** — they always track the remote main branch and never
 The CLI treats pinned repos specially across commands:
 
 - **init** — sets the worktree branch's upstream to `origin/<main-branch>` and `push.default=upstream`, so `git push` lands on the main branch.
-- **connect / disconnect / push** — skipped; pinned repos never get a feature-branch upstream.
-- **sync** — pulled from `origin/<main-branch>` via `--ff-only`.
+- **connect / disconnect** — skipped; pinned repos never get a feature-branch upstream.
+- **sync / pull** — pulled from `origin/<main-branch>` via `--ff-only` (for `pull`, this is the asymmetry from non-pinned, which pull from `origin/<feature-branch>`).
+- **push** — excluded by default. Use `--include-pinned` to push pinned worktrees alongside non-pinned, or `--only-pinned` to push just the pinned set. Pushed pinned worktrees go to whatever upstream their local branch tracks (typically `origin/<main>`, but the user can re-target with `git branch --set-upstream-to`).
 
 ## Cloning (source checkouts)
 
@@ -71,7 +72,7 @@ git -C "./<name>/<repo-name>" push -u origin <name>:<feature-branch>
 
 **Before pushing**, ask the user: "Want me to run pre-release checks (lint, format, tests) on the changed repos before pushing?" If they agree, run the checks from the Pre-Release Checklist in [development.md](./project/general/development.md) for each repo with changes. Fix any issues before pushing.
 
-Pinned repos are always skipped during connect/disconnect/push — if they have local commits, push directly to their configured main branch outside the normal feature delivery flow.
+Pinned repos are skipped during connect/disconnect (no feature branch tracking to set/unset) and excluded from `push` by default. See the [Pinned repos](#pinned-repos) section for how to include them.
 
 ## Disconnecting a worktree
 
@@ -81,7 +82,7 @@ winter ws disconnect <name>
 
 Unsets upstream tracking on each non-pinned repo. With no upstream set, the worktree reads as disconnected.
 
-## Syncing a feature worktree
+## Syncing a feature worktree against main
 
 ```bash
 winter ws sync <name>
@@ -89,11 +90,37 @@ winter ws sync <name>
 
 Fetches every repo in parallel, tries `git merge --ff-only origin/<main-branch>` on each worktree (falls back to a 3-way merge if ff-only fails), then fast-forwards the source checkout in `projects/`. Pinned repos are reset to `origin/<main-branch>` via the same ff-only path. Main branch per repo is read from the config — `main_branch` on the `[[project_repository]]` entry if set, otherwise the top-level `main_branch`.
 
+## Pulling remote feature-branch commits
+
+```bash
+winter ws pull <name>                # ff-only (default) — diverged repos reported, not touched
+winter ws pull <name> --merge        # fall back to a 3-way merge commit
+winter ws pull <name> --rebase       # replay local commits onto upstream
+winter ws pull <name> --autostash    # stash dirty tree, integrate, then restore
+```
+
+Each repo pulls from its own tracked upstream: non-pinned worktrees from `origin/<feature-branch>` (set by `connect`), pinned worktrees from `origin/<main-branch>`. Standalone repos can be reached with `winter ws pull --standalone` or `winter ws pull --all`.
+
+`pull` is **ff-only by default** — no silent merge commits, no surprise rewrites. Diverged repos are surfaced in the report and the working tree is left untouched. Use `--merge` or `--rebase` to integrate explicitly, or resolve with raw git in the affected repo.
+
 ## Pushing completed work
 
 ```bash
-winter ws push <name>                # all changed non-pinned repos
-winter ws push <name> repo-a repo-b  # specific repos
+winter ws push                          # every env's non-pinned worktrees
+winter ws push <name>                   # <name>'s non-pinned worktrees (== '<name>/*')
+winter ws push <name>/<repo>            # one specific worktree
+winter ws push '*/<repo>'               # every env's <repo> worktree
+winter ws push 'alpha/*' 'beta/*'       # multiple envs in one shot
+winter ws push --include-pinned         # add pinned worktrees to the push set
+winter ws push --only-pinned            # push only pinned worktrees
+winter ws push --standalone             # standalone repos only (patterns not accepted)
+winter ws push --all                    # non-pinned worktrees + standalone
 ```
 
-Uses the feature branch recorded during `winter ws connect`. Each repo gets pushed to `origin/<feature-branch>` and its upstream is set on first push.
+`PATTERNS` are segment-aware globs over `<env>/<repo>`. `*` matches within a segment (does not cross `/`); `?` matches one char. A bare env name expands to `<env>/*`. Quote patterns in your shell.
+
+Non-pinned worktrees push to the feature branch recorded during `winter ws connect` (`HEAD:refs/heads/<feature-branch>`, upstream set on first push). Pinned worktrees (when included) and standalone repos plain-push to whatever their local branch tracks. Only repos with commits ahead of upstream are pushed.
+
+If an env has non-pinned repos matched by your patterns but isn't connected, those repos are skipped with an error in the report. Pinned repos matched in the same env still push because they don't need a feature branch.
+
+To push a single standalone repo, use raw git — patterns don't apply to standalone repos.

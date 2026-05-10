@@ -3,7 +3,7 @@ from __future__ import annotations
 import click
 
 from winter_cli.cli_context import cli_ctx
-from winter_cli.modules.workspace.models import DiffMode
+from winter_cli.modules.workspace.models import DiffMode, PinnedScope, PullMode, RepoScope
 from winter_cli.modules.workspace.handlers import (
     InitParams,
     RepoAddParams,
@@ -13,12 +13,54 @@ from winter_cli.modules.workspace.handlers import (
     WorktreeConnectParams,
     WorktreeDiffParams,
     WorktreeDisconnectParams,
+    WorktreeFetchParams,
     WorktreeIndexParams,
     WorktreeListParams,
+    WorktreePullParams,
     WorktreePushParams,
     WorktreeStatusParams,
     WorktreeSyncParams,
 )
+
+
+def _resolve_scope(standalone: bool, all_flag: bool) -> RepoScope:
+    if standalone and all_flag:
+        raise click.ClickException("--standalone and --all are mutually exclusive")
+    if standalone:
+        return RepoScope.standalone
+    if all_flag:
+        return RepoScope.all
+    return RepoScope.project
+
+
+def _resolve_pull_mode(ff_only: bool, merge: bool, rebase: bool) -> PullMode:
+    chosen = [name for name, flag in (("--ff-only", ff_only), ("--merge", merge), ("--rebase", rebase)) if flag]
+    if len(chosen) > 1:
+        raise click.ClickException(f"{', '.join(chosen)} are mutually exclusive")
+    if merge:
+        return PullMode.merge
+    if rebase:
+        return PullMode.rebase
+    return PullMode.ff_only
+
+
+def _resolve_pinned_scope(include_pinned: bool, only_pinned: bool) -> PinnedScope:
+    if include_pinned and only_pinned:
+        raise click.ClickException("--include-pinned and --only-pinned are mutually exclusive")
+    if only_pinned:
+        return PinnedScope.only
+    if include_pinned:
+        return PinnedScope.include
+    return PinnedScope.exclude
+
+
+def _validate_pattern(pattern: str) -> None:
+    if not pattern:
+        raise click.ClickException("Empty pattern is not allowed")
+    if pattern.count("/") > 1:
+        raise click.ClickException(
+            f"Invalid pattern '{pattern}' — expected <env>/<repo> (one '/' max)"
+        )
 
 
 @click.group("ws")
@@ -28,10 +70,10 @@ def ws_group():
 
 @ws_group.command("init")
 @click.argument("target", required=False)
-@click.option("--all", "all_targets", is_flag=True, default=False, help="Reconcile projects/, standalone repos, and every existing worktree.")
+@click.option("--all", "all_flag", is_flag=True, default=False, help="Reconcile projects/, standalone repos, and every existing worktree.")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
-def ws_init(ctx: click.Context, target: str | None, all_targets: bool, output_json: bool):
+def ws_init(ctx: click.Context, target: str | None, all_flag: bool, output_json: bool):
     """Reconcile source checkouts, standalone repos, or a feature worktree against the config.
 
     \b
@@ -41,7 +83,7 @@ def ws_init(ctx: click.Context, target: str | None, all_targets: bool, output_js
     """
     container = cli_ctx(ctx).container
     handler = container.init_handler()
-    handler.run(InitParams(target=target, all=all_targets, output_json=output_json))
+    handler.run(InitParams(target=target, all=all_flag, output_json=output_json))
 
 
 @ws_group.command("list")
@@ -99,18 +141,150 @@ def ws_disconnect(ctx: click.Context, worktree: str, output_json: bool):
     handler.disconnect(WorktreeDisconnectParams(worktree=worktree, output_json=output_json))
 
 
-@ws_group.command("push")
-@click.argument("worktree")
-@click.argument("repos", nargs=-1)
+@ws_group.command("fetch")
+@click.argument("patterns", nargs=-1)
+@click.option("--standalone", is_flag=True, default=False, help="Fetch standalone repos only (PATTERNS are not accepted).")
+@click.option("--all", "all_flag", is_flag=True, default=False, help="Also fetch every standalone repo, in addition to pattern-matched project worktrees.")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
-def ws_push(ctx: click.Context, worktree: str, repos: tuple[str, ...], output_json: bool):
-    """Push worktree repos to their upstream branch."""
+def ws_fetch(ctx: click.Context, patterns: tuple[str, ...], standalone: bool, all_flag: bool, output_json: bool):
+    """Fetch refs from origin for project worktrees matched by PATTERNS.
+
+    Each PATTERN is a segment-aware glob over `<env>/<repo>`. Bare env names
+    (no `/`) are treated as `<env>/*`. Pinned and non-pinned worktrees are
+    both fetched.
+
+    \b
+      winter ws fetch                       # every env's project worktrees
+      winter ws fetch alpha                 # alpha's project worktrees (== 'alpha/*')
+      winter ws fetch alpha/winter          # one specific worktree
+      winter ws fetch '*/winter'            # every env's winter worktree
+      winter ws fetch --standalone          # standalone repos only
+      winter ws fetch --all                 # every env's project worktrees + standalone
+    """
+    if standalone and patterns:
+        raise click.ClickException("PATTERNS cannot be combined with --standalone")
+    scope = _resolve_scope(standalone, all_flag)
+    for pattern in patterns:
+        _validate_pattern(pattern)
+    container = cli_ctx(ctx).container
+    handler = container.workspace_handler()
+    handler.fetch(WorktreeFetchParams(patterns=list(patterns), scope=scope, output_json=output_json))
+
+
+@ws_group.command("pull")
+@click.argument("patterns", nargs=-1)
+@click.option("--standalone", is_flag=True, default=False, help="Pull standalone repos only (PATTERNS are not accepted).")
+@click.option("--all", "all_flag", is_flag=True, default=False, help="Also pull every standalone repo, in addition to pattern-matched project worktrees.")
+@click.option("--ff-only", "ff_only", is_flag=True, default=False, help="Refuse to integrate diverged branches (default).")
+@click.option("--merge", is_flag=True, default=False, help="Fall back to a 3-way merge commit when ff-only fails.")
+@click.option("--rebase", is_flag=True, default=False, help="Replay local commits on top of upstream instead of merging.")
+@click.option("--autostash", is_flag=True, default=False, help="Stash dirty working tree before pulling, restore after.")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def ws_pull(
+    ctx: click.Context,
+    patterns: tuple[str, ...],
+    standalone: bool,
+    all_flag: bool,
+    ff_only: bool,
+    merge: bool,
+    rebase: bool,
+    autostash: bool,
+    output_json: bool,
+):
+    """Fetch + integrate project worktrees matched by PATTERNS (ff-only by default).
+
+    Each PATTERN is a segment-aware glob over `<env>/<repo>`. Bare env names
+    (no `/`) are treated as `<env>/*`. Pinned worktrees pull from their main
+    branch; non-pinned pull from the feature branch set by `winter ws connect`;
+    standalone repos pull from whatever their local branch tracks. Diverged
+    repos are reported and left untouched unless --merge or --rebase is given.
+
+    \b
+      winter ws pull                       # ff-only against every env's tracked upstream
+      winter ws pull alpha                 # alpha's project worktrees (== 'alpha/*')
+      winter ws pull alpha/winter          # one specific worktree
+      winter ws pull '*/winter' --rebase   # rebase every env's winter worktree
+      winter ws pull --autostash           # stash dirty tree first, restore after
+      winter ws pull --standalone          # standalone repos only
+      winter ws pull --all                 # every env's project worktrees + standalone
+    """
+    if standalone and patterns:
+        raise click.ClickException("PATTERNS cannot be combined with --standalone")
+    scope = _resolve_scope(standalone, all_flag)
+    mode = _resolve_pull_mode(ff_only, merge, rebase)
+    for pattern in patterns:
+        _validate_pattern(pattern)
+    container = cli_ctx(ctx).container
+    handler = container.workspace_handler()
+    handler.pull(WorktreePullParams(
+        patterns=list(patterns),
+        scope=scope,
+        mode=mode,
+        autostash=autostash,
+        output_json=output_json,
+    ))
+
+
+@ws_group.command("push")
+@click.argument("patterns", nargs=-1)
+@click.option("--standalone", is_flag=True, default=False, help="Push standalone repos only (PATTERNS are not accepted).")
+@click.option("--all", "all_flag", is_flag=True, default=False, help="Also push every standalone repo, in addition to pattern-matched project worktrees.")
+@click.option("--include-pinned", "include_pinned", is_flag=True, default=False, help="Include pinned project worktrees in the push set.")
+@click.option("--only-pinned", "only_pinned", is_flag=True, default=False, help="Push only pinned project worktrees (excludes non-pinned).")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def ws_push(
+    ctx: click.Context,
+    patterns: tuple[str, ...],
+    standalone: bool,
+    all_flag: bool,
+    include_pinned: bool,
+    only_pinned: bool,
+    output_json: bool,
+):
+    """Push project worktrees matched by PATTERNS to their tracked upstreams.
+
+    Each PATTERN is a segment-aware glob over `<env>/<repo>`. Bare env names
+    (no `/`) are treated as `<env>/*`. Pass any number of patterns to push
+    exactly the set you want. Non-pinned worktrees are pushed by default;
+    pass --include-pinned or --only-pinned to change that.
+
+    Non-pinned worktrees push HEAD:refs/heads/<feature-branch>; pinned
+    worktrees plain-push to whatever their local branch tracks. Standalone
+    repos (reached via --standalone or --all) plain-push too. Only repos with
+    commits ahead of upstream are pushed.
+
+    To push a single standalone repo, use raw git instead — patterns don't
+    apply to standalone repos.
+
+    \b
+      winter ws push                              # every env's non-pinned worktrees
+      winter ws push alpha                        # alpha's non-pinned worktrees (== 'alpha/*')
+      winter ws push alpha/winter                 # one specific worktree
+      winter ws push '*/winter'                   # every env's winter worktree
+      winter ws push 'alpha/*' 'beta/*'           # alpha + beta non-pinned worktrees
+      winter ws push --include-pinned             # every env, pinned and non-pinned
+      winter ws push --only-pinned                # every env, pinned only
+      winter ws push 'alpha/winter' --include-pinned   # push alpha/winter even if pinned
+      winter ws push --standalone                 # standalone repos only
+      winter ws push --all                        # non-pinned worktrees + standalone
+    """
+    if standalone and patterns:
+        raise click.ClickException("PATTERNS cannot be combined with --standalone")
+    if standalone and (include_pinned or only_pinned):
+        raise click.ClickException("--include-pinned / --only-pinned cannot be combined with --standalone (standalone repos aren't pinned)")
+    scope = _resolve_scope(standalone, all_flag, worktree=None)
+    pinned_scope = _resolve_pinned_scope(include_pinned, only_pinned)
+    for pattern in patterns:
+        _validate_pattern(pattern)
     container = cli_ctx(ctx).container
     handler = container.workspace_handler()
     handler.push(WorktreePushParams(
-        worktree=worktree,
-        repo_names=list(repos) if repos else None,
+        patterns=list(patterns),
+        scope=scope,
+        pinned_scope=pinned_scope,
         output_json=output_json,
     ))
 

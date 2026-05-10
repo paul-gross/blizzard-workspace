@@ -11,7 +11,9 @@ Sync one of: the workspace branch, a standalone repo, or a feature environment. 
 
 A feature environment contains a worktree for every project repo, so syncing one is a multi-repo operation. Use `winter ws sync` and `winter ws push` — they fetch in parallel, handle pinned repos, and fast-forward the source checkouts under `projects/` as a side effect. See [ai/winter-cli/usage.md](./ai/winter-cli/usage.md) and [ai/worktree-ops.md](./ai/worktree-ops.md) for the full reference.
 
-Use raw git only for the single-repo targets (the workspace itself, standalone repos) — `winter ws sync` doesn't operate on those.
+Use raw git only for the workspace branch itself — `winter ws sync` doesn't operate on it. Standalone repos can be reached via `winter ws fetch/pull/push --standalone` or with raw git, whichever is more convenient.
+
+`winter ws sync <env>` always brings `origin/main` into the environment (ff-only, falling back to a 3-way merge when ff fails). To pull remote commits made on the *feature branch* instead, use `winter ws pull <env>` — ff-only by default; pass `--merge` or `--rebase` to integrate diverged repos explicitly, plus `--autostash` to handle a dirty working tree.
 
 ## Project-specific rules
 
@@ -45,7 +47,15 @@ Report the result.
 
 ## Standalone repo
 
-Standalone repos sit at the workspace root and aren't managed by `winter ws sync`. Use raw git:
+Standalone repos sit at the workspace root and aren't managed by `winter ws sync`. Either reach them through the CLI:
+
+```bash
+winter ws pull --standalone            # ff-only against each standalone repo's tracked upstream
+winter ws pull --standalone --rebase   # if you have local commits and want a linear history
+winter ws push --standalone            # push each standalone repo with commits ahead
+```
+
+…or use raw git for a single one:
 
 ```bash
 git -C ./<name> pull --rebase && git -C ./<name> push
@@ -72,15 +82,14 @@ If a repo reports "diverged" (neither ff nor 3-way merge succeeded), resolve it 
 Before pushing, ask the user: "Want me to run lint/format/tests on the changed repos first?" If yes, run whatever checks the project's contributing rules define (or ask the user if no rules are established) and fix failures before pushing.
 
 ```bash
-winter ws push <name>                # all changed non-pinned repos
-winter ws push <name> repo-a repo-b  # specific repos
+winter ws push <name>                # all non-pinned worktrees in the env
+winter ws push <name>/<repo>         # one specific worktree
+winter ws push '<name>/*'            # all worktrees in the env (same as bare <name>)
 ```
 
-A connected environment has each worktree's remote tracking branch already set, so `winter ws push` just works — it pushes each non-pinned repo to the feature branch recorded by `winter ws connect`.
+`PATTERNS` are segment-aware globs over `<env>/<repo>`. A connected environment has each non-pinned worktree's remote tracking branch already set, so `winter ws push <name>` just works — it pushes each non-pinned repo to the feature branch recorded by `winter ws connect`.
 
-If the environment isn't connected, `winter ws push` aborts with `Run 'winter ws connect <name> <branch>' first.` — ask the user which remote feature branch to use, run `winter ws connect <name> <feature-branch>`, then retry the push.
-
-Pinned repos are skipped automatically. If a pinned repo has local commits to deliver, push it directly outside this skill.
+Pinned worktrees are excluded by default. If you've landed commits on a pinned repo's main branch and want to ship them, pass `--include-pinned` (alongside non-pinned) or `--only-pinned` (alone). Pushed pinned worktrees go to whatever upstream their local branch tracks.
 
 ## Report
 

@@ -85,7 +85,9 @@ class SyncResult(enum.Enum):
     fast_forwarded = "fast_forwarded"
     up_to_date = "up_to_date"
     merged = "merged"
+    rebased = "rebased"
     diverged = "diverged"
+    no_upstream = "no_upstream"
 
 
 @dataclasses.dataclass
@@ -135,3 +137,92 @@ class WorktreeDiffResult:
     worktree: str
     mode: DiffMode
     repos: list[RepoDiffResult]
+
+
+@dataclasses.dataclass
+class RepoFetchOutcome:
+    """Result of fetching one repo — name and whether the fetch succeeded."""
+    repo_name: str
+    success: bool
+    error: str | None = None
+
+
+@dataclasses.dataclass
+class WorktreeFetchReport:
+    """Per-env fetch outcomes within a multi-env / multi-scope fetch."""
+    worktree: str
+    repos: list[RepoFetchOutcome]
+
+
+@dataclasses.dataclass
+class FetchReport:
+    """Top-level fetch report spanning project worktrees and standalone repos."""
+    envs: list[WorktreeFetchReport]
+    standalone: list[RepoFetchOutcome]
+
+    @property
+    def success(self) -> bool:
+        if any(not r.success for env in self.envs for r in env.repos):
+            return False
+        if any(not r.success for r in self.standalone):
+            return False
+        return True
+
+
+@dataclasses.dataclass
+class EnvSkipped:
+    """An env skipped by a multi-repo op (typically: not connected to a feature branch)."""
+    worktree: str
+    reason: str
+
+
+@dataclasses.dataclass
+class PullReport:
+    """Top-level pull report — per-env sync results plus standalone outcomes."""
+    envs: list[WorktreeSyncReport]
+    standalone: list[RepoSyncOutcome]
+    skipped: list[EnvSkipped] = dataclasses.field(default_factory=list)
+
+    @property
+    def success(self) -> bool:
+        if any(not e.success for e in self.envs):
+            return False
+        if any(o.sync_result in (SyncResult.diverged, SyncResult.no_upstream) for o in self.standalone):
+            return False
+        if self.skipped:
+            return False
+        return True
+
+
+@dataclasses.dataclass
+class RepoPushOutcome:
+    """Result of pushing one repo — name, push status, commits delivered, error if any."""
+    repo_name: str
+    pushed: bool
+    commits: int = 0
+    error: str | None = None
+
+
+@dataclasses.dataclass
+class WorktreePushReport:
+    """Per-env push outcomes."""
+    worktree: str
+    repos: list[RepoPushOutcome]
+
+
+@dataclasses.dataclass
+class PushReport:
+    """Top-level push report — per-env outcomes plus standalone outcomes."""
+    envs: list[WorktreePushReport]
+    standalone: list[RepoPushOutcome]
+    skipped: list[EnvSkipped] = dataclasses.field(default_factory=list)
+
+    @property
+    def success(self) -> bool:
+        if any(not r.pushed for env in self.envs for r in env.repos):
+            return False
+        if any(not r.pushed for r in self.standalone):
+            return False
+        if self.skipped:
+            return False
+        return True
