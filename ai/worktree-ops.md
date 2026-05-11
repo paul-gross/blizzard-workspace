@@ -6,7 +6,13 @@ Git commands for the polyrepo workspace topology. All paths are relative to the 
 
 ## Pinned repos
 
-Some repos are **pinned** — they always track the remote main branch (as declared by `main_branch` on the repo's `[[project_repository]]` entry, or the workspace-wide `default_main_branch`) and never participate in feature branching. Pinning is declared in `workspace:/.winter/config.toml` via `pinned = true` on a `[[project_repository]]` entry. The CLI handles pinned repos inline: they are skipped during connect/disconnect/push and pulled from `origin/<main-branch>` during sync.
+Some repos are **pinned** — they always track the remote main branch and never participate in feature branching. Declare pinning by setting `pinned = true` on a `[[project_repository]]` entry in `workspace:/.winter/config.toml`. The main branch comes from the entry's `main_branch` field, falling back to the workspace-wide `default_main_branch`.
+
+The CLI treats pinned repos specially across commands:
+
+- **init** — sets the worktree branch's upstream to `origin/<main-branch>` and `push.default=upstream`, so `git push` lands on the main branch.
+- **connect / disconnect / push** — skipped; pinned repos never get a feature-branch upstream.
+- **sync** — pulled from `origin/<main-branch>` via `--ff-only`.
 
 ## Cloning (source checkouts)
 
@@ -28,7 +34,18 @@ git clone <repo-url> ./projects/<repo-name>
 winter ws init <name>
 ```
 
-Creates `./<name>/`, runs `git worktree add -b <name> <main-branch>` for each declared project repo, copies git identity, writes git-exclude entries, runs each repo's `cmd` list, seeds `./<name>/.winter.env` with workspace-managed base variables (`WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`), and runs every installed extension's `on_worktree_init` hook. Greek letters (`alpha`, `beta`, …) are the convention because they carry a port-offset index, but any valid name works.
+This command:
+
+- Creates the `./<name>/` directory.
+- For each project repo, runs `git worktree add -b <name> <main-branch>`.
+- Copies git identity into each worktree.
+- Writes git-exclude entries.
+- For pinned repos, wires the upstream to `origin/<main-branch>` — see [Pinned repos](#pinned-repos).
+- Runs each repo's `cmd` list.
+- Seeds `./<name>/.winter.env` with `WINTER_ENV`, `WINTER_ENV_INDEX`, and `WINTER_PORT_BASE`.
+- Runs every installed extension's `on_worktree_init` hook.
+
+Greek letters (`alpha`, `beta`, …) are the convention because they carry a port-offset index, but any valid name works.
 
 After this runs, follow `workspace:/ai/project/project-setup.md` for project-specific orchestration (appending project-specific vars to `.winter.env`, provisioning per-environment resources, generating other env files, anything else the project needs).
 

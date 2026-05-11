@@ -52,6 +52,8 @@ class StreamReporter:
             self._echo(f"[{repo}] symlinked {detail}")
         elif action == "excludes_updated":
             self._echo(f"[{repo}] excludes updated: {detail}")
+        elif action == "pinned_tracking_set":
+            self._echo(f"[{repo}] pinned tracking set: {detail}")
         elif action == "extension_installed":
             self._echo(f"[{repo}] extension installed: {detail}")
         elif action == "extension_warning":

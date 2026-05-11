@@ -306,8 +306,54 @@ class InitService:
             return False
         if not self._write_excludes(worktree_path, repo, reporter, location):
             return False
+        if not self._configure_pinned_tracking(repo, worktree_path, reporter):
+            return False
         if not self._run_cmds(worktree_path, repo, reporter):
             return False
+        return True
+
+    def _configure_pinned_tracking(
+        self,
+        repo: ProjectRepository,
+        worktree_path: Path,
+        reporter: InitReporter,
+    ) -> bool:
+        """Wire a pinned worktree to push and pull against `origin/<main-branch>`.
+
+        `winter ws connect` deliberately skips pinned repos — they never participate
+        in feature-branch flow — so init is the only place that installs their
+        upstream tracking. Pinned repos are owned by the workspace user and
+        commits land directly on the main branch, so we also set
+        `push.default=upstream` to make `git push` from the worktree branch
+        target the main branch. Idempotent: a no-op when both are already in place.
+        """
+        if not repo.pinned:
+            return True
+        desired = f"origin/{repo.main_branch}"
+        changes: list[str] = []
+        try:
+            r = git.Repo(str(worktree_path))
+
+            try:
+                current = r.active_branch.tracking_branch()
+            except TypeError:
+                current = None
+            if current is None or current.name != desired:
+                r.git.branch("--set-upstream-to", desired)
+                changes.append(desired)
+
+            with r.config_writer() as cw:
+                if cw.get_value("push", "default", "") != "upstream":
+                    cw.set_value("push", "default", "upstream")
+                    changes.append("push.default=upstream")
+        except (git.InvalidGitRepositoryError, git.NoSuchPathError, git.GitCommandError) as exc:
+            reporter.repo_error(repo.name, f"configure pinned tracking — {exc}")
+            return False
+
+        if changes:
+            reporter.repo_action(
+                repo.name, str(worktree_path), "pinned_tracking_set", ", ".join(changes),
+            )
         return True
 
     def _create_git_worktree(
