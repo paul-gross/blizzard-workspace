@@ -14,17 +14,13 @@ from winter_cli.modules.workspace.models import (
     DiffMode,
     FeatureEnvironmentOverview,
     FeatureEnvironmentStatus,
-    FetchReport,
     PinnedScope,
     PullMode,
-    PullReport,
     PushReport,
     RepoScope,
     SyncResult,
     Workspace,
-    WorktreeDiffResult,
     WorktreeRepoStatus,
-    WorktreeSyncReport,
 )
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.internal.read_workspace_repository import resolve_worktree_index
@@ -250,35 +246,49 @@ class WorkspaceHandler:
 
     def fetch(self, params: WorktreeFetchParams) -> None:
         self._drift_warning_svc.raise_warning()
-        report = self._workspace_svc.fetch_all(scope=params.scope, patterns=params.patterns)
+        reporter = self._reporter_factory.get_fetch_reporter(params.output_json)
+        report = self._workspace_svc.fetch_all(
+            scope=params.scope, patterns=params.patterns, reporter=reporter,
+        )
 
         if params.output_json:
-            _echo_json(_to_dict(report))
             if not report.success:
                 sys.exit(1)
             return
 
-        self._render_fetch_report(report, params.scope)
+        if not report.projects and not report.standalone:
+            self._console.print("[dim]Nothing to fetch[/dim]")
+            return
         if not report.success:
             sys.exit(1)
 
     def pull(self, params: WorktreePullParams) -> None:
         self._drift_warning_svc.raise_warning()
+        reporter = self._reporter_factory.get_pull_reporter(params.output_json)
         report = self._workspace_svc.pull_all(
             scope=params.scope,
             patterns=params.patterns,
             mode=params.mode,
             autostash=params.autostash,
+            reporter=reporter,
         )
 
         if params.output_json:
-            _echo_json(_to_dict(report))
             if not report.success:
                 sys.exit(1)
             return
 
-        self._render_pull_report(report, params.scope, params.mode)
+        if not report.envs and not report.standalone and not report.skipped:
+            self._console.print("[dim]Nothing to pull[/dim]")
+            return
         if not report.success:
+            if params.mode == PullMode.ff_only and any(
+                o.sync_result == SyncResult.diverged
+                for env in report.envs for o in env.repos
+            ):
+                self._console.print(
+                    "[dim]retry with --merge or --rebase, or resolve with raw git[/dim]"
+                )
             sys.exit(1)
 
     def push(self, params: WorktreePushParams) -> None:
@@ -442,70 +452,6 @@ class WorkspaceHandler:
             if i < len(result.repos) - 1:
                 click.echo()
 
-    def _render_fetch_report(self, report: FetchReport, scope: RepoScope) -> None:
-        console = self._console
-        sectioned = self._is_sectioned(envs=len(report.envs), include_standalone=scope.includes_standalone)
-
-        if not report.envs and not report.standalone:
-            console.print("[dim]Nothing to fetch[/dim]")
-            return
-
-        for env_report in report.envs:
-            if sectioned:
-                console.print(f"[bold]{env_report.worktree}[/bold]")
-            console.print(self._fetch_table(env_report.repos))
-            if sectioned:
-                console.print()
-
-        if scope.includes_standalone:
-            if sectioned:
-                console.print("[bold]standalone[/bold]")
-            if report.standalone:
-                console.print(self._fetch_table(report.standalone))
-            else:
-                console.print("[dim]No standalone repos[/dim]")
-
-        if report.success:
-            console.print("\n[green]✓[/green] fetch complete")
-        else:
-            console.print("\n[yellow]![/yellow] fetch had errors")
-
-    def _render_pull_report(self, report: PullReport, scope: RepoScope, mode: PullMode) -> None:
-        console = self._console
-        sectioned = self._is_sectioned(envs=len(report.envs), include_standalone=scope.includes_standalone)
-
-        if not report.envs and not report.standalone and not report.skipped:
-            console.print("[dim]Nothing to pull[/dim]")
-            return
-
-        for env_report in report.envs:
-            if sectioned:
-                console.print(f"[bold]{env_report.worktree}[/bold]")
-            if env_report.repos:
-                console.print(self._sync_table(env_report.repos))
-            else:
-                console.print("[dim](no repos pulled)[/dim]")
-            if sectioned:
-                console.print()
-
-        for skip in report.skipped:
-            console.print(f"[yellow]![/yellow] {skip.worktree}: {skip.reason}")
-
-        if scope.includes_standalone:
-            if sectioned:
-                console.print("[bold]standalone[/bold]")
-            if report.standalone:
-                console.print(self._sync_table(report.standalone))
-            else:
-                console.print("[dim]No standalone repos[/dim]")
-
-        if report.success:
-            console.print("\n[green]✓[/green] pull complete")
-        elif mode == PullMode.ff_only:
-            console.print("\n[yellow]![/yellow] pull had diverged repos — retry with --merge or --rebase, or resolve with raw git")
-        else:
-            console.print("\n[yellow]![/yellow] pull had diverged repos or skipped envs")
-
     def _render_push_report(self, report: PushReport, scope: RepoScope) -> None:
         console = self._console
         sectioned = self._is_sectioned(envs=len(report.envs), include_standalone=scope.includes_standalone)
@@ -544,42 +490,6 @@ class WorkspaceHandler:
     @staticmethod
     def _is_sectioned(envs: int, include_standalone: bool) -> bool:
         return envs > 1 or (envs > 0 and include_standalone)
-
-    @staticmethod
-    def _fetch_table(rows) -> Table:
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("REPO")
-        table.add_column("RESULT")
-        table.add_column("ERROR")
-        for r in rows:
-            if r.success:
-                table.add_row(r.repo_name, "ok", "", style="green")
-            else:
-                table.add_row(r.repo_name, "error", r.error or "", style="red")
-        return table
-
-    @staticmethod
-    def _sync_table(rows) -> Table:
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("REPO")
-        table.add_column("RESULT")
-        table.add_column("NOTES")
-        for outcome in rows:
-            result = outcome.sync_result
-            if result == SyncResult.fast_forwarded:
-                style, notes = "green", ""
-            elif result == SyncResult.up_to_date:
-                style, notes = "dim", ""
-            elif result == SyncResult.merged:
-                style, notes = "cyan", "merge commit created"
-            elif result == SyncResult.rebased:
-                style, notes = "cyan", "local commits rebased on upstream"
-            elif result == SyncResult.no_upstream:
-                style, notes = "yellow", "no upstream — set one with `git branch --set-upstream-to`"
-            else:  # diverged
-                style, notes = "yellow", f"+{outcome.ahead} / -{outcome.behind}"
-            table.add_row(outcome.repo_name, result.value, notes, style=style)
-        return table
 
     @staticmethod
     def _push_table(rows) -> Table:

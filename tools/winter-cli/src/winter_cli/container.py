@@ -12,8 +12,10 @@ from winter_cli.modules.workspace.extensions import ExtensionService
 from winter_cli.modules.workspace.handlers.init_handler import InitHandler
 from winter_cli.modules.workspace.handlers.repo_handler import RepoHandler
 from winter_cli.modules.workspace.handlers.workspace_handler import WorkspaceHandler
+from winter_cli.modules.workspace.fetch_reporter import JsonFetchReporter, StreamFetchReporter
 from winter_cli.modules.workspace.init_reporter import JsonReporter, StreamReporter
 from winter_cli.modules.workspace.init_service import InitService
+from winter_cli.modules.workspace.pull_reporter import JsonPullReporter, StreamPullReporter
 from winter_cli.modules.workspace.prune_service import PruneService
 from winter_cli.modules.workspace.reporter_factory import ReporterFactory
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
@@ -104,6 +106,26 @@ class Container(containers.DeclarativeContainer):
 
     json_reporter = providers.Factory(
         JsonReporter,
+        click=providers.Object(click),
+    )
+
+    stream_fetch_reporter = providers.Factory(
+        StreamFetchReporter,
+        click=providers.Object(click),
+    )
+
+    json_fetch_reporter = providers.Factory(
+        JsonFetchReporter,
+        click=providers.Object(click),
+    )
+
+    stream_pull_reporter = providers.Factory(
+        StreamPullReporter,
+        click=providers.Object(click),
+    )
+
+    json_pull_reporter = providers.Factory(
+        JsonPullReporter,
         click=providers.Object(click),
     )
 

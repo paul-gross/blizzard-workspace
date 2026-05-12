@@ -148,21 +148,20 @@ class RepoFetchOutcome:
 
 
 @dataclasses.dataclass
-class WorktreeFetchReport:
-    """Per-env fetch outcomes within a multi-env / multi-scope fetch."""
-    worktree: str
-    repos: list[RepoFetchOutcome]
-
-
-@dataclasses.dataclass
 class FetchReport:
-    """Top-level fetch report spanning project worktrees and standalone repos."""
-    envs: list[WorktreeFetchReport]
+    """Top-level fetch report — one outcome per unique project repo, plus standalone clones.
+
+    Worktrees of a project repo share a `.git`, so a single `git fetch origin`
+    updates remote refs for all of them — we fetch each project repo at most
+    once even when multiple env worktrees match the user's pattern. Standalone
+    clones are independent and fetched per-repo.
+    """
+    projects: list[RepoFetchOutcome]
     standalone: list[RepoFetchOutcome]
 
     @property
     def success(self) -> bool:
-        if any(not r.success for env in self.envs for r in env.repos):
+        if any(not r.success for r in self.projects):
             return False
         if any(not r.success for r in self.standalone):
             return False

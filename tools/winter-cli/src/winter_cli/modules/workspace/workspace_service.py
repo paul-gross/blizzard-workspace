@@ -31,11 +31,12 @@ from winter_cli.modules.workspace.models import (
     FeatureWorktree,
     Workspace,
     WorktreeDiffResult,
-    WorktreeFetchReport,
     WorktreePushReport,
     WorktreeRepoStatus,
     WorktreeSyncReport,
 )
+from winter_cli.modules.workspace.fetch_reporter import FetchReporter
+from winter_cli.modules.workspace.pull_reporter import PullReporter
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_repository import ReadWorkspaceRepository
 from winter_cli.modules.workspace.repo_repository import WriteRepoRepository
@@ -217,12 +218,21 @@ class WorkspaceService:
 
         return WorktreeDiffResult(worktree=env_worktrees.environment.name, mode=mode, repos=results)
 
-    def fetch_all(self, scope: RepoScope, patterns: list[str] | None = None) -> FetchReport:
-        """Fetch project worktrees matched by `patterns`, and/or standalone repos.
+    def fetch_all(
+        self,
+        scope: RepoScope,
+        patterns: list[str] | None,
+        reporter: FetchReporter,
+    ) -> FetchReport:
+        """Fetch unique project repos matched by `patterns`, and/or standalone repos.
 
         `patterns` filters project worktrees by segment-aware glob over
-        `<env>/<repo>` (empty list ⇒ `*/*`). Standalone repos are fetched
-        when `scope` includes standalone and ignore `patterns`.
+        `<env>/<repo>` (empty list ⇒ `*/*`); any matching worktree pulls its
+        project repo into the fetch set. Worktrees of a project repo share
+        a `.git`, so one `git fetch origin` updates remote refs for every
+        env — we run that fetch from any one of the matching worktrees and
+        emit a single `[project/<repo>]` event for it. Standalone repos are
+        independent clones, fetched per-repo. Events fire in completion order.
         """
         patterns = patterns or ["*/*"]
         project_repos = self._repo_factory.get_project_repos()
@@ -242,40 +252,56 @@ class WorkspaceService:
             (env.name, wt) for env in matched_envs for wt in matched_by_env[env.name]
         ]
 
+        all_worktrees = self._drop_missing_worktrees(all_worktrees)
+        standalone_repos = self._drop_missing_standalones(standalone_repos)
+
+        # Pick one representative worktree per unique project repo — the
+        # source `.git` is shared, so any of them works. Insertion order is
+        # preserved by the dict so output ordering stays stable when fetches
+        # complete in deterministic order (rare; see as_completed below).
+        repo_reps: dict[str, FeatureWorktree] = {}
+        for _, wt in all_worktrees:
+            repo_reps.setdefault(wt.repository.name, wt)
+
+        if not repo_reps and not standalone_repos:
+            return FetchReport(projects=[], standalone=[])
+
+        reporter.fetch_started()
+
+        project_results: list[RepoFetchOutcome] = []
+        standalone_results: list[RepoFetchOutcome] = []
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=_GIT_PARALLELISM) as pool:
-            wt_futures = {
-                pool.submit(self._repo_repo.fetch, wt): (env_name_, wt.repository.name)
-                for env_name_, wt in all_worktrees
-            }
-            standalone_futures = {
-                pool.submit(self._repo_repo.fetch_standalone, repo): repo.name
-                for repo in standalone_repos
-            }
+            future_keys: dict[concurrent.futures.Future, tuple[str, str]] = {}
+            for repo_name, wt in repo_reps.items():
+                fut = pool.submit(self._repo_repo.fetch, wt)
+                future_keys[fut] = ("project", repo_name)
+            for repo in standalone_repos:
+                fut = pool.submit(self._repo_repo.fetch_standalone, repo)
+                future_keys[fut] = ("standalone", repo.name)
 
-            wt_results: dict[str, list[RepoFetchOutcome]] = {env.name: [] for env in matched_envs}
-            for fut, (env_name_, repo_name) in wt_futures.items():
-                wt_results[env_name_].append(self._collect_fetch(fut, repo_name))
+            for fut in concurrent.futures.as_completed(future_keys):
+                scope_label, repo_name = future_keys[fut]
+                outcome = self._collect_fetch(fut, repo_name)
+                reporter.repo_fetched(scope_label, repo_name, outcome.success, outcome.error)
+                if scope_label == "project":
+                    project_results.append(outcome)
+                else:
+                    standalone_results.append(outcome)
 
-            standalone_results = [
-                self._collect_fetch(fut, repo_name)
-                for fut, repo_name in standalone_futures.items()
-            ]
-
-        env_reports: list[WorktreeFetchReport] = []
-        for env in matched_envs:
-            repo_order = [wt.repository.name for wt in matched_by_env[env.name]]
-            wt_results[env.name].sort(key=lambda o: repo_order.index(o.repo_name))
-            env_reports.append(WorktreeFetchReport(worktree=env.name, repos=wt_results[env.name]))
-
+        project_results.sort(key=lambda o: list(repo_reps).index(o.repo_name))
         standalone_results.sort(key=lambda o: o.repo_name)
-        return FetchReport(envs=env_reports, standalone=standalone_results)
+        report = FetchReport(projects=project_results, standalone=standalone_results)
+        reporter.fetch_completed(report.success)
+        return report
 
     def pull_all(
         self,
         scope: RepoScope,
-        patterns: list[str] | None = None,
-        mode: PullMode = PullMode.ff_only,
-        autostash: bool = False,
+        patterns: list[str] | None,
+        mode: PullMode,
+        autostash: bool,
+        reporter: PullReporter,
     ) -> PullReport:
         """Fetch + integrate (ff-only / merge / rebase) project worktrees matched
         by `patterns`, and/or standalone repos.
@@ -285,7 +311,8 @@ class WorkspaceService:
         `origin/<main_branch>`; non-pinned from `origin/<feature_branch>`;
         standalone repos from their tracked upstream. Envs whose matched
         non-pinned worktrees have no feature branch are skipped (pinned
-        worktrees still integrate against main).
+        worktrees still integrate against main). Per-repo events fire on
+        `reporter` as each integrate finishes, in completion order.
         """
         patterns = patterns or ["*/*"]
         project_repos = self._repo_factory.get_project_repos()
@@ -303,23 +330,63 @@ class WorkspaceService:
         matched_envs = [env for env in envs if matched_by_env[env.name]]
 
         targets, skipped = self._build_pull_targets(matched_envs, matched_by_env, project_repos)
+        targets = [
+            t for t in targets
+            if self._warn_unless_present(t.worktree.path, f"{t.env_name}/{t.worktree.repository.name}", t.env_name)
+        ]
+        standalone_repos = self._drop_missing_standalones(standalone_repos)
 
-        # Stage 1: fetch everything in parallel. Errors are logged (run `winter
-        # ws fetch` to see them per-repo) but do not abort the pull — stale local
-        # refs simply produce up-to-date / diverged outcomes from the integrate.
-        worktrees_to_fetch = [t.worktree for t in targets]
-        self._fetch_in_parallel(worktrees_to_fetch, log_errors=True)
-        self._fetch_standalone_in_parallel(standalone_repos, log_errors=True)
+        if not targets and not standalone_repos and not skipped:
+            return PullReport(envs=[], standalone=[], skipped=[])
 
-        # Stage 2: fan all integrates out across envs at once.
-        all_outcomes = self._integrate_in_parallel(
-            [(t.worktree, t.target_ref) for t in targets],
-            mode=mode,
-            autostash=autostash,
-        )
+        reporter.pull_started()
+
+        # Surface env-level skips up front so the stream reads as: phase header →
+        # skips → per-repo results → summary. The pinned worktrees in a skipped
+        # env still flow through the integrate stage below.
+        for skip in skipped:
+            reporter.env_skipped(skip.worktree, skip.reason)
+
+        # Group integrate targets by source repo so each project repo gets
+        # one shared fetch. Within a group, integrates run serially (they're
+        # local-only and fast); across groups they run in parallel up to the
+        # pool's slot count. A slow fetch only blocks its own group's slot.
+        # Fetch errors are logged but don't abort: stale local refs just
+        # produce up-to-date / diverged outcomes from the integrate.
+        targets_by_repo: dict[str, list[_PullTarget]] = {}
+        for t in targets:
+            targets_by_repo.setdefault(t.worktree.repository.name, []).append(t)
+
         outcomes_by_env: dict[str, list[RepoSyncOutcome]] = {env.name: [] for env in matched_envs}
-        for outcome, target in zip(all_outcomes, targets):
-            outcomes_by_env[target.env_name].append(outcome)
+        standalone_outcomes: list[RepoSyncOutcome] = []
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_GIT_PARALLELISM) as pool:
+            project_futures: dict[concurrent.futures.Future, str] = {}
+            standalone_futures: dict[concurrent.futures.Future, str] = {}
+            for repo_name, group in targets_by_repo.items():
+                fut = pool.submit(
+                    self._fetch_then_integrate_group, group, mode, autostash, reporter,
+                )
+                project_futures[fut] = repo_name
+            for repo in standalone_repos:
+                fut = pool.submit(
+                    self._fetch_then_integrate_standalone, repo, mode, autostash,
+                )
+                standalone_futures[fut] = repo.name
+
+            for fut in concurrent.futures.as_completed({**project_futures, **standalone_futures}):
+                if fut in project_futures:
+                    # Group task already emitted per-worktree events itself —
+                    # we just collect outcomes for the final report.
+                    for env_name_, outcome in fut.result():
+                        outcomes_by_env[env_name_].append(outcome)
+                else:
+                    outcome = fut.result()
+                    reporter.repo_synced(
+                        "standalone", outcome.repo_name, outcome.sync_result,
+                        outcome.ahead, outcome.behind,
+                    )
+                    standalone_outcomes.append(outcome)
 
         env_reports: list[WorktreeSyncReport] = []
         for env in matched_envs:
@@ -330,10 +397,10 @@ class WorkspaceService:
             success = all(o.sync_result != SyncResult.diverged for o in env_outcomes)
             env_reports.append(WorktreeSyncReport(worktree=env.name, repos=env_outcomes, success=success))
 
-        # Stage 3: standalone integrates in parallel.
-        standalone_outcomes = self._integrate_standalone_in_parallel(standalone_repos, mode, autostash)
-
-        return PullReport(envs=env_reports, standalone=standalone_outcomes, skipped=skipped)
+        standalone_outcomes.sort(key=lambda o: o.repo_name)
+        report = PullReport(envs=env_reports, standalone=standalone_outcomes, skipped=skipped)
+        reporter.pull_completed(report.success)
+        return report
 
     def push_all(
         self,
@@ -489,23 +556,77 @@ class WorkspaceService:
                     else:
                         raise
 
-    def _fetch_standalone_in_parallel(
+    @staticmethod
+    def _warn_unless_present(path, label: str, init_target: str | None) -> bool:
+        """Return True if `path` exists; otherwise warn the user and return False.
+
+        Surfaces newly-added config entries whose worktrees / clones haven't
+        been provisioned yet — happens when a repo is added to
+        `.winter/config.toml` but `winter ws init` hasn't been re-run.
+        """
+        if path.exists():
+            return True
+        fix = f"winter ws init {init_target}" if init_target else "winter ws init"
+        click.echo(f"warning: {label} — missing on disk (run `{fix}`)", err=True)
+        return False
+
+    def _drop_missing_worktrees(
+        self, items: list[tuple[str, FeatureWorktree]],
+    ) -> list[tuple[str, FeatureWorktree]]:
+        return [
+            (env_name, wt) for (env_name, wt) in items
+            if self._warn_unless_present(wt.path, f"{env_name}/{wt.repository.name}", env_name)
+        ]
+
+    def _drop_missing_standalones(
+        self, repos: list[StandaloneRepository],
+    ) -> list[StandaloneRepository]:
+        return [
+            r for r in repos
+            if self._warn_unless_present(r.path, f"standalone/{r.name}", None)
+        ]
+
+    def _fetch_then_integrate_group(
         self,
-        repos: list[StandaloneRepository],
-        log_errors: bool = False,
-    ) -> None:
-        if not repos:
-            return
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_GIT_PARALLELISM) as pool:
-            futures = {pool.submit(self._repo_repo.fetch_standalone, r): r for r in repos}
-            for fut, repo in futures.items():
-                try:
-                    fut.result()
-                except RepoError as exc:
-                    if log_errors:
-                        logger.warning("Fetch failed for standalone %s: %s", repo.name, exc)
-                    else:
-                        raise
+        targets: list[_PullTarget],
+        mode: PullMode,
+        autostash: bool,
+        reporter: PullReporter,
+    ) -> list[tuple[str, RepoSyncOutcome]]:
+        """Fetch a project repo once, then integrate each of its worktrees.
+
+        Worktrees of a project repo share a `.git`, so a single
+        `git fetch origin` from any of them updates remote refs for every
+        worktree — we fetch from the first and run integrate sequentially
+        for the rest. Per-worktree integrate events are emitted on
+        `reporter` from inside this task so the user sees them as soon as
+        each integrate lands, even within the same group.
+        """
+        first_wt = targets[0].worktree
+        try:
+            self._repo_repo.fetch(first_wt)
+        except RepoError as exc:
+            logger.warning("Fetch failed for %s: %s", first_wt.repository.name, exc)
+        results: list[tuple[str, RepoSyncOutcome]] = []
+        for t in targets:
+            outcome = self._repo_repo.integrate(t.worktree, t.target_ref, mode, autostash)
+            reporter.repo_synced(
+                t.env_name, outcome.repo_name, outcome.sync_result, outcome.ahead, outcome.behind,
+            )
+            results.append((t.env_name, outcome))
+        return results
+
+    def _fetch_then_integrate_standalone(
+        self,
+        repo: StandaloneRepository,
+        mode: PullMode,
+        autostash: bool,
+    ) -> RepoSyncOutcome:
+        try:
+            self._repo_repo.fetch_standalone(repo)
+        except RepoError as exc:
+            logger.warning("Fetch failed for standalone %s: %s", repo.name, exc)
+        return self._repo_repo.integrate_standalone(repo, mode, autostash)
 
     def _integrate_in_parallel(
         self,
@@ -524,25 +645,6 @@ class WorkspaceService:
             for fut, idx in futures.items():
                 results[idx] = fut.result()
         return [r for r in results if r is not None]
-
-    def _integrate_standalone_in_parallel(
-        self,
-        repos: list[StandaloneRepository],
-        mode: PullMode,
-        autostash: bool,
-    ) -> list[RepoSyncOutcome]:
-        if not repos:
-            return []
-        outcomes: list[RepoSyncOutcome] = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_GIT_PARALLELISM) as pool:
-            futures = {
-                pool.submit(self._repo_repo.integrate_standalone, r, mode, autostash): r
-                for r in repos
-            }
-            for fut in concurrent.futures.as_completed(futures):
-                outcomes.append(fut.result())
-        outcomes.sort(key=lambda o: o.repo_name)
-        return outcomes
 
     @staticmethod
     def _sort_outcomes(outcomes: list[RepoSyncOutcome], repo_order: list[str]) -> list[RepoSyncOutcome]:
