@@ -3,6 +3,7 @@ from winter_cli.modules.workspace.handlers.repo_handler import RepoAddParams, Re
 from winter_cli.modules.workspace.handlers.workspace_handler import (
     WorkspaceHandler,
     WorkspacePruneParams,
+    WorktreeCheckoutParams,
     WorktreeConnectParams,
     WorktreeDiffParams,
     WorktreeDisconnectParams,
@@ -24,6 +25,7 @@ __all__ = [
     "RepoRemoveParams",
     "WorkspaceHandler",
     "WorkspacePruneParams",
+    "WorktreeCheckoutParams",
     "WorktreeConnectParams",
     "WorktreeDiffParams",
     "WorktreeDisconnectParams",

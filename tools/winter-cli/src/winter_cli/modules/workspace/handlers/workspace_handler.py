@@ -10,6 +10,7 @@ import click
 
 from winter_cli.cli_output_service import Cell, CliOutputService
 from winter_cli.modules.workspace.models import (
+    CheckoutResult,
     DiffMode,
     FeatureEnvironmentOverview,
     FeatureEnvironmentStatus,
@@ -19,6 +20,7 @@ from winter_cli.modules.workspace.models import (
     RepoScope,
     SyncResult,
     Workspace,
+    WorktreeCheckoutReport,
     WorktreeRepoStatus,
 )
 from winter_cli.modules.workspace.drift import DriftWarningService
@@ -58,6 +60,14 @@ class WorktreeConnectParams:
 @dataclasses.dataclass
 class WorktreeDisconnectParams:
     worktree: str
+    output_json: bool
+
+
+@dataclasses.dataclass
+class WorktreeCheckoutParams:
+    worktree: str
+    feature_branch: str
+    force: bool
     output_json: bool
 
 
@@ -252,6 +262,62 @@ class WorkspaceHandler:
             f"{out.style('✓', 'green')} Disconnected "
             f"{out.style(params.worktree, 'bold')} ({count} repos)"
         )
+
+    def checkout(self, params: WorktreeCheckoutParams) -> None:
+        env = self._workspace_repo.get_environment(self._workspace, params.worktree)
+        project_repos = self._repo_factory.get_project_repos()
+        self._drift_warning_svc.raise_warning()
+        env_worktrees = self._workspace_svc.get_feature_environment_worktrees(env, project_repos)
+        report = self._workspace_svc.checkout_worktree(
+            env_worktrees, params.feature_branch, params.force,
+        )
+
+        if params.output_json:
+            _echo_json(_to_dict(report))
+            if report.aborted:
+                sys.exit(1)
+            return
+
+        self._render_checkout_report(report)
+        if report.aborted:
+            sys.exit(1)
+
+    def _render_checkout_report(self, report: WorktreeCheckoutReport) -> None:
+        out = self._cli_output_svc
+        rows: list[list[str | Cell]] = []
+        row_styles: list[str | None] = []
+        for outcome in report.repos:
+            if outcome.result == CheckoutResult.reset:
+                style = "green"
+            elif outcome.result == CheckoutResult.skip_missing_ref:
+                style = "dim"
+            else:
+                style = "red"
+            rows.append([outcome.repo_name, outcome.result.value])
+            row_styles.append(style)
+
+        for line in out.render_table(
+            rows, headers=["REPO", "RESULT"], row_styles=row_styles
+        ):
+            click.echo(line)
+
+        if report.aborted:
+            click.echo(
+                f"\n{out.style('✗', 'red')} {out.style(report.worktree, 'bold')} "
+                f"not checked out — safety gate refused (no changes made). "
+                f"Re-run with {out.style('--force', 'bold')} to bypass."
+            )
+        else:
+            reset_count = sum(1 for o in report.repos if o.result == CheckoutResult.reset)
+            skip_count = sum(1 for o in report.repos if o.result == CheckoutResult.skip_missing_ref)
+            details = [f"{reset_count} reset"]
+            if skip_count:
+                details.append(f"{skip_count} skipped")
+            click.echo(
+                f"\n{out.style('✓', 'green')} Checked out "
+                f"{out.style(report.worktree, 'bold')} → "
+                f"{out.style(report.feature_branch, 'bold')} ({', '.join(details)})"
+            )
 
     def fetch(self, params: WorktreeFetchParams) -> None:
         self._drift_warning_svc.raise_warning()

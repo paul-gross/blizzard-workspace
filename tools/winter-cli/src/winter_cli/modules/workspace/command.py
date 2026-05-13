@@ -10,6 +10,7 @@ from winter_cli.modules.workspace.handlers import (
     RepoListParams,
     RepoRemoveParams,
     WorkspacePruneParams,
+    WorktreeCheckoutParams,
     WorktreeConnectParams,
     WorktreeDiffParams,
     WorktreeDisconnectParams,
@@ -139,6 +140,33 @@ def ws_disconnect(ctx: click.Context, worktree: str, output_json: bool):
     container = cli_ctx(ctx).container
     handler = container.workspace_handler()
     handler.disconnect(WorktreeDisconnectParams(worktree=worktree, output_json=output_json))
+
+
+@ws_group.command("checkout")
+@click.argument("worktree")
+@click.argument("feature_branch")
+@click.option("--force", is_flag=True, default=False, help="Bypass dirty / divergent safety checks.")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def ws_checkout(ctx: click.Context, worktree: str, feature_branch: str, force: bool, output_json: bool):
+    """Adopt a remote feature branch into WORKTREE, all-or-nothing across every repo.
+
+    Sets upstream tracking and resets the worktree's Greek-letter branch in each
+    project repo to the local `origin/FEATURE_BRANCH` ref. No network — run
+    `winter ws fetch` first if you need fresh remote-tracking refs.
+
+    Phase 1 checks each repo for: working tree dirty (staged or unstaged),
+    commits not present on `origin/FEATURE_BRANCH`, and whether the ref exists
+    locally. If any repo is dirty or divergent (and --force is not set), the
+    whole command refuses with a per-repo report — no `git reset --hard` runs
+    anywhere. Repos missing the local remote-tracking ref are reported as
+    skipped (no destructive side effect) regardless of --force.
+    """
+    container = cli_ctx(ctx).container
+    handler = container.workspace_handler()
+    handler.checkout(WorktreeCheckoutParams(
+        worktree=worktree, feature_branch=feature_branch, force=force, output_json=output_json,
+    ))
 
 
 @ws_group.command("fetch")

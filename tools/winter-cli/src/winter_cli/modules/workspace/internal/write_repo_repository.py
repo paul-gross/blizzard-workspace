@@ -65,6 +65,36 @@ class WriteRepoRepository(ReadRepoRepository):
         except git.GitCommandError:
             pass
 
+    def has_local_ref(self, worktree: FeatureWorktree, ref: str) -> bool:
+        """Whether `ref` resolves in the worktree's local object store. No network."""
+        r = git.Repo(str(worktree.path))
+        try:
+            r.git.rev_parse("--verify", "--quiet", ref)
+            return True
+        except git.GitCommandError:
+            return False
+
+    def is_worktree_dirty(self, worktree: FeatureWorktree) -> bool:
+        """Staged or unstaged changes present? Untracked files don't count —
+        `git reset --hard` leaves untracked files in place."""
+        r = git.Repo(str(worktree.path))
+        return r.is_dirty(working_tree=True, index=True, untracked_files=False)
+
+    def count_commits_not_in(self, worktree: FeatureWorktree, ref: str) -> int:
+        """Commits reachable from HEAD but not from `ref`. No network."""
+        r = git.Repo(str(worktree.path))
+        try:
+            return int(r.git.rev_list("--count", "HEAD", f"^{ref}"))
+        except git.GitCommandError:
+            return 0
+
+    def hard_reset(self, worktree: FeatureWorktree, target_ref: str) -> None:
+        r = git.Repo(str(worktree.path))
+        try:
+            r.git.reset("--hard", target_ref)
+        except git.GitCommandError as exc:
+            raise RepoError(f"reset failed — {exc}") from exc
+
     def unset_upstream(self, worktree: FeatureWorktree) -> None:
         r = git.Repo(str(worktree.path))
         try:

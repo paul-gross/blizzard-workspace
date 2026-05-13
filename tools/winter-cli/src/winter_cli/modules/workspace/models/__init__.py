@@ -13,6 +13,7 @@ from winter_cli.modules.workspace.models.domain_model import (
     Workspace,
 )
 from winter_cli.modules.workspace.models.service_model import (
+    CheckoutResult,
     EnvSkipped,
     FeatureEnvironmentOverview,
     FeatureEnvironmentStatus,
@@ -20,6 +21,7 @@ from winter_cli.modules.workspace.models.service_model import (
     IRepoStatus,
     PullReport,
     PushReport,
+    RepoCheckoutOutcome,
     RepoCommit,
     RepoDiffResult,
     RepoFetchOutcome,
@@ -28,6 +30,7 @@ from winter_cli.modules.workspace.models.service_model import (
     RepoSyncOutcome,
     StandaloneRepoStatus,
     SyncResult,
+    WorktreeCheckoutReport,
     WorktreeDiffResult,
     WorktreePushReport,
     WorktreeRepoStatus,
@@ -35,6 +38,7 @@ from winter_cli.modules.workspace.models.service_model import (
 )
 
 __all__ = [
+    "CheckoutResult",
     "DiffMode",
     "EnvSkipped",
     "FeatureEnvironment",
@@ -50,6 +54,7 @@ __all__ = [
     "PullMode",
     "PullReport",
     "PushReport",
+    "RepoCheckoutOutcome",
     "RepoCommit",
     "RepoDiffResult",
     "RepoError",
@@ -62,6 +67,7 @@ __all__ = [
     "StandaloneRepository",
     "SyncResult",
     "Workspace",
+    "WorktreeCheckoutReport",
     "WorktreeDiffResult",
     "WorktreePushReport",
     "WorktreeRepoStatus",

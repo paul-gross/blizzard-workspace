@@ -131,6 +131,37 @@ class WorktreeSyncReport:
     success: bool
 
 
+class CheckoutResult(enum.Enum):
+    """Per-repo outcome of `winter ws checkout`."""
+    reset = "reset"
+    skip_missing_ref = "skip-missing-ref"
+    refused_dirty = "refused-dirty"
+    refused_divergent = "refused-divergent"
+
+
+@dataclasses.dataclass
+class RepoCheckoutOutcome:
+    """Result of attempting to adopt a feature branch into one worktree repo."""
+    repo_name: str
+    result: CheckoutResult
+
+
+@dataclasses.dataclass
+class WorktreeCheckoutReport:
+    """All-or-nothing report from `winter ws checkout`.
+
+    `aborted` is True when at least one repo refused safety in Phase 1 — in that
+    case no `git reset --hard` ran in any repo, and `repos` contains only the
+    refusals and any skip-missing-ref findings (would-be-reset repos are not
+    listed because nothing happened to them). When `aborted` is False, every
+    non-pinned repo has a `reset` or `skip-missing-ref` outcome.
+    """
+    worktree: str
+    feature_branch: str
+    aborted: bool
+    repos: list[RepoCheckoutOutcome]
+
+
 @dataclasses.dataclass
 class WorktreeDiffResult:
     """Combined diff results across all repos in a worktree."""
