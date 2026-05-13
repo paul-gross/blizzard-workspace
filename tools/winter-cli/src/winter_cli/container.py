@@ -143,6 +143,7 @@ class Container(containers.DeclarativeContainer):
         drift_warning_svc=drift_warning_svc,
         prune_svc=prune_svc,
         reporter_factory=reporter_factory,
+        cli_output_svc=cli_output_svc,
         workspace=workspace,
     )
 

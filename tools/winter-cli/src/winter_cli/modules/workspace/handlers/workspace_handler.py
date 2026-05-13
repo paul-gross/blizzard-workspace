@@ -7,9 +7,8 @@ import sys
 from typing import Any
 
 import click
-from rich.console import Console
-from rich.table import Table
 
+from winter_cli.cli_output_service import Cell, CliOutputService
 from winter_cli.modules.workspace.models import (
     DiffMode,
     FeatureEnvironmentOverview,
@@ -119,6 +118,7 @@ class WorkspaceHandler:
         drift_warning_svc: DriftWarningService,
         prune_svc: PruneService,
         reporter_factory: ReporterFactory,
+        cli_output_svc: CliOutputService,
         workspace: Workspace,
     ) -> None:
         self._workspace_svc = workspace_svc
@@ -128,8 +128,8 @@ class WorkspaceHandler:
         self._drift_warning_svc = drift_warning_svc
         self._prune_svc = prune_svc
         self._reporter_factory = reporter_factory
+        self._cli_output_svc = cli_output_svc
         self._workspace = workspace
-        self._console = Console()
 
     def list(self, params: WorktreeListParams) -> None:
         project_repos = self._repo_factory.get_project_repos()
@@ -142,17 +142,16 @@ class WorkspaceHandler:
             _echo_json(items)
             return
 
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("WORKTREE")
-        table.add_column("FEATURE BRANCH")
-        table.add_column("STATUS")
-
+        rows: list[list[str | Cell]] = []
         for s in statuses:
             feature_branch = s.feature_branch or "-"
             status_text = " ".join(v for v in s.extensions.values() if v) or "-"
-            table.add_row(s.environment.name, feature_branch, status_text)
+            rows.append([s.environment.name, feature_branch, status_text])
 
-        self._console.print(table)
+        for line in self._cli_output_svc.render_table(
+            rows, headers=["WORKTREE", "FEATURE BRANCH", "STATUS"]
+        ):
+            click.echo(line)
 
     def status(self, params: WorktreeStatusParams) -> None:
         project_repos = self._repo_factory.get_project_repos()
@@ -186,12 +185,8 @@ class WorkspaceHandler:
                 sys.exit(1)
             return
 
-        console = self._console
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("REPO")
-        table.add_column("RESULT")
-        table.add_column("NOTES")
-
+        rows: list[list[str | Cell]] = []
+        row_styles: list[str | None] = []
         for outcome in report.repos:
             result_val = outcome.sync_result.value
 
@@ -208,14 +203,19 @@ class WorkspaceHandler:
                 style = "yellow"
                 notes = f"+{outcome.ahead} / -{outcome.behind}"
 
-            table.add_row(outcome.repo_name, result_val, notes, style=style)
+            rows.append([outcome.repo_name, result_val, notes])
+            row_styles.append(style)
 
-        console.print(table)
+        for line in self._cli_output_svc.render_table(
+            rows, headers=["REPO", "RESULT", "NOTES"], row_styles=row_styles
+        ):
+            click.echo(line)
 
+        out = self._cli_output_svc
         if report.success:
-            console.print(f"\n[green]✓[/green] {report.worktree} synced successfully")
+            click.echo(f"\n{out.style('✓', 'green')} {report.worktree} synced successfully")
         else:
-            console.print(f"\n[yellow]![/yellow] {report.worktree} has diverged repos")
+            click.echo(f"\n{out.style('!', 'yellow')} {report.worktree} has diverged repos")
             sys.exit(1)
 
     def connect(self, params: WorktreeConnectParams) -> None:
@@ -229,7 +229,12 @@ class WorkspaceHandler:
             _echo_json({"worktree": params.worktree, "feature_branch": params.feature_branch, "repos_configured": count})
             return
 
-        self._console.print(f"[green]✓[/green] Connected [bold]{params.worktree}[/bold] → [bold]{params.feature_branch}[/bold] ({count} repos)")
+        out = self._cli_output_svc
+        click.echo(
+            f"{out.style('✓', 'green')} Connected "
+            f"{out.style(params.worktree, 'bold')} → "
+            f"{out.style(params.feature_branch, 'bold')} ({count} repos)"
+        )
 
     def disconnect(self, params: WorktreeDisconnectParams) -> None:
         env = self._workspace_repo.get_environment(self._workspace, params.worktree)
@@ -242,7 +247,11 @@ class WorkspaceHandler:
             _echo_json({"worktree": params.worktree, "repos_configured": count})
             return
 
-        self._console.print(f"[green]✓[/green] Disconnected [bold]{params.worktree}[/bold] ({count} repos)")
+        out = self._cli_output_svc
+        click.echo(
+            f"{out.style('✓', 'green')} Disconnected "
+            f"{out.style(params.worktree, 'bold')} ({count} repos)"
+        )
 
     def fetch(self, params: WorktreeFetchParams) -> None:
         self._drift_warning_svc.raise_warning()
@@ -257,7 +266,7 @@ class WorkspaceHandler:
             return
 
         if not report.projects and not report.standalone:
-            self._console.print("[dim]Nothing to fetch[/dim]")
+            click.echo(self._cli_output_svc.style("Nothing to fetch", "dim"))
             return
         if not report.success:
             sys.exit(1)
@@ -278,16 +287,17 @@ class WorkspaceHandler:
                 sys.exit(1)
             return
 
+        out = self._cli_output_svc
         if not report.envs and not report.standalone and not report.skipped:
-            self._console.print("[dim]Nothing to pull[/dim]")
+            click.echo(out.style("Nothing to pull", "dim"))
             return
         if not report.success:
             if params.mode == PullMode.ff_only and any(
                 o.sync_result == SyncResult.diverged
                 for env in report.envs for o in env.repos
             ):
-                self._console.print(
-                    "[dim]retry with --merge or --rebase, or resolve with raw git[/dim]"
+                click.echo(
+                    out.style("retry with --merge or --rebase, or resolve with raw git", "dim")
                 )
             sys.exit(1)
 
@@ -453,55 +463,55 @@ class WorkspaceHandler:
                 click.echo()
 
     def _render_push_report(self, report: PushReport, scope: RepoScope) -> None:
-        console = self._console
+        out = self._cli_output_svc
         sectioned = self._is_sectioned(envs=len(report.envs), include_standalone=scope.includes_standalone)
 
         any_pushed = any(r for env in report.envs for r in env.repos) or bool(report.standalone)
         if not any_pushed and not report.skipped:
-            console.print("[dim]No repos with commits to push[/dim]")
+            click.echo(out.style("No repos with commits to push", "dim"))
             return
 
         for env_report in report.envs:
             if sectioned:
-                console.print(f"[bold]{env_report.worktree}[/bold]")
+                click.echo(out.style(env_report.worktree, "bold"))
             if env_report.repos:
-                console.print(self._push_table(env_report.repos))
+                for line in self._push_table_lines(env_report.repos):
+                    click.echo(line)
             else:
-                console.print("[dim](nothing to push)[/dim]")
+                click.echo(out.style("(nothing to push)", "dim"))
             if sectioned:
-                console.print()
+                click.echo()
 
         for skip in report.skipped:
-            console.print(f"[yellow]![/yellow] {skip.worktree}: {skip.reason}")
+            click.echo(f"{out.style('!', 'yellow')} {skip.worktree}: {skip.reason}")
 
         if scope.includes_standalone:
             if sectioned:
-                console.print("[bold]standalone[/bold]")
+                click.echo(out.style("standalone", "bold"))
             if report.standalone:
-                console.print(self._push_table(report.standalone))
+                for line in self._push_table_lines(report.standalone):
+                    click.echo(line)
             else:
-                console.print("[dim]No standalone repos to push[/dim]")
+                click.echo(out.style("No standalone repos to push", "dim"))
 
         if report.success:
-            console.print("\n[green]✓[/green] push complete")
+            click.echo(f"\n{out.style('✓', 'green')} push complete")
         else:
-            console.print("\n[yellow]![/yellow] push had errors or skipped envs")
+            click.echo(f"\n{out.style('!', 'yellow')} push had errors or skipped envs")
 
     @staticmethod
     def _is_sectioned(envs: int, include_standalone: bool) -> bool:
         return envs > 1 or (envs > 0 and include_standalone)
 
-    @staticmethod
-    def _push_table(rows) -> Table:
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("REPO")
-        table.add_column("PUSHED")
-        table.add_column("COMMITS", justify="right")
+    def _push_table_lines(self, rows) -> list[str]:
+        table_rows: list[list[str | Cell]] = []
         for r in rows:
-            pushed = "[green]yes[/green]" if r.pushed else "[red]failed[/red]"
+            pushed_cell = Cell.of("yes", "green") if r.pushed else Cell.of("failed", "red")
             commits = str(r.commits) if r.pushed else (r.error or "")
-            table.add_row(r.repo_name, pushed, commits)
-        return table
+            table_rows.append([r.repo_name, pushed_cell, commits])
+        return self._cli_output_svc.render_table(
+            table_rows, headers=["REPO", "PUSHED", "COMMITS"]
+        )
 
     def _render_single(
         self,
@@ -513,17 +523,17 @@ class WorkspaceHandler:
             _echo_json({"environment": _to_dict(env_status), "repos": _to_dict(repo_statuses)})
             return
 
-        console = self._console
-        console.print(f"[bold]Worktree:[/bold] {env_status.environment.name}")
+        out = self._cli_output_svc
+        click.echo(f"{out.style('Worktree:', 'bold')} {env_status.environment.name}")
         if env_status.feature_branch:
-            console.print(f"[bold]Branch:[/bold]   {env_status.feature_branch}")
+            click.echo(f"{out.style('Branch:', 'bold')}   {env_status.feature_branch}")
         for key, value in env_status.extensions.items():
             if value:
-                console.print(f"[bold]{key}:[/bold] {value}")
-        console.print()
+                click.echo(f"{out.style(key + ':', 'bold')} {value}")
+        click.echo()
 
         if not repo_statuses:
-            console.print("[dim]No repos[/dim]")
+            click.echo(out.style("No repos", "dim"))
             return
 
         extension_keys: list[str] = []
@@ -532,12 +542,9 @@ class WorkspaceHandler:
                 if k not in extension_keys:
                     extension_keys.append(k)
 
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("REPO")
-        table.add_column("SYNC", justify="right")
-        table.add_column("DIRTY", justify="right")
-        for key in extension_keys:
-            table.add_column(key.upper())
+        headers: list[str | Cell] = ["REPO", "SYNC", "DIRTY", *(k.upper() for k in extension_keys)]
+        rows: list[list[str | Cell]] = []
+        row_styles: list[str | None] = []
 
         for repo_status in repo_statuses:
             sync_parts = []
@@ -555,7 +562,7 @@ class WorkspaceHandler:
                 dirty_str = f"{repo_status.dirty_count} files"
 
             if repo_status.dirty_count:
-                row_style = "red"
+                row_style: str | None = "red"
             elif repo_status.ahead and repo_status.behind:
                 row_style = "dark_orange"
             elif repo_status.ahead:
@@ -563,15 +570,19 @@ class WorkspaceHandler:
             elif repo_status.behind:
                 row_style = "yellow"
             else:
-                row_style = ""
+                row_style = None
 
-            row = [repo_status.worktree.repository.name, sync_str, dirty_str]
+            row: list[str | Cell] = [repo_status.worktree.repository.name, sync_str, dirty_str]
             for key in extension_keys:
                 ext = repo_status.extensions.get(key, {})
                 row.append(str(ext) if ext else "-")
-            table.add_row(*row, style=row_style)
+            rows.append(row)
+            row_styles.append(row_style)
 
-        console.print(table)
+        for line in self._cli_output_svc.render_table(
+            rows, headers=headers, row_styles=row_styles
+        ):
+            click.echo(line)
 
     def _render_grid(
         self,
@@ -582,14 +593,13 @@ class WorkspaceHandler:
             _echo_json([{"environment": _to_dict(o.status), "repos": _to_dict(o.repo_statuses)} for o in overviews])
             return
 
-        console = self._console
         repo_names: list[str] = []
         if overviews:
             repo_names = [rs.worktree.repository.name for rs in overviews[0].repo_statuses]
 
-        table = Table(show_header=True, header_style="bold")
-        table.add_column("REPO", no_wrap=True)
-
+        # Two header rows: env name (+ badges) on top, feature branch on the bottom.
+        headers_top: list[str | Cell] = ["REPO"]
+        headers_bottom: list[str | Cell] = [""]
         for overview in overviews:
             badges = " ".join(v for v in overview.status.extensions.values() if v)
 
@@ -597,52 +607,66 @@ class WorkspaceHandler:
             has_behind = any(rs.behind for rs in overview.repo_statuses)
 
             if has_ahead and has_behind:
-                header_color = "dark_orange"
+                header_color: str | None = "dark_orange"
             elif has_ahead:
                 header_color = "green"
             elif has_behind:
                 header_color = "yellow"
             else:
-                header_color = ""
+                header_color = None
 
             name_label = overview.status.environment.name.capitalize()
+            top_text = f"{name_label} {badges}".rstrip()
             if header_color:
-                name_label = f"[{header_color}]{name_label}[/{header_color}]"
+                headers_top.append(Cell.of(top_text, header_color))
+            else:
+                headers_top.append(top_text)
             branch = overview.status.feature_branch or "—"
-            header_label = f"{name_label} {badges}".rstrip()
-            table.add_column(f"{header_label}\n[dim]{branch}[/dim]", justify="center", no_wrap=True)
+            headers_bottom.append(Cell.of(branch, "dim"))
 
-        repo_lookup: dict[str, dict[str, Any]] = {}
+        repo_lookup: dict[str, dict[str, WorktreeRepoStatus]] = {}
         for overview in overviews:
             repo_lookup[overview.status.environment.name] = {
                 rs.worktree.repository.name: rs for rs in overview.repo_statuses
             }
 
+        rows: list[list[str | Cell]] = [headers_bottom]
         for repo_name in repo_names:
-            row = [repo_name]
+            row: list[str | Cell] = [repo_name]
             for overview in overviews:
                 repo_status = repo_lookup[overview.status.environment.name].get(repo_name)
                 if repo_status is None:
-                    row.append("[dim]-[/dim]")
+                    row.append(Cell.of("-", "dim"))
                     continue
                 cell = self._format_cell(repo_status)
-                row.append(cell if cell else "[dim]·[/dim]")
-            table.add_row(*row)
+                row.append(cell)
+            rows.append(row)
 
-        console.print(table)
+        for line in self._cli_output_svc.render_table(rows, headers=headers_top):
+            click.echo(line)
 
     @staticmethod
-    def _format_cell(repo_status: Any) -> str:
-        parts = []
+    def _format_cell(repo_status: WorktreeRepoStatus) -> Cell:
+        segments: list[tuple[str, str | None]] = []
         if repo_status.ahead:
-            parts.append(f"[green]+{repo_status.ahead}[/green]")
+            if segments:
+                segments.append((" ", None))
+            segments.append((f"+{repo_status.ahead}", "green"))
         if repo_status.behind:
-            parts.append(f"[yellow]-{repo_status.behind}[/yellow]")
+            if segments:
+                segments.append((" ", None))
+            segments.append((f"-{repo_status.behind}", "yellow"))
         if repo_status.dirty_count == 1:
-            parts.append("[red]1 file[/red]")
+            if segments:
+                segments.append((" ", None))
+            segments.append(("1 file", "red"))
         elif repo_status.dirty_count > 1:
-            parts.append(f"[red]{repo_status.dirty_count} files[/red]")
-        return " ".join(parts)
+            if segments:
+                segments.append((" ", None))
+            segments.append((f"{repo_status.dirty_count} files", "red"))
+        if not segments:
+            return Cell.of("·", "dim")
+        return Cell.compose(segments)
 
 
 def _to_dict(obj: Any) -> Any:

@@ -275,7 +275,7 @@ def ws_push(
         raise click.ClickException("PATTERNS cannot be combined with --standalone")
     if standalone and (include_pinned or only_pinned):
         raise click.ClickException("--include-pinned / --only-pinned cannot be combined with --standalone (standalone repos aren't pinned)")
-    scope = _resolve_scope(standalone, all_flag, worktree=None)
+    scope = _resolve_scope(standalone, all_flag)
     pinned_scope = _resolve_pinned_scope(include_pinned, only_pinned)
     for pattern in patterns:
         _validate_pattern(pattern)
