@@ -209,4 +209,5 @@ class ReadRepoRepository:
             recent_commits=recent_commits,
             tracking_branch=tracking_branch,
             tracking_ahead=tracking_ahead,
+            tracking_ref_present=tracking_ref_present,
         )

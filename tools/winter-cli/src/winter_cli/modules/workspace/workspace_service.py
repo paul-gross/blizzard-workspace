@@ -378,11 +378,11 @@ class WorkspaceService:
 
         `patterns` filters project worktrees by segment-aware glob over
         `<env>/<repo>` (empty list ⇒ `*/*`). Pinned worktrees integrate from
-        `origin/<main_branch>`; non-pinned from `origin/<feature_branch>`;
-        standalone repos from their tracked upstream. Envs whose matched
-        non-pinned worktrees have no feature branch are skipped (pinned
-        worktrees still integrate against main). Per-repo events fire on
-        `reporter` as each integrate finishes, in completion order.
+        `origin/<main_branch>`; non-pinned integrate from
+        `origin/<feature_branch>` when the env is connected and from
+        `origin/<main_branch>` otherwise; standalone repos integrate from
+        their tracked upstream. Per-repo events fire on `reporter` as each
+        integrate finishes, in completion order.
         """
         patterns = patterns or ["*/*"]
         project_repos = self._repo_factory.get_project_repos()
@@ -572,31 +572,33 @@ class WorkspaceService:
         matched_by_env: dict[str, list[FeatureWorktree]],
         project_repos: list[ProjectRepository],
     ) -> tuple[list[_PullTarget], list[EnvSkipped]]:
+        """Resolve per-worktree pull targets.
+
+        Each worktree pulls from its own ref independently — no env-level
+        skip. Pinned worktrees always pull from `origin/<main_branch>`;
+        non-pinned worktrees pull from `origin/<feature_branch>` when the
+        env is connected, otherwise they fall back to `origin/<main_branch>`
+        too. Worktrees missing from disk are filtered out by
+        `_drop_missing_worktrees` in the caller, so an env that only has
+        pinned worktrees materialized produces no events for the unborn
+        non-pinned ones.
+
+        A non-pinned worktree with local feature commits and no feature
+        branch will see a `diverged` integrate outcome — that's the right
+        signal; it surfaces just as clearly as the old "not connected"
+        skip message did, without blocking the fresh-env / partial-init
+        case where pulling from main is exactly what the user wants.
+        """
         targets: list[_PullTarget] = []
-        skipped: list[EnvSkipped] = []
         for env in envs:
             env_status = self._worktree_repo.get_environment_status(env, project_repos)
-            worktrees = matched_by_env[env.name]
-            non_pinned = [wt for wt in worktrees if not wt.repository.pinned]
-            pinned = [wt for wt in worktrees if wt.repository.pinned]
-
-            if non_pinned and not env_status.feature_branch:
-                skipped.append(EnvSkipped(
-                    env=env.name,
-                    reason="not connected — run `winter ws connect` first",
-                ))
-                wts_to_pull = pinned
-            else:
-                wts_to_pull = worktrees
-
-            for wt in wts_to_pull:
-                target_ref = (
-                    f"origin/{wt.repository.main_branch}"
-                    if wt.repository.pinned
-                    else f"origin/{env_status.feature_branch}"
-                )
+            for wt in matched_by_env[env.name]:
+                if wt.repository.pinned or not env_status.feature_branch:
+                    target_ref = f"origin/{wt.repository.main_branch}"
+                else:
+                    target_ref = f"origin/{env_status.feature_branch}"
                 targets.append(_PullTarget(env_name=env.name, worktree=wt, target_ref=target_ref))
-        return targets, skipped
+        return targets, []
 
     def _build_env_worktrees_map(
         self,
