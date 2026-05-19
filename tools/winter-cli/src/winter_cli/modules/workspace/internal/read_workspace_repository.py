@@ -93,13 +93,17 @@ class ReadWorkspaceRepository:
         env: FeatureEnvironment,
         project_repos: list[ProjectRepository],
     ) -> str | None:
-        """Resolve the connected feature branch from git's upstream tracking.
+        """Resolve the connected feature branch from each worktree's tracking config.
 
-        The contract is: every non-pinned repo in a feature environment shares the
-        same remote feature branch name, so we read it from the first non-pinned
-        repo only. Pinned repos always track main and would lie. If the upstream
-        is `origin/<branch>`, we strip the `origin/` prefix and return `<branch>`;
-        anything else (no upstream, no worktree, git error) reads as disconnected.
+        The contract is: every non-pinned repo in a feature environment shares
+        the same remote feature branch name, so we read it from the first
+        non-pinned repo only. Pinned repos always track main and would lie.
+
+        Reads `branch.<head>.{remote,merge}` directly via `git config` rather
+        than `@{upstream}` — the latter requires the remote-tracking ref to
+        exist locally, which it won't for a brand-new feature branch that's
+        never been fetched. We want a freshly-connected env to read back as
+        connected immediately.
         """
         for repo in project_repos:
             if repo.pinned:
@@ -109,10 +113,12 @@ class ReadWorkspaceRepository:
                 return None
             try:
                 r = git.Repo(str(worktree_path))
-                upstream = r.git.rev_parse("--abbrev-ref", "@{upstream}").strip()
-            except git.GitCommandError:
+                head = r.active_branch.name
+                remote = r.git.config("--get", f"branch.{head}.remote").strip()
+                merge = r.git.config("--get", f"branch.{head}.merge").strip()
+            except (git.GitCommandError, TypeError):
                 return None
-            if not upstream.startswith("origin/"):
+            if remote != "origin" or not merge.startswith("refs/heads/"):
                 return None
-            return upstream[len("origin/"):]
+            return merge[len("refs/heads/"):]
         return None

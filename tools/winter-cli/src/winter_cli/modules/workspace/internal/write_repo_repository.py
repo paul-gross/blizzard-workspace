@@ -59,11 +59,18 @@ class WriteRepoRepository(ReadRepoRepository):
             logger.warning("Could not fast-forward %s", repo.name)
 
     def set_upstream(self, worktree: FeatureWorktree, remote_branch: str) -> None:
+        # Write branch.<head>.{remote,merge} directly instead of using
+        # `git branch --set-upstream-to`, which refuses to set tracking to a
+        # remote ref it can't see locally. Setting it directly lets connect
+        # succeed on a brand-new feature branch with no remote ref yet — the
+        # first push then creates it on origin.
         r = git.Repo(str(worktree.path))
-        try:
-            r.git.branch("--set-upstream-to", remote_branch)
-        except git.GitCommandError:
-            pass
+        remote, _, branch = remote_branch.partition("/")
+        if not branch:
+            raise RepoError(f"set_upstream: expected '<remote>/<branch>', got {remote_branch!r}")
+        head = r.active_branch.name
+        r.git.config(f"branch.{head}.remote", remote)
+        r.git.config(f"branch.{head}.merge", f"refs/heads/{branch}")
 
     def has_local_ref(self, worktree: FeatureWorktree, ref: str) -> bool:
         """Whether `ref` resolves in the worktree's local object store. No network."""
