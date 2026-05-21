@@ -40,6 +40,7 @@ from winter_cli.modules.workspace.models import (
     EnvSyncReport,
 )
 from winter_cli.modules.workspace.fetch_reporter import IFetchReporter
+from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.pull_reporter import IPullReporter
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_repository import IReadWorkspaceRepository
@@ -47,11 +48,6 @@ from winter_cli.modules.workspace.repo_repository import IWriteRepoRepository
 from winter_cli.plugins.types import EnvironmentDecorator, WorktreeRepoDecorator
 
 logger = logging.getLogger(__name__)
-
-# Codeberg.org (and most SSH-based git hosts) throttle simultaneous SSH
-# connections per source IP. Empirically the cap is around 5; staying at 4
-# keeps a comfortable margin while still parallelizing 4× over serial git ops.
-_GIT_PARALLELISM = 4
 
 
 @dataclasses.dataclass
@@ -87,11 +83,13 @@ class WorkspaceService:
         repo_repo: IWriteRepoRepository,
         repo_factory: RepositoryFactory,
         workspace: Workspace,
+        git_ops: GitOpsService,
     ) -> None:
         self._worktree_repo = worktree_repo
         self._repo_repo = repo_repo
         self._repo_factory = repo_factory
         self._workspace = workspace
+        self._git_ops = git_ops
 
     def get_environment_status(
         self,
@@ -177,7 +175,7 @@ class WorkspaceService:
         outcomes = self._sort_outcomes(outcomes, [wt.repository.name for wt in worktrees])
 
         project_repos = [wt.repository for wt in worktrees]
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_GIT_PARALLELISM) as pool:
+        with self._git_ops.executor() as pool:
             list(pool.map(self._repo_repo.sync_ff_only, project_repos))
 
         success = all(o.sync_result != SyncResult.diverged for o in outcomes)
@@ -358,7 +356,7 @@ class WorkspaceService:
         project_results: list[RepoFetchOutcome] = []
         standalone_results: list[RepoFetchOutcome] = []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_GIT_PARALLELISM) as pool:
+        with self._git_ops.executor() as pool:
             future_keys: dict[concurrent.futures.Future, tuple[str, str]] = {}
             for repo_name, wt in repo_reps.items():
                 fut = pool.submit(self._repo_repo.fetch, wt)
@@ -447,7 +445,7 @@ class WorkspaceService:
         outcomes_by_env: dict[str, list[RepoSyncOutcome]] = {env.name: [] for env in matched_envs}
         standalone_outcomes: list[RepoSyncOutcome] = []
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_GIT_PARALLELISM) as pool:
+        with self._git_ops.executor() as pool:
             project_futures: dict[concurrent.futures.Future, str] = {}
             standalone_futures: dict[concurrent.futures.Future, str] = {}
             for repo_name, group in targets_by_repo.items():
@@ -634,7 +632,7 @@ class WorkspaceService:
     ) -> None:
         if not worktrees:
             return
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_GIT_PARALLELISM) as pool:
+        with self._git_ops.executor() as pool:
             futures = {pool.submit(self._repo_repo.fetch, wt): wt for wt in worktrees}
             for fut, wt in futures.items():
                 try:
@@ -726,7 +724,7 @@ class WorkspaceService:
         if not targets:
             return []
         results: list[RepoSyncOutcome | None] = [None] * len(targets)
-        with concurrent.futures.ThreadPoolExecutor(max_workers=_GIT_PARALLELISM) as pool:
+        with self._git_ops.executor() as pool:
             futures = {
                 pool.submit(self._repo_repo.integrate, wt, target_ref, mode, autostash): idx
                 for idx, (wt, target_ref) in enumerate(targets)

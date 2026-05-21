@@ -5,6 +5,7 @@ from dependency_injector import containers, providers
 
 from winter_cli.config.workspace import WorkspaceConfigService
 from winter_cli.config.internal.write_winter_configuration_repository import WriteWinterConfigurationRepository
+from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.read_workspace_repository import ReadWorkspaceRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.internal.write_repo_repository import WriteRepoRepository
@@ -50,7 +51,15 @@ class Container(containers.DeclarativeContainer):
     # that translates GitPython exceptions into winter's error type.
     repo_error_factory = providers.Singleton(RepoErrorFactory)
 
-    repo_repo = providers.Factory(WriteRepoRepository, error_factory=repo_error_factory)
+    # Central git-ops chokepoint: owns the parallelism cap and retry policy
+    # for network-touching git operations.
+    git_ops_svc = providers.Singleton(GitOpsService, error_factory=repo_error_factory)
+
+    repo_repo = providers.Factory(
+        WriteRepoRepository,
+        error_factory=repo_error_factory,
+        git_ops=git_ops_svc,
+    )
     workspace = providers.Singleton(
         repo_repo.provided.get_workspace.call(
             workspace_config.provided.workspace_root,
@@ -85,6 +94,7 @@ class Container(containers.DeclarativeContainer):
         repo_repo=repo_repo,
         repo_factory=repo_factory,
         workspace=workspace,
+        git_ops=git_ops_svc,
     )
 
     extension_svc = providers.Singleton(

@@ -5,6 +5,7 @@ from pathlib import Path
 import git
 import pytest
 
+from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.internal.write_repo_repository import WriteRepoRepository
 from winter_cli.modules.workspace.models import (
@@ -18,7 +19,9 @@ from winter_cli.modules.workspace.models import (
 
 
 def _repo() -> WriteRepoRepository:
-    return WriteRepoRepository(error_factory=RepoErrorFactory())
+    error_factory = RepoErrorFactory()
+    git_ops = GitOpsService(error_factory, sleep=lambda _: None, jitter=lambda: 0.0)
+    return WriteRepoRepository(error_factory=error_factory, git_ops=git_ops)
 
 
 def _make_repo(path: Path) -> git.Repo:

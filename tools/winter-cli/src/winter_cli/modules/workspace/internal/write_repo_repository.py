@@ -4,6 +4,9 @@ import logging
 
 import git
 
+from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
+from winter_cli.modules.workspace.internal.read_repo_repository import ReadRepoRepository
+from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.models import (
     FeatureWorktree,
     ProjectRepository,
@@ -13,7 +16,6 @@ from winter_cli.modules.workspace.models import (
     StandaloneRepository,
     SyncResult,
 )
-from winter_cli.modules.workspace.internal.read_repo_repository import ReadRepoRepository
 
 logger = logging.getLogger(__name__)
 
@@ -25,16 +27,20 @@ def _autostash_args(autostash: bool) -> list[str]:
 class WriteRepoRepository(ReadRepoRepository):
     """Read-write GitPython implementation. Extends ReadRepoRepository with mutating operations."""
 
+    def __init__(self, error_factory: RepoErrorFactory, git_ops: GitOpsService) -> None:
+        super().__init__(error_factory)
+        self._git_ops = git_ops
+
     def fetch(self, worktree: FeatureWorktree) -> None:
-        try:
-            # Shell out via r.git rather than r.remotes.origin.fetch() — gitpython's
-            # high-level remotes API reads from the worktree's git-dir, which doesn't
-            # have remote config; the shared remotes live in the common-dir.
-            git.Repo(str(worktree.path)).git.fetch("origin")
-        except git.GitCommandError as exc:
-            raise self._error_factory.from_git(
-                exc, message=f"fetch failed for {worktree.repository.name}", cwd=worktree.path,
-            ) from exc
+        # Shell out via r.git rather than r.remotes.origin.fetch() — gitpython's
+        # high-level remotes API reads from the worktree's git-dir, which doesn't
+        # have remote config; the shared remotes live in the common-dir.
+        r = git.Repo(str(worktree.path))
+        self._git_ops.run_remote(
+            lambda: r.git.fetch("origin"),
+            cwd=worktree.path,
+            message=f"fetch failed for {worktree.repository.name}",
+        )
 
     def integrate(
         self,
@@ -54,8 +60,12 @@ class WriteRepoRepository(ReadRepoRepository):
     def sync_ff_only(self, repo: ProjectRepository) -> None:
         main_branch = repo.main_branch
         r = git.Repo(str(repo.main_path))
+        self._git_ops.run_remote(
+            lambda: r.git.fetch("origin"),
+            cwd=repo.main_path,
+            message=f"sync_ff_only failed for {repo.name}",
+        )
         try:
-            r.git.fetch("origin")
             r.git.merge("--ff-only", f"origin/{main_branch}")
         except git.GitCommandError as exc:
             raise self._error_factory.from_git(
@@ -160,26 +170,28 @@ class WriteRepoRepository(ReadRepoRepository):
         r = git.Repo(str(worktree.path))
         status = self.get_worktree_status(worktree)
         commit_count = status.ahead
-        try:
-            if feature_branch:
-                r.git.push("-u", "origin", f"HEAD:refs/heads/{feature_branch}")
-            else:
-                r.git.push("origin")
-        except git.GitCommandError as exc:
-            raise self._error_factory.from_git(
-                exc,
-                message=f"push failed for {worktree.repository.name}",
+        message = f"push failed for {worktree.repository.name}"
+        if feature_branch:
+            self._git_ops.run_remote(
+                lambda: r.git.push("-u", "origin", f"HEAD:refs/heads/{feature_branch}"),
                 cwd=worktree.path,
-            ) from exc
+                message=message,
+            )
+        else:
+            self._git_ops.run_remote(
+                lambda: r.git.push("origin"),
+                cwd=worktree.path,
+                message=message,
+            )
         return commit_count
 
     def fetch_standalone(self, repo: StandaloneRepository) -> None:
-        try:
-            git.Repo(str(repo.path)).git.fetch("origin")
-        except git.GitCommandError as exc:
-            raise self._error_factory.from_git(
-                exc, message=f"fetch failed for {repo.name}", cwd=repo.path,
-            ) from exc
+        r = git.Repo(str(repo.path))
+        self._git_ops.run_remote(
+            lambda: r.git.fetch("origin"),
+            cwd=repo.path,
+            message=f"fetch failed for {repo.name}",
+        )
 
     def integrate_standalone(
         self,
@@ -201,12 +213,11 @@ class WriteRepoRepository(ReadRepoRepository):
                 cwd=str(repo.path),
             )
         commit_count = self._tracking_ahead(repo, r)
-        try:
-            r.git.push("origin")
-        except git.GitCommandError as exc:
-            raise self._error_factory.from_git(
-                exc, message=f"push failed for {repo.name}", cwd=repo.path,
-            ) from exc
+        self._git_ops.run_remote(
+            lambda: r.git.push("origin"),
+            cwd=repo.path,
+            message=f"push failed for {repo.name}",
+        )
         return commit_count
 
     def get_standalone_tracking_ahead(self, repo: StandaloneRepository) -> int:
