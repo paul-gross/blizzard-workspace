@@ -33,11 +33,11 @@ class StreamReporter:
             self._click.echo(message, err=err)
 
     def target_started(self, target: str) -> None:
-        self._echo(f"→ initializing {target}")
+        self._echo(f"→ {target}")
 
     def target_completed(self, target: str, success: bool) -> None:
         if success:
-            self._echo(f"✓ {target} reconciled")
+            self._echo(f"✓ {target} done")
         else:
             self._echo(f"✗ {target} failed", err=True)
 
@@ -62,6 +62,19 @@ class StreamReporter:
             self._echo(f"[{repo}] workspace excludes updated: {detail}")
         elif action == "claudemd_updated":
             self._echo(f"[{repo}] CLAUDE.md updated: {detail}")
+        elif action == "worktree_removed":
+            suffix = f" ({detail})" if detail else ""
+            self._echo(f"[{repo}] worktree removed at {location}{suffix}")
+        elif action == "env_removed":
+            self._echo(f"[{repo}] env directory removed at {location}")
+        elif action == "would_remove_worktree":
+            self._echo(f"[{repo}] would remove worktree at {location}")
+        elif action == "would_remove_env":
+            self._echo(f"[{repo}] would remove env directory at {location}")
+        elif action == "would_remove_workspace_exclude":
+            self._echo(f"[{repo}] would strip workspace exclude block: {detail}")
+        elif action == "hook_ran":
+            self._echo(f"[{repo}] {detail} ran")
         else:
             self._echo(f"[{repo}] {action} {detail}".rstrip())
 

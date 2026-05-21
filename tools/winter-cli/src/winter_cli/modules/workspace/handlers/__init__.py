@@ -1,3 +1,4 @@
+from winter_cli.modules.workspace.handlers.destroy_handler import DestroyHandler, DestroyParams
 from winter_cli.modules.workspace.handlers.init_handler import InitHandler, InitParams
 from winter_cli.modules.workspace.handlers.repo_handler import RepoAddParams, RepoHandler, RepoListParams, RepoRemoveParams
 from winter_cli.modules.workspace.handlers.workspace_handler import (
@@ -17,6 +18,8 @@ from winter_cli.modules.workspace.handlers.workspace_handler import (
 )
 
 __all__ = [
+    "DestroyHandler",
+    "DestroyParams",
     "InitHandler",
     "InitParams",
     "RepoAddParams",

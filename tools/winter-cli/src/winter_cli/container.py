@@ -11,6 +11,8 @@ from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFa
 from winter_cli.modules.workspace.internal.write_repo_repository import WriteRepoRepository
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.extensions import ExtensionService
+from winter_cli.modules.workspace.destroy_service import DestroyService
+from winter_cli.modules.workspace.handlers.destroy_handler import DestroyHandler
 from winter_cli.modules.workspace.handlers.init_handler import InitHandler
 from winter_cli.modules.workspace.handlers.repo_handler import RepoHandler
 from winter_cli.modules.workspace.handlers.workspace_handler import WorkspaceHandler
@@ -117,6 +119,13 @@ class Container(containers.DeclarativeContainer):
         error_factory=repo_error_factory,
     )
 
+    destroy_svc = providers.Factory(
+        DestroyService,
+        config=workspace_config,
+        repo_factory=repo_factory,
+        extension_svc=extension_svc,
+    )
+
     stream_reporter = providers.Factory(
         StreamReporter,
         click=providers.Object(click),
@@ -178,6 +187,12 @@ class Container(containers.DeclarativeContainer):
     init_handler = providers.Factory(
         InitHandler,
         init_service=init_svc,
+        reporter_factory=reporter_factory,
+    )
+
+    destroy_handler = providers.Factory(
+        DestroyHandler,
+        destroy_service=destroy_svc,
         reporter_factory=reporter_factory,
     )
 

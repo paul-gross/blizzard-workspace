@@ -31,6 +31,7 @@ PORT_BASE = 4000
 PORT_STEP = 100
 
 HOOK_ON_ENV_INIT = "on_env_init"
+HOOK_ON_ENV_DESTROY = "on_env_destroy"
 
 CLAUDEMD_BLOCK_NAME = "winter-extensions"
 CLAUDEMD_INDEX_FILENAME = "index.md"
@@ -157,6 +158,40 @@ class ExtensionService:
         place, with env vars identifying the workspace, the extension,
         and the feature env.
         """
+        return self._run_env_hooks(
+            repos, env_root, env_name, HOOK_ON_ENV_INIT, reporter,
+        )
+
+    def run_env_destroy_hooks(
+        self,
+        repos: list[StandaloneRepository],
+        env_root: Path,
+        env_name: str,
+        reporter: IInitReporter,
+    ) -> bool:
+        """Run each installed extension's `on_env_destroy` hook.
+
+        Called from `winter ws destroy <name>` *before* any file removal,
+        so extensions can clean up per-env resources (tmux sessions,
+        watchers, tunnels, provisioned DBs) while the env still exists on
+        disk. The env-var contract matches `on_env_init`.
+
+        Returns False if any hook errored or exited non-zero. Callers
+        decide whether to abort teardown on that signal (`--strict`) or
+        log and continue.
+        """
+        return self._run_env_hooks(
+            repos, env_root, env_name, HOOK_ON_ENV_DESTROY, reporter,
+        )
+
+    def _run_env_hooks(
+        self,
+        repos: list[StandaloneRepository],
+        env_root: Path,
+        env_name: str,
+        hook_name: str,
+        reporter: IInitReporter,
+    ) -> bool:
         if self._config.adopt_extensions == AdoptExtensions.none:
             return True
 
@@ -171,10 +206,10 @@ class ExtensionService:
             if manifest is None:
                 success = False
                 continue
-            hook = manifest.hooks.get(HOOK_ON_ENV_INIT)
+            hook = manifest.hooks.get(hook_name)
             if not hook:
                 continue
-            if not self._run_hook(repo, manifest, hook, env_root, env_name, reporter):
+            if not self._run_hook(repo, manifest, hook, hook_name, env_root, env_name, reporter):
                 success = False
         return success
 
@@ -183,6 +218,7 @@ class ExtensionService:
         repo: StandaloneRepository,
         manifest: ExtensionManifest,
         hook: str,
+        hook_name: str,
         env_root: Path,
         env_name: str,
         reporter: IInitReporter,
@@ -214,7 +250,8 @@ class ExtensionService:
             "WINTER_PORT_BASE": str(PORT_BASE + index * PORT_STEP),
         })
 
-        reporter.cmd_started(repo.name, f"hook on_env_init")
+        label = f"hook {hook_name}"
+        reporter.cmd_started(repo.name, label)
         try:
             proc = subprocess.Popen(
                 [str(script_path)],
@@ -226,21 +263,21 @@ class ExtensionService:
                 bufsize=1,
             )
         except OSError as exc:
-            reporter.repo_error(repo.name, f"hook on_env_init — {exc}")
+            reporter.repo_error(repo.name, f"hook {hook_name} — {exc}")
             return False
         assert proc.stdout is not None
         for line in proc.stdout:
             reporter.cmd_output_line(repo.name, line.rstrip("\n"))
         returncode = proc.wait()
-        reporter.cmd_completed(repo.name, "hook on_env_init", returncode)
+        reporter.cmd_completed(repo.name, label, returncode)
         if returncode != 0:
             reporter.repo_error(
                 repo.name,
-                f"hook on_env_init exited with code {returncode}",
+                f"hook {hook_name} exited with code {returncode}",
             )
             return False
         reporter.repo_action(
-            repo.name, str(env_root), "hook_ran", "on_env_init"
+            repo.name, str(env_root), "hook_ran", hook_name
         )
         return True
 

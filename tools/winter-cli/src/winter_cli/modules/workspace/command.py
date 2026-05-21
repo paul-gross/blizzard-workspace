@@ -5,6 +5,7 @@ import click
 from winter_cli.cli_context import cli_ctx
 from winter_cli.modules.workspace.models import DiffMode, PinnedScope, PullMode, RepoScope
 from winter_cli.modules.workspace.handlers import (
+    DestroyParams,
     InitParams,
     RepoAddParams,
     RepoListParams,
@@ -85,6 +86,32 @@ def ws_init(ctx: click.Context, target: str | None, all_flag: bool, output_json:
     container = cli_ctx(ctx).container
     handler = container.init_handler()
     handler.run(InitParams(target=target, all=all_flag, output_json=output_json))
+
+
+@ws_group.command("destroy")
+@click.argument("env")
+@click.option("--force", is_flag=True, default=False, help="Bypass dirty-worktree check and pass --force to `git worktree remove`.")
+@click.option("--strict", is_flag=True, default=False, help="Abort teardown if any on_env_destroy hook exits non-zero.")
+@click.option("--dry-run", "dry_run", is_flag=True, default=False, help="Print the plan without running hooks or removing anything.")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def ws_destroy(ctx: click.Context, env: str, force: bool, strict: bool, dry_run: bool, output_json: bool):
+    """Tear down a feature env: fire on_env_destroy hooks, then remove every per-repo worktree and the env dir.
+
+    \b
+      winter ws destroy alpha               # standard teardown
+      winter ws destroy alpha --dry-run     # print the plan; no side effects
+      winter ws destroy alpha --force       # bypass dirty checks and force git worktree remove
+      winter ws destroy alpha --strict      # abort if any hook exits non-zero
+
+    Manual env removal (raw `rm -rf` plus `git worktree remove`) bypasses the
+    extension hooks the same way manual env creation bypasses `on_env_init`.
+    """
+    container = cli_ctx(ctx).container
+    handler = container.destroy_handler()
+    handler.run(DestroyParams(
+        env=env, force=force, strict=strict, dry_run=dry_run, output_json=output_json,
+    ))
 
 
 @ws_group.command("list")
