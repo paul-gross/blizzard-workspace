@@ -11,6 +11,7 @@ from winter_cli.config.models import (
     WorkspaceConfig,
 )
 from winter_cli.config.workspace import CONFIG_FILE, LOCAL_CONFIG_FILE, WINTER_DIR
+from winter_cli.core.filesystem import IFilesystemWriter
 
 
 class WriteWinterConfigurationRepository:
@@ -22,12 +23,17 @@ class WriteWinterConfigurationRepository:
 
     Takes Pydantic config models for appends so only fields the caller explicitly
     set land in the file. Removals match by explicit `name` or URL-derived name.
+
+    Raw file I/O goes through an injected `IFilesystemWriter` so tests can run
+    against an in-memory fake; tomlkit is only invoked on the string content
+    returned by the seam.
     """
 
-    def __init__(self, workspace_config: WorkspaceConfig) -> None:
+    def __init__(self, workspace_config: WorkspaceConfig, fs: IFilesystemWriter) -> None:
         winter_dir = workspace_config.workspace_root / WINTER_DIR
         self._shared_path = winter_dir / CONFIG_FILE
         self._local_path = winter_dir / LOCAL_CONFIG_FILE
+        self._fs = fs
 
     def append_project_repository(self, config: ProjectRepositoryConfig, local: bool = False) -> None:
         self._append_block("project_repository", config.model_dump(exclude_defaults=True, exclude_none=True), local)
@@ -59,11 +65,11 @@ class WriteWinterConfigurationRepository:
             aot = tomlkit.aot()
             aot.append(block)
             doc[table_name] = aot
-        path.write_text(tomlkit.dumps(doc))
+        self._fs.write_text(path, tomlkit.dumps(doc))
 
     def _remove_block(self, table_name: str, target_name: str, local: bool) -> bool:
         path = self._path_for(local)
-        if local and not path.exists():
+        if local and not self._fs.exists(path):
             return False
         doc = self._load(path, allow_missing=False)
         aot = doc.get(table_name)
@@ -76,20 +82,19 @@ class WriteWinterConfigurationRepository:
             if effective != target_name:
                 continue
             del aot[index]
-            path.write_text(tomlkit.dumps(doc))
+            self._fs.write_text(path, tomlkit.dumps(doc))
             return True
         return False
 
     def _path_for(self, local: bool) -> Path:
         return self._local_path if local else self._shared_path
 
-    @staticmethod
-    def _load(path: Path, allow_missing: bool) -> tomlkit.TOMLDocument:
-        if not path.exists():
+    def _load(self, path: Path, allow_missing: bool) -> tomlkit.TOMLDocument:
+        if not self._fs.exists(path):
             if allow_missing:
                 return tomlkit.document()
             raise FileNotFoundError(f"Config file not found: {path}")
-        return tomlkit.parse(path.read_text())
+        return tomlkit.parse(self._fs.read_text(path))
 
     @staticmethod
     def _name_from_url(url: str) -> str:

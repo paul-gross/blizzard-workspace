@@ -74,6 +74,7 @@ class Container(containers.DeclarativeContainer):
     write_winter_config_repo = providers.Factory(
         WriteWinterConfigurationRepository,
         workspace_config=workspace_config,
+        fs=fs,
     )
 
     # Factory for structured RepoError instances — injected into every class
