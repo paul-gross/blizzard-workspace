@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
+from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.workspace.models import ProjectRepository, Workspace
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
@@ -34,10 +35,12 @@ class DriftWarningService:
         self,
         workspace: Workspace,
         repo_factory: RepositoryFactory,
+        fs: IFilesystemReader,
         click: Any,
     ) -> None:
         self._workspace = workspace
         self._repo_factory = repo_factory
+        self._fs = fs
         self._click = click
 
     def detect(self) -> DriftReport:
@@ -51,8 +54,10 @@ class DriftWarningService:
         projects_dir = self._workspace.root_path / "projects"
 
         on_disk: set[str] = set()
-        if projects_dir.is_dir():
-            on_disk = {p.name for p in projects_dir.iterdir() if p.is_dir() and not p.name.startswith(".")}
+        if self._fs.is_dir(projects_dir):
+            on_disk = {
+                p.name for p in self._fs.iterdir(projects_dir) if self._fs.is_dir(p) and not p.name.startswith(".")
+            }
 
         declared = {r.name for r in project_repos}
         missing = sorted(

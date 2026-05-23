@@ -118,6 +118,7 @@ class Container(containers.DeclarativeContainer):
         DriftWarningService,
         workspace=workspace,
         repo_factory=repo_factory,
+        fs=fs,
         click=providers.Object(click),
     )
 

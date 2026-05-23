@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from textwrap import dedent
 from typing import Any
@@ -140,6 +141,138 @@ class ClickRecorder:
 
     def echo(self, message: str, err: bool = False, **_: Any) -> None:
         self.calls.append((message, err))
+
+
+class FakeFilesystem:
+    """In-memory filesystem satisfying IFilesystemReader and IFilesystemWriter.
+
+    Tracks files (paths → text content), directories (a set of paths), and
+    symlinks (link path → target path). Models just enough behavior for the
+    assertions services make: `is_dir`/`is_file`/`exists`, `iterdir`,
+    `read_text`/`write_text`, symlinks, mkdir, append, unlink, rmtree.
+
+    Hand-rolled rather than reaching for `pyfakefs` so the fake's behavior is
+    legible right next to the tests that use it. Behavior gaps (rename, copy)
+    are added on demand.
+    """
+
+    def __init__(
+        self,
+        files: dict[Path, str] | None = None,
+        directories: Iterable[Path] = (),
+        binary_files: dict[Path, bytes] | None = None,
+        symlinks: dict[Path, Path] | None = None,
+        executables: Iterable[Path] = (),
+    ) -> None:
+        self.files: dict[Path, str] = dict(files or {})
+        self.binary_files: dict[Path, bytes] = dict(binary_files or {})
+        self.directories: set[Path] = set(directories)
+        self.symlinks: dict[Path, Path] = dict(symlinks or {})
+        self.executables: set[Path] = set(executables)
+        # Ensure parents of every seeded file/dir are known directories so
+        # is_dir() works on intermediate paths without explicit listing.
+        for p in list(self.files) + list(self.binary_files) + list(self.directories):
+            for parent in p.parents:
+                self.directories.add(parent)
+
+    # ── IFilesystemReader ────────────────────────────────────────────────
+
+    def exists(self, path: Path) -> bool:
+        return (
+            path in self.files or path in self.binary_files or path in self.directories or path in self.symlinks
+        )
+
+    def is_file(self, path: Path) -> bool:
+        return path in self.files or path in self.binary_files
+
+    def is_dir(self, path: Path) -> bool:
+        return path in self.directories
+
+    def is_symlink(self, path: Path) -> bool:
+        return path in self.symlinks
+
+    def iterdir(self, path: Path) -> list[Path]:
+        results: set[Path] = set()
+        for p in list(self.files) + list(self.binary_files) + list(self.directories) + list(self.symlinks):
+            if p.parent == path and p != path:
+                results.add(p)
+        return sorted(results)
+
+    def read_text(self, path: Path) -> str:
+        if path not in self.files:
+            raise FileNotFoundError(path)
+        return self.files[path]
+
+    def read_bytes(self, path: Path) -> bytes:
+        if path in self.binary_files:
+            return self.binary_files[path]
+        if path in self.files:
+            return self.files[path].encode()
+        raise FileNotFoundError(path)
+
+    def readlink(self, path: Path) -> Path:
+        if path not in self.symlinks:
+            raise FileNotFoundError(path)
+        return self.symlinks[path]
+
+    def access_x_ok(self, path: Path) -> bool:
+        return path in self.executables
+
+    # ── IFilesystemWriter ────────────────────────────────────────────────
+
+    def mkdir(self, path: Path, parents: bool = False, exist_ok: bool = False) -> None:
+        if path in self.directories and not exist_ok:
+            raise FileExistsError(path)
+        if not parents and path.parent not in self.directories and path.parent != path:
+            raise FileNotFoundError(path.parent)
+        self.directories.add(path)
+        if parents:
+            for parent in path.parents:
+                self.directories.add(parent)
+
+    def write_text(self, path: Path, data: str) -> None:
+        self.files[path] = data
+        # Drop any stale symlink or binary at the same path.
+        self.binary_files.pop(path, None)
+        self.symlinks.pop(path, None)
+        for parent in path.parents:
+            self.directories.add(parent)
+
+    def append_lines(self, path: Path, lines: Iterable[str]) -> None:
+        existing = self.files.get(path, "")
+        if existing and not existing.endswith("\n"):
+            existing += "\n"
+        suffix = "".join(line if line.endswith("\n") else line + "\n" for line in lines)
+        self.files[path] = existing + suffix
+
+    def symlink_to(self, link_path: Path, target: Path) -> None:
+        if link_path in self.files or link_path in self.binary_files or link_path in self.directories:
+            raise FileExistsError(link_path)
+        self.symlinks[link_path] = target
+        for parent in link_path.parents:
+            self.directories.add(parent)
+
+    def unlink(self, path: Path) -> None:
+        if path in self.symlinks:
+            del self.symlinks[path]
+            return
+        if path in self.files:
+            del self.files[path]
+            return
+        if path in self.binary_files:
+            del self.binary_files[path]
+            return
+        raise FileNotFoundError(path)
+
+    def rmtree(self, path: Path) -> None:
+        self.directories.discard(path)
+        for collection in (self.files, self.binary_files, self.symlinks):
+            for p in list(collection):
+                if p == path or path in p.parents:
+                    del collection[p]
+        for d in list(self.directories):
+            if path in d.parents:
+                self.directories.discard(d)
 
 
 def make_git_repo(path: Path, initial_branch: str = "main") -> None:
