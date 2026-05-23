@@ -169,6 +169,8 @@ class Container(containers.DeclarativeContainer):
         config=workspace_config,
         repo_factory=repo_factory,
         extension_svc=extension_svc,
+        fs=fs,
+        git_repo=git_repo,
     )
 
     stream_reporter = providers.Factory(

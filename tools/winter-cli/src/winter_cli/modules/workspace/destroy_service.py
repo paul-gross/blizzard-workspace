@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-import shutil
-import subprocess
 from pathlib import Path
 
-import git
-
 from winter_cli.config.models import WorkspaceConfig
+from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.modules.workspace.extensions import ExtensionService
+from winter_cli.modules.workspace.git_repository import IGitRepository
 from winter_cli.modules.workspace.init_reporter import IInitReporter
 from winter_cli.modules.workspace.internal.managed_block import (
     GITIGNORE_BEGIN,
     GITIGNORE_END,
     strip_block,
 )
-from winter_cli.modules.workspace.models import ProjectRepository
+from winter_cli.modules.workspace.models import ProjectRepository, RepoError
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
 
@@ -34,10 +32,14 @@ class DestroyService:
         config: WorkspaceConfig,
         repo_factory: RepositoryFactory,
         extension_svc: ExtensionService,
+        fs: IFilesystemWriter,
+        git_repo: IGitRepository,
     ) -> None:
         self._config = config
         self._repo_factory = repo_factory
         self._extension_svc = extension_svc
+        self._fs = fs
+        self._git_repo = git_repo
 
     def destroy_env(
         self,
@@ -50,21 +52,21 @@ class DestroyService:
         reporter.target_started(name)
 
         env_root = self._config.workspace_root / name
-        if not env_root.is_dir():
+        if not self._fs.is_dir(env_root):
             reporter.repo_error(name, f"env directory not found at {env_root}")
             reporter.target_completed(name, False)
             return False
 
         project_repos = self._repo_factory.get_project_repos()
         existing_worktrees: list[tuple[ProjectRepository, Path]] = [
-            (repo, env_root / repo.name) for repo in project_repos if (env_root / repo.name).is_dir()
+            (repo, env_root / repo.name) for repo in project_repos if self._fs.is_dir(env_root / repo.name)
         ]
 
         # Phase 1: safety check — refuse if any worktree is dirty unless --force.
         if not force:
             dirty: list[str] = []
             for repo, wt_path in existing_worktrees:
-                if self._is_dirty(wt_path):
+                if not self._git_repo.is_worktree_clean(wt_path):
                     dirty.append(repo.name)
             if dirty:
                 reporter.repo_error(
@@ -124,9 +126,9 @@ class DestroyService:
 
         # Phase 4: drop the env directory itself (covers .winter.env and any
         # stray files from project setup steps).
-        if env_root.exists():
+        if self._fs.exists(env_root):
             try:
-                shutil.rmtree(env_root)
+                self._fs.rmtree(env_root)
             except OSError as exc:
                 reporter.repo_error(name, f"removing env directory — {exc}")
                 success = False
@@ -142,12 +144,11 @@ class DestroyService:
         reporter.target_completed(name, success)
         return success
 
-    @staticmethod
-    def _self_exclude_present(env_name: str, exclude_path: Path) -> bool:
-        if not exclude_path.exists():
+    def _self_exclude_present(self, env_name: str, exclude_path: Path) -> bool:
+        if not self._fs.exists(exclude_path):
             return False
         try:
-            content = exclude_path.read_text()
+            content = self._fs.read_text(exclude_path)
         except OSError:
             return False
         marker = GITIGNORE_BEGIN.format(name=f"winter-dir/{env_name}")
@@ -155,11 +156,11 @@ class DestroyService:
 
     def _strip_self_exclude(self, env_name: str, reporter: IInitReporter) -> bool:
         exclude_path = self._config.workspace_root / ".git" / "info" / "exclude"
-        if not exclude_path.exists():
+        if not self._fs.exists(exclude_path):
             return True
 
         try:
-            existing = exclude_path.read_text()
+            existing = self._fs.read_text(exclude_path)
         except OSError as exc:
             reporter.repo_error(env_name, f"reading .git/info/exclude — {exc}")
             return False
@@ -172,7 +173,7 @@ class DestroyService:
             return True
 
         try:
-            exclude_path.write_text(new_content)
+            self._fs.write_text(exclude_path, new_content)
         except OSError as exc:
             reporter.repo_error(env_name, f"writing .git/info/exclude — {exc}")
             return False
@@ -185,21 +186,6 @@ class DestroyService:
         )
         return True
 
-    @staticmethod
-    def _is_dirty(worktree_path: Path) -> bool:
-        try:
-            result = subprocess.run(
-                ["git", "-C", str(worktree_path), "status", "--porcelain"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except OSError:
-            return True
-        if result.returncode != 0:
-            return True
-        return bool(result.stdout.strip())
-
     def _remove_git_worktree(
         self,
         repo: ProjectRepository,
@@ -207,11 +193,11 @@ class DestroyService:
         force: bool,
         reporter: IInitReporter,
     ) -> bool:
-        if not repo.main_path.exists():
+        if not self._fs.exists(repo.main_path):
             # Source checkout is gone too — fall back to a plain rmtree so we
             # don't leave the env half-removed.
             try:
-                shutil.rmtree(worktree_path)
+                self._fs.rmtree(worktree_path)
             except OSError as exc:
                 reporter.repo_error(repo.name, f"removing worktree dir — {exc}")
                 return False
@@ -219,13 +205,8 @@ class DestroyService:
             return True
 
         try:
-            source = git.Repo(str(repo.main_path))
-            args = ["remove"]
-            if force:
-                args.append("--force")
-            args.append(str(worktree_path))
-            source.git.worktree(*args)
-        except git.GitCommandError as exc:
+            self._git_repo.remove_worktree(repo.main_path, worktree_path, force)
+        except RepoError as exc:
             reporter.repo_error(repo.name, f"git worktree remove failed — {exc}")
             return False
         reporter.repo_action(repo.name, str(worktree_path), "worktree_removed")
