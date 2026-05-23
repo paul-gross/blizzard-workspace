@@ -168,8 +168,8 @@ class ReadRepoRepository:
             deletions=deletions,
         )
 
-    def get_workspace(self, root_path: Path, session_prefix: str, main_branch_name: str) -> Workspace:
-        return Workspace(root_path=root_path, session_prefix=session_prefix, main_branch=main_branch_name)
+    def get_workspace(self, root_path: Path, session_prefix: str, main_branch: str) -> Workspace:
+        return Workspace(root_path=root_path, session_prefix=session_prefix, main_branch=main_branch)
 
     def _build_repo_status(
         self,
