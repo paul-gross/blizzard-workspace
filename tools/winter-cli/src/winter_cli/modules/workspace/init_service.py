@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from pathlib import Path
 
 from winter_cli.config.models import WorkspaceConfig
@@ -11,6 +11,7 @@ from winter_cli.core.subprocess_runner import ISubprocessRunner
 from winter_cli.modules.workspace.extensions import ExtensionService
 from winter_cli.modules.workspace.git_repository import IGitRepository
 from winter_cli.modules.workspace.init_reporter import IInitReporter
+from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.managed_block import (
     GITIGNORE_BEGIN,
     GITIGNORE_END,
@@ -65,6 +66,7 @@ class InitService:
         fs: IFilesystemWriter,
         subprocess_runner: ISubprocessRunner,
         git_repo: IGitRepository,
+        git_ops: GitOpsService,
     ) -> None:
         self._config = config
         self._repo_factory = repo_factory
@@ -72,6 +74,7 @@ class InitService:
         self._fs = fs
         self._subprocess = subprocess_runner
         self._git_repo = git_repo
+        self._git_ops = git_ops
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -157,16 +160,18 @@ class InitService:
         return success
 
     def _run_per_repo(self, repos, work_fn) -> bool:
-        """Fan work_fn(repo) out across a thread pool — clones and cmds run in parallel.
+        """Fan work_fn(repo) out across the shared GitOpsService thread pool.
 
         Each repo's work runs serially within its own task (clone → identity → excludes →
-        cmds), but the tasks run concurrently across repos. Reporter calls are
-        thread-safe via internal locking.
+        cmds), but the tasks run concurrently across repos. The pool is capped at
+        `GitOpsService.PARALLELISM` so a workspace with many repos doesn't overwhelm
+        the SSH connection limit on remote git hosts (Codeberg in particular). Reporter
+        calls are thread-safe via internal locking.
         """
         if not repos:
             return True
         success = True
-        with ThreadPoolExecutor(max_workers=len(repos)) as pool:
+        with self._git_ops.executor() as pool:
             futures = [pool.submit(work_fn, repo) for repo in repos]
             for fut in as_completed(futures):
                 if not fut.result():

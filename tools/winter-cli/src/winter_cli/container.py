@@ -165,6 +165,7 @@ class Container(containers.DeclarativeContainer):
         fs=fs,
         subprocess_runner=subprocess_runner,
         git_repo=git_repo,
+        git_ops=git_ops_svc,
     )
 
     destroy_svc = providers.Factory(

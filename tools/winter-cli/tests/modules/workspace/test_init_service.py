@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,8 @@ from winter_cli.config.models import (
 from winter_cli.core.subprocess_runner import SubprocessResult
 from winter_cli.modules.workspace.extensions import ExtensionService
 from winter_cli.modules.workspace.init_service import InitService
+from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
+from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
 WORKSPACE_ROOT = Path("/ws")
@@ -44,6 +47,7 @@ def _service(
     fs: FakeFilesystem,
     subprocess: FakeSubprocessRunner,
     git: FakeGitRepository,
+    git_ops: GitOpsService | None = None,
 ) -> InitService:
     ext_svc = ExtensionService(
         workspace_config,
@@ -58,6 +62,7 @@ def _service(
         fs=fs,
         subprocess_runner=subprocess,
         git_repo=git,
+        git_ops=git_ops or GitOpsService(RepoErrorFactory()),
     )
 
 
@@ -165,9 +170,7 @@ def test_run_cmds_streams_output_through_reporter(
     cfg = workspace_config.model_copy(
         update={
             "project_repos": [
-                ProjectRepositoryConfig(
-                    name="demo", url="git@example.com:org/demo.git", cmd=["pnpm install"]
-                )
+                ProjectRepositoryConfig(name="demo", url="git@example.com:org/demo.git", cmd=["pnpm install"])
             ]
         }
     )
@@ -192,3 +195,52 @@ def test_run_cmds_streams_output_through_reporter(
     assert ("demo", "+ pnpm install line 1") in init_reporter.cmd_output
     assert ("demo", "Done") in init_reporter.cmd_output
     assert ("demo", "pnpm install", 0) in init_reporter.cmds_completed
+
+
+def test_run_per_repo_caps_parallelism_via_git_ops_executor(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """Init fans out through GitOpsService.executor() so it inherits the SSH-safe cap.
+
+    With many more repos than `PARALLELISM`, the underlying thread pool must still
+    be sized to the cap — otherwise large workspaces overwhelm Codeberg's SSH
+    connection limit on `winter ws init`.
+    """
+    repo_count = GitOpsService.PARALLELISM * 2 + 1
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=GitIdentity(name="Bot", email="bot@example.com"),
+        project_repos=[
+            ProjectRepositoryConfig(name=f"r{i}", url=f"git@example.com:org/r{i}.git") for i in range(repo_count)
+        ],
+    )
+    fs = FakeFilesystem()
+    fs.directories.add(WORKSPACE_ROOT / ".git")
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    subprocess = FakeSubprocessRunner()
+    git = FakeGitRepository()
+
+    git_ops = GitOpsService(RepoErrorFactory())
+    observed_max_workers: list[int] = []
+    real_executor = git_ops.executor
+
+    @contextlib.contextmanager
+    def spying_executor():
+        with real_executor() as pool:
+            observed_max_workers.append(pool._max_workers)
+            yield pool
+
+    git_ops.executor = spying_executor  # type: ignore[method-assign]
+
+    svc = _service(cfg, fs, subprocess, git, git_ops=git_ops)
+    ok = svc.reconcile_projects(init_reporter)
+
+    assert ok is True
+    assert observed_max_workers, "InitService should fan out via git_ops.executor()"
+    assert all(workers == GitOpsService.PARALLELISM for workers in observed_max_workers), (
+        f"expected each fan-out capped at {GitOpsService.PARALLELISM}, got {observed_max_workers}"
+    )
