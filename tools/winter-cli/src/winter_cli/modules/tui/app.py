@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from textual.app import App
-from textual.binding import Binding
+from textual.binding import Binding, BindingType
 
 from winter_cli.container import Container
 from winter_cli.modules.tui.screen_factory import ScreenFactory
@@ -16,7 +16,7 @@ class WinterDashboardApp(App):
 
     TITLE = "Winter Dashboard"
 
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding("q", "quit", "Quit"),
     ]
 

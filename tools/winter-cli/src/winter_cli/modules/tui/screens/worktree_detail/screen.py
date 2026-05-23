@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from rich.text import Text
 from textual import work
@@ -139,7 +139,7 @@ class WorktreeDetailScreen(Screen):
     def action_open_log(self) -> None:
         from winter_cli.modules.tui.app import WinterDashboardApp
 
-        app: WinterDashboardApp = self.app
+        app = cast(WinterDashboardApp, self.app)
         app.push_screen(app.screen_factory.error_log_screen())
 
     def _on_refresh_start(self) -> None:

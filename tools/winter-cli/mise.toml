@@ -16,3 +16,7 @@ run = "uv run ruff check ."
 [tasks.format]
 description = "Format with ruff"
 run = "uv run ruff format ."
+
+[tasks.typecheck]
+description = "Type-check with pyright"
+run = "uv run pyright"

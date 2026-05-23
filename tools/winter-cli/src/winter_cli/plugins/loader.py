@@ -3,14 +3,10 @@ from __future__ import annotations
 import importlib.util
 import logging
 import sys
+import tomllib
 from pathlib import Path
 
 import click
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 from winter_cli.modules.workspace.models import StandaloneRepository, Workspace
 from winter_cli.plugins.types import (
@@ -30,7 +26,7 @@ logger = logging.getLogger(__name__)
 class PluginRegistry:
     def __init__(self) -> None:
         self.plugins: list[WinterPlugin] = []
-        self.commands: list[click.BaseCommand] = []
+        self.commands: list[click.Command] = []
         self.worktree_repo_decorators: list[WorktreeRepoDecorator] = []
         self.environment_decorators: list[EnvironmentDecorator] = []
         self.screens: list = []
@@ -89,6 +85,8 @@ class PluginRegistry:
                 f"winter_plugin_{plugin_name}",
                 entry_point,
             )
+            if spec is None or spec.loader is None:
+                raise ImportError(f"could not build module spec for {entry_point}")
             module = importlib.util.module_from_spec(spec)
             sys.modules[spec.name] = module
             spec.loader.exec_module(module)

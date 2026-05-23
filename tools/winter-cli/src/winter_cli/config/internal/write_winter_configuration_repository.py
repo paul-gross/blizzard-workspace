@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import tomlkit
+from tomlkit.items import AoT
 
 from winter_cli.config.models import (
     ProjectRepositoryConfig,
@@ -51,7 +52,9 @@ class WriteWinterConfigurationRepository:
         for key, value in fields.items():
             block[key] = value
         if table_name in doc:
-            doc[table_name].append(block)
+            existing = doc[table_name]
+            assert isinstance(existing, AoT)
+            existing.append(block)
         else:
             aot = tomlkit.aot()
             aot.append(block)

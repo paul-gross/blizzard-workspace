@@ -4,12 +4,13 @@ import contextlib
 from typing import ClassVar
 
 from rich.text import Text
-from textual.binding import Binding
+from textual.binding import Binding, BindingType
 from textual.reactive import reactive
 from textual.widgets import DataTable
+from textual.widgets.data_table import ColumnKey
 
 from winter_cli.modules.tui.screens.workspace.repo_status import render_repo_cell
-from winter_cli.modules.workspace.models import FeatureEnvironmentOverview
+from winter_cli.modules.workspace.models import FeatureEnvironmentOverview, WorktreeRepoStatus
 
 # Pushpin marks pinned project repos in the row label. The trailing
 # U+FE0E (variation selector-15) requests text-style monochrome rendering
@@ -21,7 +22,7 @@ _PIN_PAD = "  "
 
 
 class FeatureWorktreesGrid(DataTable):
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding("h", "cursor_left", "Left", show=False),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
@@ -113,7 +114,7 @@ class FeatureWorktreesGrid(DataTable):
         repo_lookup = self._build_repo_lookup()
 
         for overview in self.statuses:
-            col_key = overview.status.environment.name
+            col_key = ColumnKey(overview.status.environment.name)
             self.columns[col_key].label = self._column_header(overview)
 
         for repo_name in self._repo_keys:
@@ -126,10 +127,10 @@ class FeatureWorktreesGrid(DataTable):
         self._update_count += 1
         self.refresh()
 
-    def _build_repo_lookup(self) -> dict[str, dict[str, object]]:
-        lookup: dict[str, dict[str, object]] = {}
+    def _build_repo_lookup(self) -> dict[str, dict[str, WorktreeRepoStatus]]:
+        lookup: dict[str, dict[str, WorktreeRepoStatus]] = {}
         for overview in self.statuses:
-            by_name: dict[str, object] = {}
+            by_name: dict[str, WorktreeRepoStatus] = {}
             for repo_status in overview.repo_statuses:
                 by_name[repo_status.worktree.repository.name] = repo_status
             lookup[overview.status.environment.name] = by_name

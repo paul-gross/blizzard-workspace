@@ -79,7 +79,11 @@ class ReadRepoRepository:
         latest_commit: str | None = None
         try:
             head_commit = r.head.commit
-            latest_commit = head_commit.message.strip().splitlines()[0]
+            # GitPython types `Commit.message` as `bytes | str`; decode the bytes case.
+            message = head_commit.message
+            if isinstance(message, bytes):
+                message = message.decode("utf-8", errors="replace")
+            latest_commit = message.strip().splitlines()[0]
         except (ValueError, IndexError):
             pass
 
@@ -246,7 +250,8 @@ class ReadRepoRepository:
                     ) from exc
 
         try:
-            dirty_files = [item.a_path for item in r.index.diff(None)]
+            # GitPython types `Diff.a_path` as `str | None`; drop the None case to keep `list[str]`.
+            dirty_files: list[str] = [item.a_path for item in r.index.diff(None) if item.a_path is not None]
             dirty_files += r.untracked_files
         except git.GitCommandError as exc:
             raise self._error_factory.from_git(
@@ -259,9 +264,11 @@ class ReadRepoRepository:
         if main_branch:
             try:
                 for c in r.iter_commits(f"origin/{main_branch}..HEAD", max_count=5):
-                    recent_commits.append(
-                        RepoCommit(short_hash=c.hexsha[:7], message=c.message.strip().splitlines()[0])
-                    )
+                    # GitPython types `Commit.message` as `bytes | str`; decode the bytes case.
+                    msg = c.message
+                    if isinstance(msg, bytes):
+                        msg = msg.decode("utf-8", errors="replace")
+                    recent_commits.append(RepoCommit(short_hash=c.hexsha[:7], message=msg.strip().splitlines()[0]))
             except git.GitCommandError as exc:
                 # `iter_commits` against a missing `origin/<main>` is the same
                 # case as the ahead/behind probe above — tolerate it.

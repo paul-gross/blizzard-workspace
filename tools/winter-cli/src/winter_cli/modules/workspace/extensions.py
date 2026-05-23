@@ -3,14 +3,9 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
-
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
 
 from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
 from winter_cli.modules.workspace.init_reporter import IInitReporter

@@ -97,7 +97,7 @@ class TuiAction:
 
 @dataclasses.dataclass
 class PluginRegistration:
-    commands: list[click.BaseCommand] = dataclasses.field(default_factory=list)
+    commands: list[click.Command] = dataclasses.field(default_factory=list)
     worktree_repo_decorators: list[WorktreeRepoDecorator] = dataclasses.field(default_factory=list)
     environment_decorators: list[EnvironmentDecorator] = dataclasses.field(default_factory=list)
     tui_screens: list[Any] = dataclasses.field(default_factory=list)

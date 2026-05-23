@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING, ClassVar, cast
 
 from textual import work
 from textual.binding import Binding
@@ -178,7 +178,7 @@ class WorkspaceScreen(Screen):
             )
 
     def action_open_log(self) -> None:
-        app: WinterDashboardApp = self.app
+        app = cast("WinterDashboardApp", self.app)
         app.push_screen(app.screen_factory.error_log_screen())
 
     def _on_refresh_start(self) -> None:
@@ -245,7 +245,7 @@ class WorkspaceScreen(Screen):
         grid = self.query_one("#grid", FeatureWorktreesGrid)
         name = grid.get_selected_worktree()
         if name is not None:
-            app: WinterDashboardApp = self.app
+            app = cast("WinterDashboardApp", self.app)
             app.push_screen(app.screen_factory.worktree_detail_screen(name))
 
     def _run_plugin_action(self, action_name: str) -> None:

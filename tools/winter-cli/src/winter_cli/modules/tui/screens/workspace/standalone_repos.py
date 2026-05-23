@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import ClassVar
 
 from rich.text import Text
-from textual.binding import Binding
+from textual.binding import Binding, BindingType
 from textual.reactive import reactive
 from textual.widgets import DataTable
 
@@ -11,7 +11,7 @@ from winter_cli.modules.workspace.models import StandaloneRepoStatus
 
 
 class StandaloneReposTable(DataTable):
-    BINDINGS: ClassVar[list[Binding]] = [
+    BINDINGS: ClassVar[list[BindingType]] = [
         Binding("h", "cursor_left", "Left", show=False),
         Binding("j", "cursor_down", "Down", show=False),
         Binding("k", "cursor_up", "Up", show=False),
