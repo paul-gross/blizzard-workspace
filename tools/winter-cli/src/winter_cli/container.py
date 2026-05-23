@@ -3,6 +3,7 @@ from __future__ import annotations
 import click
 from dependency_injector import containers, providers
 
+from winter_cli.config.internal.cwd_workspace_locator import CwdWorkspaceLocator
 from winter_cli.config.internal.write_winter_configuration_repository import (
     WriteWinterConfigurationRepository,
 )
@@ -11,6 +12,9 @@ from winter_cli.core.internal.click_cli_input_validation_service import (
     ClickCliInputValidationService,
 )
 from winter_cli.core.internal.click_cli_output_service import ClickCliOutputService
+from winter_cli.core.internal.local_filesystem import LocalFilesystem
+from winter_cli.core.internal.local_subprocess_runner import LocalSubprocessRunner
+from winter_cli.core.internal.tomllib_config_file_reader import TomllibConfigFileReader
 from winter_cli.modules.tui.error_log import ErrorLogService
 from winter_cli.modules.tui.screens.error_log import ErrorLogScreen
 from winter_cli.modules.tui.screens.workspace import WorkspaceScreen
@@ -26,6 +30,7 @@ from winter_cli.modules.workspace.handlers.workspace_handler import WorkspaceHan
 from winter_cli.modules.workspace.init_reporter import JsonReporter, StreamReporter
 from winter_cli.modules.workspace.init_service import InitService
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
+from winter_cli.modules.workspace.internal.gitpython_repository import GitPythonRepository
 from winter_cli.modules.workspace.internal.read_workspace_repository import ReadWorkspaceRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.internal.write_repo_repository import WriteRepoRepository
@@ -34,6 +39,7 @@ from winter_cli.modules.workspace.pull_reporter import JsonPullReporter, StreamP
 from winter_cli.modules.workspace.reporter_factory import ReporterFactory
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_service import WorkspaceService
+from winter_cli.plugins.internal.importlib_plugin_loader import ImportlibPluginLoader
 from winter_cli.plugins.loader import PluginRegistry
 
 
@@ -44,6 +50,18 @@ class Container(containers.DeclarativeContainer):
 
     cli_output_svc = providers.Singleton(ClickCliOutputService)
     cli_input_validation_svc = providers.Singleton(ClickCliInputValidationService)
+
+    # Cross-cutting I/O seams. Adapters confine `pathlib`/`shutil`/`os`,
+    # `tomllib`, and `subprocess` so service code depends on Protocols, not
+    # the standard library. See core/{filesystem,config_file,subprocess_runner}.py.
+    fs = providers.Singleton(LocalFilesystem)
+    config_file_reader = providers.Singleton(TomllibConfigFileReader)
+    subprocess_runner = providers.Singleton(LocalSubprocessRunner)
+
+    # Workspace-root discovery seam — lets WorkspaceConfigService accept a
+    # locator instead of reaching `Path.cwd()` directly. Tests substitute a
+    # fake that returns a fixed path.
+    workspace_locator = providers.Singleton(CwdWorkspaceLocator)
 
     workspace_config_svc = providers.Singleton(WorkspaceConfigService)
     workspace_config = providers.Singleton(workspace_config_svc.provided.load.call())
@@ -56,6 +74,15 @@ class Container(containers.DeclarativeContainer):
     # Factory for structured RepoError instances — injected into every class
     # that translates GitPython exceptions into winter's error type.
     repo_error_factory = providers.Singleton(RepoErrorFactory)
+
+    # Service-level git seam used by InitService / DestroyService / PruneService
+    # (not by IRead/IWriteRepoRepository, which already own domain-level git).
+    # The adapter wraps `git.GitCommandError` into `RepoError` via repo_error_factory.
+    git_repo = providers.Singleton(GitPythonRepository, error_factory=repo_error_factory)
+
+    # Importlib-based plugin module loader. Confines `importlib.util` and
+    # `sys.modules` mutation so the registry depends on a Protocol.
+    plugin_loader = providers.Singleton(ImportlibPluginLoader)
 
     # Central git-ops chokepoint: owns the parallelism cap and retry policy
     # for network-touching git operations.
