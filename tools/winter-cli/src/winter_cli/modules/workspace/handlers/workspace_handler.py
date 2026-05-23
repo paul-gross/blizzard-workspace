@@ -331,11 +331,11 @@ class WorkspaceHandler:
                 sys.exit(1)
             return
 
+        if not report.success:
+            sys.exit(1)
         if not report.projects and not report.standalone:
             click.echo(self._cli_output_svc.style("Nothing to fetch", "dim"))
             return
-        if not report.success:
-            sys.exit(1)
 
     def pull(self, params: EnvPullParams) -> None:
         self._drift_warning_svc.raise_warning()
@@ -354,15 +354,15 @@ class WorkspaceHandler:
             return
 
         out = self._cli_output_svc
-        if not report.envs and not report.standalone and not report.skipped:
-            click.echo(out.style("Nothing to pull", "dim"))
-            return
         if not report.success:
             if params.mode == PullMode.ff_only and any(
                 o.sync_result == SyncResult.diverged for env in report.envs for o in env.repos
             ):
                 click.echo(out.style("retry with --merge or --rebase, or resolve with raw git", "dim"))
             sys.exit(1)
+        if not report.envs and not report.standalone and not report.skipped:
+            click.echo(out.style("Nothing to pull", "dim"))
+            return
 
     def push(self, params: EnvPushParams) -> None:
         self._drift_warning_svc.raise_warning()
