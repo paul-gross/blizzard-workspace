@@ -11,8 +11,8 @@ import click
 from winter_cli.core.cli_output_service import Cell, ICliOutputService
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
+from winter_cli.modules.workspace.env_index import resolve_env_index
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
-from winter_cli.modules.workspace.internal.read_workspace_repository import resolve_env_index
 from winter_cli.modules.workspace.models import (
     CheckoutResult,
     DiffMode,

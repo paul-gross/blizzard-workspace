@@ -6,6 +6,7 @@ from pathlib import Path
 from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.core.subprocess_runner import ISubprocessRunner
+from winter_cli.modules.workspace.env_index import resolve_env_index
 from winter_cli.modules.workspace.extension_manifest import (
     EXT_MANIFEST,
     HOOK_ON_ENV_DESTROY,
@@ -16,7 +17,6 @@ from winter_cli.modules.workspace.extension_manifest import (
     ExtensionManifestLoader,
 )
 from winter_cli.modules.workspace.init_reporter import IInitReporter
-from winter_cli.modules.workspace.internal.read_workspace_repository import resolve_env_index
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
 
 

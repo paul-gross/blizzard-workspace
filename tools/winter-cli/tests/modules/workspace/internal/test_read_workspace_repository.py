@@ -6,11 +6,10 @@ from unittest.mock import MagicMock
 import git
 import pytest
 
+from winter_cli.modules.workspace.env_index import GREEK_LETTERS, resolve_env_index
 from winter_cli.modules.workspace.internal import read_workspace_repository
 from winter_cli.modules.workspace.internal.read_workspace_repository import (
-    GREEK_LETTERS,
     ReadWorkspaceRepository,
-    resolve_env_index,
 )
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.models import ProjectRepository, Workspace

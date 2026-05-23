@@ -8,6 +8,7 @@ from pathlib import Path
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.core.subprocess_runner import ISubprocessRunner
+from winter_cli.modules.workspace.env_index import resolve_env_index
 from winter_cli.modules.workspace.extension_claudemd_service import ExtensionClaudemdService
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
 from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
@@ -20,7 +21,6 @@ from winter_cli.modules.workspace.internal.managed_block import (
     GITIGNORE_END,
     replace_or_append_block,
 )
-from winter_cli.modules.workspace.internal.read_workspace_repository import resolve_env_index
 from winter_cli.modules.workspace.models import (
     IWorkspaceRepository,
     ProjectRepository,
