@@ -432,7 +432,7 @@ class WorkspaceHandler:
                 self._prune_svc.remove_orphan(o)
                 click.echo(f"  remove {self._relative(o.path)}")
                 removed_any = True
-            except Exception as exc:
+            except (OSError, RuntimeError) as exc:
                 click.echo(f"  error  {self._relative(o.path)} ({exc})")
 
         self._maybe_reaggregate_excludes(params, removed_any=removed_any)
@@ -468,7 +468,7 @@ class WorkspaceHandler:
                     self._prune_svc.remove_orphan(o)
                     entry["action"] = "removed"
                     removed_any = True
-                except Exception as exc:
+                except (OSError, RuntimeError) as exc:
                     entry["action"] = "error"
                     entry["error"] = str(exc)
             results.append(entry)
