@@ -53,8 +53,6 @@ from winter_cli.plugins.loader import PluginRegistry
 class Container(containers.DeclarativeContainer):
     """DI container for the winter CLI."""
 
-    __self__ = providers.Self()
-
     cli_output_svc = providers.Singleton(ClickCliOutputService)
     cli_input_validation_svc = providers.Singleton(ClickCliInputValidationService)
 
@@ -265,7 +263,12 @@ class Container(containers.DeclarativeContainer):
 
     reporter_factory = providers.Singleton(
         ReporterFactory,
-        container=__self__,
+        stream_init_reporter=stream_reporter.provider,
+        json_init_reporter=json_reporter.provider,
+        stream_fetch_reporter=stream_fetch_reporter.provider,
+        json_fetch_reporter=json_fetch_reporter.provider,
+        stream_pull_reporter=stream_pull_reporter.provider,
+        json_pull_reporter=json_pull_reporter.provider,
     )
 
     workspace_handler = providers.Factory(
