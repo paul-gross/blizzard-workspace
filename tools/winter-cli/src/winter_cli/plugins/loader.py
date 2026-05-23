@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import importlib.util
 import logging
-import sys
-import tomllib
 from pathlib import Path
 
 import click
 
+from winter_cli.core.config_file import ConfigFileReadError, IConfigFileReader
+from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.workspace.models import StandaloneRepository, Workspace
+from winter_cli.plugins.plugin_loader import IPluginLoader
 from winter_cli.plugins.types import (
     ActionScope,
     EnvironmentDecorator,
@@ -24,7 +24,26 @@ logger = logging.getLogger(__name__)
 
 
 class PluginRegistry:
-    def __init__(self) -> None:
+    """Discovers and loads winter plugins from workspace, user-global, and extension sources.
+
+    I/O goes through three Protocol seams:
+      - `IFilesystemReader` for directory/file probes
+      - `IConfigFileReader` for `config.toml` parsing
+      - `IPluginLoader` for importing the plugin module from its `plugin.py`
+
+    Each source is consulted in priority order (workspace > user-global >
+    standalone extensions); first wins on name collision.
+    """
+
+    def __init__(
+        self,
+        fs: IFilesystemReader,
+        config_file_reader: IConfigFileReader,
+        plugin_loader: IPluginLoader,
+    ) -> None:
+        self._fs = fs
+        self._config_file_reader = config_file_reader
+        self._plugin_loader = plugin_loader
         self.plugins: list[WinterPlugin] = []
         self.commands: list[click.Command] = []
         self.worktree_repo_decorators: list[WorktreeRepoDecorator] = []
@@ -35,9 +54,8 @@ class PluginRegistry:
     def actions_for_scope(self, scope: ActionScope) -> list[TuiAction]:
         return [a for a in self.tui_actions if a.scope == scope]
 
-    @classmethod
-    def load(
-        cls,
+    def discover(
+        self,
         workspace: Workspace,
         standalone_repos: list[StandaloneRepository] | None = None,
     ) -> PluginRegistry:
@@ -50,30 +68,41 @@ class PluginRegistry:
              winter extension ship a dashboard plugin alongside its hooks
              without the user having to copy anything into .winter/plugins/.
         """
-        registry = cls()
         workspace_plugins_dir = workspace.root_path / ".winter" / "plugins"
         seen: set[str] = set()
 
         for plugins_dir in [workspace_plugins_dir, USER_PLUGINS_DIR]:
-            if not plugins_dir.is_dir():
+            if not self._fs.is_dir(plugins_dir):
                 continue
-            for plugin_dir in sorted(plugins_dir.iterdir()):
-                if not plugin_dir.is_dir() or plugin_dir.name in seen:
+            for plugin_dir in sorted(self._fs.iterdir(plugins_dir)):
+                if not self._fs.is_dir(plugin_dir) or plugin_dir.name in seen:
                     continue
-                if not (plugin_dir / "plugin.py").is_file():
+                if not self._fs.is_file(plugin_dir / "plugin.py"):
                     continue
-                registry._load_plugin(plugin_dir)
+                self._load_plugin(plugin_dir)
                 seen.add(plugin_dir.name)
 
         for repo in standalone_repos or []:
             if repo.name in seen:
                 continue
-            if not repo.path.is_dir() or not (repo.path / "plugin.py").is_file():
+            if not self._fs.is_dir(repo.path) or not self._fs.is_file(repo.path / "plugin.py"):
                 continue
-            registry._load_plugin(repo.path)
+            self._load_plugin(repo.path)
             seen.add(repo.name)
 
-        return registry
+        return self
+
+    @classmethod
+    def load(
+        cls,
+        workspace: Workspace,
+        fs: IFilesystemReader,
+        config_file_reader: IConfigFileReader,
+        plugin_loader: IPluginLoader,
+        standalone_repos: list[StandaloneRepository] | None = None,
+    ) -> PluginRegistry:
+        """Factory helper used by the DI container: build a registry and run discovery."""
+        return cls(fs, config_file_reader, plugin_loader).discover(workspace, standalone_repos)
 
     def _load_plugin(self, plugin_dir: Path) -> None:
         plugin_name = plugin_dir.name
@@ -81,15 +110,7 @@ class PluginRegistry:
         config = self._load_config(plugin_dir)
 
         try:
-            spec = importlib.util.spec_from_file_location(
-                f"winter_plugin_{plugin_name}",
-                entry_point,
-            )
-            if spec is None or spec.loader is None:
-                raise ImportError(f"could not build module spec for {entry_point}")
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[spec.name] = module
-            spec.loader.exec_module(module)
+            module = self._plugin_loader.load(plugin_name, entry_point)
         except Exception:
             logger.warning("Failed to load plugin '%s'", plugin_name, exc_info=True)
             return
@@ -110,10 +131,11 @@ class PluginRegistry:
         self.screens.extend(registration.tui_screens)
         self.tui_actions.extend(registration.tui_actions)
 
-    @staticmethod
-    def _load_config(plugin_dir: Path) -> dict:
+    def _load_config(self, plugin_dir: Path) -> dict:
         config_path = plugin_dir / "config.toml"
-        if not config_path.is_file():
+        if not self._fs.is_file(config_path):
             return {}
-        with config_path.open("rb") as f:
-            return tomllib.load(f)
+        try:
+            return self._config_file_reader.load(config_path)
+        except ConfigFileReadError:
+            return {}

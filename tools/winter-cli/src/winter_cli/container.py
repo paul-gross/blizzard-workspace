@@ -115,6 +115,9 @@ class Container(containers.DeclarativeContainer):
     plugin_registry = providers.Singleton(
         PluginRegistry.load,
         workspace=workspace,
+        fs=fs,
+        config_file_reader=config_file_reader,
+        plugin_loader=plugin_loader,
         standalone_repos=repo_factory.provided.get_standalone_repos.call(),
     )
 
