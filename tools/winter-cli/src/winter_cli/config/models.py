@@ -152,3 +152,10 @@ class WorkspaceConfig(BaseModel):
 
     standalone_repos: list[StandaloneRepositoryConfig] = Field(default_factory=list)
     """Repos declared in `[[standalone_repository]]`."""
+
+    doctor: str | None = None
+    """Optional path to a workspace-level `winter doctor` probe script (relative to workspace_root).
+
+    Symmetric with the per-extension `doctor` field in `winter-ext.toml`. When
+    set, the script runs after core probes and before extension probes, and is
+    expected to emit one NDJSON probe event per stdout line."""

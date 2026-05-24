@@ -42,12 +42,17 @@ class ExtensionManifest:
     relative to the extension's repo root. Hooks let an extension contribute
     setup steps that don't fit the symlink-skills/agents model — for example,
     dropping additional files into a worktree or running provisioning commands.
+
+    `doctor` is the relative path of an executable probe script invoked by
+    `winter doctor`. The script emits one NDJSON event per check on stdout;
+    a non-zero exit is treated as a single fail with stderr as the message.
     """
 
     prefix: str
     skills_dirs: tuple[str, ...]
     agents_dirs: tuple[str, ...]
     hooks: dict[str, str] = field(default_factory=dict)
+    doctor: str | None = None
 
 
 class ExtensionManifestLoader:
@@ -86,9 +91,13 @@ class ExtensionManifestLoader:
         hooks_raw = data.get("hooks") or {}
         hooks = {k: str(v) for k, v in hooks_raw.items() if isinstance(v, str)}
 
+        doctor_raw = data.get("doctor")
+        doctor = doctor_raw if isinstance(doctor_raw, str) and doctor_raw else None
+
         return ExtensionManifest(
             prefix=prefix,
             skills_dirs=skills_dirs,
             agents_dirs=agents_dirs,
             hooks=hooks,
+            doctor=doctor,
         )

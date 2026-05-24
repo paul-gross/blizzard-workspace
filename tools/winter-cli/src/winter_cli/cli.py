@@ -10,6 +10,7 @@ sys.dont_write_bytecode = True
 import click
 
 from winter_cli.cli_context import CliContext
+from winter_cli.modules.doctor.command import doctor_command
 from winter_cli.modules.tui.command import dashboard
 from winter_cli.modules.workspace.command import repo_group, ws_group
 from winter_cli.modules.workspace.models import RepoError
@@ -26,6 +27,7 @@ def _cli_group(ctx: click.Context, source_override: str | None):
 
 
 _cli_group.add_command(dashboard)
+_cli_group.add_command(doctor_command)
 _cli_group.add_command(ws_group)
 _cli_group.add_command(repo_group)
 

@@ -15,6 +15,12 @@ from winter_cli.core.internal.click_cli_output_service import ClickCliOutputServ
 from winter_cli.core.internal.local_filesystem import LocalFilesystem
 from winter_cli.core.internal.local_subprocess_runner import LocalSubprocessRunner
 from winter_cli.core.internal.tomllib_config_file_reader import TomllibConfigFileReader
+from winter_cli.modules.doctor.core_probe_service import CoreProbeService
+from winter_cli.modules.doctor.doctor_reporter import JsonDoctorReporter, StreamDoctorReporter
+from winter_cli.modules.doctor.doctor_service import DoctorService
+from winter_cli.modules.doctor.extension_probe_service import ExtensionProbeService
+from winter_cli.modules.doctor.handler import DoctorHandler
+from winter_cli.modules.doctor.workspace_probe_service import WorkspaceProbeService
 from winter_cli.modules.tui.error_log import ErrorLogService
 from winter_cli.modules.tui.screens.error_log import ErrorLogScreen
 from winter_cli.modules.tui.screens.workspace import WorkspaceScreen
@@ -307,6 +313,57 @@ class Container(containers.DeclarativeContainer):
         DestroyHandler,
         destroy_service=destroy_svc,
         reporter_factory=reporter_factory,
+    )
+
+    core_probe_svc = providers.Factory(
+        CoreProbeService,
+        config=workspace_config,
+        fs=fs,
+        subprocess_runner=subprocess_runner,
+        config_file_reader=config_file_reader,
+        repo_factory=repo_factory,
+        worktree_repo=worktree_repo,
+        repo_repo=repo_repo,
+    )
+
+    workspace_probe_svc = providers.Factory(
+        WorkspaceProbeService,
+        config=workspace_config,
+        fs=fs,
+        subprocess_runner=subprocess_runner,
+    )
+
+    extension_probe_svc = providers.Factory(
+        ExtensionProbeService,
+        config=workspace_config,
+        fs=fs,
+        subprocess_runner=subprocess_runner,
+        manifest_loader=extension_manifest_loader,
+    )
+
+    doctor_svc = providers.Factory(
+        DoctorService,
+        core_probe_svc=core_probe_svc,
+        workspace_probe_svc=workspace_probe_svc,
+        extension_probe_svc=extension_probe_svc,
+        repo_factory=repo_factory,
+    )
+
+    stream_doctor_reporter = providers.Factory(
+        StreamDoctorReporter,
+        click=providers.Object(click),
+    )
+
+    json_doctor_reporter = providers.Factory(
+        JsonDoctorReporter,
+        click=providers.Object(click),
+    )
+
+    doctor_handler = providers.Factory(
+        DoctorHandler,
+        doctor_service=doctor_svc,
+        stream_reporter=stream_doctor_reporter,
+        json_reporter=json_doctor_reporter,
     )
 
     # Session-scoped log buffer for RepoErrors captured during dashboard

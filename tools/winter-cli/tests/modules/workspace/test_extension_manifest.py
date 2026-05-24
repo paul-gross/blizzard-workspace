@@ -25,6 +25,7 @@ def test_load_returns_defaults_when_manifest_path_is_none() -> None:
     assert manifest.skills_dirs == DEFAULT_SKILLS_DIRS
     assert manifest.agents_dirs == DEFAULT_AGENTS_DIRS
     assert manifest.hooks == {}
+    assert manifest.doctor is None
 
 
 def test_load_respects_manifest_prefix_and_hooks() -> None:
@@ -44,6 +45,35 @@ def test_load_respects_manifest_prefix_and_hooks() -> None:
     assert manifest.prefix == "mp"
     assert manifest.skills_dirs == ("custom-skills",)
     assert manifest.hooks == {"on_env_init": "scripts/init.sh"}
+
+
+def test_load_parses_doctor_script_path() -> None:
+    """`doctor` is a single relative script path; empty / non-string falls back to None."""
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    config_files = {
+        manifest_path: {
+            "doctor": "scripts/probe.sh",
+        }
+    }
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    manifest = loader.load(repo, manifest_path=manifest_path)
+    assert manifest.doctor == "scripts/probe.sh"
+
+
+def test_load_ignores_non_string_doctor_value() -> None:
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    config_files = {
+        manifest_path: {
+            "doctor": 42,
+        }
+    }
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    manifest = loader.load(repo, manifest_path=manifest_path)
+    assert manifest.doctor is None
 
 
 def test_load_raises_repo_error_on_broken_manifest() -> None:
