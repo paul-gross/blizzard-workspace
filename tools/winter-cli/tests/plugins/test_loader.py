@@ -123,3 +123,84 @@ def test_discover_skips_plugin_module_without_create_plugin(workspace: Workspace
 
     registry = PluginRegistry(fs, FakeConfigFileReader({}), loader).discover(workspace, standalone_repos=[])
     assert registry.plugins == []
+
+
+def test_discover_isolates_exception_raised_inside_create_plugin(workspace: Workspace) -> None:
+    """A plugin that raises in create_plugin() is skipped, not propagated.
+
+    The registry is a Singleton consumed by every `winter ws *` command path —
+    if any plugin's create_plugin() / register() raised out of discover(), a
+    single buggy extension would take the whole CLI offline.
+    """
+    plugin_dir = WORKSPACE_ROOT / ".winter" / "plugins" / "exploding"
+    plugin_py = plugin_dir / "plugin.py"
+    fs = FakeFilesystem(
+        directories=[WORKSPACE_ROOT / ".winter" / "plugins", plugin_dir],
+        files={plugin_py: ""},
+    )
+
+    module = ModuleType("exploding")
+
+    def create_plugin() -> SimpleNamespace:
+        raise RuntimeError("plugin author typo")
+
+    module.create_plugin = create_plugin  # type: ignore[attr-defined]
+    loader = FakePluginLoader({plugin_py: module})
+
+    registry = PluginRegistry(fs, FakeConfigFileReader({}), loader).discover(workspace, standalone_repos=[])
+    assert registry.plugins == []
+
+
+def test_discover_isolates_exception_raised_inside_register(workspace: Workspace) -> None:
+    """A plugin that raises in register() is skipped, not propagated."""
+    plugin_dir = WORKSPACE_ROOT / ".winter" / "plugins" / "bad-register"
+    plugin_py = plugin_dir / "plugin.py"
+    fs = FakeFilesystem(
+        directories=[WORKSPACE_ROOT / ".winter" / "plugins", plugin_dir],
+        files={plugin_py: ""},
+    )
+
+    module = ModuleType("bad-register")
+
+    def create_plugin() -> SimpleNamespace:
+        def register(config: object) -> PluginRegistration:
+            raise ValueError("bad config schema")
+
+        return SimpleNamespace(name="bad-register", register=register)
+
+    module.create_plugin = create_plugin  # type: ignore[attr-defined]
+    loader = FakePluginLoader({plugin_py: module})
+
+    registry = PluginRegistry(fs, FakeConfigFileReader({}), loader).discover(workspace, standalone_repos=[])
+    assert registry.plugins == []
+
+
+def test_discover_other_plugins_load_when_one_explodes(workspace: Workspace) -> None:
+    """One broken plugin does not stop sibling plugins from loading."""
+    plugins_dir = WORKSPACE_ROOT / ".winter" / "plugins"
+    good_dir = plugins_dir / "good"
+    good_py = good_dir / "plugin.py"
+    bad_dir = plugins_dir / "bad"
+    bad_py = bad_dir / "plugin.py"
+    fs = FakeFilesystem(
+        directories=[plugins_dir, good_dir, bad_dir],
+        files={good_py: "", bad_py: ""},
+    )
+
+    bad_module = ModuleType("bad")
+
+    def create_plugin() -> SimpleNamespace:
+        raise RuntimeError("kaboom")
+
+    bad_module.create_plugin = create_plugin  # type: ignore[attr-defined]
+
+    config_received: list[dict] = []
+    loader = FakePluginLoader(
+        {
+            good_py: _make_module("good", config_received=config_received),
+            bad_py: bad_module,
+        }
+    )
+
+    registry = PluginRegistry(fs, FakeConfigFileReader({}), loader).discover(workspace, standalone_repos=[])
+    assert [p.name for p in registry.plugins] == ["good"]

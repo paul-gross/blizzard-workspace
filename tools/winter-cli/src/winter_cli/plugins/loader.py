@@ -111,17 +111,18 @@ class PluginRegistry:
 
         try:
             module = self._plugin_loader.load(plugin_name, entry_point)
+            if not hasattr(module, "create_plugin"):
+                logger.warning("Plugin '%s' has no create_plugin() function, skipping", plugin_name)
+                return
+            plugin: WinterPlugin = module.create_plugin()
+            registration: PluginRegistration = plugin.register(config)
+            self._apply(plugin, registration)
         except Exception:
+            # A buggy plugin must not take the whole CLI offline. The registry is
+            # consumed as a Singleton by the dashboard and every `winter ws *`
+            # command path, so an exception here would brick the tool.
             logger.warning("Failed to load plugin '%s'", plugin_name, exc_info=True)
             return
-
-        if not hasattr(module, "create_plugin"):
-            logger.warning("Plugin '%s' has no create_plugin() function, skipping", plugin_name)
-            return
-
-        plugin: WinterPlugin = module.create_plugin()
-        registration: PluginRegistration = plugin.register(config)
-        self._apply(plugin, registration)
 
     def _apply(self, plugin: WinterPlugin, registration: PluginRegistration) -> None:
         self.plugins.append(plugin)
