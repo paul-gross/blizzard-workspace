@@ -12,7 +12,7 @@ from winter_cli.modules.workspace.models import StandaloneRepository
 
 WORKSPACE_ROOT = Path("/ws")
 EXT_PATH = WORKSPACE_ROOT / "my-ext"
-SCRIPT_PATH = EXT_PATH / "probe.sh"
+SCRIPT_PATH = EXT_PATH / "doctor.sh"
 
 
 def _build_config(adopt: AdoptExtensions = AdoptExtensions.winter) -> WorkspaceConfig:
@@ -41,7 +41,7 @@ def _build_service(
         executables=fs_executables if fs_executables is not None else {SCRIPT_PATH},
     )
     config_files = {
-        EXT_PATH / EXT_MANIFEST: dict(manifest_data if manifest_data is not None else {"doctor": "probe.sh"}),
+        EXT_PATH / EXT_MANIFEST: dict(manifest_data if manifest_data is not None else {"doctor": "doctor.sh"}),
     }
     config_reader = FakeConfigFileReader(config_files)
     loader = ExtensionManifestLoader(config_file_reader=config_reader)

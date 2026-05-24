@@ -90,7 +90,7 @@ name = "winter-backlog"        # default symlink prefix when no override is set
 prefix = "wsb"                 # optional shorter prefix; takes precedence over `name`
 skills_dir = "skills"          # optional; explicit path overrides default discovery
 agents_dir = "agents"          # optional; explicit path overrides default discovery
-doctor = "scripts/probe.sh"    # optional; executable that emits NDJSON probe events for `winter doctor`
+doctor = "scripts/doctor.sh"   # optional; executable that emits NDJSON probe events for `winter doctor`
 ```
 
 The final symlink prefix is resolved with this precedence: `prefix` on the workspace config entry > `prefix` in `winter-ext.toml` > `name` in `winter-ext.toml` > the standalone repo's directory name.
@@ -198,7 +198,7 @@ Results appear under a `[project]` source group in the table view, between `[cor
 Extensions opt in via a top-level field in `winter-ext.toml`:
 
 ```toml
-doctor = "scripts/probe.sh"
+doctor = "scripts/doctor.sh"
 ```
 
 `doctor` is a **top-level scalar** in `winter-ext.toml`, not part of `[hooks]` — there's at most one probe script per extension. The path is **relative to the extension directory** (same rule as hook scripts) and must point to an executable file.

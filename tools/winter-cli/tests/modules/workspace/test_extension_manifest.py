@@ -52,14 +52,14 @@ def test_load_parses_doctor_script_path() -> None:
     manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
     config_files = {
         manifest_path: {
-            "doctor": "scripts/probe.sh",
+            "doctor": "scripts/doctor.sh",
         }
     }
     loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
     repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
 
     manifest = loader.load(repo, manifest_path=manifest_path)
-    assert manifest.doctor == "scripts/probe.sh"
+    assert manifest.doctor == "scripts/doctor.sh"
 
 
 def test_load_ignores_non_string_doctor_value() -> None:
