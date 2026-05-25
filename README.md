@@ -47,12 +47,12 @@ See [ai/workspace-layout.md](./ai/workspace-layout.md) for the full directory ma
 
 Winter is extensible by design — the framework, the meta workspace it's developed in, and its extensions all ship as separate repos that compose via `winter ws init`:
 
-- **[winter](https://codeberg.org/pgross/winter)** — the framework itself: Python CLI, workspace skills, conventions
-- **[winter-workspace](https://codeberg.org/pgross/winter-workspace)** — the meta workspace where winter is developed; fork this to start your own
-- **[winter-service-tmux](https://codeberg.org/pgross/winter-service-tmux)** — extension: tmux-based service orchestration so agents can launch and monitor application suites
-- **[winter-product](https://codeberg.org/pgross/winter-product)** — extension: planning agents and the `todo` skill
-- **[winter-workflow](https://codeberg.org/pgross/winter-workflow)** — extension: the author's personal agentic workflow, interchangeable with your own
-- **[winter-codeberg](https://codeberg.org/pgross/winter-codeberg)** — extension: AI-native Codeberg issue format and the `/wc-issue` skill
+- **[winter](https://github.com/paul-gross/winter)** — the framework itself: Python CLI, workspace skills, conventions
+- **[winter-workspace](https://github.com/paul-gross/winter-workspace)** — the meta workspace where winter is developed; fork this to start your own
+- **[winter-service-tmux](https://github.com/paul-gross/winter-service-tmux)** — extension: tmux-based service orchestration so agents can launch and monitor application suites
+- **[winter-product](https://github.com/paul-gross/winter-product)** — extension: planning agents and the `todo` skill
+- **[winter-workflow](https://github.com/paul-gross/winter-workflow)** — extension: the author's personal agentic workflow, interchangeable with your own
+- **[winter-codeberg](https://github.com/paul-gross/winter-codeberg)** — extension: AI-native Codeberg issue format and the `/wc-issue` skill
 
 ## 🌿 Forking
 
@@ -98,11 +98,11 @@ The workspace for a complex application should be shareable and versioned. Treat
 
 ### 4. Plug-and-play
 
-There's no canonical agentic harness. Every team and every developer has opinions about how their agents plan, commit, and reason — and those opinions evolve fast. We believe the workspace should be a stable integration surface, and the harness and [workflow](https://codeberg.org/pgross/winter-workflow) should be swappable components chosen for the project at hand.
+There's no canonical agentic harness. Every team and every developer has opinions about how their agents plan, commit, and reason — and those opinions evolve fast. We believe the workspace should be a stable integration surface, and the harness and [workflow](https://github.com/paul-gross/winter-workflow) should be swappable components chosen for the project at hand.
 
 ### 5. Support local ephemeral environments shared between humans and agents
 
-Shared development resources breed contention. Staging servers, single dev databases, and singleton local environments force humans and agents to take turns or step on each other. We believe each in-flight feature should be able to spin up its own runtime, hand it between humans and agents freely, and tear it down without residue. See [`winter-service-tmux`](https://codeberg.org/pgross/winter-service-tmux).
+Shared development resources breed contention. Staging servers, single dev databases, and singleton local environments force humans and agents to take turns or step on each other. We believe each in-flight feature should be able to spin up its own runtime, hand it between humans and agents freely, and tear it down without residue. See [`winter-service-tmux`](https://github.com/paul-gross/winter-service-tmux).
 
 ### 6. Coordinate agentic work across repositories
 

@@ -92,7 +92,7 @@ class RepositoryFactory:
 
         Takes everything after the last `/` or `:` and strips a trailing `.git`. Handles
         the SSH, HTTPS, and Azure DevOps URL shapes:
-            git@codeberg.org:pgross/winter.git → winter
+            git@github.com:paul-gross/winter.git → winter
             git@ssh.dev.azure.com:v3/paul0819/Salacia/Salacia → Salacia
             https://github.com/foo/bar.git → bar
         """
