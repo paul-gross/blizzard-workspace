@@ -19,7 +19,7 @@ from winter_cli.modules.workspace.models import (
 )
 from winter_cli.modules.workspace.repo_repository import IWriteRepoRepository
 from winter_cli.modules.workspace.workspace_repository import IReadWorkspaceRepository
-from winter_cli.plugins.types import EnvironmentDecorator, WorktreeRepoDecorator
+from winter_cli.plugins.types import IEnvironmentDecorator, IWorktreeRepoDecorator
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class EnvStatusService:
         self,
         env: FeatureEnvironment,
         project_repos: list[ProjectRepository],
-        env_decorators: list[EnvironmentDecorator] | None = None,
+        env_decorators: list[IEnvironmentDecorator] | None = None,
     ) -> FeatureEnvironmentStatus:
         """Read the env's git-tracked status and let visual plugins decorate it.
 
@@ -66,7 +66,7 @@ class EnvStatusService:
     def get_worktree_repo_statuses(
         self,
         env_worktrees: FeatureEnvironmentWorktrees,
-        worktree_repo_decorators: list[WorktreeRepoDecorator] | None = None,
+        worktree_repo_decorators: list[IWorktreeRepoDecorator] | None = None,
         on_repo_error: Callable[[FeatureWorktree, RepoError], None] | None = None,
     ) -> list[WorktreeRepoStatus]:
         """Read one row per worktree, optionally tolerating per-worktree failures.

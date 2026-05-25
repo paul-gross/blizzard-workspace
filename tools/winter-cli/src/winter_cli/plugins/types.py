@@ -16,7 +16,7 @@ from winter_cli.modules.workspace.models import (
 
 
 @runtime_checkable
-class WorktreeRepoDecorator(Protocol):
+class IWorktreeRepoDecorator(Protocol):
     """Mutates a worktree-repo status row with extension-contributed badges.
 
     Called once per repo per refresh; populate `repo_status.extensions[<key>] = <value>`
@@ -27,7 +27,7 @@ class WorktreeRepoDecorator(Protocol):
 
 
 @runtime_checkable
-class EnvironmentDecorator(Protocol):
+class IEnvironmentDecorator(Protocol):
     """Mutates a feature-environment status with extension-contributed badges.
 
     Called once per environment per refresh; populate
@@ -98,15 +98,15 @@ class TuiAction:
 @dataclasses.dataclass
 class PluginRegistration:
     commands: list[click.Command] = dataclasses.field(default_factory=list)
-    worktree_repo_decorators: list[WorktreeRepoDecorator] = dataclasses.field(default_factory=list)
-    environment_decorators: list[EnvironmentDecorator] = dataclasses.field(default_factory=list)
+    worktree_repo_decorators: list[IWorktreeRepoDecorator] = dataclasses.field(default_factory=list)
+    environment_decorators: list[IEnvironmentDecorator] = dataclasses.field(default_factory=list)
     tui_screens: list[Any] = dataclasses.field(default_factory=list)
     tui_actions: list[TuiAction] = dataclasses.field(default_factory=list)
     metadata: dict = dataclasses.field(default_factory=dict)
 
 
 @runtime_checkable
-class WinterPlugin(Protocol):
+class IWinterPlugin(Protocol):
     name: str
 
     def register(self, config: object) -> PluginRegistration: ...

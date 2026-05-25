@@ -11,11 +11,11 @@ from winter_cli.modules.workspace.models import StandaloneRepository, Workspace
 from winter_cli.plugins.plugin_loader import IPluginLoader
 from winter_cli.plugins.types import (
     ActionScope,
-    EnvironmentDecorator,
+    IEnvironmentDecorator,
+    IWinterPlugin,
+    IWorktreeRepoDecorator,
     PluginRegistration,
     TuiAction,
-    WinterPlugin,
-    WorktreeRepoDecorator,
 )
 
 USER_PLUGINS_DIR = Path.home() / ".config" / "winter" / "plugins"
@@ -44,10 +44,10 @@ class PluginRegistry:
         self._fs = fs
         self._config_file_reader = config_file_reader
         self._plugin_loader = plugin_loader
-        self.plugins: list[WinterPlugin] = []
+        self.plugins: list[IWinterPlugin] = []
         self.commands: list[click.Command] = []
-        self.worktree_repo_decorators: list[WorktreeRepoDecorator] = []
-        self.environment_decorators: list[EnvironmentDecorator] = []
+        self.worktree_repo_decorators: list[IWorktreeRepoDecorator] = []
+        self.environment_decorators: list[IEnvironmentDecorator] = []
         self.screens: list = []
         self.tui_actions: list[TuiAction] = []
 
@@ -114,7 +114,7 @@ class PluginRegistry:
             if not hasattr(module, "create_plugin"):
                 logger.warning("Plugin '%s' has no create_plugin() function, skipping", plugin_name)
                 return
-            plugin: WinterPlugin = module.create_plugin()
+            plugin: IWinterPlugin = module.create_plugin()
             registration: PluginRegistration = plugin.register(config)
             self._apply(plugin, registration)
         except Exception:
@@ -124,7 +124,7 @@ class PluginRegistry:
             logger.warning("Failed to load plugin '%s'", plugin_name, exc_info=True)
             return
 
-    def _apply(self, plugin: WinterPlugin, registration: PluginRegistration) -> None:
+    def _apply(self, plugin: IWinterPlugin, registration: PluginRegistration) -> None:
         self.plugins.append(plugin)
         self.commands.extend(registration.commands)
         self.worktree_repo_decorators.extend(registration.worktree_repo_decorators)

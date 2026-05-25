@@ -81,7 +81,7 @@ class FeatureEnvironmentStatus:
     """Runtime status of a feature environment — feature branch plus extension-contributed badges.
 
     `extensions` is keyed by extension prefix (e.g. `wst` for winter-service-tmux); each value
-    is a short badge string an `EnvironmentDecorator` plugin contributed for this env. Renderers
+    is a short badge string an `IEnvironmentDecorator` plugin contributed for this env. Renderers
     append the values to the env header so each plugin can advertise whatever it wants.
     """
 

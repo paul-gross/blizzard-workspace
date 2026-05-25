@@ -19,7 +19,7 @@ class ReadWorkspaceRepository:
     Internal infrastructure — discovers feature environments by scanning the workspace root
     for Greek-letter directories and derives the connected feature branch from git's upstream
     tracking on the first non-pinned repo. Per-environment status badges are populated later
-    by visual plugins (see `EnvironmentDecorator`); this class leaves `extensions={}` and
+    by visual plugins (see `IEnvironmentDecorator`); this class leaves `extensions={}` and
     has no awareness of any service-orchestration extension.
     """
 
