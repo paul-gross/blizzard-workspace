@@ -42,9 +42,7 @@ def test_load_builds_spec_loads_module_and_registers_in_sys_modules(
     assert result is fake_module
 
 
-def test_load_raises_import_error_when_spec_is_none(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_load_raises_import_error_when_spec_is_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     entry = tmp_path / "bad_plugin" / "__init__.py"
 
     fake_importlib = MagicMock()
@@ -60,9 +58,7 @@ def test_load_raises_import_error_when_spec_is_none(
         ImportlibPluginLoader.load("bad_plugin", entry)
 
 
-def test_load_raises_import_error_when_loader_is_none(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_load_raises_import_error_when_loader_is_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     entry = tmp_path / "no_loader" / "__init__.py"
 
     fake_spec = MagicMock()

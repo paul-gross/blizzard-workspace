@@ -65,7 +65,9 @@ def test_access_x_ok_delegates_to_os_access(monkeypatch: pytest.MonkeyPatch, tmp
 
 def test_mkdir_delegates_to_path_mkdir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     calls: list[tuple] = []
-    monkeypatch.setattr(Path, "mkdir", lambda self, parents=False, exist_ok=False: calls.append((self, parents, exist_ok)))
+    monkeypatch.setattr(
+        Path, "mkdir", lambda self, parents=False, exist_ok=False: calls.append((self, parents, exist_ok))
+    )
 
     LocalFilesystem.mkdir(tmp_path / "newdir", parents=True, exist_ok=True)
 
