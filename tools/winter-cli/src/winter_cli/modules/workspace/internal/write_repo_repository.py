@@ -40,8 +40,10 @@ class WriteRepoRepository(ReadRepoRepository):
         # high-level remotes API reads from the worktree's git-dir, which doesn't
         # have remote config; the shared remotes live in the common-dir.
         r = git.Repo(str(worktree.path))
-        self._git_ops.run_remote(
-            lambda: r.git.fetch("origin"),
+        self._git_ops.run_remote_git(
+            r,
+            "fetch",
+            "origin",
             cwd=worktree.path,
             message=f"fetch failed for {worktree.repository.name}",
         )
@@ -104,8 +106,10 @@ class WriteRepoRepository(ReadRepoRepository):
     def sync_ff_only(self, repo: ProjectRepository) -> None:
         main_branch = repo.main_branch
         r = git.Repo(str(repo.main_path))
-        self._git_ops.run_remote(
-            lambda: r.git.fetch("origin"),
+        self._git_ops.run_remote_git(
+            r,
+            "fetch",
+            "origin",
             cwd=repo.main_path,
             message=f"sync_ff_only failed for {repo.name}",
         )
@@ -216,14 +220,20 @@ class WriteRepoRepository(ReadRepoRepository):
         commit_count = status.ahead
         message = f"push failed for {worktree.repository.name}"
         if feature_branch:
-            self._git_ops.run_remote(
-                lambda: r.git.push("-u", "origin", f"HEAD:refs/heads/{feature_branch}"),
+            self._git_ops.run_remote_git(
+                r,
+                "push",
+                "-u",
+                "origin",
+                f"HEAD:refs/heads/{feature_branch}",
                 cwd=worktree.path,
                 message=message,
             )
         else:
-            self._git_ops.run_remote(
-                lambda: r.git.push("origin"),
+            self._git_ops.run_remote_git(
+                r,
+                "push",
+                "origin",
                 cwd=worktree.path,
                 message=message,
             )
@@ -231,8 +241,10 @@ class WriteRepoRepository(ReadRepoRepository):
 
     def fetch_standalone(self, repo: StandaloneRepository) -> None:
         r = git.Repo(str(repo.path))
-        self._git_ops.run_remote(
-            lambda: r.git.fetch("origin"),
+        self._git_ops.run_remote_git(
+            r,
+            "fetch",
+            "origin",
             cwd=repo.path,
             message=f"fetch failed for {repo.name}",
         )
@@ -257,8 +269,10 @@ class WriteRepoRepository(ReadRepoRepository):
                 cwd=str(repo.path),
             )
         commit_count = self._tracking_ahead(repo, r)
-        self._git_ops.run_remote(
-            lambda: r.git.push("origin"),
+        self._git_ops.run_remote_git(
+            r,
+            "push",
+            "origin",
             cwd=repo.path,
             message=f"push failed for {repo.name}",
         )

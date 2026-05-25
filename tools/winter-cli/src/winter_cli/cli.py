@@ -13,6 +13,7 @@ from winter_cli.cli_context import CliContext
 from winter_cli.modules.doctor.command import doctor_command
 from winter_cli.modules.tui.command import dashboard
 from winter_cli.modules.workspace.command import repo_group, ws_group
+from winter_cli.modules.workspace.internal.git_ops_service import ensure_ssh_keepalives
 from winter_cli.modules.workspace.models import RepoError
 
 
@@ -41,6 +42,14 @@ def cli() -> None:
     exiting non-zero — this is the CLI boundary the harness's
     error-handling rules call out.
     """
+    # Pave SSH-side keepalives into GIT_SSH_COMMAND so a wedged TCP socket
+    # surfaces as an SSH error in ~90s instead of relying solely on the
+    # per-call Python-side timeout. Idempotent and respects user overrides.
+    # NB: runs before Click parses argv, so even `winter --help` and a
+    # future `winter doctor` probe will see the paved default. If a probe
+    # ever wants to report on the raw user-set GIT_SSH_COMMAND, it must
+    # snapshot the env before this call rather than reading at probe time.
+    ensure_ssh_keepalives()
     try:
         _cli_group.main(standalone_mode=False)
     except click.exceptions.Abort:
