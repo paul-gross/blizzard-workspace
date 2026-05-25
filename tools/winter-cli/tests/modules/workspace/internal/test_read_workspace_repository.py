@@ -22,6 +22,9 @@ def _fake_git_repo(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     git_mock.GitCommandError = git.GitCommandError
     git_mock.InvalidGitRepositoryError = git.InvalidGitRepositoryError
     git_mock.NoSuchPathError = git.NoSuchPathError
+    # The implementation uses `with git.Repo(...) as r:`, so __enter__ must return
+    # the same mock that tests assert against.
+    git_mock.Repo.return_value.__enter__.return_value = git_mock.Repo.return_value
     monkeypatch.setattr(read_workspace_repository, "git", git_mock)
     return git_mock
 

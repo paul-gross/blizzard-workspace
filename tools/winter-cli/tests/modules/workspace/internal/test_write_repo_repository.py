@@ -29,6 +29,9 @@ def _fake_git_repo(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     git_mock.GitCommandError = git.GitCommandError
     git_mock.InvalidGitRepositoryError = git.InvalidGitRepositoryError
     git_mock.NoSuchPathError = git.NoSuchPathError
+    # The implementation uses `with git.Repo(...) as r:`, so __enter__ must return
+    # the same mock that tests assert against.
+    git_mock.Repo.return_value.__enter__.return_value = git_mock.Repo.return_value
     monkeypatch.setattr(write_repo_repository, "git", git_mock)
     monkeypatch.setattr(read_repo_repository, "git", git_mock)
     return git_mock
@@ -76,9 +79,7 @@ def test_fetch_raises_structured_repo_error_on_missing_remote(
     assert err.stderr
 
 
-def test_count_commits_not_in_raises_for_bogus_ref(
-    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
-) -> None:
+def test_count_commits_not_in_raises_for_bogus_ref(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.git.rev_list.side_effect = git.GitCommandError(
         ("git", "rev-list", "--count"), 128, stderr=b"unknown revision"
@@ -91,9 +92,7 @@ def test_count_commits_not_in_raises_for_bogus_ref(
     assert ei.value.subcommand == "rev-list"
 
 
-def test_hard_reset_raises_for_bogus_ref(
-    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
-) -> None:
+def test_hard_reset_raises_for_bogus_ref(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.git.reset.side_effect = git.GitCommandError(
         ("git", "reset", "--hard"), 128, stderr=b"ambiguous argument"
@@ -106,9 +105,7 @@ def test_hard_reset_raises_for_bogus_ref(
     assert ei.value.subcommand == "reset"
 
 
-def test_push_standalone_raises_when_no_upstream(
-    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
-) -> None:
+def test_push_standalone_raises_when_no_upstream(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.active_branch.tracking_branch.return_value = None
     standalone = StandaloneRepository(name="stand", path=_STAND_PATH)
@@ -120,9 +117,7 @@ def test_push_standalone_raises_when_no_upstream(
     assert ei.value.cwd is not None
 
 
-def test_sync_ff_only_raises_on_failure(
-    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
-) -> None:
+def test_sync_ff_only_raises_on_failure(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.git.fetch.side_effect = git.GitCommandError(
         ("git", "fetch", "origin"), 128, stderr=b"no such remote"

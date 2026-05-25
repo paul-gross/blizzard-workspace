@@ -95,25 +95,25 @@ class ReadWorkspaceRepository:
             worktree_path = env.path / repo.name
             if not (worktree_path / ".git").exists():
                 return None
-            try:
-                r = git.Repo(str(worktree_path))
-                head = r.active_branch.name
-            except (TypeError, ValueError):
-                return None
-            try:
-                remote = r.git.config("--get", f"branch.{head}.remote").strip()
-                merge = r.git.config("--get", f"branch.{head}.merge").strip()
-            except git.GitCommandError as exc:
-                if exc.status == 1:
-                    return None  # branch.<head>.{remote,merge} not configured
-                raise self._error_factory.from_git(
-                    exc,
-                    message=f"reading feature-branch config failed for {repo.name}",
-                    cwd=worktree_path,
-                ) from exc
-            if remote != "origin" or not merge.startswith("refs/heads/"):
-                return None
-            return merge[len("refs/heads/") :]
+            with git.Repo(str(worktree_path)) as r:
+                try:
+                    head = r.active_branch.name
+                except (TypeError, ValueError):
+                    return None
+                try:
+                    remote = r.git.config("--get", f"branch.{head}.remote").strip()
+                    merge = r.git.config("--get", f"branch.{head}.merge").strip()
+                except git.GitCommandError as exc:
+                    if exc.status == 1:
+                        return None  # branch.<head>.{remote,merge} not configured
+                    raise self._error_factory.from_git(
+                        exc,
+                        message=f"reading feature-branch config failed for {repo.name}",
+                        cwd=worktree_path,
+                    ) from exc
+                if remote != "origin" or not merge.startswith("refs/heads/"):
+                    return None
+                return merge[len("refs/heads/") :]
         return None
 
 

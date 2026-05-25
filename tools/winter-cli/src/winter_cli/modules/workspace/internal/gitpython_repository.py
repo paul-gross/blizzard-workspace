@@ -39,11 +39,11 @@ class GitPythonRepository:
         base_branch: str | None = None,
     ) -> None:
         try:
-            r = git.Repo(str(source))
-            if base_branch is None:
-                r.git.worktree("add", str(worktree_path), branch)
-            else:
-                r.git.worktree("add", str(worktree_path), "-b", branch, base_branch)
+            with git.Repo(str(source)) as r:
+                if base_branch is None:
+                    r.git.worktree("add", str(worktree_path), branch)
+                else:
+                    r.git.worktree("add", str(worktree_path), "-b", branch, base_branch)
         except git.GitCommandError as exc:
             raise self._error_factory.from_git(
                 exc,
@@ -53,12 +53,12 @@ class GitPythonRepository:
 
     def remove_worktree(self, source: Path, worktree_path: Path, force: bool) -> None:
         try:
-            r = git.Repo(str(source))
-            args = ["remove"]
-            if force:
-                args.append("--force")
-            args.append(str(worktree_path))
-            r.git.worktree(*args)
+            with git.Repo(str(source)) as r:
+                args = ["remove"]
+                if force:
+                    args.append("--force")
+                args.append(str(worktree_path))
+                r.git.worktree(*args)
         except git.GitCommandError as exc:
             raise self._error_factory.from_git(
                 exc,
@@ -68,8 +68,8 @@ class GitPythonRepository:
 
     def list_worktrees(self, source: Path) -> list[Path]:
         try:
-            r = git.Repo(str(source))
-            output = r.git.worktree("list", "--porcelain")
+            with git.Repo(str(source)) as r:
+                output = r.git.worktree("list", "--porcelain")
         except git.GitCommandError as exc:
             raise self._error_factory.from_git(
                 exc,
@@ -85,21 +85,21 @@ class GitPythonRepository:
     # ── Branches + tracking ──────────────────────────────────────────────
 
     def get_local_branches(self, path: Path) -> list[str]:
-        r = git.Repo(str(path))
-        return [h.name for h in r.heads]
+        with git.Repo(str(path)) as r:
+            return [h.name for h in r.heads]
 
     def get_tracking_branch(self, path: Path) -> str | None:
-        r = git.Repo(str(path))
-        try:
-            tb = r.active_branch.tracking_branch()
-        except (TypeError, ValueError):
-            return None
-        return tb.name if tb is not None else None
+        with git.Repo(str(path)) as r:
+            try:
+                tb = r.active_branch.tracking_branch()
+            except (TypeError, ValueError):
+                return None
+            return tb.name if tb is not None else None
 
     def set_upstream_to(self, path: Path, ref: str) -> None:
         try:
-            r = git.Repo(str(path))
-            r.git.branch("--set-upstream-to", ref)
+            with git.Repo(str(path)) as r:
+                r.git.branch("--set-upstream-to", ref)
         except git.GitCommandError as exc:
             raise self._error_factory.from_git(
                 exc,
@@ -108,21 +108,18 @@ class GitPythonRepository:
             ) from exc
 
     def set_push_default_upstream(self, path: Path) -> None:
-        r = git.Repo(str(path))
-        with r.config_writer() as cw:
+        with git.Repo(str(path)) as r, r.config_writer() as cw:
             cw.set_value("push", "default", "upstream")
 
     # ── Repository-scope config ──────────────────────────────────────────
 
     def set_user_identity(self, path: Path, name: str, email: str) -> None:
-        r = git.Repo(str(path))
-        with r.config_writer(config_level="repository") as cw:
+        with git.Repo(str(path)) as r, r.config_writer(config_level="repository") as cw:
             cw.set_value("user", "name", name)
             cw.set_value("user", "email", email)
 
     def get_push_default(self, path: Path) -> str | None:
-        r = git.Repo(str(path))
-        with r.config_writer() as cw:
+        with git.Repo(str(path)) as r, r.config_writer() as cw:
             value = cw.get_value("push", "default", "")
         return str(value) if value != "" else None
 
@@ -135,8 +132,8 @@ class GitPythonRepository:
         callers (destroy, prune) treat ambiguity as "do not touch".
         """
         try:
-            r = git.Repo(str(path))
-            output = r.git.status("--porcelain")
+            with git.Repo(str(path)) as r:
+                output = r.git.status("--porcelain")
         except (git.InvalidGitRepositoryError, git.NoSuchPathError, git.GitCommandError):
             return False
         return not output.strip()

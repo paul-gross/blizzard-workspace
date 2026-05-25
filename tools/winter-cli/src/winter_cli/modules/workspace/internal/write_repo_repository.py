@@ -39,14 +39,14 @@ class WriteRepoRepository(ReadRepoRepository):
         # Shell out via r.git rather than r.remotes.origin.fetch() — gitpython's
         # high-level remotes API reads from the worktree's git-dir, which doesn't
         # have remote config; the shared remotes live in the common-dir.
-        r = git.Repo(str(worktree.path))
-        self._git_ops.run_remote_git(
-            r,
-            "fetch",
-            "origin",
-            cwd=worktree.path,
-            message=f"fetch failed for {worktree.repository.name}",
-        )
+        with git.Repo(str(worktree.path)) as r:
+            self._git_ops.run_remote_git(
+                r,
+                "fetch",
+                "origin",
+                cwd=worktree.path,
+                message=f"fetch failed for {worktree.repository.name}",
+            )
 
     def integrate(
         self,
@@ -55,13 +55,14 @@ class WriteRepoRepository(ReadRepoRepository):
         mode: PullMode,
         autostash: bool,
     ) -> RepoSyncOutcome:
-        return self._integrate(
-            git.Repo(str(worktree.path)),
-            worktree.repository.name,
-            target_ref,
-            mode,
-            autostash,
-        )
+        with git.Repo(str(worktree.path)) as r:
+            return self._integrate(
+                r,
+                worktree.repository.name,
+                target_ref,
+                mode,
+                autostash,
+            )
 
     def merge_ref(
         self,
@@ -79,13 +80,14 @@ class WriteRepoRepository(ReadRepoRepository):
         tracked upstream, so it can't be missing; merge takes an arbitrary
         ref, so a typo or per-repo absence is a real case.
         """
-        return self._merge(
-            git.Repo(str(worktree.path)),
-            worktree.repository.name,
-            source_ref,
-            mode,
-            autostash,
-        )
+        with git.Repo(str(worktree.path)) as r:
+            return self._merge(
+                r,
+                worktree.repository.name,
+                source_ref,
+                mode,
+                autostash,
+            )
 
     def merge_ref_standalone(
         self,
@@ -95,32 +97,33 @@ class WriteRepoRepository(ReadRepoRepository):
         autostash: bool,
     ) -> RepoMergeOutcome:
         """Standalone counterpart to `merge_ref` — same modes and outcome shape."""
-        return self._merge(
-            git.Repo(str(repo.path)),
-            repo.name,
-            source_ref,
-            mode,
-            autostash,
-        )
+        with git.Repo(str(repo.path)) as r:
+            return self._merge(
+                r,
+                repo.name,
+                source_ref,
+                mode,
+                autostash,
+            )
 
     def sync_ff_only(self, repo: ProjectRepository) -> None:
         main_branch = repo.main_branch
-        r = git.Repo(str(repo.main_path))
-        self._git_ops.run_remote_git(
-            r,
-            "fetch",
-            "origin",
-            cwd=repo.main_path,
-            message=f"sync_ff_only failed for {repo.name}",
-        )
-        try:
-            r.git.merge("--ff-only", f"origin/{main_branch}")
-        except git.GitCommandError as exc:
-            raise self._error_factory.from_git(
-                exc,
-                message=f"sync_ff_only failed for {repo.name}",
+        with git.Repo(str(repo.main_path)) as r:
+            self._git_ops.run_remote_git(
+                r,
+                "fetch",
+                "origin",
                 cwd=repo.main_path,
-            ) from exc
+                message=f"sync_ff_only failed for {repo.name}",
+            )
+            try:
+                r.git.merge("--ff-only", f"origin/{main_branch}")
+            except git.GitCommandError as exc:
+                raise self._error_factory.from_git(
+                    exc,
+                    message=f"sync_ff_only failed for {repo.name}",
+                    cwd=repo.main_path,
+                ) from exc
 
     def set_upstream(self, worktree: FeatureWorktree, remote_branch: str) -> None:
         # Write branch.<head>.{remote,merge} directly instead of using
@@ -128,13 +131,13 @@ class WriteRepoRepository(ReadRepoRepository):
         # remote ref it can't see locally. Setting it directly lets connect
         # succeed on a brand-new feature branch with no remote ref yet — the
         # first push then creates it on origin.
-        r = git.Repo(str(worktree.path))
-        remote, _, branch = remote_branch.partition("/")
-        if not branch:
-            raise RepoError(f"set_upstream: expected '<remote>/<branch>', got {remote_branch!r}")
-        head = r.active_branch.name
-        r.git.config(f"branch.{head}.remote", remote)
-        r.git.config(f"branch.{head}.merge", f"refs/heads/{branch}")
+        with git.Repo(str(worktree.path)) as r:
+            remote, _, branch = remote_branch.partition("/")
+            if not branch:
+                raise RepoError(f"set_upstream: expected '<remote>/<branch>', got {remote_branch!r}")
+            head = r.active_branch.name
+            r.git.config(f"branch.{head}.remote", remote)
+            r.git.config(f"branch.{head}.merge", f"refs/heads/{branch}")
 
     def has_local_ref(self, worktree: FeatureWorktree, ref: str) -> bool:
         """Whether `ref` resolves in the worktree's local object store. No network.
@@ -143,41 +146,41 @@ class WriteRepoRepository(ReadRepoRepository):
         exits non-zero when the ref doesn't resolve, which is the *answer*
         to this method's question, not an error.
         """
-        r = git.Repo(str(worktree.path))
-        try:
-            r.git.rev_parse("--verify", "--quiet", ref)
-            return True
-        except git.GitCommandError:
-            return False
+        with git.Repo(str(worktree.path)) as r:
+            try:
+                r.git.rev_parse("--verify", "--quiet", ref)
+                return True
+            except git.GitCommandError:
+                return False
 
     def is_worktree_dirty(self, worktree: FeatureWorktree) -> bool:
         """Staged or unstaged changes present? Untracked files don't count —
         `git reset --hard` leaves untracked files in place."""
-        r = git.Repo(str(worktree.path))
-        return r.is_dirty(working_tree=True, index=True, untracked_files=False)
+        with git.Repo(str(worktree.path)) as r:
+            return r.is_dirty(working_tree=True, index=True, untracked_files=False)
 
     def count_commits_not_in(self, worktree: FeatureWorktree, ref: str) -> int:
         """Commits reachable from HEAD but not from `ref`. No network."""
-        r = git.Repo(str(worktree.path))
-        try:
-            return int(r.git.rev_list("--count", "HEAD", f"^{ref}"))
-        except git.GitCommandError as exc:
-            raise self._error_factory.from_git(
-                exc,
-                message=f"count_commits_not_in failed for {worktree.repository.name}",
-                cwd=worktree.path,
-            ) from exc
+        with git.Repo(str(worktree.path)) as r:
+            try:
+                return int(r.git.rev_list("--count", "HEAD", f"^{ref}"))
+            except git.GitCommandError as exc:
+                raise self._error_factory.from_git(
+                    exc,
+                    message=f"count_commits_not_in failed for {worktree.repository.name}",
+                    cwd=worktree.path,
+                ) from exc
 
     def hard_reset(self, worktree: FeatureWorktree, target_ref: str) -> None:
-        r = git.Repo(str(worktree.path))
-        try:
-            r.git.reset("--hard", target_ref)
-        except git.GitCommandError as exc:
-            raise self._error_factory.from_git(
-                exc,
-                message=f"reset failed for {worktree.repository.name}",
-                cwd=worktree.path,
-            ) from exc
+        with git.Repo(str(worktree.path)) as r:
+            try:
+                r.git.reset("--hard", target_ref)
+            except git.GitCommandError as exc:
+                raise self._error_factory.from_git(
+                    exc,
+                    message=f"reset failed for {worktree.repository.name}",
+                    cwd=worktree.path,
+                ) from exc
 
     def unset_upstream(self, worktree: FeatureWorktree) -> None:
         """Remove upstream tracking; no-op when already unset.
@@ -188,66 +191,68 @@ class WriteRepoRepository(ReadRepoRepository):
         upstream isn't configured we return without touching anything; if
         the actual `--unset-upstream` call fails, that raises.
         """
-        r = git.Repo(str(worktree.path))
-        head = r.active_branch.name
-        try:
-            r.git.config("--get", f"branch.{head}.remote")
-        except git.GitCommandError as exc:
-            if exc.status == 1:
-                return  # already unset
-            raise self._error_factory.from_git(
-                exc,
-                message=f"probing upstream config failed for {worktree.repository.name}",
-                cwd=worktree.path,
-            ) from exc
-        try:
-            r.git.branch("--unset-upstream")
-        except git.GitCommandError as exc:
-            raise self._error_factory.from_git(
-                exc,
-                message=f"unset_upstream failed for {worktree.repository.name}",
-                cwd=worktree.path,
-            ) from exc
+        with git.Repo(str(worktree.path)) as r:
+            head = r.active_branch.name
+            try:
+                r.git.config("--get", f"branch.{head}.remote")
+            except git.GitCommandError as exc:
+                if exc.status == 1:
+                    return  # already unset
+                raise self._error_factory.from_git(
+                    exc,
+                    message=f"probing upstream config failed for {worktree.repository.name}",
+                    cwd=worktree.path,
+                ) from exc
+            try:
+                r.git.branch("--unset-upstream")
+            except git.GitCommandError as exc:
+                raise self._error_factory.from_git(
+                    exc,
+                    message=f"unset_upstream failed for {worktree.repository.name}",
+                    cwd=worktree.path,
+                ) from exc
 
     def set_push_default(self, worktree: FeatureWorktree) -> None:
-        r = git.Repo(str(worktree.path))
-        with r.config_writer() as cw:
+        with git.Repo(str(worktree.path)) as r, r.config_writer() as cw:
             cw.set_value("push", "default", "upstream")
 
     def push(self, worktree: FeatureWorktree, feature_branch: str | None = None) -> int:
-        r = git.Repo(str(worktree.path))
+        # `get_worktree_status` opens its own Repo internally; resolve the
+        # ahead count before opening ours so the two Repo lifetimes don't
+        # overlap unnecessarily.
         status = self.get_worktree_status(worktree)
         commit_count = status.ahead
         message = f"push failed for {worktree.repository.name}"
-        if feature_branch:
-            self._git_ops.run_remote_git(
-                r,
-                "push",
-                "-u",
-                "origin",
-                f"HEAD:refs/heads/{feature_branch}",
-                cwd=worktree.path,
-                message=message,
-            )
-        else:
-            self._git_ops.run_remote_git(
-                r,
-                "push",
-                "origin",
-                cwd=worktree.path,
-                message=message,
-            )
+        with git.Repo(str(worktree.path)) as r:
+            if feature_branch:
+                self._git_ops.run_remote_git(
+                    r,
+                    "push",
+                    "-u",
+                    "origin",
+                    f"HEAD:refs/heads/{feature_branch}",
+                    cwd=worktree.path,
+                    message=message,
+                )
+            else:
+                self._git_ops.run_remote_git(
+                    r,
+                    "push",
+                    "origin",
+                    cwd=worktree.path,
+                    message=message,
+                )
         return commit_count
 
     def fetch_standalone(self, repo: StandaloneRepository) -> None:
-        r = git.Repo(str(repo.path))
-        self._git_ops.run_remote_git(
-            r,
-            "fetch",
-            "origin",
-            cwd=repo.path,
-            message=f"fetch failed for {repo.name}",
-        )
+        with git.Repo(str(repo.path)) as r:
+            self._git_ops.run_remote_git(
+                r,
+                "fetch",
+                "origin",
+                cwd=repo.path,
+                message=f"fetch failed for {repo.name}",
+            )
 
     def integrate_standalone(
         self,
@@ -255,34 +260,36 @@ class WriteRepoRepository(ReadRepoRepository):
         mode: PullMode,
         autostash: bool,
     ) -> RepoSyncOutcome:
-        r = git.Repo(str(repo.path))
-        tb = self._tracking_branch_name(r)
-        if tb is None:
-            return RepoSyncOutcome(repo_name=repo.name, sync_result=SyncResult.no_upstream)
-        return self._integrate(r, repo.name, tb, mode, autostash)
+        with git.Repo(str(repo.path)) as r:
+            tb = self._tracking_branch_name(r)
+            if tb is None:
+                return RepoSyncOutcome(repo_name=repo.name, sync_result=SyncResult.no_upstream)
+            return self._integrate(r, repo.name, tb, mode, autostash)
 
     def push_standalone(self, repo: StandaloneRepository) -> int:
-        r = git.Repo(str(repo.path))
-        if self._tracking_branch_name(r) is None:
-            raise RepoError(
-                f"{repo.name} has no upstream — set one with `git branch --set-upstream-to`",
-                cwd=str(repo.path),
+        with git.Repo(str(repo.path)) as r:
+            if self._tracking_branch_name(r) is None:
+                raise RepoError(
+                    f"{repo.name} has no upstream — set one with `git branch --set-upstream-to`",
+                    cwd=str(repo.path),
+                )
+            commit_count = self._tracking_ahead(repo, r)
+            self._git_ops.run_remote_git(
+                r,
+                "push",
+                "origin",
+                cwd=repo.path,
+                message=f"push failed for {repo.name}",
             )
-        commit_count = self._tracking_ahead(repo, r)
-        self._git_ops.run_remote_git(
-            r,
-            "push",
-            "origin",
-            cwd=repo.path,
-            message=f"push failed for {repo.name}",
-        )
-        return commit_count
+            return commit_count
 
     def get_standalone_tracking_ahead(self, repo: StandaloneRepository) -> int:
-        return self._tracking_ahead(repo, git.Repo(str(repo.path)))
+        with git.Repo(str(repo.path)) as r:
+            return self._tracking_ahead(repo, r)
 
     def get_standalone_upstream(self, repo: StandaloneRepository) -> str | None:
-        return self._tracking_branch_name(git.Repo(str(repo.path)))
+        with git.Repo(str(repo.path)) as r:
+            return self._tracking_branch_name(r)
 
     def _integrate(
         self,

@@ -30,6 +30,9 @@ def _fake_git_repo(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     git_mock.GitCommandError = git.GitCommandError
     git_mock.InvalidGitRepositoryError = git.InvalidGitRepositoryError
     git_mock.NoSuchPathError = git.NoSuchPathError
+    # The implementation uses `with git.Repo(...) as r:`, so __enter__ must return
+    # the same mock that tests assert against.
+    git_mock.Repo.return_value.__enter__.return_value = git_mock.Repo.return_value
     monkeypatch.setattr(read_repo_repository, "git", git_mock)
     return git_mock
 
@@ -69,9 +72,7 @@ def test_get_project_status_reports_branch_and_clean_tree(
     assert status.behind == 0
 
 
-def test_get_project_status_lists_dirty_files(
-    monkeypatch: pytest.MonkeyPatch, repo: ReadRepoRepository
-) -> None:
+def test_get_project_status_lists_dirty_files(monkeypatch: pytest.MonkeyPatch, repo: ReadRepoRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     monkeypatch.setattr(Path, "exists", lambda self: True)
     r = git_mock.Repo.return_value
@@ -173,4 +174,3 @@ def test_get_workspace_constructs_domain_object(repo: ReadRepoRepository) -> Non
     assert workspace.root_path == _ROOT
     assert workspace.session_prefix == "test"
     assert workspace.main_branch == "main"
-

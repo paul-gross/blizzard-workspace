@@ -23,6 +23,9 @@ def _fake_git_repo(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     git_mock.GitCommandError = git.GitCommandError
     git_mock.InvalidGitRepositoryError = git.InvalidGitRepositoryError
     git_mock.NoSuchPathError = git.NoSuchPathError
+    # The implementation uses `with git.Repo(...) as r:`, so __enter__ must return
+    # the same mock that tests assert against.
+    git_mock.Repo.return_value.__enter__.return_value = git_mock.Repo.return_value
     monkeypatch.setattr(gitpython_repository, "git", git_mock)
     return git_mock
 
@@ -137,9 +140,7 @@ def test_remove_worktree_raises_repo_error_on_git_command_error(
 # ── list_worktrees ─────────────────────────────────────────────────────────
 
 
-def test_list_worktrees_parses_porcelain_output(
-    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
-) -> None:
+def test_list_worktrees_parses_porcelain_output(monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.git.worktree.return_value = (
         "worktree /repo/main\nHEAD abc123\nbranch refs/heads/main\n\n"
@@ -169,9 +170,7 @@ def test_list_worktrees_raises_repo_error_on_git_command_error(
 # ── get_local_branches ─────────────────────────────────────────────────────
 
 
-def test_get_local_branches_returns_head_names(
-    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
-) -> None:
+def test_get_local_branches_returns_head_names(monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     head_a = MagicMock()
     head_a.name = "main"
@@ -263,9 +262,7 @@ def test_set_upstream_to_raises_repo_error_on_git_command_error(
 # ── set_push_default_upstream ──────────────────────────────────────────────
 
 
-def test_set_push_default_upstream_writes_config(
-    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
-) -> None:
+def test_set_push_default_upstream_writes_config(monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     cw = MagicMock()
     git_mock.Repo.return_value.config_writer.return_value.__enter__ = MagicMock(return_value=cw)
@@ -279,9 +276,7 @@ def test_set_push_default_upstream_writes_config(
 # ── set_user_identity ──────────────────────────────────────────────────────
 
 
-def test_set_user_identity_writes_name_and_email(
-    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
-) -> None:
+def test_set_user_identity_writes_name_and_email(monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     cw = MagicMock()
     git_mock.Repo.return_value.config_writer.return_value.__enter__ = MagicMock(return_value=cw)
@@ -297,9 +292,7 @@ def test_set_user_identity_writes_name_and_email(
 # ── get_push_default ───────────────────────────────────────────────────────
 
 
-def test_get_push_default_returns_value_when_set(
-    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
-) -> None:
+def test_get_push_default_returns_value_when_set(monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     cw = MagicMock()
     cw.get_value.return_value = "upstream"
