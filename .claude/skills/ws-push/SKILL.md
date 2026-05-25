@@ -2,7 +2,7 @@
 name: ws-push
 description: Push local commits from a feature environment, a standalone repo, or the workspace branch to its recorded upstream
 model: opus
-allowed-tools: Bash, Read
+allowed-tools: Bash, Read, AskUserQuestion
 ---
 
 Push local commits from one of: the workspace branch, a standalone repo, or a feature environment. Parse `$ARGUMENTS` to determine which — a single optional name.
@@ -20,6 +20,28 @@ Use raw `git push` for the workspace branch itself — `winter ws push` doesn't 
 - **A feature environment name** (greek letter or otherwise, e.g., `alpha`) → push the environment.
 
 If the name could be either a standalone repo or a feature environment, ask the user which they meant.
+
+## Pre-push discovery
+
+After resolving the target (from the dispatch above) and **before** running the per-target push command (in the sections below), scan for documented pre-push processes and surface any matches. This lets the caller honor project-specific gates (review skills, lint runs, manual checks) that the workspace or per-repo docs declare, without `ws-push` knowing about any specific process by name.
+
+Locations to scan, depending on target:
+
+- **Always**: `workspace:/ai/project/contributing.md`
+- **Standalone repo target**: also `./<name>/CONTRIBUTING.md`
+- **Feature env target**: also `./<env>/<repo>/CONTRIBUTING.md` for each worktree in the env — list `./<env>/*/` to enumerate per-repo worktrees and read each one's `CONTRIBUTING.md` if present
+
+Read each file and look for any pre-push documentation — section, paragraph, checklist, whatever shape the project uses. Skip files that don't exist; skip files that have nothing relevant.
+
+If you find anything, surface it to the caller (annotated by source path) and ask via `AskUserQuestion` with three options:
+
+- **Carry out the documented steps before pushing** — follow what was found, then proceed to the push.
+- **Skip and push as-is** — acknowledge the documented steps, proceed straight to the push.
+- **Show full text** — relay the raw matched content per source, then re-prompt.
+
+Do **not** execute documented steps unprompted — wait for the caller's choice. If they pick "Carry out", then run the steps before invoking the per-target push command below. The scan itself is awareness; execution only happens when the caller explicitly opts in.
+
+If you find nothing, proceed to the push silently. Absence is fine, not a warning.
 
 ## Workspace (no argument)
 
