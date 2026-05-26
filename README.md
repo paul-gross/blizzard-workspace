@@ -18,7 +18,7 @@ Clone it, run `/ws-setup`, and start building.
 
 ```bash
 # Clone winter with any name you prefer
-git clone <winter-repo-url> my-workspace
+git clone https://github.com/paul-gross/winter.git my-workspace
 cd my-workspace
 
 # Run workspace setup (in Claude Code)
@@ -47,8 +47,8 @@ See [ai/workspace-layout.md](./ai/workspace-layout.md) for the full directory ma
 
 Winter is extensible by design — the framework, the meta workspace it's developed in, and its extensions all ship as separate repos that compose via `winter ws init`:
 
-- **[winter](https://github.com/paul-gross/winter)** — the framework itself: Python CLI, workspace skills, conventions
-- **[winter-workspace](https://github.com/paul-gross/winter-workspace)** — the meta workspace where winter is developed; fork this to start your own
+- **[winter](https://github.com/paul-gross/winter)** — the framework itself: Python CLI, workspace skills, conventions; **fork this to start your own**
+- **[winter-workspace](https://github.com/paul-gross/winter-workspace)** — the maintainer's own workspace where winter is developed; pre-wired to the maintainer's project repos, not a starter template
 - **[winter-service-tmux](https://github.com/paul-gross/winter-service-tmux)** — extension: tmux-based service orchestration so agents can launch and monitor application suites
 - **[winter-product](https://github.com/paul-gross/winter-product)** — extension: planning agents and the `todo` skill
 - **[winter-workflow](https://github.com/paul-gross/winter-workflow)** — extension: the author's personal agentic workflow, interchangeable with your own
@@ -56,7 +56,7 @@ Winter is extensible by design — the framework, the meta workspace it's develo
 
 ## 🌿 Forking
 
-We recommend you fork the winter workspace and customize it for your application. `/ws-setup` and the winter CLI handle the remote configuration for you — `winter` becomes the upstream you pull framework updates from, and `origin` points to your fork. Your customizations (project-specific agents, skills, workflow scripts, integration config) live in your fork.
+We recommend you fork [`paul-gross/winter`](https://github.com/paul-gross/winter) and customize it for your application. `/ws-setup` and the winter CLI handle the remote configuration for you — `winter` becomes the upstream you pull framework updates from, and `origin` points to your fork. Your customizations (project-specific agents, skills, workflow scripts, integration config) live in your fork.
 
 Winter is meant to be integrated into your projects, not adopted wholesale. The framework lives upstream; the workflow you build on top of it lives in your fork.
 
