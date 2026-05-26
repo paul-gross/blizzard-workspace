@@ -51,7 +51,14 @@ class ReadRepoRepository:
                     branch = None
 
                 try:
-                    dirty_count = len(r.index.diff(None)) + len(r.untracked_files)
+                    # git.BadName is raised by r.index.diff("HEAD") when the repo has no commits yet
+                    # (unborn HEAD). Treat that as "no staged changes."
+                    try:
+                        staged_paths = {item.a_path for item in r.index.diff("HEAD") if item.a_path is not None}
+                    except git.BadName:
+                        staged_paths = set()
+                    unstaged_paths = {item.a_path for item in r.index.diff(None) if item.a_path is not None}
+                    dirty_count = len(staged_paths | unstaged_paths) + len(r.untracked_files)
                 except git.GitCommandError as exc:
                     raise self._error_factory.from_git(
                         exc,
@@ -255,7 +262,16 @@ class ReadRepoRepository:
 
                 try:
                     # GitPython types `Diff.a_path` as `str | None`; drop the None case to keep `list[str]`.
-                    dirty_files: list[str] = [item.a_path for item in r.index.diff(None) if item.a_path is not None]
+                    # r.index.diff("HEAD") → staged (HEAD↔index); r.index.diff(None) → unstaged (index↔worktree).
+                    # dict.fromkeys deduplicates paths that appear in both diffs (partially-staged files) while
+                    # preserving insertion order. git.BadName is raised when the repo has no commits yet
+                    # (unborn HEAD); treat that as "no staged changes."
+                    try:
+                        staged_files = [item.a_path for item in r.index.diff("HEAD") if item.a_path is not None]
+                    except git.BadName:
+                        staged_files = []
+                    unstaged_files = [item.a_path for item in r.index.diff(None) if item.a_path is not None]
+                    dirty_files: list[str] = list(dict.fromkeys(staged_files + unstaged_files))
                     dirty_files += r.untracked_files
                 except git.GitCommandError as exc:
                     raise self._error_factory.from_git(

@@ -80,7 +80,8 @@ def test_get_project_status_lists_dirty_files(monkeypatch: pytest.MonkeyPatch, r
     r.active_branch.tracking_branch.return_value = None
     diff_item = MagicMock()
     diff_item.a_path = "README.md"
-    r.index.diff.return_value = [diff_item]
+    # "HEAD" → staged diff; None → unstaged diff. README.md is unstaged only here.
+    r.index.diff.side_effect = lambda arg: [] if arg == "HEAD" else [diff_item]
     r.untracked_files = ["untracked.txt"]
     r.git.rev_list.return_value = "0"
     r.iter_commits.return_value = []
@@ -90,6 +91,29 @@ def test_get_project_status_lists_dirty_files(monkeypatch: pytest.MonkeyPatch, r
 
     assert "untracked.txt" in status.dirty_files
     assert "README.md" in status.dirty_files
+
+
+def test_get_project_status_counts_staged_files_as_dirty(
+    monkeypatch: pytest.MonkeyPatch, repo: ReadRepoRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    r = git_mock.Repo.return_value
+    r.active_branch.name = "main"
+    r.active_branch.tracking_branch.return_value = None
+    staged_item = MagicMock()
+    staged_item.a_path = "staged.py"
+    # "HEAD" → staged diff only; None → no unstaged changes.
+    r.index.diff.side_effect = lambda arg: [staged_item] if arg == "HEAD" else []
+    r.untracked_files = []
+    r.git.rev_list.return_value = "0"
+    r.iter_commits.return_value = []
+    project = ProjectRepository(name="demo", main_path=_PROJECT_PATH, main_branch="main")
+
+    status = repo.get_project_status(project)
+
+    assert "staged.py" in status.dirty_files
+    assert len(status.dirty_files) == 1
 
 
 def test_get_project_status_returns_empty_when_path_missing(repo: ReadRepoRepository) -> None:
@@ -130,6 +154,29 @@ def test_get_standalone_status_reads_branch_and_commit(
 
     assert status.branch == "main"
     assert status.latest_commit == "init"
+
+
+def test_get_standalone_status_counts_staged_files_as_dirty(
+    monkeypatch: pytest.MonkeyPatch, repo: ReadRepoRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    r = git_mock.Repo.return_value
+    r.active_branch.name = "main"
+    r.active_branch.tracking_branch.return_value = None
+    staged_item = MagicMock()
+    staged_item.a_path = "staged.py"
+    # "HEAD" → staged diff only; None → no unstaged changes.
+    r.index.diff.side_effect = lambda arg: [staged_item] if arg == "HEAD" else []
+    r.untracked_files = []
+    commit = MagicMock()
+    commit.message = "init"
+    r.head.commit = commit
+    standalone = StandaloneRepository(name="ext", path=_EXT_PATH)
+
+    status = repo.get_standalone_status(standalone)
+
+    assert status.dirty_count == 1
 
 
 def test_get_worktree_status_delegates_to_repo_status(
