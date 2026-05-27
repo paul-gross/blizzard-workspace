@@ -23,7 +23,7 @@ If the name could be either a standalone repo or a feature environment, ask the 
 
 ## Pre-push discovery
 
-After resolving the target (from the dispatch above) and **before** running the per-target push command (in the sections below), scan for documented pre-push processes and surface any matches. This lets the caller honor project-specific gates (review skills, lint runs, manual checks) that the workspace or per-repo docs declare, without `ws-push` knowing about any specific process by name.
+After resolving the target (from the dispatch above) and **before** running the per-target push command (in the sections below), check that the project's release-readiness gates have actually been satisfied. Teams name these differently — *pre-push checklist*, *definition of done*, *production-readiness checklist*, *merge requirements*, *quality gates*, *compliance checks*, *shipping criteria* — but they all answer the same question: "what must be true before this code lands?" Surface them so the caller can honor whatever the workspace or per-repo docs declare, without `ws-push` hard-coding any specific tool by name.
 
 Locations to scan, depending on target:
 
@@ -31,17 +31,19 @@ Locations to scan, depending on target:
 - **Standalone repo target**: also `./<name>/CONTRIBUTING.md`
 - **Feature env target**: also `./<env>/<repo>/CONTRIBUTING.md` for each worktree in the env — list `./<env>/*/` to enumerate per-repo worktrees and read each one's `CONTRIBUTING.md` if present
 
-Read each file and look for any pre-push documentation — section, paragraph, checklist, whatever shape the project uses. Skip files that don't exist; skip files that have nothing relevant.
+In each file, look for sections matching common industry framings — *Pre-push*, *Pre-commit*, *Before pushing*, *Definition of Done*, *Release checklist*, *Quality gates*, *Required checks*, *Merge requirements*, *Code review*, *Compliance*, *Production-ready*, *Shipping* — or any equivalent gate / checklist the project documents under its own name. Follow any links the scanned content contains that may carry additional pre-push information — a contributing doc that defers to another doc for the canonical list, a `CONTRIBUTING.md` that points at an `ai/` convention, a checklist that references a named skill — read those too. Use your own awareness to recognize when a referenced document is worth opening; absence of an explicit "pre-push" label isn't a reason to skip a clearly relevant link.
 
-If you find anything, surface it to the caller (annotated by source path) and ask via `AskUserQuestion` with three options:
+For each gate you find, mark it **(done)** or **(pending)** based on what already happened in this session. Match honestly — "we ran ruff" satisfies "lint with ruff," but "we ran lint" does **not** satisfy "code review." When in doubt, treat it as pending.
 
-- **Carry out the documented steps before pushing** — follow what was found, then proceed to the push.
-- **Skip and push as-is** — acknowledge the documented steps, proceed straight to the push.
+Surface the findings annotated by source path and gate status, then ask via `AskUserQuestion` with three options:
+
+- **Run the pending gates before pushing** — execute what's left, then proceed to the push.
+- **Skip and push as-is** — acknowledge what's pending, proceed straight to the push.
 - **Show full text** — relay the raw matched content per source, then re-prompt.
 
-Do **not** execute documented steps unprompted — wait for the caller's choice. If they pick "Carry out", then run the steps before invoking the per-target push command below. The scan itself is awareness; execution only happens when the caller explicitly opts in.
+Do **not** execute pending gates unprompted — wait for the caller's choice. If they pick "Run the pending gates", run them before invoking the per-target push command below. The scan itself is awareness; execution only happens when the caller explicitly opts in.
 
-If you find nothing, proceed to the push silently. Absence is fine, not a warning.
+If you find nothing (or every gate is already done), proceed to the push silently. Absence is fine, not a warning.
 
 ## Workspace (no argument)
 
