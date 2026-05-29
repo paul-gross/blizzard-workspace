@@ -280,7 +280,7 @@ def test_timeout_s_guards_against_non_positive_env(monkeypatch: pytest.MonkeyPat
     """Footgun guard: WINTER_GIT_TIMEOUT_S=0 (or negative) would set
     `kill_after_timeout=0`, which SIGKILLs the git subprocess before it can
     even start. The property must reject this and fall back to the default
-    so a typo / shell-export-gone-wrong doesn't brick `winter ws sync`."""
+    so a typo / shell-export-gone-wrong doesn't brick `winter ws fetch`."""
     monkeypatch.setenv(TIMEOUT_ENV_VAR, bad)
     svc = GitOpsService(RepoErrorFactory())
     assert svc.timeout_s == OPERATION_TIMEOUT_S

@@ -174,7 +174,6 @@ def _make_detail_screen(focused_repo: str | None) -> WorktreeDetailScreen:
     return WorktreeDetailScreen(
         worktree_name="alpha",
         env_status_svc=cast(Any, _FakeEnvStatusSvc(env, repo_statuses)),
-        workspace_sync_svc=cast(Any, None),
         workspace_repo=cast(Any, _FakeWorkspaceRepo(env)),
         repo_repo=cast(Any, _FakeRepoRepo()),
         repo_factory=cast(Any, _FakeRepoFactory()),

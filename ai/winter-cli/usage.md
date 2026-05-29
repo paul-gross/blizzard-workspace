@@ -4,7 +4,7 @@ Command reference for agents executing `winter` commands. For installation and c
 
 ## When to use the CLI vs raw git
 
-**Use the CLI** for operations that span multiple repos — init, status, sync, connect, push, diff. The CLI handles pinned repos, parallel fetching, source checkout fast-forwarding, and idempotent setup automatically.
+**Use the CLI** for operations that span multiple repos — init, status, fetch, pull, connect, push, diff. The CLI handles pinned repos, parallel fetching, source checkout fast-forwarding, and idempotent setup automatically.
 
 **Use raw git** for single-repo operations — staging files, committing, resolving conflicts, interactive rebase, branch inspection. The CLI doesn't replace git for per-repo work.
 
@@ -31,8 +31,7 @@ Greek letters (`alpha`, `beta`, …) are the suggested convention for feature en
 | `winter ws checkout` | `winter ws checkout ENV FEATURE_BRANCH [--force] [--json]` | Adopt a remote feature branch into ENV, all-or-nothing across every repo (no network — run `winter ws fetch` first if needed) |
 | `winter ws list` | `winter ws list [--json]` | List all feature environments |
 | `winter ws status` | `winter ws status [ENV] [--json]` | Git status across all repos in a feature environment |
-| `winter ws sync` | `winter ws sync ENV [--json]` | Fetch all repos, ff-only merge `origin/main` (falls back to merge), then fast-forward source checkouts |
-| `winter ws fetch` | `winter ws fetch [PATTERNS...] [--standalone\|--all] [--json]` | Fetch refs from `origin` for project worktrees matched by PATTERNS |
+| `winter ws fetch` | `winter ws fetch [PATTERNS...] [--standalone\|--all] [--json]` | Fetch refs from `origin` for project worktrees matched by PATTERNS, and fast-forward each matched source checkout's local main |
 | `winter ws pull` | `winter ws pull [PATTERNS...] [--standalone\|--all] [--ff-only\|--merge\|--rebase] [--autostash] [--json]` | Fetch + ff-only integrate (default) project worktrees matched by PATTERNS |
 | `winter ws merge` | `winter ws merge SOURCE_REF [PATTERNS...] [--standalone\|--all] [--ff-only\|--merge\|--no-ff] [--autostash] [--exclude-pinned\|--only-pinned] [--json]` | Merge an arbitrary SOURCE_REF (env name, branch, `origin/...`) into project worktrees matched by PATTERNS |
 | `winter ws push` | `winter ws push [PATTERNS...] [--standalone\|--all] [--include-pinned\|--only-pinned] [--json]` | Push project worktrees matched by PATTERNS to their tracked upstream |
@@ -85,7 +84,7 @@ Pattern syntax: `*` matches any chars within a segment (does not cross `/`); `?`
 
 `push` excludes pinned worktrees by default because pinned repos track the main branch and aren't part of the feature-push flow. Use `--include-pinned` when you've landed commits on a pinned repo's main branch and want to ship them, or `--only-pinned` to ship just those without touching feature branches.
 
-**`sync` vs `pull`.** `sync` always targets `origin/main` and falls back to a merge commit when ff-only fails (so source checkouts stay aligned even when the env has drifted). `pull` always targets the *tracked* upstream — the feature branch for non-pinned worktrees, main for pinned, custom branches for standalone repos — and is ff-only by default. See the `merge` section for how those compare to `merge` too.
+**`fetch` and source checkouts.** Beyond refreshing remote-tracking refs, `fetch` fast-forwards each matched source checkout's local main (`projects/<repo>`) to `origin/<main-branch>`. Worktrees of a project repo share the source checkout's `.git`, so this is a single fetch per repo that both updates the shared refs every worktree sees and keeps the base `winter ws init` branches new envs off of current. Feature worktrees are never touched. A diverged source checkout main (it should only ever track main) is reported as a failed fetch for that repo.
 
 ### `merge` — fold an arbitrary ref into matched worktrees
 
@@ -116,11 +115,10 @@ winter ws merge master --all           # merge master into every env's worktrees
 
 Exit code is `0` when every selected repo merged cleanly (`up-to-date`, `fast-forwarded`, or `merged (merge commit created)`), and `1` if any repo diverged or had a missing source ref. Cross-repo atomicity is not provided — if one repo merges cleanly and another diverges, the clean merge stays. Conflicts that abort don't leave a merge in progress; use raw `git reset --hard ORIG_HEAD` per repo if you want to undo a fast-forward or merge commit.
 
-**When to use `merge` vs `pull` vs `sync`:**
+**When to use `merge` vs `pull`:**
 
-- `merge` — the source ref isn't the worktree's tracked upstream (env-to-env, explicit branch).
+- `merge` — the source ref isn't the worktree's tracked upstream (env-to-env, explicit branch). Offline; doesn't fetch.
 - `pull` — integrate the tracked upstream (feature branch for non-pinned, main for pinned). Fetches first.
-- `sync` — fetch + ff-or-merge against `origin/main` plus source-checkout fast-forward.
 
 ### `destroy` — tear down a feature env
 
@@ -205,7 +203,7 @@ Two knobs:
 
 ## Drift warnings
 
-Operations that iterate repos (`ws list`, `ws status`, `ws sync`, `ws fetch`, `ws pull`, `ws push`, `ws merge`, `ws connect`, `ws disconnect`, `ws diff`, `repo list`) warn to stderr when the config and filesystem disagree:
+Operations that iterate repos (`ws list`, `ws status`, `ws fetch`, `ws pull`, `ws push`, `ws merge`, `ws connect`, `ws disconnect`, `ws diff`, `repo list`) warn to stderr when the config and filesystem disagree:
 
 - **Missing:** a declared project repo has no directory under `projects/` — run `winter ws init`
 - **Undeclared:** a directory under `projects/` is not in the config — add it to `.winter/config.toml` or remove it
@@ -236,7 +234,7 @@ winter ws merge origin/master alpha         # then merge the freshly-fetched ref
 winter ws merge master alpha --merge        # 3-way fallback when ff-only would refuse
 ```
 
-Prefer `merge` over `sync` here — it doesn't hit the remote, so it's faster, offline-capable, and won't stall on a hanging fetch. Use `sync` (below) only when you want the fetch + merge bundled per env.
+Use the offline `winter ws merge master alpha` form when local `master` is already current — it doesn't hit the remote, so it's faster and won't stall on a hanging fetch. When you need a fresh `origin/master` first, run `winter ws fetch alpha` (which also fast-forwards the source checkout's local main), then `winter ws merge origin/master alpha`.
 
 ### Pull remote feature-branch commits into the local env
 ```bash
@@ -249,11 +247,6 @@ winter ws pull alpha --autostash   # stash dirty tree first, restore after
 ```bash
 winter ws init alpha                       # ensures alpha/ exists
 winter ws connect alpha feature/my-feature
-```
-
-### Sync (fetch + ff-merge origin/main + ff source checkouts, one env at a time)
-```bash
-winter ws sync alpha    # tries ff-only against origin/main, falls back to merge, reports diverged if both fail
 ```
 
 ### Fold one env into another
@@ -270,10 +263,11 @@ winter ws push --include-pinned            # all envs, pinned and non-pinned
 winter ws push --all                       # all envs' non-pinned worktrees + standalone
 ```
 
-### Update everything from remotes (no working-tree changes)
+### Update everything from remotes (refs + source-checkout mains)
 ```bash
-winter ws fetch --all                      # refresh refs for every env + standalone
+winter ws fetch --all                      # refresh refs for every env + standalone, ff each source checkout's local main
 ```
+Feature worktrees are left untouched; only remote-tracking refs and the source checkouts' local main move.
 
 ### Review changes before committing
 ```bash

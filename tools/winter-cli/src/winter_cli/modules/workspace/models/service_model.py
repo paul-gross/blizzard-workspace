@@ -147,7 +147,11 @@ class WorktreeRepoStatus:
 
 @dataclasses.dataclass
 class EnvSyncReport:
-    """Report from syncing every repo in a feature environment — per-repo outcomes and overall success."""
+    """Per-env integration result — per-repo outcomes and overall success.
+
+    Nested inside `PullReport` (one per matched env); the name predates the
+    `fetch`/`pull`/`merge` split and is retained because `pull_all` builds it.
+    """
 
     env: str
     repos: list[RepoSyncOutcome]

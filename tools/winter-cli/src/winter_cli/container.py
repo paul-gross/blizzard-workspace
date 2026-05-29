@@ -399,7 +399,6 @@ class Container(containers.DeclarativeContainer):
     workspace_screen = providers.Factory(
         WorkspaceScreen,
         env_status_svc=env_status_svc,
-        workspace_sync_svc=workspace_sync_svc,
         workspace_repo=worktree_repo,
         repo_repo=repo_repo,
         repo_factory=repo_factory,
@@ -411,7 +410,6 @@ class Container(containers.DeclarativeContainer):
     worktree_detail_screen = providers.Factory(
         WorktreeDetailScreen,
         env_status_svc=env_status_svc,
-        workspace_sync_svc=workspace_sync_svc,
         workspace_repo=worktree_repo,
         repo_repo=repo_repo,
         repo_factory=repo_factory,

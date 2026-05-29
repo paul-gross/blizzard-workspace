@@ -50,12 +50,6 @@ class EnvStatusParams:
 
 
 @dataclasses.dataclass
-class EnvSyncParams:
-    env: str
-    output_json: bool
-
-
-@dataclasses.dataclass
 class EnvConnectParams:
     env: str
     feature_branch: str
@@ -202,50 +196,6 @@ class WorkspaceHandler:
                 repo_statuses = self._env_status_svc.get_worktree_repo_statuses(env_worktrees)
                 overviews.append(FeatureEnvironmentOverview(status=env_status, repo_statuses=repo_statuses))
             self._render_grid(overviews, params.output_json)
-
-    def sync(self, params: EnvSyncParams) -> None:
-        env = self._workspace_repo.get_environment(self._workspace, params.env)
-        project_repos = self._repo_factory.get_project_repos()
-        self._drift_warning_svc.raise_warning()
-        env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-        report = self._workspace_sync_svc.sync_env(env_worktrees)
-
-        if params.output_json:
-            _echo_json(_to_dict(report))
-            if not report.success:
-                sys.exit(1)
-            return
-
-        rows: list[list[str | Cell]] = []
-        row_styles: list[str | None] = []
-        for outcome in report.repos:
-            result_val = outcome.sync_result.value
-
-            if result_val == "fast_forwarded":
-                style = "green"
-                notes = ""
-            elif result_val == "up_to_date":
-                style = "dim"
-                notes = ""
-            elif result_val == "merged":
-                style = "cyan"
-                notes = "merge commit created"
-            else:
-                style = "yellow"
-                notes = f"+{outcome.ahead} / -{outcome.behind}"
-
-            rows.append([outcome.repo_name, result_val, notes])
-            row_styles.append(style)
-
-        for line in self._cli_output_svc.render_table(rows, headers=["REPO", "RESULT", "NOTES"], row_styles=row_styles):
-            click.echo(line)
-
-        out = self._cli_output_svc
-        if report.success:
-            click.echo(f"\n{out.style('✓', 'green')} {report.env} synced successfully")
-        else:
-            click.echo(f"\n{out.style('!', 'yellow')} {report.env} has diverged repos")
-            sys.exit(1)
 
     def connect(self, params: EnvConnectParams) -> None:
         env = self._workspace_repo.get_environment(self._workspace, params.env)

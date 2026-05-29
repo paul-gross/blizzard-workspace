@@ -9,7 +9,7 @@ Fetch refs from `origin` for one of: the workspace branch, a standalone repo, or
 
 ## Big picture
 
-A feature environment contains a worktree for every project repo, so fetching one is a multi-repo operation. Use `winter ws fetch` — it fetches every matched worktree's `origin` in parallel and honors pinned-repo rules. See [ai/winter-cli/usage.md](./ai/winter-cli/usage.md) and [ai/worktree-ops.md](./ai/worktree-ops.md) for the full reference.
+A feature environment contains a worktree for every project repo, so fetching one is a multi-repo operation. Use `winter ws fetch` — it fetches every matched worktree's `origin` in parallel and honors pinned-repo rules. Beyond refreshing refs, it also fast-forwards each matched project repo's **source checkout** (`projects/<repo>`) local main to `origin/<main-branch>`, keeping the base `winter ws init` branches new envs off of current (feature worktrees are never touched; a diverged source-checkout main is reported as a failed fetch). See the "`fetch` and source checkouts" note in [ai/winter-cli/usage.md](./ai/winter-cli/usage.md) and [ai/worktree-ops.md](./ai/worktree-ops.md) for the full reference.
 
 Use raw `git fetch` for the workspace branch itself — `winter ws fetch` doesn't operate on it. Standalone repos can be reached via `winter ws fetch --standalone` or with raw git, whichever is more convenient.
 
@@ -57,14 +57,14 @@ winter ws fetch '<name>/*'             # every worktree in the env (same as bare
 
 ## Report
 
-Output a concise summary of what was fetched. For a feature environment, include a per-repo line — what each repo did (new refs, already up to date):
+Output a concise summary of what was fetched. For a feature environment, include a per-repo line — what each repo did (new refs, already up to date). The CLI reports each repo as ok/failed; a failed repo most often means its source-checkout main diverged from `origin/<main-branch>` (surface that, since the fast-forward is part of what fetch does):
 
 ```
 ## Fetch: <name>
 
-- repo-a: fetched (2 new refs)
+- repo-a: fetched (refs + source main fast-forwarded)
 - repo-b: already up to date
-- repo-c: fetched (1 new ref)
+- repo-c: failed — source-checkout main diverged from origin/<main-branch>
 ```
 
 $ARGUMENTS

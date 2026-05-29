@@ -63,7 +63,7 @@ Paths use a `<context>:<path>` prefix to clarify which repo/branch a file lives 
 |-------|----------|
 | Directory layout and repo topology | [ai/workspace-layout.md](./ai/workspace-layout.md) |
 | Winter CLI command reference | [ai/winter-cli/index.md](./ai/winter-cli/index.md) |
-| Worktree git operations (create, sync, complete) | [ai/worktree-ops.md](./ai/worktree-ops.md) |
+| Worktree git operations (create, pull, destroy) | [ai/worktree-ops.md](./ai/worktree-ops.md) |
 | Contributing conventions (merge, push, delivery) | [ai/project/contributing.md](./ai/project/contributing.md) |
 | Installed winter extensions | `CLAUDE.winter.md` |
 

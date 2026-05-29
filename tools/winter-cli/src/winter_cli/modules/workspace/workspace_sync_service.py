@@ -48,9 +48,10 @@ class _PullTarget:
 class WorkspaceSyncService:
     """Network-touching git operations across envs and standalone repos.
 
-    Owns `sync_env` (single env, ff-or-merge against `origin/<main>`),
-    `fetch_all`, `pull_all`, `push_all`. Parallelism is bounded by the shared
-    `GitOpsService` executor so a wide workspace doesn't overwhelm SSH.
+    Owns `fetch_all` (fetch every matched source repo and fast-forward its
+    local main) and `pull_all` (fetch + integrate worktrees against their
+    tracked upstream). Parallelism is bounded by the shared `GitOpsService`
+    executor so a wide workspace doesn't overwhelm SSH.
     """
 
     def __init__(
@@ -69,31 +70,6 @@ class WorkspaceSyncService:
         self._workspace = workspace
         self._git_ops = git_ops
 
-    def sync_env(self, env_worktrees: FeatureEnvironmentWorktrees) -> EnvSyncReport:
-        """Sync a worktree's repos against `origin/<main>` (ff-or-merge).
-
-        Sync intentionally falls back to a merge commit when ff-only fails —
-        this keeps source-checkout fast-forwards aligned with the worktree even
-        when the worktree has drifted. Use `winter ws pull` for the ff-only
-        flow against the feature branch.
-        """
-        worktrees = env_worktrees.worktrees
-        self._fetch_in_parallel(worktrees)
-
-        outcomes = self._integrate_in_parallel(
-            [(wt, f"origin/{wt.repository.main_branch}") for wt in worktrees],
-            mode=PullMode.merge,
-            autostash=False,
-        )
-        outcomes = self._sort_outcomes(outcomes, [wt.repository.name for wt in worktrees])
-
-        project_repos = [wt.repository for wt in worktrees]
-        with self._git_ops.executor() as pool:
-            list(pool.map(self._repo_repo.sync_ff_only, project_repos))
-
-        success = all(o.sync_result != SyncResult.diverged for o in outcomes)
-        return EnvSyncReport(env=env_worktrees.environment.name, repos=outcomes, success=success)
-
     def fetch_all(
         self,
         scope: RepoScope,
@@ -105,10 +81,14 @@ class WorkspaceSyncService:
         `patterns` filters project worktrees by segment-aware glob over
         `<env>/<repo>` (empty list ⇒ `*/*`); any matching worktree pulls its
         project repo into the fetch set. Worktrees of a project repo share
-        a `.git`, so one `git fetch origin` updates remote refs for every
-        env — we run that fetch from any one of the matching worktrees and
-        emit a single `[project/<repo>]` event for it. Standalone repos are
-        independent clones, fetched per-repo. Events fire in completion order.
+        the source checkout's `.git`, so a single fetch updates remote refs
+        for every env. We run that fetch through `sync_ff_only` against the
+        source checkout, which both fetches `origin` (refreshing the shared
+        refs every worktree sees) and fast-forwards the source checkout's
+        local main — keeping the base that `winter ws init` branches new envs
+        off of current. One `[project/<repo>]` event fires per repo.
+        Standalone repos are independent clones, fetched per-repo. Events fire
+        in completion order.
         """
         patterns = patterns or ["*/*"]
         project_repos = self._repo_factory.get_project_repos()
@@ -132,10 +112,12 @@ class WorkspaceSyncService:
         all_worktrees = self._drop_missing_worktrees(all_worktrees)
         standalone_repos = self._drop_missing_standalones(standalone_repos)
 
-        # Pick one representative worktree per unique project repo — the
-        # source `.git` is shared, so any of them works. Insertion order is
-        # preserved by the dict so output ordering stays stable when fetches
-        # complete in deterministic order (rare; see as_completed below).
+        # Pick one representative worktree per unique project repo — its
+        # `.repository` carries the source-checkout path we fetch + ff. The
+        # source `.git` is shared, so any worktree resolves the same repo.
+        # Insertion order is preserved by the dict so output ordering stays
+        # stable when fetches complete in deterministic order (rare; see
+        # as_completed below).
         repo_reps: dict[str, FeatureWorktree] = {}
         for _, wt in all_worktrees:
             repo_reps.setdefault(wt.repository.name, wt)
@@ -151,7 +133,7 @@ class WorkspaceSyncService:
         with self._git_ops.executor() as pool:
             future_keys: dict[concurrent.futures.Future, tuple[str, str]] = {}
             for repo_name, wt in repo_reps.items():
-                fut = pool.submit(self._repo_repo.fetch, wt)
+                fut = pool.submit(self._repo_repo.sync_ff_only, wt.repository)
                 future_keys[fut] = ("project", repo_name)
             for repo in standalone_repos:
                 fut = pool.submit(self._repo_repo.fetch_standalone, repo)
@@ -332,24 +314,6 @@ class WorkspaceSyncService:
     ) -> dict[str, FeatureEnvironmentWorktrees]:
         return {env.name: self._env_status_svc.get_feature_environment_worktrees(env, project_repos) for env in envs}
 
-    def _fetch_in_parallel(
-        self,
-        worktrees: list[FeatureWorktree],
-        log_errors: bool = False,
-    ) -> None:
-        if not worktrees:
-            return
-        with self._git_ops.executor() as pool:
-            futures = {pool.submit(self._repo_repo.fetch, wt): wt for wt in worktrees}
-            for fut, wt in futures.items():
-                try:
-                    fut.result()
-                except RepoError as exc:
-                    if log_errors:
-                        logger.warning("Fetch failed for %s: %s", wt.repository.name, exc)
-                    else:
-                        raise
-
     @staticmethod
     def _warn_unless_present(path, label: str, init_target: str | None) -> bool:
         """Return True if `path` exists; otherwise warn the user and return False.
@@ -425,24 +389,6 @@ class WorkspaceSyncService:
         except RepoError as exc:
             logger.warning("Fetch failed for standalone %s: %s", repo.name, exc)
         return self._repo_repo.integrate_standalone(repo, mode, autostash)
-
-    def _integrate_in_parallel(
-        self,
-        targets: list[tuple[FeatureWorktree, str]],
-        mode: PullMode,
-        autostash: bool,
-    ) -> list[RepoSyncOutcome]:
-        if not targets:
-            return []
-        results: list[RepoSyncOutcome | None] = [None] * len(targets)
-        with self._git_ops.executor() as pool:
-            futures = {
-                pool.submit(self._repo_repo.integrate, wt, target_ref, mode, autostash): idx
-                for idx, (wt, target_ref) in enumerate(targets)
-            }
-            for fut, idx in futures.items():
-                results[idx] = fut.result()
-        return [r for r in results if r is not None]
 
     @staticmethod
     def _sort_outcomes(outcomes: list[RepoSyncOutcome], repo_order: list[str]) -> list[RepoSyncOutcome]:

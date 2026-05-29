@@ -146,7 +146,7 @@ class GitOpsService:
         var → `OPERATION_TIMEOUT_S` module default. An invalid value (not
         parseable as float, or ≤ 0) falls back to the default with a
         warning rather than crashing the CLI — config noise shouldn't make
-        `winter ws sync` unusable, and a 0 / negative timeout would
+        `winter ws fetch` unusable, and a 0 / negative timeout would
         SIGKILL every subprocess before it started.
         """
         if self._timeout_override is not None:

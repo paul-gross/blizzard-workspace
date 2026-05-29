@@ -12,7 +12,7 @@ The CLI treats pinned repos specially across commands:
 
 - **init** — sets the worktree branch's upstream to `origin/<main-branch>` and `push.default=upstream`, so `git push` lands on the main branch.
 - **connect / disconnect** — skipped; pinned repos never get a feature-branch upstream.
-- **sync / pull** — pulled from `origin/<main-branch>` via `--ff-only` (for `pull`, this is the asymmetry from non-pinned, which pull from `origin/<feature-branch>`).
+- **pull** — pulled from `origin/<main-branch>` via `--ff-only` — the asymmetry from non-pinned worktrees, which pull from `origin/<feature-branch>`.
 - **push** — excluded by default. Use `--include-pinned` to push pinned worktrees alongside non-pinned, or `--only-pinned` to push just the pinned set. Pushed pinned worktrees go to whatever upstream their local branch tracks (typically `origin/<main>`, but the user can re-target with `git branch --set-upstream-to`).
 
 ## Cloning (source checkouts)
@@ -81,14 +81,6 @@ winter ws disconnect <name>
 ```
 
 Unsets upstream tracking on each non-pinned repo. With no upstream set, the env reads as disconnected.
-
-## Syncing a feature environment against main
-
-```bash
-winter ws sync <name>
-```
-
-Fetches every repo in parallel, tries `git merge --ff-only origin/<main-branch>` on each worktree (falls back to a 3-way merge if ff-only fails), then fast-forwards the source checkout in `projects/`. Pinned repos are reset to `origin/<main-branch>` via the same ff-only path. Main branch per repo is read from the config — `main_branch` on the `[[project_repository]]` entry if set, otherwise the top-level `main_branch`.
 
 ## Pulling remote feature-branch commits
 

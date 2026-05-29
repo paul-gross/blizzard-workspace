@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from winter_cli.modules.workspace.models import (
     FeatureWorktree,
     ProjectRepository,
     PullMode,
+    RepoError,
     RepoScope,
     Workspace,
 )
@@ -65,8 +67,10 @@ class FakeWriteRepoRepository:
     """No-op repo for empty-input smoke tests.
 
     `sync_ff_only` exists as a no-op rather than raising on `__getattr__`
-    because `sync_env` accesses it as an attribute for `pool.map(...)` even
-    when the iterable is empty. Other attribute accesses still raise so
+    because `fetch_all` fetches + fast-forwards each matched source repo
+    through it. The empty-input tests below never reach that fan-out, but
+    keeping it a no-op (instead of letting `__getattr__` raise) documents the
+    accessor `fetch_all` uses. Other attribute accesses still raise so
     accidental fan-out trips the test.
     """
 
@@ -158,21 +162,6 @@ def test_get_feature_environment_worktrees_helper_unused_directly(workspace: Wor
     assert wt.repository.name == "demo"
 
 
-def test_sync_env_with_empty_worktrees_returns_successful_empty_report(
-    workspace: Workspace, workspace_config: WorkspaceConfig
-) -> None:
-    """sync_env over an env with zero worktrees produces a success=True empty report."""
-    svc = _make_service(workspace, workspace_config)
-    env = FeatureEnvironment(workspace=workspace, name="alpha", index=1, path=workspace.root_path / "alpha")
-    env_worktrees = FeatureEnvironmentWorktrees(environment=env, worktrees=[])
-
-    report = svc.sync_env(env_worktrees)
-
-    assert report.env == "alpha"
-    assert report.repos == []
-    assert report.success is True
-
-
 def test_fetch_all_with_no_envs_or_standalones_returns_empty_report(
     workspace: Workspace, workspace_config: WorkspaceConfig
 ) -> None:
@@ -206,3 +195,116 @@ def test_pull_all_with_no_envs_or_standalones_returns_empty_report(
     assert report.standalone == []
     assert report.skipped == []
     assert report.success is True
+
+
+class _SpyWriteRepoRepository:
+    """Records `sync_ff_only` calls and fails loudly if `fetch` is used.
+
+    Pins `fetch_all`'s contract: it refreshes + fast-forwards each project repo
+    through `sync_ff_only` against the source checkout, never a per-worktree
+    `fetch`. `raise_on` names a repo whose `sync_ff_only` raises, modelling a
+    diverged source main.
+    """
+
+    def __init__(self, raise_on: str | None = None) -> None:
+        self.synced: list[ProjectRepository] = []
+        self._raise_on = raise_on
+        self._lock = threading.Lock()
+
+    def sync_ff_only(self, repo: ProjectRepository) -> None:
+        with self._lock:
+            self.synced.append(repo)
+        if repo.name == self._raise_on:
+            raise RepoError(f"sync_ff_only failed for {repo.name}", cwd=str(repo.main_path))
+
+    def fetch(self, worktree: FeatureWorktree) -> None:
+        raise AssertionError("fetch_all must fast-forward via sync_ff_only, not fetch")
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"_SpyWriteRepoRepository.{name} called unexpectedly")
+
+
+class _FakeEnvStatusService:
+    """Returns a fixed worktree set, sidestepping on-disk worktree discovery."""
+
+    def __init__(self, env_worktrees: FeatureEnvironmentWorktrees) -> None:
+        self._env_worktrees = env_worktrees
+
+    def get_feature_environment_worktrees(
+        self, env: FeatureEnvironment, project_repos: list[ProjectRepository]
+    ) -> FeatureEnvironmentWorktrees:
+        return self._env_worktrees
+
+
+def _make_fetch_service(
+    workspace: Workspace,
+    workspace_config: WorkspaceConfig,
+    env_worktrees: FeatureEnvironmentWorktrees,
+    repo_repo: _SpyWriteRepoRepository,
+) -> WorkspaceSyncService:
+    class _OneEnvWorktreeRepo(FakeReadWorkspaceRepository):
+        def get_environments(self, workspace_, project_repos):  # type: ignore[no-untyped-def]
+            return [env_worktrees.environment]
+
+    git_ops = GitOpsService(RepoErrorFactory(), sleep=lambda _: None, jitter=lambda: 0.0)
+    return WorkspaceSyncService(
+        env_status_svc=_FakeEnvStatusService(env_worktrees),  # type: ignore[arg-type]
+        worktree_repo=_OneEnvWorktreeRepo(),  # type: ignore[arg-type]
+        repo_repo=repo_repo,  # type: ignore[arg-type]
+        repo_factory=RepositoryFactory(workspace_config),
+        workspace=workspace,
+        git_ops=git_ops,
+    )
+
+
+def _make_env_with_worktree(
+    workspace: Workspace, tmp_path: Path
+) -> tuple[FeatureEnvironmentWorktrees, ProjectRepository]:
+    env = FeatureEnvironment(workspace=workspace, name="alpha", index=1, path=tmp_path / "alpha")
+    repo = ProjectRepository(name="demo", main_path=tmp_path / "projects" / "demo", main_branch="main")
+    wt = FeatureWorktree(workspace=workspace, environment=env, repository=repo)
+    wt.path.mkdir(parents=True)  # _warn_unless_present drops worktrees missing on disk
+    return FeatureEnvironmentWorktrees(environment=env, worktrees=[wt]), repo
+
+
+def test_fetch_all_fast_forwards_source_checkouts_via_sync_ff_only(
+    workspace_config: WorkspaceConfig, tmp_path: Path
+) -> None:
+    """fetch_all routes each matched project repo through sync_ff_only (not fetch).
+
+    sync_ff_only fetches the shared source-checkout `.git` and fast-forwards
+    its local main; doing it here is what keeps `winter ws init`'s branch base
+    current.
+    """
+    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    env_worktrees, repo = _make_env_with_worktree(workspace, tmp_path)
+    repo_repo = _SpyWriteRepoRepository()
+    svc = _make_fetch_service(workspace, workspace_config, env_worktrees, repo_repo)
+    reporter: IFetchReporter = _NullFetchReporter()  # type: ignore[assignment]
+
+    report = svc.fetch_all(scope=RepoScope.project, patterns=None, reporter=reporter)
+
+    assert [r.name for r in repo_repo.synced] == ["demo"]
+    assert repo_repo.synced[0].main_path == repo.main_path
+    assert [o.repo_name for o in report.projects] == ["demo"]
+    assert report.success is True
+
+
+def test_fetch_all_reports_failure_when_source_checkout_diverges(
+    workspace_config: WorkspaceConfig, tmp_path: Path
+) -> None:
+    """A RepoError from sync_ff_only (e.g. diverged source main) is a failed fetch."""
+    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    env_worktrees, _ = _make_env_with_worktree(workspace, tmp_path)
+    repo_repo = _SpyWriteRepoRepository(raise_on="demo")
+    svc = _make_fetch_service(workspace, workspace_config, env_worktrees, repo_repo)
+    reporter: IFetchReporter = _NullFetchReporter()  # type: ignore[assignment]
+
+    report = svc.fetch_all(scope=RepoScope.project, patterns=None, reporter=reporter)
+
+    assert len(report.projects) == 1
+    outcome = report.projects[0]
+    assert outcome.repo_name == "demo"
+    assert outcome.success is False
+    assert outcome.error is not None
+    assert report.success is False

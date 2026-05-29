@@ -25,7 +25,6 @@ from winter_cli.modules.workspace.models import (
 from winter_cli.modules.workspace.repo_repository import IReadRepoRepository
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_repository import IReadWorkspaceRepository
-from winter_cli.modules.workspace.workspace_sync_service import WorkspaceSyncService
 from winter_cli.plugins.loader import PluginRegistry
 from winter_cli.plugins.types import (
     ActionScope,
@@ -41,7 +40,6 @@ if TYPE_CHECKING:
 class WorkspaceScreen(Screen):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("r", "refresh", "Refresh"),
-        Binding("s", "sync", "Sync"),
         Binding("L", "open_log", "Log"),
         Binding("q", "quit", "Quit"),
         Binding("ctrl+k", "jump_prev", "Jump prev", show=False),
@@ -51,7 +49,6 @@ class WorkspaceScreen(Screen):
     def __init__(
         self,
         env_status_svc: EnvStatusService,
-        workspace_sync_svc: WorkspaceSyncService,
         workspace_repo: IReadWorkspaceRepository,
         repo_repo: IReadRepoRepository,
         repo_factory: RepositoryFactory,
@@ -62,7 +59,6 @@ class WorkspaceScreen(Screen):
     ) -> None:
         super().__init__(**kwargs)
         self._env_status_svc = env_status_svc
-        self._workspace_sync_svc = workspace_sync_svc
         self._workspace_repo = workspace_repo
         self._repo_repo = repo_repo
         self._repo_factory = repo_factory
@@ -226,23 +222,6 @@ class WorkspaceScreen(Screen):
         chain = self.focus_chain
         if chain:
             chain[-1].focus()
-
-    def action_sync(self) -> None:
-        grid = self.query_one("#grid", FeatureWorktreesGrid)
-        name = grid.get_selected_worktree()
-        if name is not None:
-            self._run_sync(name)
-
-    @work(thread=True)
-    def _run_sync(self, name: str) -> None:
-        env_worktrees = self._env_worktrees.get(name)
-        if env_worktrees is None:
-            return
-        try:
-            self._workspace_sync_svc.sync_env(env_worktrees)
-        except RepoError as exc:
-            self._capture_error(f"WorkspaceScreen.sync({name})", exc)
-        self._refresh_data()
 
     def on_data_table_cell_selected(self, event: FeatureWorktreesGrid.CellSelected) -> None:
         grid = self.query_one("#grid", FeatureWorktreesGrid)

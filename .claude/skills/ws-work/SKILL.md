@@ -61,7 +61,9 @@ State your decision and reasoning to the user. Carry it forward — it informs p
 Once the worktree is selected, ask the user: **"Run a baseline check to make sure `<worktree>` is up to date and set up before we start?"**
 
 If yes:
-1. Sync the worktree against main: `winter ws sync <worktree>`
+1. Bring the worktree up to date against main with two commands:
+   - `winter ws fetch <worktree>` — refreshes `origin` refs and fast-forwards (ff-only, no merge commit) each repo's **source checkout** (`projects/<repo>`) local main. Does not touch the feature worktrees.
+   - `winter ws merge origin/<main-branch> <worktree> --merge` — integrates `origin/<main-branch>` into the feature worktrees, falling back to a 3-way merge commit when ff-only can't apply.
 2. Reconcile setup (re-runs each repo's `cmd` list, refreshes git-excludes): `winter ws init <worktree>`
 3. Report the result. If anything failed, surface it to the user and pause before proceeding.
 

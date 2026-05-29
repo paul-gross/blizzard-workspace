@@ -41,7 +41,7 @@ async def test_log_screen_displays_injected_errors():
         log.clear()
         log.record(location="WorkspaceScreen.refresh", exc=_err("err A"))
         log.record(location="WorkspaceScreen.refresh", exc=_err("err A"))  # dup fingerprint
-        log.record(location="WorkspaceScreen.sync(alpha)", exc=_err("err B", cmd_args=("upstream",)))
+        log.record(location="WorkspaceScreen.refresh(alpha)", exc=_err("err B", cmd_args=("upstream",)))
         await pilot.press("L")
         await pilot.pause(0.3)
         assert isinstance(app.screen, ErrorLogScreen)

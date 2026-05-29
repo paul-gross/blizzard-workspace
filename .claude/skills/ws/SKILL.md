@@ -39,7 +39,7 @@ What would you like to do?
 | Fetch, update refs | `/ws-fetch [name]` |
 | Pull, rebase down, bring down | `/ws-pull [name]` |
 | Push, send up, ship | `/ws-push [name]` |
-| Bring main into an env, sync env against main | `winter ws sync <name>` |
+| Bring main into an env, update an env against main | `winter ws fetch <name>` then `winter ws merge origin/<main-branch> <name>` |
 | Work, implement, build, start a plan | `/ws-work <plan>` |
 | Initialize, bring up after clone, make it work | `/ws-init [target]` |
 | Configure, declare new repo, set git identity | `/ws-setup` |

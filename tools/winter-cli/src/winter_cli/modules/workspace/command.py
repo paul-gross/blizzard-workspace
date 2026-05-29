@@ -16,7 +16,6 @@ from winter_cli.modules.workspace.handlers import (
     EnvPullParams,
     EnvPushParams,
     EnvStatusParams,
-    EnvSyncParams,
     InitParams,
     RepoAddParams,
     RepoListParams,
@@ -183,17 +182,6 @@ def ws_status(ctx: click.Context, env: str | None, output_json: bool):
     handler.status(EnvStatusParams(env=env, output_json=output_json))
 
 
-@ws_group.command("sync")
-@click.argument("env")
-@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
-@click.pass_context
-def ws_sync(ctx: click.Context, env: str, output_json: bool):
-    """Sync a feature environment with origin (fetch + ff-only merge)."""
-    container = cli_ctx(ctx).container
-    handler = container.workspace_handler()
-    handler.sync(EnvSyncParams(env=env, output_json=output_json))
-
-
 @ws_group.command("connect")
 @click.argument("env")
 @click.argument("feature_branch")
@@ -273,11 +261,19 @@ def ws_fetch(
     all_flag: bool,
     output_json: bool,
 ):
-    """Fetch refs from origin for project worktrees matched by PATTERNS.
+    """Fetch refs from origin for project worktrees matched by PATTERNS, and fast-forward their source checkouts.
 
     Each PATTERN is a segment-aware glob over `<env>/<repo>`. Bare env names
     (no `/`) are treated as `<env>/*`. Pinned and non-pinned worktrees are
     both fetched.
+
+    Beyond refreshing remote-tracking refs, each matched project repo's
+    source checkout (`projects/<repo>`) has its local main fast-forwarded to
+    `origin/<main-branch>` — worktrees share that `.git`, so it's one fetch
+    per repo, and it keeps the base `winter ws init` branches new envs off of
+    current. Feature worktrees are never touched. A diverged source-checkout
+    main (it should only ever track main) is reported as a failed fetch for
+    that repo. Standalone repos are fetched only; they have no source checkout.
 
     \b
       winter ws fetch                       # every env's project worktrees

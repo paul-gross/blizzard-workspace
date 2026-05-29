@@ -18,7 +18,6 @@ from winter_cli.modules.workspace.handlers.workspace_handler import (
     EnvPullParams,
     EnvPushParams,
     EnvStatusParams,
-    EnvSyncParams,
     WorkspaceHandler,
     WorkspacePruneParams,
 )
@@ -37,7 +36,6 @@ __all__ = [
     "EnvPullParams",
     "EnvPushParams",
     "EnvStatusParams",
-    "EnvSyncParams",
     "InitHandler",
     "InitParams",
     "RepoAddParams",

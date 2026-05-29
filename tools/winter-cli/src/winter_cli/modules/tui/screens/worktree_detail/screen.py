@@ -23,7 +23,6 @@ from winter_cli.modules.workspace.models import (
 from winter_cli.modules.workspace.repo_repository import IReadRepoRepository
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_repository import IReadWorkspaceRepository
-from winter_cli.modules.workspace.workspace_sync_service import WorkspaceSyncService
 from winter_cli.plugins.loader import PluginRegistry
 from winter_cli.plugins.types import (
     ActionScope,
@@ -36,7 +35,6 @@ from winter_cli.plugins.types import (
 class WorktreeDetailScreen(Screen):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("r", "refresh", "Refresh"),
-        Binding("s", "sync", "Sync"),
         Binding("L", "open_log", "Log"),
         Binding("h", "cursor_left", "Left", show=False),
         Binding("j", "cursor_down", "Down", show=False),
@@ -49,7 +47,6 @@ class WorktreeDetailScreen(Screen):
         self,
         worktree_name: str,
         env_status_svc: EnvStatusService,
-        workspace_sync_svc: WorkspaceSyncService,
         workspace_repo: IReadWorkspaceRepository,
         repo_repo: IReadRepoRepository,
         repo_factory: RepositoryFactory,
@@ -62,7 +59,6 @@ class WorktreeDetailScreen(Screen):
         super().__init__(**kwargs)
         self.worktree_name = worktree_name
         self._env_status_svc = env_status_svc
-        self._workspace_sync_svc = workspace_sync_svc
         self._workspace_repo = workspace_repo
         self._repo_repo = repo_repo
         self._repo_factory = repo_factory
@@ -305,20 +301,6 @@ class WorktreeDetailScreen(Screen):
         table.action_cursor_right()
 
     def action_refresh(self) -> None:
-        self._refresh_data()
-
-    def action_sync(self) -> None:
-        self._run_sync()
-
-    @work(thread=True)
-    def _run_sync(self) -> None:
-        try:
-            project_repos = self._repo_factory.get_project_repos()
-            env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
-            env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-            self._workspace_sync_svc.sync_env(env_worktrees)
-        except RepoError as exc:
-            self._capture_error(f"WorktreeDetailScreen({self.worktree_name}).sync", exc)
         self._refresh_data()
 
     def _run_plugin_action(self, action_name: str) -> None:
