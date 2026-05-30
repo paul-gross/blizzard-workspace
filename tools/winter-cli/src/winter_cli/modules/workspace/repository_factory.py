@@ -72,6 +72,18 @@ class RepositoryFactory:
             )
         return result
 
+    def find_standalone(self, name: str) -> StandaloneRepository | None:
+        """Resolve a standalone repo by name across both singletons and user-declared repos.
+
+        Singletons and user-declared standalones share one lookup namespace in the
+        dashboard (the standalone panel lists both), so callers that resolve a repo
+        from a selected row go through here rather than re-stitching the two lists.
+        """
+        for repo in (*self.get_singleton_repos(), *self.get_standalone_repos()):
+            if repo.name == name:
+                return repo
+        return None
+
     def _resolve_project_name(self, repo: ProjectRepositoryConfig) -> str:
         if repo.name:
             return repo.name

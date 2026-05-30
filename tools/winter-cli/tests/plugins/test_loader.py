@@ -8,7 +8,7 @@ import pytest
 from tests.conftest import FakeConfigFileReader, FakeFilesystem
 from winter_cli.modules.workspace.models import StandaloneRepository, Workspace
 from winter_cli.plugins.loader import PluginRegistry
-from winter_cli.plugins.types import PluginRegistration
+from winter_cli.plugins.types import IDetailPanel, PluginRegistration
 
 WORKSPACE_ROOT = Path("/ws")
 
@@ -50,6 +50,45 @@ def _make_module(name: str, *, config_received: list[dict]) -> ModuleType:
 @pytest.fixture
 def workspace() -> Workspace:
     return Workspace(root_path=WORKSPACE_ROOT, session_prefix="t", main_branch="main")
+
+
+class _StubPanel:
+    """Minimal IDetailPanel for asserting the loader collects detail panels."""
+
+    name = "info"
+    title = "Info"
+
+    def render(self, context: object) -> object:
+        return "x"
+
+
+def _make_panel_module(name: str, panel: IDetailPanel) -> ModuleType:
+    """Build a fake plugin module that contributes a single detail panel."""
+    module = ModuleType(name)
+
+    def create_plugin() -> SimpleNamespace:
+        def register(config: object) -> PluginRegistration:
+            return PluginRegistration(detail_panels=[panel])
+
+        return SimpleNamespace(name=name, register=register)
+
+    module.create_plugin = create_plugin  # type: ignore[attr-defined]
+    return module
+
+
+def test_discover_collects_detail_panels(workspace: Workspace) -> None:
+    plugin_dir = WORKSPACE_ROOT / ".winter" / "plugins" / "paneled"
+    plugin_py = plugin_dir / "plugin.py"
+    fs = FakeFilesystem(
+        directories=[WORKSPACE_ROOT / ".winter" / "plugins", plugin_dir],
+        files={plugin_py: ""},
+    )
+    panel = _StubPanel()
+    loader = FakePluginLoader({plugin_py: _make_panel_module("paneled", panel)})
+
+    registry = PluginRegistry(fs, FakeConfigFileReader({}), loader).discover(workspace, standalone_repos=[])
+
+    assert registry.detail_panels == [panel]
 
 
 def test_discover_loads_workspace_local_plugin(workspace: Workspace) -> None:

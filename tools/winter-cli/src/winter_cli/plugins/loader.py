@@ -11,6 +11,7 @@ from winter_cli.modules.workspace.models import StandaloneRepository, Workspace
 from winter_cli.plugins.plugin_loader import IPluginLoader
 from winter_cli.plugins.types import (
     ActionScope,
+    IDetailPanel,
     IEnvironmentDecorator,
     IWinterPlugin,
     IWorktreeRepoDecorator,
@@ -48,6 +49,7 @@ class PluginRegistry:
         self.commands: list[click.Command] = []
         self.worktree_repo_decorators: list[IWorktreeRepoDecorator] = []
         self.environment_decorators: list[IEnvironmentDecorator] = []
+        self.detail_panels: list[IDetailPanel] = []
         self.screens: list = []
         self.tui_actions: list[TuiAction] = []
 
@@ -129,6 +131,7 @@ class PluginRegistry:
         self.commands.extend(registration.commands)
         self.worktree_repo_decorators.extend(registration.worktree_repo_decorators)
         self.environment_decorators.extend(registration.environment_decorators)
+        self.detail_panels.extend(registration.detail_panels)
         self.screens.extend(registration.tui_screens)
         self.tui_actions.extend(registration.tui_actions)
 

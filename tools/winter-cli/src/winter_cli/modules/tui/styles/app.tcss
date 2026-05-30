@@ -47,6 +47,10 @@ WorktreeDetailScreen {
     layout: vertical;
 }
 
+StandaloneDetailScreen {
+    layout: vertical;
+}
+
 #detail-title-bar {
     height: auto;
     padding: 0 1;
@@ -67,7 +71,14 @@ WorktreeDetailScreen {
 
 #detail-info {
     width: 1fr;
+    height: 1fr;
     padding: 0 1;
+}
+
+/* The contributed-panel tab bar fills the detail body; with zero panels the
+   view renders a bare #repo-info Static instead (no TabbedContent). */
+#detail-tabs {
+    height: 1fr;
 }
 
 ExtensionSlot {

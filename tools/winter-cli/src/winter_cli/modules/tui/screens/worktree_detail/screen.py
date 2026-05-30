@@ -6,12 +6,14 @@ from typing import ClassVar, cast
 from rich.text import Text
 from textual import work
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical
+from textual.containers import Horizontal
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
 from winter_cli.modules.tui.error_log import ErrorLogService
+from winter_cli.modules.tui.screens.plugin_action_mixin import PluginActionMixin
 from winter_cli.modules.tui.widgets.refresh_status import RefreshStatus
+from winter_cli.modules.tui.widgets.repo_detail_view import PanelOutcome, RepoDetailView, render_detail_panels
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
 from winter_cli.modules.workspace.models import (
     FeatureEnvironmentStatus,
@@ -26,13 +28,14 @@ from winter_cli.modules.workspace.workspace_repository import IReadWorkspaceRepo
 from winter_cli.plugins.loader import PluginRegistry
 from winter_cli.plugins.types import (
     ActionScope,
+    DetailPanelContext,
     FeatureEnvironmentContext,
     FeatureWorktreeContext,
     WorkspaceContext,
 )
 
 
-class WorktreeDetailScreen(Screen):
+class WorktreeDetailScreen(PluginActionMixin, Screen):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("r", "refresh", "Refresh"),
         Binding("L", "open_log", "Log"),
@@ -65,6 +68,7 @@ class WorktreeDetailScreen(Screen):
         self._workspace = workspace
         self._plugin_registry = plugin_registry
         self._error_log = error_log
+        self._detail_panels = list(plugin_registry.detail_panels)
         self._env_status: FeatureEnvironmentStatus | None = None
         self._repo_statuses: list[WorktreeRepoStatus] = []
         self._focused_repo: str | None = focused_repo
@@ -78,16 +82,14 @@ class WorktreeDetailScreen(Screen):
             yield RefreshStatus(id="refresh-status")
         yield DataTable(id="detail-repos")
         with Horizontal(id="detail-bottom"):
-            yield Vertical(Static(id="repo-info"), id="detail-info")
+            yield RepoDetailView(self._detail_panels, id="detail-info")
         yield Footer()
 
     def on_mount(self) -> None:
         table = self.query_one("#detail-repos", DataTable)
         table.cursor_type = "row"
 
-        for scope in ActionScope:
-            for action in self._plugin_registry.actions_for_scope(scope):
-                self._bindings.bind(action.key, f"plugin_{action.name}", action.description)
+        self._bind_plugin_actions()
 
         self._refresh_data()
         self.set_interval(30, self._refresh_data)
@@ -119,18 +121,6 @@ class WorktreeDetailScreen(Screen):
             on_repo_error=_on_repo_error,
         )
         self.app.call_from_thread(self._update_widgets, env_status, repo_statuses)
-
-    def _capture_error(self, location: str, exc: RepoError) -> None:
-        """Log a RepoError to the session log and toast (deduped) without crashing."""
-        entry, should_notify = self._error_log.record(location=location, exc=exc)
-        if should_notify:
-            self.app.call_from_thread(
-                self.app.notify,
-                f"{entry.message}\nPress L for log",
-                title="git error",
-                severity="error",
-                timeout=6,
-            )
 
     def _on_refresh_finished(self) -> None:
         with contextlib.suppress(Exception):
@@ -256,33 +246,14 @@ class WorktreeDetailScreen(Screen):
                 exc,
             )
             return
-        self.app.call_from_thread(self._update_repo_info, detail)
+        # Panel rendering is pure and isolated, so it runs here in the worker
+        # thread alongside the git read; the UI thread only applies the results.
+        outcomes = render_detail_panels(self._detail_panels, DetailPanelContext(worktree=wt))
+        self.app.call_from_thread(self._update_repo_info, detail, outcomes)
 
-    def _update_repo_info(self, detail: RepoStatus) -> None:
+    def _update_repo_info(self, detail: RepoStatus, outcomes: list[PanelOutcome]) -> None:
         self._repo_detail = detail
-        info = self.query_one("#repo-info", Static)
-
-        lines = [
-            f"[bold]{detail.name}[/bold]",
-            f"Branch:   {detail.branch or '—'}",
-            f"Tracking: {detail.tracking_branch or '—'}",
-            f"Ahead:    {detail.ahead}  Behind: {detail.behind}",
-        ]
-
-        if len(detail.dirty_files) > 0:
-            lines.append(f"\n[bold]Modified ({len(detail.dirty_files)}):[/bold]")
-            for f in detail.dirty_files[:15]:
-                lines.append(f"  {f}")
-            remaining = len(detail.dirty_files) - 15
-            if remaining > 0:
-                lines.append(f"  ... and {remaining} more")
-
-        if len(detail.recent_commits) > 0:
-            lines.append("\n[bold]Recent commits:[/bold]")
-            for c in detail.recent_commits[:10]:
-                lines.append(f"  [dim]{c.short_hash}[/dim] {c.message}")
-
-        info.update("\n".join(lines))
+        self.query_one("#detail-info", RepoDetailView).show_repo(detail, outcomes)
 
     def action_cursor_up(self) -> None:
         table = self.query_one("#detail-repos", DataTable)
@@ -346,16 +317,6 @@ class WorktreeDetailScreen(Screen):
             if action.name == action_name:
                 action.handler(ctx)
                 return
-
-    def __getattr__(self, name: str):
-        if name.startswith("action_plugin_"):
-            action_name = name[len("action_plugin_") :]
-
-            def handler() -> None:
-                self._run_plugin_action(action_name)
-
-            return handler
-        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")
 
     def action_back(self) -> None:
         self.app.pop_screen()

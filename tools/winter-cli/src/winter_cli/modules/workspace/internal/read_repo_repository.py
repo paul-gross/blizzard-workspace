@@ -31,6 +31,15 @@ class ReadRepoRepository:
     def get_worktree_status(self, worktree: FeatureWorktree) -> RepoStatus:
         return self._build_repo_status(worktree.path, worktree.repository.name, worktree.repository.main_branch)
 
+    def get_standalone_detail(self, repo: StandaloneRepository) -> RepoStatus:
+        # The standalone detail screen reuses the worktree detail's RepoStatus
+        # shape (branch / tracking / dirty files / recent commits). Unlike a
+        # feature worktree, a standalone has no feature branch ahead of main, so
+        # `recent_from_head` lists the tip commits on HEAD itself — otherwise a
+        # standalone with no configured `main_branch` would show an empty
+        # history.
+        return self._build_repo_status(repo.path, repo.name, repo.main_branch, recent_from_head=True)
+
     def get_standalone_status(self, repo: StandaloneRepository) -> StandaloneRepoStatus:
         # Missing-on-disk / not-a-repo aren't errors — the dashboard renders
         # the row as "not present" and the user knows to run init.
@@ -186,6 +195,7 @@ class ReadRepoRepository:
         repo_path: Path,
         name: str,
         main_branch: str | None,
+        recent_from_head: bool = False,
     ) -> RepoStatus:
         # Missing-on-disk / not-a-repo aren't errors — they're legitimate
         # "this worktree hasn't been provisioned yet" states the dashboard
@@ -281,9 +291,12 @@ class ReadRepoRepository:
                     ) from exc
 
                 recent_commits: list[RepoCommit] = []
-                if main_branch:
+                # Standalone repos list the tip commits on HEAD (recent_from_head);
+                # feature worktrees list only what's ahead of origin/<main>.
+                commit_rev = "HEAD" if recent_from_head else (f"origin/{main_branch}..HEAD" if main_branch else None)
+                if commit_rev is not None:
                     try:
-                        for c in r.iter_commits(f"origin/{main_branch}..HEAD", max_count=5):
+                        for c in r.iter_commits(commit_rev, max_count=10 if recent_from_head else 5):
                             # GitPython types `Commit.message` as `bytes | str`; decode the bytes case.
                             msg = c.message
                             if isinstance(msg, bytes):
@@ -292,10 +305,12 @@ class ReadRepoRepository:
                                 RepoCommit(short_hash=c.hexsha[:7], message=msg.strip().splitlines()[0])
                             )
                     except git.GitCommandError as exc:
-                        # `iter_commits` against a missing `origin/<main>` is the same
-                        # case as the ahead/behind probe above — tolerate it.
+                        # `iter_commits` against a missing `origin/<main>` — or an
+                        # unborn HEAD (brand-new standalone with no commits) — is
+                        # the same tolerated case as the ahead/behind probe above.
+                        probe_ref = "HEAD" if recent_from_head else f"origin/{main_branch}"
                         try:
-                            r.git.rev_parse("--verify", "--quiet", f"origin/{main_branch}")
+                            r.git.rev_parse("--verify", "--quiet", probe_ref)
                         except git.GitCommandError:
                             pass
                         else:

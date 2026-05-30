@@ -23,6 +23,7 @@ from winter_cli.modules.doctor.handler import DoctorHandler
 from winter_cli.modules.doctor.workspace_probe_service import WorkspaceProbeService
 from winter_cli.modules.tui.error_log import ErrorLogService
 from winter_cli.modules.tui.screens.error_log import ErrorLogScreen
+from winter_cli.modules.tui.screens.standalone_detail import StandaloneDetailScreen
 from winter_cli.modules.tui.screens.workspace import WorkspaceScreen
 from winter_cli.modules.tui.screens.worktree_detail import WorktreeDetailScreen
 from winter_cli.modules.workspace.destroy_service import DestroyService
@@ -411,6 +412,15 @@ class Container(containers.DeclarativeContainer):
         WorktreeDetailScreen,
         env_status_svc=env_status_svc,
         workspace_repo=worktree_repo,
+        repo_repo=repo_repo,
+        repo_factory=repo_factory,
+        workspace=workspace,
+        plugin_registry=plugin_registry,
+        error_log=error_log_svc,
+    )
+
+    standalone_detail_screen = providers.Factory(
+        StandaloneDetailScreen,
         repo_repo=repo_repo,
         repo_factory=repo_factory,
         workspace=workspace,

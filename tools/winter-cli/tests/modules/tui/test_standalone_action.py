@@ -74,6 +74,9 @@ class _FakeRepoFactory:
     def get_standalone_repos(self):
         return []
 
+    def find_standalone(self, name):
+        return next((r for r in [*self.get_singleton_repos(), *self.get_standalone_repos()] if r.name == name), None)
+
 
 class _FakeWorkspaceRepo:
     def get_environments(self, _workspace, _project_repos):

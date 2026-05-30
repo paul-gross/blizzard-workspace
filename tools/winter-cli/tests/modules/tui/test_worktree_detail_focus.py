@@ -113,8 +113,25 @@ class _FakePluginRegistry:
     worktree_repo_decorators: tuple = ()
     environment_decorators: tuple = ()
 
+    def __init__(self, detail_panels: tuple = ()) -> None:
+        self.detail_panels = detail_panels
+
     def actions_for_scope(self, _scope):
         return []
+
+
+class _CapturingPanel:
+    """Records the DetailPanelContext it was rendered with."""
+
+    name = "demo"
+    title = "Demo"
+
+    def __init__(self, captured: list) -> None:
+        self._captured = captured
+
+    def render(self, context) -> object:
+        self._captured.append(context)
+        return "[bold]panel body[/bold]"
 
 
 class _FakeRepoFactory:
@@ -162,7 +179,7 @@ class _DetailApp(App):
         self.push_screen(self._detail_screen)
 
 
-def _make_detail_screen(focused_repo: str | None) -> WorktreeDetailScreen:
+def _make_detail_screen(focused_repo: str | None, detail_panels: tuple = ()) -> WorktreeDetailScreen:
     env = _env("alpha", 1)
     repo_statuses = [
         WorktreeRepoStatus(worktree=_worktree(env, rn), branch="alpha", ahead=0, behind=0, dirty_count=0)
@@ -178,7 +195,7 @@ def _make_detail_screen(focused_repo: str | None) -> WorktreeDetailScreen:
         repo_repo=cast(Any, _FakeRepoRepo()),
         repo_factory=cast(Any, _FakeRepoFactory()),
         workspace=_WORKSPACE,
-        plugin_registry=cast(Any, _FakePluginRegistry()),
+        plugin_registry=cast(Any, _FakePluginRegistry(detail_panels)),
         error_log=cast(Any, None),
         focused_repo=focused_repo,
     )
@@ -218,3 +235,23 @@ async def test_detail_screen_defaults_to_first_repo_when_none_supplied():
         assert screen._focused_repo == "a"
         table = screen.query_one("#detail-repos", DataTable)
         assert table.cursor_row == 0
+
+
+@pytest.mark.asyncio
+async def test_detail_screen_renders_contributed_panel_with_worktree_context():
+    # A contributed panel renders in the feature-env detail view too, and is
+    # handed a worktree-bearing DetailPanelContext (the standalone view hands a
+    # repo-bearing one — see test_detail_panels.py).
+    from textual.widgets import Static
+
+    from winter_cli.modules.tui.widgets.repo_detail_view import RepoDetailView
+
+    captured: list = []
+    screen = _make_detail_screen(focused_repo="b", detail_panels=(_CapturingPanel(captured),))
+    app = _DetailApp(screen)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await pilot.pause(0.5)
+        assert any(ctx.worktree is not None and ctx.worktree.repository.name == "b" for ctx in captured)
+        assert all(ctx.repo is None for ctx in captured)
+        view = screen.query_one("#detail-info", RepoDetailView)
+        assert "panel body" in str(view.query_one("#detail-panel-0", Static).render())

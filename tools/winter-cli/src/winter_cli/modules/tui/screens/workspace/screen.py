@@ -7,9 +7,10 @@ from textual import work
 from textual.binding import Binding
 from textual.containers import Center, Horizontal, Middle
 from textual.screen import Screen
-from textual.widgets import Footer, Header, LoadingIndicator, Static
+from textual.widgets import DataTable, Footer, Header, LoadingIndicator, Static
 
 from winter_cli.modules.tui.error_log import ErrorLogService
+from winter_cli.modules.tui.screens.plugin_action_mixin import PluginActionMixin
 from winter_cli.modules.tui.screens.workspace.feature_worktrees import FeatureWorktreesGrid
 from winter_cli.modules.tui.screens.workspace.standalone_repos import StandaloneReposTable
 from winter_cli.modules.tui.widgets.refresh_status import RefreshStatus
@@ -38,7 +39,7 @@ if TYPE_CHECKING:
     from winter_cli.modules.tui.app import WinterDashboardApp
 
 
-class WorkspaceScreen(Screen):
+class WorkspaceScreen(PluginActionMixin, Screen):
     BINDINGS: ClassVar[list[Binding]] = [
         Binding("r", "refresh", "Refresh"),
         Binding("L", "open_log", "Log"),
@@ -100,9 +101,7 @@ class WorkspaceScreen(Screen):
         self.query_one("#services").display = False
         self.query_one("#status-bar").display = False
 
-        for scope in ActionScope:
-            for action in self._plugin_registry.actions_for_scope(scope):
-                self._bindings.bind(action.key, f"plugin_{action.name}", action.description)
+        self._bind_plugin_actions()
 
         self._refresh_data()
         self.set_interval(30, self._refresh_data)
@@ -165,18 +164,6 @@ class WorkspaceScreen(Screen):
 
         self.app.call_from_thread(self._update_widgets, env_worktrees_map, overviews, singleton_statuses)
 
-    def _capture_error(self, location: str, exc: RepoError) -> None:
-        """Log a RepoError to the session log and toast (deduped) without crashing."""
-        entry, should_notify = self._error_log.record(location=location, exc=exc)
-        if should_notify:
-            self.app.call_from_thread(
-                self.app.notify,
-                f"{entry.message}\nPress L for log",
-                title="git error",
-                severity="error",
-                timeout=6,
-            )
-
     def action_open_log(self) -> None:
         app = cast("WinterDashboardApp", self.app)
         app.push_screen(app.screen_factory.error_log_screen())
@@ -231,6 +218,17 @@ class WorkspaceScreen(Screen):
             repo_name = grid.get_selected_repo()
             app = cast("WinterDashboardApp", self.app)
             app.push_screen(app.screen_factory.worktree_detail_screen(name, focused_repo=repo_name))
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        # The feature grid is cursor_type="cell" (CellSelected, above); only the
+        # row-cursor standalone table raises RowSelected on this screen. Enter on
+        # a standalone row drills into its single-repo detail view.
+        if event.data_table.id != "singletons":
+            return
+        repo_name = self.query_one("#singletons", StandaloneReposTable).get_selected_repo()
+        if repo_name is not None:
+            app = cast("WinterDashboardApp", self.app)
+            app.push_screen(app.screen_factory.standalone_detail_screen(repo_name))
 
     def _run_plugin_action(self, action_name: str) -> None:
         action = next(
@@ -292,17 +290,7 @@ class WorkspaceScreen(Screen):
 
     @work(thread=True)
     def _execute_standalone_action(self, action_name: str, repo_name: str) -> None:
-        repo = next(
-            (
-                r
-                for r in [
-                    *self._repo_factory.get_singleton_repos(),
-                    *self._repo_factory.get_standalone_repos(),
-                ]
-                if r.name == repo_name
-            ),
-            None,
-        )
+        repo = self._repo_factory.find_standalone(repo_name)
         if repo is None:
             return
         ctx = StandaloneRepoContext(repo=repo, suspend=self.app.suspend)
@@ -310,13 +298,3 @@ class WorkspaceScreen(Screen):
             if action.name == action_name:
                 action.handler(ctx)
                 return
-
-    def __getattr__(self, name: str):
-        if name.startswith("action_plugin_"):
-            action_name = name[len("action_plugin_") :]
-
-            def handler() -> None:
-                self._run_plugin_action(action_name)
-
-            return handler
-        raise AttributeError(f"'{type(self).__name__}' has no attribute '{name}'")

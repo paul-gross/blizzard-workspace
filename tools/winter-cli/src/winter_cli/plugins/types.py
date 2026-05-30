@@ -2,8 +2,9 @@
 
 These names are the plugin author's API surface. Renaming `IWinterPlugin`,
 `PluginRegistration`, `IWorktreeRepoDecorator`, `IEnvironmentDecorator`,
-`TuiAction`, or `ActionScope` is a breaking change for external plugins —
-update the authoring doc in the same change: `winter-harness:/python/plugin-author.md`.
+`IDetailPanel`, `DetailPanelContext`, `TuiAction`, or `ActionScope` is a
+breaking change for external plugins — update the authoring doc in the same
+change: `winter-harness:/python/plugin-author.md`.
 """
 
 from __future__ import annotations
@@ -47,6 +48,40 @@ class IEnvironmentDecorator(Protocol):
     """
 
     def __call__(self, env_status: object, env_path: object) -> None: ...
+
+
+@dataclasses.dataclass
+class DetailPanelContext:
+    """The focused repo a detail panel renders for.
+
+    Exactly one field is set: `worktree` in a feature-environment detail view
+    (the repo row the cursor is on), `repo` in a standalone detail view. This is
+    the panel analog of the `worktree` / `repo` that `IWorktreeRepoDecorator`
+    and `IEnvironmentDecorator` are handed — a panel reads it to decide what to
+    render and must not mutate it.
+    """
+
+    worktree: FeatureWorktree | None = None
+    repo: StandaloneRepository | None = None
+
+
+@runtime_checkable
+class IDetailPanel(Protocol):
+    """Contributes a named, read-only info panel to the detail screen.
+
+    Rendered as a tab alongside the built-in repo info, in both the feature-env
+    and standalone detail views. `name` is a stable identifier; `title` is the
+    tab label. `render` is called once per detail refresh with the focused
+    repo's `DetailPanelContext` and returns rich-console markup (a `str`) or any
+    Rich renderable shown in the panel body. Raising is isolated by the screen —
+    the panel shows an error state and the rest of the screen keeps rendering,
+    matching the decorator error handling.
+    """
+
+    name: str
+    title: str
+
+    def render(self, context: DetailPanelContext) -> object: ...
 
 
 class ActionScope(enum.Enum):
@@ -118,6 +153,7 @@ class PluginRegistration:
     commands: list[click.Command] = dataclasses.field(default_factory=list)
     worktree_repo_decorators: list[IWorktreeRepoDecorator] = dataclasses.field(default_factory=list)
     environment_decorators: list[IEnvironmentDecorator] = dataclasses.field(default_factory=list)
+    detail_panels: list[IDetailPanel] = dataclasses.field(default_factory=list)
     tui_screens: list[Any] = dataclasses.field(default_factory=list)
     tui_actions: list[TuiAction] = dataclasses.field(default_factory=list)
     metadata: dict = dataclasses.field(default_factory=dict)

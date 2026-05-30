@@ -179,6 +179,33 @@ def test_get_standalone_status_counts_staged_files_as_dirty(
     assert status.dirty_count == 1
 
 
+def test_get_standalone_detail_lists_head_commits(monkeypatch: pytest.MonkeyPatch, repo: ReadRepoRepository) -> None:
+    # A standalone has no feature branch ahead of main, so the detail view lists
+    # the tip commits on HEAD itself — and must do so even with no main_branch.
+    git_mock = _fake_git_repo(monkeypatch)
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    r = git_mock.Repo.return_value
+    r.active_branch.name = "main"
+    r.active_branch.tracking_branch.return_value = None
+    r.index.diff.return_value = []
+    r.untracked_files = []
+    r.git.rev_list.return_value = "0"
+    commit = MagicMock()
+    commit.hexsha = "abcdef1234567"
+    commit.message = "recent work\n\nbody"
+    r.iter_commits.return_value = [commit]
+    standalone = StandaloneRepository(name="ext", path=_EXT_PATH)  # main_branch=None
+
+    status = repo.get_standalone_detail(standalone)
+
+    assert status.name == "ext"
+    assert status.branch == "main"
+    assert len(status.recent_commits) == 1
+    assert status.recent_commits[0].short_hash == "abcdef1"
+    assert status.recent_commits[0].message == "recent work"
+    r.iter_commits.assert_called_once_with("HEAD", max_count=10)
+
+
 def test_get_worktree_status_delegates_to_repo_status(
     monkeypatch: pytest.MonkeyPatch, repo: ReadRepoRepository
 ) -> None:
