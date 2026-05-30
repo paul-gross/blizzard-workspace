@@ -37,10 +37,10 @@ Greek letters (`alpha`, `beta`, …) are the suggested convention for feature en
 | `winter ws push` | `winter ws push [PATTERNS...] [--standalone\|--all] [--include-pinned\|--only-pinned] [--json]` | Push project worktrees matched by PATTERNS to their tracked upstream |
 | `winter ws connect` | `winter ws connect ENV FEATURE_BRANCH [--json]` | Connect a feature environment to a remote feature branch |
 | `winter ws disconnect` | `winter ws disconnect ENV [--json]` | Disconnect a feature environment from its feature branch |
-| `winter ws diff` | `winter ws diff ENV [--staged\|--branch] [--repo REPO] [--json]` | Unified diff across all repos in a feature environment |
+| `winter ws diff` | `winter ws diff ENV [--staged\|--branch] [--repo REPO] [--no-headers] [--json]` | Unified diff across all repos in a feature environment (`--no-headers` omits the per-repo separator headers) |
 | `winter ws index` | `winter ws index NAME [--json]` | Print the port-offset index for a feature environment name (Greek = 1..24, other = hashed 26..281) |
 | `winter ws prune` | `winter ws prune [--dry-run\|--force] [--json]` | Remove disk state for repos no longer in the workspace config (orphan project clones, orphan standalone clones, broken `.claude/` symlinks). Refuses repos with uncommitted changes or attached worktrees |
-| `winter ws worktrees` | `winter ws worktrees [--json]` | List every existing feature-environment worktree and standalone repo as a flat table or JSON array — intended for editor integrations (e.g. Neovim fuzzy-finder `cd` picker). Omits entries whose directory does not exist on disk |
+| `winter ws worktrees` | `winter ws worktrees [--status] [--json]` | List every existing feature-environment worktree and standalone repo as a flat table or JSON array — intended for editor integrations (e.g. Neovim fuzzy-finder `cd` picker). Omits entries whose directory does not exist on disk. `--status` adds per-repo git status (ahead/behind/dirty) at the cost of a git call per repo |
 
 ### `fetch` / `pull` / `push` / `merge` patterns and scope
 
@@ -183,7 +183,7 @@ winter doctor --json     # NDJSON event stream
 
 Runs preflight checks for the workspace and every installed extension. Each probe reports `pass`, `warn`, or `fail` with a one-line message and an optional remediation hint shown under failures. Exit code is `0` when nothing failed (warnings allowed), `1` if any probe failed.
 
-**Built-in core probes** cover `git --version`, the running python version (>=3.11), `.winter/config.toml` parses, every declared project repo exists at `projects/<name>/`, every declared standalone repo exists at its configured path, and every feature env's per-repo worktrees exist on the env-named branch.
+**Built-in core probes** cover `git --version`, the running python version (>=3.11), `.winter/config.toml` parses, every declared project repo exists at `projects/<name>/`, every declared standalone repo exists at its configured path, every feature env's per-repo worktrees exist on the env-named branch, and the `.claude/` symlinks (agents and skills contributed by extensions) resolve to existing targets.
 
 **Workspace probes** are contributed via a top-level `doctor = "path/to/probe-script"` field in `.winter/config.toml`. Use this to add project-specific checks ("postgres reachable", "node_modules installed", "secrets present"). See [setup.md](./setup.md#workspace-doctor-probe) for the script contract.
 

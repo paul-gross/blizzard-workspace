@@ -6,7 +6,7 @@ Git commands for the polyrepo workspace topology. All paths are relative to the 
 
 ## Pinned repos
 
-Some repos are **pinned** — they always track the remote main branch and never participate in feature branching. Declare pinning by setting `pinned = true` on a `[[project_repository]]` entry in `workspace:/.winter/config.toml`. The main branch comes from the entry's `main_branch` field, falling back to the workspace-wide `default_main_branch`.
+Some repos are **pinned** — they always track the remote main branch and never participate in feature branching. Declare pinning by setting `pinned = true` on a `[[project_repository]]` entry in `workspace:/.winter/config.toml`. The main branch comes from the entry's `main_branch` field, falling back to the top-level workspace-wide `main_branch`.
 
 The CLI treats pinned repos specially across commands:
 
