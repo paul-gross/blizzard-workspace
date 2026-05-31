@@ -59,6 +59,27 @@ the checkout being linted.
 graph-less fallback. A lint script may call `winter graph` but must never call
 `winter lint` (that would recurse).
 
+## Implementation shape
+
+`extractability.py` is organized into four service classes, each injected with
+collaborators at construction time:
+
+- **`GraphClient`** — wraps the `$WINTER_CLI graph --json` subprocess call.
+  Constructed with the CLI path; exposes `fetch_graph(cwd)`.
+- **`ManifestReader`** — reads `winter-ext.toml` manifests. Exposes
+  `module_name`, `module_requires`, and `owning_module` (walks ancestor dirs to
+  find the nearest manifest).
+- **`ReferenceScanner`** — scans markdown content. Exposes `references_in_line`
+  (path-notation refs), `import_target_module` (@import resolution), and
+  `collect_md_files` (directory walker).
+- **`ExtractabilityLint`** — orchestrates the full check. Constructed with the
+  three collaborators above; exposes `check_paths` (validates a list of paths
+  against a graph) and `cycle_findings` (detects `requires` cycles in the graph).
+
+`main()` is the composition root: it reads env vars, constructs all four
+services, wires them together, calls `check_paths` and `cycle_findings`, and
+prints NDJSON findings on stdout.
+
 ## Wiring it into a workspace
 
 It is an opt-in workspace lint check. Point `.winter/config.toml` at it:

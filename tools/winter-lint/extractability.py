@@ -94,282 +94,301 @@ class Finding:
         return json.dumps(payload)
 
 
-# ── manifest reading ────────────────────────────────────────────────────────
+# ── services ────────────────────────────────────────────────────────────────
 
 
-def _read_manifest(path: Path) -> dict:
-    try:
-        with path.open("rb") as fh:
-            return tomllib.load(fh)
-    except (OSError, tomllib.TOMLDecodeError):
-        return {}
+class GraphClient:
+    """Fetches the workspace dependency graph from the winter CLI."""
+
+    def __init__(self, winter_cli_path: str) -> None:
+        self._winter_cli_path = winter_cli_path
+
+    def fetch_graph(self, cwd: Path) -> dict[str, list[str]]:
+        """Run `$WINTER_CLI graph --json` and parse the adjacency map."""
+        try:
+            result = subprocess.run(
+                [self._winter_cli_path, "graph", "--json"],
+                cwd=str(cwd),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as exc:
+            raise GraphError(f"could not run `{self._winter_cli_path} graph --json`: {exc}") from exc
+        if result.returncode != 0:
+            detail = result.stderr.strip() or f"exit code {result.returncode}"
+            raise GraphError(f"`{self._winter_cli_path} graph --json` failed: {detail}")
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise GraphError(f"`{self._winter_cli_path} graph --json` produced invalid JSON: {exc}") from exc
+        if not isinstance(data, dict):
+            raise GraphError("`winter graph --json` did not return a JSON object")
+        return {str(k): [str(v) for v in (vs or [])] for k, vs in data.items()}
 
 
-def module_name(manifest_path: Path) -> str:
-    """A module's identity — its `name`, falling back to its directory name."""
-    data = _read_manifest(manifest_path)
-    name = data.get("name")
-    return name if isinstance(name, str) and name else manifest_path.parent.name
+class ManifestReader:
+    """Reads winter-ext.toml manifests to determine module identity and requirements."""
+
+    def _read_manifest(self, path: Path) -> dict:
+        try:
+            with path.open("rb") as fh:
+                return tomllib.load(fh)
+        except (OSError, tomllib.TOMLDecodeError):
+            return {}
+
+    def module_name(self, manifest_path: Path) -> str:
+        """A module's identity — its `name`, falling back to its directory name."""
+        data = self._read_manifest(manifest_path)
+        name = data.get("name")
+        return name if isinstance(name, str) and name else manifest_path.parent.name
+
+    def module_requires(self, manifest_path: Path) -> frozenset[str]:
+        data = self._read_manifest(manifest_path)
+        raw = data.get("requires")
+        if not isinstance(raw, list):
+            return frozenset()
+        return frozenset(r for r in raw if isinstance(r, str) and r)
+
+    def owning_module(self, path: Path, workspace_root: Path) -> tuple[str, Path]:
+        """Resolve `path` to (module-name, module-root).
+
+        Walks up to the nearest ancestor with a `winter-ext.toml`. Anything not
+        under such a module belongs to the `workspace` module, rooted at the
+        workspace root.
+        """
+        cur = path if path.is_dir() else path.parent
+        root = workspace_root.resolve()
+        while True:
+            manifest = cur / MANIFEST
+            if manifest.is_file():
+                return self.module_name(manifest), cur
+            if cur.resolve() == root or cur.parent == cur:
+                return "workspace", workspace_root
+            cur = cur.parent
 
 
-def module_requires(manifest_path: Path) -> frozenset[str]:
-    data = _read_manifest(manifest_path)
-    raw = data.get("requires")
-    if not isinstance(raw, list):
-        return frozenset()
-    return frozenset(r for r in raw if isinstance(r, str) and r)
+class ReferenceScanner:
+    """Scans markdown files for winter path-notation references and @imports."""
+
+    def references_in_line(self, line: str) -> list[str]:
+        """Winter `<context>:` reference contexts on a line (may repeat)."""
+        return [m.group(1) for m in _REF_RE.finditer(line) if self._is_winter_context(m.group(1))]
+
+    def import_target_module(
+        self,
+        line: str,
+        file: Path,
+        owner_root: Path,
+        workspace_root: Path,
+        manifest_reader: ManifestReader,
+    ) -> str | None:
+        """Module a line-leading `@import` points at, if it escapes the owner module.
+
+        Returns the target module name when the import resolves outside the owning
+        module's root (a cross-module dependency), else None (internal import, or
+        not an import-shaped line).
+        """
+        m = _IMPORT_RE.match(line)
+        if not m:
+            return None
+        raw = m.group(1)
+        if "/" not in raw and "." not in raw:  # `@param`-style, not a path import
+            return None
+        target = (file.parent / raw).resolve()
+        try:
+            target.relative_to(owner_root.resolve())
+            return None  # internal to the module
+        except ValueError:
+            pass
+        name, _ = manifest_reader.owning_module(target, workspace_root)
+        return name
+
+    def collect_md_files(self, paths: list[Path]) -> list[Path]:
+        out: list[Path] = []
+        seen: set[Path] = set()
+        for p in paths:
+            if p.is_file():
+                if p.suffix == ".md" and p not in seen:
+                    seen.add(p)
+                    out.append(p)
+                continue
+            for dirpath, dirnames, filenames in os.walk(p):
+                dirnames[:] = [d for d in dirnames if d not in PRUNE_DIRS]
+                for name in filenames:
+                    if name.endswith(".md"):
+                        f = Path(dirpath) / name
+                        if f not in seen:
+                            seen.add(f)
+                            out.append(f)
+        return out
+
+    def _is_winter_context(self, ctx: str) -> bool:
+        return ctx == "workspace" or ctx == "winter" or ctx.startswith("winter-")
 
 
-def owning_module(path: Path, workspace_root: Path) -> tuple[str, Path]:
-    """Resolve `path` to (module-name, module-root).
+class ExtractabilityLint:
+    """Orchestrates extractability checks over a set of paths."""
 
-    Walks up to the nearest ancestor with a `winter-ext.toml`. Anything not
-    under such a module belongs to the `workspace` module, rooted at the
-    workspace root.
-    """
-    cur = path if path.is_dir() else path.parent
-    root = workspace_root.resolve()
-    while True:
-        manifest = cur / MANIFEST
-        if manifest.is_file():
-            return module_name(manifest), cur
-        if cur.resolve() == root or cur.parent == cur:
-            return "workspace", workspace_root
-        cur = cur.parent
+    def __init__(
+        self,
+        graph_client: GraphClient,
+        manifest_reader: ManifestReader,
+        scanner: ReferenceScanner,
+    ) -> None:
+        self._graph_client = graph_client
+        self._manifest_reader = manifest_reader
+        self._scanner = scanner
 
+    def check_paths(
+        self,
+        paths: list[Path],
+        graph: dict[str, list[str]],
+        workspace_root: Path,
+    ) -> list[Finding]:
+        """Validate every winter reference in the in-scope markdown files."""
+        known = frozenset(graph.keys())
+        findings: list[Finding] = []
+        requires_cache: dict[Path, frozenset[str]] = {}
 
-# ── reference + import extraction ───────────────────────────────────────────
+        for file in self._scanner.collect_md_files(paths):
+            owner, owner_root = self._manifest_reader.owning_module(file, workspace_root)
+            manifest = owner_root / MANIFEST
+            if manifest not in requires_cache:
+                requires_cache[manifest] = (
+                    self._manifest_reader.module_requires(manifest)
+                    if owner != "workspace"
+                    else frozenset()
+                )
+            owner_requires = requires_cache[manifest]
 
+            try:
+                lines = file.read_text(errors="replace").splitlines()
+            except OSError:
+                continue
 
-def _is_winter_context(ctx: str) -> bool:
-    return ctx == "workspace" or ctx == "winter" or ctx.startswith("winter-")
+            in_fence = False
+            for lineno, line in enumerate(lines, start=1):
+                stripped = line.lstrip()
+                # References inside a fenced code block are illustrative literals
+                # (sample commands, example prompts) — skip the whole fence.
+                if stripped.startswith("```") or stripped.startswith("~~~"):
+                    in_fence = not in_fence
+                    continue
+                if in_fence:
+                    continue
+                if _MARKER_RE.search(line):
+                    continue
+                targets = self._scanner.references_in_line(line)
+                imp = self._scanner.import_target_module(
+                    line, file, owner_root, workspace_root, self._manifest_reader
+                )
+                if imp is not None:
+                    targets.append(imp)
+                for target in targets:
+                    verdict = self._classify(owner, owner_requires, target, known)
+                    if verdict is not None:
+                        findings.append(
+                            Finding(
+                                status=verdict.status,
+                                message=verdict.message,
+                                file=self._relpath(file, workspace_root),
+                                line=lineno,
+                                remediation=verdict.remediation,
+                            )
+                        )
+        return findings
 
+    def cycle_findings(self, graph: dict[str, list[str]]) -> list[Finding]:
+        findings: list[Finding] = []
+        for cycle in self._detect_cycles(graph):
+            chain = " → ".join(cycle)
+            findings.append(
+                Finding(
+                    status="fail",
+                    message=f"dependency cycle in `requires`: {chain}",
+                    remediation="Break the cycle — a module's requires graph must be acyclic.",
+                )
+            )
+        return findings
 
-def references_in_line(line: str) -> list[str]:
-    """Winter `<context>:` reference contexts on a line (may repeat)."""
-    return [m.group(1) for m in _REF_RE.finditer(line) if _is_winter_context(m.group(1))]
-
-
-def import_target_module(line: str, file: Path, owner_root: Path, workspace_root: Path) -> str | None:
-    """Module a line-leading `@import` points at, if it escapes the owner module.
-
-    Returns the target module name when the import resolves outside the owning
-    module's root (a cross-module dependency), else None (internal import, or
-    not an import-shaped line).
-    """
-    m = _IMPORT_RE.match(line)
-    if not m:
-        return None
-    raw = m.group(1)
-    if "/" not in raw and "." not in raw:  # `@param`-style, not a path import
-        return None
-    target = (file.parent / raw).resolve()
-    try:
-        target.relative_to(owner_root.resolve())
-        return None  # internal to the module
-    except ValueError:
-        pass
-    name, _ = owning_module(target, workspace_root)
-    return name
-
-
-# ── rule application ────────────────────────────────────────────────────────
-
-
-def classify(owner: str, owner_requires: frozenset[str], target: str, known: frozenset[str]) -> Finding | None:
-    """Apply the extractability rules to one reference; None when allowed."""
-    if target == owner:
-        return None
-    if owner in CORE:
+    def _classify(
+        self,
+        owner: str,
+        owner_requires: frozenset[str],
+        target: str,
+        known: frozenset[str],
+    ) -> Finding | None:
+        """Apply the extractability rules to one reference; None when allowed."""
+        if target == owner:
+            return None
+        if owner in CORE:
+            if target in CORE:
+                return None
+            return Finding(
+                status="fail",
+                message=f"core module `{owner}` references extension `{target}` (layering violation)",
+                remediation=f"A foundation must not depend on an extension. Drop the reference, move the "
+                f"content into core, or mark it `<!-- winter-lint:example -->` if purely illustrative.",
+            )
         if target in CORE:
             return None
-        return Finding(
-            status="fail",
-            message=f"core module `{owner}` references extension `{target}` (layering violation)",
-            remediation=f"A foundation must not depend on an extension. Drop the reference, move the "
-            f"content into core, or mark it `<!-- winter-lint:example -->` if purely illustrative.",
-        )
-    if target in CORE:
-        return None
-    if target in owner_requires:
-        return None
-    if target in known:
-        return Finding(
-            status="fail",
-            message=f"`{owner}` references `{target}` but does not declare it in `requires`",
-            remediation=f"Add `{target}` to {owner}'s {MANIFEST} `requires`, or mark the reference "
-            f"`<!-- winter-lint:example -->` if it is only an illustration.",
-        )
-    return Finding(
-        status="fail",
-        message=f"`{owner}` references unknown / uninstalled module `{target}`",
-        remediation=f"Declare `{target}` in `requires` if it is a real dependency, or mark the "
-        f"reference `<!-- winter-lint:example -->` if it is only an illustration.",
-    )
-
-
-def _relpath(file: Path, workspace_root: Path) -> str:
-    try:
-        return str(file.resolve().relative_to(workspace_root.resolve()))
-    except ValueError:
-        return str(file)
-
-
-def _collect_md_files(paths: list[Path]) -> list[Path]:
-    out: list[Path] = []
-    seen: set[Path] = set()
-    for p in paths:
-        if p.is_file():
-            if p.suffix == ".md" and p not in seen:
-                seen.add(p)
-                out.append(p)
-            continue
-        for dirpath, dirnames, filenames in os.walk(p):
-            dirnames[:] = [d for d in dirnames if d not in PRUNE_DIRS]
-            for name in filenames:
-                if name.endswith(".md"):
-                    f = Path(dirpath) / name
-                    if f not in seen:
-                        seen.add(f)
-                        out.append(f)
-    return out
-
-
-def check_paths(paths: list[Path], graph: dict[str, list[str]], workspace_root: Path) -> list[Finding]:
-    """Validate every winter reference in the in-scope markdown files."""
-    known = frozenset(graph.keys())
-    findings: list[Finding] = []
-    requires_cache: dict[Path, frozenset[str]] = {}
-
-    for file in _collect_md_files(paths):
-        owner, owner_root = owning_module(file, workspace_root)
-        manifest = owner_root / MANIFEST
-        if manifest not in requires_cache:
-            requires_cache[manifest] = module_requires(manifest) if owner != "workspace" else frozenset()
-        owner_requires = requires_cache[manifest]
-
-        try:
-            lines = file.read_text(errors="replace").splitlines()
-        except OSError:
-            continue
-
-        in_fence = False
-        for lineno, line in enumerate(lines, start=1):
-            stripped = line.lstrip()
-            # References inside a fenced code block are illustrative literals
-            # (sample commands, example prompts) — skip the whole fence.
-            if stripped.startswith("```") or stripped.startswith("~~~"):
-                in_fence = not in_fence
-                continue
-            if in_fence:
-                continue
-            if _MARKER_RE.search(line):
-                continue
-            targets = references_in_line(line)
-            imp = import_target_module(line, file, owner_root, workspace_root)
-            if imp is not None:
-                targets.append(imp)
-            for target in targets:
-                verdict = classify(owner, owner_requires, target, known)
-                if verdict is not None:
-                    findings.append(
-                        Finding(
-                            status=verdict.status,
-                            message=verdict.message,
-                            file=_relpath(file, workspace_root),
-                            line=lineno,
-                            remediation=verdict.remediation,
-                        )
-                    )
-    return findings
-
-
-# ── cycle detection ─────────────────────────────────────────────────────────
-
-
-def detect_cycles(graph: dict[str, list[str]]) -> list[list[str]]:
-    """Return each `requires` cycle as a node list (first node repeated at end)."""
-    color: dict[str, int] = {}  # 0=visiting, 1=done
-    stack: list[str] = []
-    cycles: list[list[str]] = []
-    seen_keys: set[frozenset[str]] = set()
-
-    def visit(node: str) -> None:
-        color[node] = 0
-        stack.append(node)
-        for dep in graph.get(node, []):
-            if dep not in graph:  # unknown target — the reference check owns this
-                continue
-            if color.get(dep) == 0:
-                cycle = stack[stack.index(dep):] + [dep]
-                key = frozenset(cycle)
-                if key not in seen_keys:
-                    seen_keys.add(key)
-                    cycles.append(cycle)
-            elif dep not in color:
-                visit(dep)
-        stack.pop()
-        color[node] = 1
-
-    for node in graph:
-        if node not in color:
-            visit(node)
-    return cycles
-
-
-def cycle_findings(graph: dict[str, list[str]]) -> list[Finding]:
-    findings: list[Finding] = []
-    for cycle in detect_cycles(graph):
-        chain = " → ".join(cycle)
-        findings.append(
-            Finding(
+        if target in owner_requires:
+            return None
+        if target in known:
+            return Finding(
                 status="fail",
-                message=f"dependency cycle in `requires`: {chain}",
-                remediation="Break the cycle — a module's requires graph must be acyclic.",
+                message=f"`{owner}` references `{target}` but does not declare it in `requires`",
+                remediation=f"Add `{target}` to {owner}'s {MANIFEST} `requires`, or mark the reference "
+                f"`<!-- winter-lint:example -->` if it is only an illustration.",
             )
+        return Finding(
+            status="fail",
+            message=f"`{owner}` references unknown / uninstalled module `{target}`",
+            remediation=f"Declare `{target}` in `requires` if it is a real dependency, or mark the "
+            f"reference `<!-- winter-lint:example -->` if it is only an illustration.",
         )
-    return findings
 
+    def _detect_cycles(self, graph: dict[str, list[str]]) -> list[list[str]]:
+        """Return each `requires` cycle as a node list (first node repeated at end)."""
+        color: dict[str, int] = {}  # 0=visiting, 1=done
+        stack: list[str] = []
+        cycles: list[list[str]] = []
+        seen_keys: set[frozenset[str]] = set()
 
-# ── graph callback ──────────────────────────────────────────────────────────
+        def visit(node: str) -> None:
+            color[node] = 0
+            stack.append(node)
+            for dep in graph.get(node, []):
+                if dep not in graph:  # unknown target — the reference check owns this
+                    continue
+                if color.get(dep) == 0:
+                    cycle = stack[stack.index(dep):] + [dep]
+                    key = frozenset(cycle)
+                    if key not in seen_keys:
+                        seen_keys.add(key)
+                        cycles.append(cycle)
+                elif dep not in color:
+                    visit(dep)
+            stack.pop()
+            color[node] = 1
 
+        for node in graph:
+            if node not in color:
+                visit(node)
+        return cycles
 
-def fetch_graph(winter_cli: str, cwd: Path) -> dict[str, list[str]]:
-    """Run `$WINTER_CLI graph --json` and parse the adjacency map."""
-    try:
-        result = subprocess.run(
-            [winter_cli, "graph", "--json"],
-            cwd=str(cwd),
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except OSError as exc:
-        raise GraphError(f"could not run `{winter_cli} graph --json`: {exc}") from exc
-    if result.returncode != 0:
-        detail = result.stderr.strip() or f"exit code {result.returncode}"
-        raise GraphError(f"`{winter_cli} graph --json` failed: {detail}")
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise GraphError(f"`{winter_cli} graph --json` produced invalid JSON: {exc}") from exc
-    if not isinstance(data, dict):
-        raise GraphError("`winter graph --json` did not return a JSON object")
-    return {str(k): [str(v) for v in (vs or [])] for k, vs in data.items()}
+    def _relpath(self, file: Path, workspace_root: Path) -> str:
+        try:
+            return str(file.resolve().relative_to(workspace_root.resolve()))
+        except ValueError:
+            return str(file)
 
 
 # ── entry point ─────────────────────────────────────────────────────────────
 
 
-def _scope_paths(env: dict[str, str], workspace_root: Path) -> list[Path]:
-    raw = env.get("WINTER_LINT_PATHS")
-    if raw is not None:
-        return [Path(line) for line in raw.splitlines() if line.strip()]
-    argv = [Path(a) for a in sys.argv[1:]]
-    return argv or [workspace_root]
-
-
-def main() -> int:
+def main(argv: list[str] = sys.argv[1:]) -> int:
     env = os.environ
     workspace_root = Path(env.get("WINTER_WORKSPACE_DIR") or Path.cwd())
     winter_cli = env.get("WINTER_CLI")
@@ -384,13 +403,24 @@ def main() -> int:
             )
         )
     else:
+        graph_client = GraphClient(winter_cli)
+        manifest_reader = ManifestReader()
+        scanner = ReferenceScanner()
+        lint = ExtractabilityLint(graph_client, manifest_reader, scanner)
+
+        raw = env.get("WINTER_LINT_PATHS")
+        if raw is not None:
+            paths = [Path(line) for line in raw.splitlines() if line.strip()]
+        else:
+            paths = [Path(a) for a in argv] or [workspace_root]
+
         try:
-            graph = fetch_graph(winter_cli, workspace_root)
+            graph = graph_client.fetch_graph(workspace_root)
         except GraphError as exc:
             findings.append(Finding(status="fail", message=str(exc)))
         else:
-            findings.extend(check_paths(_scope_paths(env, workspace_root), graph, workspace_root))
-            findings.extend(cycle_findings(graph))
+            findings.extend(lint.check_paths(paths, graph, workspace_root))
+            findings.extend(lint.cycle_findings(graph))
 
     for finding in findings:
         print(finding.to_json())
@@ -398,4 +428,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main(sys.argv[1:]))

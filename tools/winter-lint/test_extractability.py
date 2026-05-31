@@ -12,44 +12,56 @@ import extractability as ext  # noqa: E402
 class ClassifyTests(unittest.TestCase):
     KNOWN = frozenset({"winter-a", "winter-b", "winter-c"})
 
+    def setUp(self) -> None:
+        manifest_reader = ext.ManifestReader()
+        scanner = ext.ReferenceScanner()
+        self.lint = ext.ExtractabilityLint(
+            graph_client=None,  # type: ignore[arg-type]
+            manifest_reader=manifest_reader,
+            scanner=scanner,
+        )
+
     def test_self_reference_allowed(self) -> None:
-        self.assertIsNone(ext.classify("winter-a", frozenset(), "winter-a", self.KNOWN))
+        self.assertIsNone(self.lint._classify("winter-a", frozenset(), "winter-a", self.KNOWN))
 
     def test_core_target_allowed(self) -> None:
         for core in ("winter", "winter-cli", "workspace"):
-            self.assertIsNone(ext.classify("winter-a", frozenset(), core, self.KNOWN))
+            self.assertIsNone(self.lint._classify("winter-a", frozenset(), core, self.KNOWN))
 
     def test_declared_dependency_allowed(self) -> None:
-        self.assertIsNone(ext.classify("winter-a", frozenset({"winter-b"}), "winter-b", self.KNOWN))
+        self.assertIsNone(self.lint._classify("winter-a", frozenset({"winter-b"}), "winter-b", self.KNOWN))
 
     def test_undeclared_sibling_fails(self) -> None:
-        verdict = ext.classify("winter-a", frozenset(), "winter-c", self.KNOWN)
+        verdict = self.lint._classify("winter-a", frozenset(), "winter-c", self.KNOWN)
         assert verdict is not None
         self.assertEqual(verdict.status, "fail")
         self.assertIn("does not declare", verdict.message)
 
     def test_core_to_extension_is_layering_failure(self) -> None:
-        verdict = ext.classify("workspace", frozenset(), "winter-a", self.KNOWN)
+        verdict = self.lint._classify("workspace", frozenset(), "winter-a", self.KNOWN)
         assert verdict is not None
         self.assertEqual(verdict.status, "fail")
         self.assertIn("layering", verdict.message)
 
     def test_core_to_core_allowed(self) -> None:
-        self.assertIsNone(ext.classify("workspace", frozenset(), "winter", self.KNOWN))
+        self.assertIsNone(self.lint._classify("workspace", frozenset(), "winter", self.KNOWN))
 
     def test_unknown_module_fails(self) -> None:
-        verdict = ext.classify("winter-a", frozenset(), "winter-ghost", self.KNOWN)
+        verdict = self.lint._classify("winter-a", frozenset(), "winter-ghost", self.KNOWN)
         assert verdict is not None
         self.assertIn("unknown", verdict.message)
 
 
 class ReferenceScanTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.scanner = ext.ReferenceScanner()
+
     def test_extracts_winter_contexts(self) -> None:
         line = "see winter-harness:/python/x.md and workspace:/ai/y.md and winter:/z"
-        self.assertEqual(ext.references_in_line(line), ["winter-harness", "workspace", "winter"])
+        self.assertEqual(self.scanner.references_in_line(line), ["winter-harness", "workspace", "winter"])
 
     def test_ignores_non_winter_schemes(self) -> None:
-        self.assertEqual(ext.references_in_line("a https://example.com and file:/tmp/x"), [])
+        self.assertEqual(self.scanner.references_in_line("a https://example.com and file:/tmp/x"), [])
 
     def test_marker_regex_matches(self) -> None:
         self.assertTrue(ext._MARKER_RE.search("x winter-x:/y <!-- winter-lint:example -->"))
@@ -57,21 +69,39 @@ class ReferenceScanTests(unittest.TestCase):
 
 
 class CycleTests(unittest.TestCase):
+    def setUp(self) -> None:
+        manifest_reader = ext.ManifestReader()
+        scanner = ext.ReferenceScanner()
+        self.lint = ext.ExtractabilityLint(
+            graph_client=None,  # type: ignore[arg-type]
+            manifest_reader=manifest_reader,
+            scanner=scanner,
+        )
+
     def test_detects_cycle(self) -> None:
-        cycles = ext.detect_cycles({"a": ["b"], "b": ["a"]})
+        cycles = self.lint._detect_cycles({"a": ["b"], "b": ["a"]})
         self.assertEqual(len(cycles), 1)
 
     def test_no_cycle(self) -> None:
-        self.assertEqual(ext.detect_cycles({"a": ["b"], "b": []}), [])
+        self.assertEqual(self.lint._detect_cycles({"a": ["b"], "b": []}), [])
 
     def test_ignores_edges_to_unknown_nodes(self) -> None:
-        self.assertEqual(ext.detect_cycles({"a": ["ghost"]}), [])
+        self.assertEqual(self.lint._detect_cycles({"a": ["ghost"]}), [])
 
 
 class CheckPathsTests(unittest.TestCase):
     def _write(self, path: Path, text: str) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text)
+
+    def setUp(self) -> None:
+        manifest_reader = ext.ManifestReader()
+        scanner = ext.ReferenceScanner()
+        self.lint = ext.ExtractabilityLint(
+            graph_client=None,  # type: ignore[arg-type]
+            manifest_reader=manifest_reader,
+            scanner=scanner,
+        )
 
     def test_end_to_end_rules(self) -> None:
         import tempfile
@@ -98,7 +128,7 @@ class CheckPathsTests(unittest.TestCase):
             self._write(root / "ai" / "guide.md", "see winter-a:/thing.md")  # FAIL layering
 
             graph = {"winter-a": [], "winter-b": [], "winter-c": [], "winter-d": []}
-            findings = ext.check_paths([root], graph, root)
+            findings = self.lint.check_paths([root], graph, root)
 
             msgs = sorted((f.file, f.line, f.status) for f in findings)
             # Three failures: undeclared (modA line 4), unknown (modA line 6), layering (ai/guide line 1).
@@ -111,6 +141,15 @@ class CheckPathsTests(unittest.TestCase):
 
 
 class CodeFenceTests(unittest.TestCase):
+    def setUp(self) -> None:
+        manifest_reader = ext.ManifestReader()
+        scanner = ext.ReferenceScanner()
+        self.lint = ext.ExtractabilityLint(
+            graph_client=None,  # type: ignore[arg-type]
+            manifest_reader=manifest_reader,
+            scanner=scanner,
+        )
+
     def test_references_inside_fenced_block_are_skipped(self) -> None:
         import tempfile
 
@@ -128,12 +167,16 @@ class CodeFenceTests(unittest.TestCase):
                     ]
                 )
             )
-            findings = ext.check_paths([root], {"winter-a": [], "winter-c": []}, root)
+            findings = self.lint.check_paths([root], {"winter-a": [], "winter-c": []}, root)
             self.assertEqual(len(findings), 1)
             self.assertEqual(findings[0].line, 1)
 
 
 class ImportTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.manifest_reader = ext.ManifestReader()
+        self.scanner = ext.ReferenceScanner()
+
     def test_internal_import_ignored(self) -> None:
         import tempfile
 
@@ -143,10 +186,18 @@ class ImportTests(unittest.TestCase):
             (root / "modA" / "winter-ext.toml").write_text('name = "winter-a"\n')
             file = root / "modA" / "CLAUDE.md"
             file.write_text("@sub/thing.md\n")
-            self.assertIsNone(ext.import_target_module("@sub/thing.md", file, root / "modA", root))
+            self.assertIsNone(
+                self.scanner.import_target_module(
+                    "@sub/thing.md", file, root / "modA", root, self.manifest_reader
+                )
+            )
 
     def test_non_path_mention_ignored(self) -> None:
-        self.assertIsNone(ext.import_target_module("@param foo", Path("/x/CLAUDE.md"), Path("/x"), Path("/x")))
+        self.assertIsNone(
+            self.scanner.import_target_module(
+                "@param foo", Path("/x/CLAUDE.md"), Path("/x"), Path("/x"), self.manifest_reader
+            )
+        )
 
 
 if __name__ == "__main__":
