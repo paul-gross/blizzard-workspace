@@ -111,7 +111,7 @@ prefix = "wsb"                 # optional shorter prefix; takes precedence over 
 skills_dir = "skills"          # optional; explicit path overrides default discovery
 agents_dir = "agents"          # optional; explicit path overrides default discovery
 doctor = "scripts/doctor.sh"   # optional; executable that emits NDJSON probe events for `winter doctor`
-lint = "scripts/lint.sh"       # optional; executable that emits NDJSON findings for `winter lint`
+lint = "scripts/lint.sh"       # optional; executable(s) emitting NDJSON findings for `winter lint` (str or list)
 requires = ["winter-product"]  # optional; other modules this one depends on (see `winter graph`)
 ```
 
@@ -272,14 +272,15 @@ On top of the doctor probe's env (`WINTER_WORKSPACE_DIR`, and for extension scri
 The workspace contributes a lint script via a top-level field in `.winter/config.toml`, symmetric with the workspace doctor probe:
 
 ```toml
-lint = "ai/project/lint.sh"
+lint = "ai/project/lint.sh"             # single script
+lint = ["ai/project/lint.sh", "ai/project/lint_docs.sh"]   # or a list
 ```
 
-The path is **relative to the workspace root** and must point to an executable file. It runs first, before extension checks, with cwd at the workspace root. Findings appear under a `[project]` source group. Use it for checks this specific workspace owns. Ecosystem-general checks meant to travel between workspaces belong in an installed extension instead (the `lint` field below) — e.g. a dedicated `winter-lint` extension hosting the cross-cutting checks no single domain extension owns.
+`lint` accepts a single path or a list; a bare string is coerced to a one-element list. Paths are **relative to the workspace root** and must point to executable files. They run first, before extension checks, with cwd at the workspace root, and their findings appear under a `[project]` source group. Use them for checks this specific workspace owns. Ecosystem-general checks meant to travel between workspaces belong in an installed extension instead (the `lint` field below) — e.g. a dedicated `winter-lint` extension hosting the cross-cutting checks no single domain extension owns.
 
 ### Extension lint checks
 
-Extensions opt in via the top-level `lint` field in `winter-ext.toml` (path **relative to the extension directory**, executable, at most one per extension — same rules as `doctor`). Each runs with cwd at the workspace root and the scope env vars above; findings appear under the extension's `[<ext-prefix>]` source group.
+Extensions opt in via the top-level `lint` field in `winter-ext.toml` (paths **relative to the extension directory**, executable). Like the workspace field, it accepts a single path or a list — an extension that contributes several distinct checks (say, one per convention) lists them all, and each runs as its own script. Each runs with cwd at the workspace root and the scope env vars above; findings appear under the extension's `[<ext-prefix>]` source group.
 
 A minimal check skeleton — walk the scope, match the files you own, emit one finding per violation, stay silent on the rest:
 

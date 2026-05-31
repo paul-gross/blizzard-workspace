@@ -74,23 +74,6 @@ class ExtensionLintService:
         if not manifest.lint:
             return None
 
-        script_path = (repo.path / manifest.lint).resolve()
-        try:
-            script_path.relative_to(repo.path.resolve())
-        except ValueError:
-            return self._fail(
-                manifest.prefix,
-                f"lint path `{manifest.lint}` escapes the extension directory",
-            )
-        if not self._fs.is_file(script_path):
-            return self._fail(manifest.prefix, f"lint script not found at {script_path}")
-        if not self._fs.access_x_ok(script_path):
-            return self._fail(
-                manifest.prefix,
-                f"lint script not executable: {script_path}",
-                remediation=f"chmod +x {script_path}",
-            )
-
         env = os.environ.copy()
         env.update(
             {
@@ -101,25 +84,40 @@ class ExtensionLintService:
             }
         )
         env.update(lint_scope_env(scope))
+
+        findings: list[LintFinding] = []
+        for script_rel in manifest.lint:
+            findings.extend(self._run_script(script_rel, repo, manifest.prefix, env))
+        return LintCheckOutcome(source=manifest.prefix, findings=findings)
+
+    def _run_script(
+        self, script_rel: str, repo: StandaloneRepository, prefix: str, env: dict[str, str]
+    ) -> list[LintFinding]:
+        script_path = (repo.path / script_rel).resolve()
+        try:
+            script_path.relative_to(repo.path.resolve())
+        except ValueError:
+            return [self._fail_finding(prefix, f"lint path `{script_rel}` escapes the extension directory")]
+        if not self._fs.is_file(script_path):
+            return [self._fail_finding(prefix, f"lint script not found at {script_path}")]
+        if not self._fs.access_x_ok(script_path):
+            return [
+                self._fail_finding(
+                    prefix, f"lint script not executable: {script_path}", remediation=f"chmod +x {script_path}"
+                )
+            ]
         try:
             result = self._subprocess.run([str(script_path)], cwd=self._config.workspace_root, env=env)
         except OSError as exc:
-            return self._fail(manifest.prefix, f"failed to invoke lint: {exc}")
-
-        findings = parse_lint_output(manifest.prefix, result.stdout, result.stderr, result.returncode)
-        return LintCheckOutcome(source=manifest.prefix, findings=findings)
+            return [self._fail_finding(prefix, f"failed to invoke lint: {exc}")]
+        return parse_lint_output(prefix, result.stdout, result.stderr, result.returncode)
 
     @staticmethod
-    def _fail(source: str, message: str, remediation: str | None = None) -> LintCheckOutcome:
-        return LintCheckOutcome(
+    def _fail_finding(source: str, message: str, remediation: str | None = None) -> LintFinding:
+        return LintFinding(
             source=source,
-            findings=[
-                LintFinding(
-                    source=source,
-                    check="lint",
-                    status=LintStatus.fail,
-                    message=message,
-                    remediation=remediation,
-                )
-            ],
+            check="lint",
+            status=LintStatus.fail,
+            message=message,
+            remediation=remediation,
         )

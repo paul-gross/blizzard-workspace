@@ -180,13 +180,14 @@ class WorkspaceConfig(BaseModel):
     set, the script runs after core probes and before extension probes, and is
     expected to emit one NDJSON probe event per stdout line."""
 
-    lint: str | None = None
-    """Optional path to a workspace-level `winter lint` check script (relative to workspace_root).
+    lint: list[str] = Field(default_factory=list)
+    """Workspace-level `winter lint` check scripts (paths relative to workspace_root).
 
-    Symmetric with the per-extension `lint` field in `winter-ext.toml`. When
-    set, the script runs before extension checks and emits one NDJSON finding
-    per stdout line (optionally with `file`/`line`). Hosts ecosystem-general
-    checks the workspace owns but no single extension does."""
+    Symmetric with the per-extension `lint` field in `winter-ext.toml`. Accepts
+    a single path or a list; a bare string is coerced to a one-element list. Each
+    script runs before extension checks and emits one NDJSON finding per stdout
+    line (optionally with `file`/`line`). Hosts ecosystem-general checks the
+    workspace owns but no single extension does. Empty by default."""
 
     keybindings: KeybindingsConfig = Field(default_factory=KeybindingsConfig)
     """Dashboard keybinding overrides from the `[keybindings]` table."""

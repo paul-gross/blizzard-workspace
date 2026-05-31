@@ -26,6 +26,7 @@ def test_load_returns_defaults_when_manifest_path_is_none() -> None:
     assert manifest.agents_dirs == DEFAULT_AGENTS_DIRS
     assert manifest.hooks == {}
     assert manifest.doctor is None
+    assert manifest.lint == ()
     assert manifest.requires == ()
 
 
@@ -75,6 +76,29 @@ def test_load_ignores_non_string_doctor_value() -> None:
 
     manifest = loader.load(repo, manifest_path=manifest_path)
     assert manifest.doctor is None
+
+
+def test_load_coerces_lint_to_a_tuple() -> None:
+    """`lint` accepts a single path or a list; both become a tuple of non-empty strings."""
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    loader = ExtensionManifestLoader(
+        config_file_reader=FakeConfigFileReader(
+            {
+                manifest_path: {"lint": "scripts/lint.sh"},
+            }
+        )
+    )
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+    assert loader.load(repo, manifest_path=manifest_path).lint == ("scripts/lint.sh",)
+
+    loader_list = ExtensionManifestLoader(
+        config_file_reader=FakeConfigFileReader(
+            {
+                manifest_path: {"lint": ["a.py", "b.py", 7]},
+            }
+        )
+    )
+    assert loader_list.load(repo, manifest_path=manifest_path).lint == ("a.py", "b.py")
 
 
 def test_load_parses_requires_list() -> None:

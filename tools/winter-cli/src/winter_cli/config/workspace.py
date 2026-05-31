@@ -22,6 +22,19 @@ CONFIG_FILE = "config.toml"
 LOCAL_CONFIG_FILE = "config.local.toml"
 
 
+def _coerce_str_list(value: object) -> list[str]:
+    """Coerce a TOML `str | list[str]` field into a clean list of non-empty strings.
+
+    A bare string becomes a one-element list (back-compat with the single-path
+    `lint = "..."` form); a list keeps its string entries; anything else is empty.
+    """
+    if isinstance(value, str):
+        return [value] if value else []
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str) and item]
+    return []
+
+
 class WorkspaceConfigService:
     """Loads `.winter/config.toml` (+ optional local overlay) into a WorkspaceConfig.
 
@@ -124,7 +137,7 @@ class WorkspaceConfigService:
             project_repos=project_repos,
             standalone_repos=standalone_repos,
             doctor=merged.get("doctor") if isinstance(merged.get("doctor"), str) else None,
-            lint=merged.get("lint") if isinstance(merged.get("lint"), str) else None,
+            lint=_coerce_str_list(merged.get("lint")),
             keybindings=keybindings,
         )
 

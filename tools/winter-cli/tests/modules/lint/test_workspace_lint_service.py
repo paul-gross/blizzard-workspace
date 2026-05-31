@@ -14,7 +14,7 @@ SCRIPT_PATH = WORKSPACE_ROOT / "lint.sh"
 SCOPE = LintScope(kind=LintScopeKind.all, label="all", paths=[WORKSPACE_ROOT])
 
 
-def _build_config(lint: str | None) -> WorkspaceConfig:
+def _build_config(lint: list[str]) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
         session_prefix="t",
@@ -25,11 +25,12 @@ def _build_config(lint: str | None) -> WorkspaceConfig:
 
 def _build_service(
     *,
-    lint: str | None = "lint.sh",
+    lint: list[str] | None = None,
     fs_executables: set[Path] | None = None,
     files: dict[Path, str] | None = None,
     run_response: SubprocessResult | None = None,
 ) -> tuple[WorkspaceLintService, FakeSubprocessRunner]:
+    lint = ["lint.sh"] if lint is None else lint
     fs = FakeFilesystem(
         files=files if files is not None else {SCRIPT_PATH: ""},
         directories={WORKSPACE_ROOT},
@@ -53,7 +54,7 @@ def test_passes_winter_cli_path_in_env() -> None:
 
 
 def test_no_lint_field_contributes_nothing() -> None:
-    svc, runner = _build_service(lint=None)
+    svc, runner = _build_service(lint=[])
     assert svc.run(SCOPE) is None
     assert runner.run_calls == []
 
@@ -94,9 +95,29 @@ def test_non_executable_script_reports_actionable_failure() -> None:
 
 
 def test_path_escaping_workspace_is_refused() -> None:
-    svc, runner = _build_service(lint="../evil.sh")
+    svc, runner = _build_service(lint=["../evil.sh"])
     outcome = svc.run(SCOPE)
     assert outcome is not None
     assert outcome.findings[0].status == LintStatus.fail
     assert "escapes" in outcome.findings[0].message
     assert runner.run_calls == []
+
+
+def test_runs_every_listed_script_and_aggregates_findings() -> None:
+    first, second = WORKSPACE_ROOT / "a.sh", WORKSPACE_ROOT / "b.sh"
+    fs = FakeFilesystem(files={first: "", second: ""}, directories={WORKSPACE_ROOT}, executables={first, second})
+    runner = FakeSubprocessRunner(
+        run_responses={
+            str(first.resolve()): SubprocessResult(0, '{"check": "a", "status": "warn"}\n', ""),
+            str(second.resolve()): SubprocessResult(0, '{"check": "b", "status": "fail"}\n', ""),
+        }
+    )
+    svc = WorkspaceLintService(
+        config=_build_config(["a.sh", "b.sh"]), fs=fs, subprocess_runner=runner, winter_cli_path="/usr/bin/winter"
+    )
+
+    outcome = svc.run(SCOPE)
+
+    assert outcome is not None
+    assert len(runner.run_calls) == 2
+    assert {f.check for f in outcome.findings} == {"a", "b"}

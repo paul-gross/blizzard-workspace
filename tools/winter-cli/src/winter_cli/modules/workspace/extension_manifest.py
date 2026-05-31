@@ -25,6 +25,19 @@ CLAUDEMD_INDEX_FILENAME = "index.md"
 CLAUDEMD_WINTER_FILENAME = "CLAUDE.winter.md"
 
 
+def _coerce_str_tuple(value: object) -> tuple[str, ...]:
+    """Coerce a manifest `str | list[str]` field into a tuple of non-empty strings.
+
+    A bare string becomes a one-element tuple (back-compat with the single-path
+    `lint = "..."` form); a list keeps its string entries; anything else is empty.
+    """
+    if isinstance(value, str):
+        return (value,) if value else ()
+    if isinstance(value, list):
+        return tuple(item for item in value if isinstance(item, str) and item)
+    return ()
+
+
 @dataclass(frozen=True)
 class ExtensionManifest:
     """Resolved extension settings for a single standalone repo.
@@ -47,9 +60,11 @@ class ExtensionManifest:
     `winter doctor`. The script emits one NDJSON event per check on stdout;
     a non-zero exit is treated as a single fail with stderr as the message.
 
-    `lint` is the relative path of an executable lint script invoked by
+    `lint` is the tuple of relative paths of executable lint scripts invoked by
     `winter lint`. Same NDJSON contract as `doctor`, with optional `file`/`line`
-    fields per finding and the scope passed in via `WINTER_LINT_*` env vars.
+    fields per finding and the scope passed in via `WINTER_LINT_*` env vars. The
+    manifest accepts a single path or a list; a bare string is coerced to a
+    one-element tuple. Empty by default.
 
     `requires` is the module's declared dependency list — the other modules this
     one references and therefore needs when shipped standalone. Each entry is a
@@ -63,7 +78,7 @@ class ExtensionManifest:
     agents_dirs: tuple[str, ...]
     hooks: dict[str, str] = field(default_factory=dict)
     doctor: str | None = None
-    lint: str | None = None
+    lint: tuple[str, ...] = ()
     requires: tuple[str, ...] = ()
 
 
@@ -106,8 +121,7 @@ class ExtensionManifestLoader:
         doctor_raw = data.get("doctor")
         doctor = doctor_raw if isinstance(doctor_raw, str) and doctor_raw else None
 
-        lint_raw = data.get("lint")
-        lint = lint_raw if isinstance(lint_raw, str) and lint_raw else None
+        lint = _coerce_str_tuple(data.get("lint"))
 
         requires_raw = data.get("requires")
         requires = tuple(r for r in requires_raw if isinstance(r, str) and r) if isinstance(requires_raw, list) else ()

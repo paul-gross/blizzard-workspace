@@ -78,6 +78,38 @@ def test_parses_findings_into_one_outcome_per_extension() -> None:
     assert all(f.source == "my-ext" for f in outcome.findings)
 
 
+def test_runs_every_listed_script_in_the_manifest() -> None:
+    first, second = EXT_PATH / "a.sh", EXT_PATH / "b.sh"
+    fs = FakeFilesystem(
+        files={EXT_PATH / EXT_MANIFEST: "", first: "", second: ""},
+        directories={EXT_PATH},
+        executables={first, second},
+    )
+    loader = ExtensionManifestLoader(
+        config_file_reader=FakeConfigFileReader({EXT_PATH / EXT_MANIFEST: {"lint": ["a.sh", "b.sh"]}})
+    )
+    runner = FakeSubprocessRunner(
+        run_responses={
+            str(first.resolve()): SubprocessResult(0, '{"check": "a", "status": "warn"}\n', ""),
+            str(second.resolve()): SubprocessResult(0, '{"check": "b", "status": "warn"}\n', ""),
+        }
+    )
+    svc = ExtensionLintService(
+        config=_build_config(AdoptExtensions.winter),
+        fs=fs,
+        subprocess_runner=runner,
+        manifest_loader=loader,
+        winter_cli_path="/usr/bin/winter",
+    )
+    repo = StandaloneRepository(name="my-ext", path=EXT_PATH)
+
+    outcomes = svc.run(SCOPE, [repo])
+
+    assert len(outcomes) == 1
+    assert len(runner.run_calls) == 2
+    assert {f.check for f in outcomes[0].findings} == {"a", "b"}
+
+
 def test_passes_winter_cli_path_in_env() -> None:
     svc, runner, repo = _build_service(run_response=SubprocessResult(0, "", ""))
     svc.run(SCOPE, [repo])

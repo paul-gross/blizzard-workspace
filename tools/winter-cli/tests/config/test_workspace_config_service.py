@@ -98,7 +98,17 @@ def test_load_maps_workspace_doctor_and_lint_scripts() -> None:
     config = svc.load()
 
     assert config.doctor == "ai/doctor.sh"
-    assert config.lint == "ai/lint.sh"
+    assert config.lint == ["ai/lint.sh"]
+
+
+def test_load_accepts_lint_as_a_list() -> None:
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {"lint": ["ai/a.sh", "ai/b.sh"]}})
+
+    config = svc.load()
+
+    assert config.lint == ["ai/a.sh", "ai/b.sh"]
 
 
 def test_load_merges_local_overlay() -> None:

@@ -43,39 +43,40 @@ class WorkspaceLintService:
         if not self._config.lint:
             return None
 
-        script_path = (self._config.workspace_root / self._config.lint).resolve()
-        try:
-            script_path.relative_to(self._config.workspace_root.resolve())
-        except ValueError:
-            return self._fail(f"lint path `{self._config.lint}` escapes the workspace directory")
-        if not self._fs.is_file(script_path):
-            return self._fail(f"lint script not found at {script_path}")
-        if not self._fs.access_x_ok(script_path):
-            return self._fail(f"lint script not executable: {script_path}", remediation=f"chmod +x {script_path}")
-
         env = os.environ.copy()
         env["WINTER_WORKSPACE_DIR"] = str(self._config.workspace_root)
         env[WINTER_CLI_VAR] = self._winter_cli_path
         env.update(lint_scope_env(scope))
+
+        findings: list[LintFinding] = []
+        for script_rel in self._config.lint:
+            findings.extend(self._run_script(script_rel, env))
+        return LintCheckOutcome(source=WORKSPACE_SOURCE, findings=findings)
+
+    def _run_script(self, script_rel: str, env: dict[str, str]) -> list[LintFinding]:
+        script_path = (self._config.workspace_root / script_rel).resolve()
+        try:
+            script_path.relative_to(self._config.workspace_root.resolve())
+        except ValueError:
+            return [self._fail_finding(f"lint path `{script_rel}` escapes the workspace directory")]
+        if not self._fs.is_file(script_path):
+            return [self._fail_finding(f"lint script not found at {script_path}")]
+        if not self._fs.access_x_ok(script_path):
+            return [
+                self._fail_finding(f"lint script not executable: {script_path}", remediation=f"chmod +x {script_path}")
+            ]
         try:
             result = self._subprocess.run([str(script_path)], cwd=self._config.workspace_root, env=env)
         except OSError as exc:
-            return self._fail(f"failed to invoke lint: {exc}")
-
-        findings = parse_lint_output(WORKSPACE_SOURCE, result.stdout, result.stderr, result.returncode)
-        return LintCheckOutcome(source=WORKSPACE_SOURCE, findings=findings)
+            return [self._fail_finding(f"failed to invoke lint: {exc}")]
+        return parse_lint_output(WORKSPACE_SOURCE, result.stdout, result.stderr, result.returncode)
 
     @staticmethod
-    def _fail(message: str, remediation: str | None = None) -> LintCheckOutcome:
-        return LintCheckOutcome(
+    def _fail_finding(message: str, remediation: str | None = None) -> LintFinding:
+        return LintFinding(
             source=WORKSPACE_SOURCE,
-            findings=[
-                LintFinding(
-                    source=WORKSPACE_SOURCE,
-                    check="lint",
-                    status=LintStatus.fail,
-                    message=message,
-                    remediation=remediation,
-                )
-            ],
+            check="lint",
+            status=LintStatus.fail,
+            message=message,
+            remediation=remediation,
         )
