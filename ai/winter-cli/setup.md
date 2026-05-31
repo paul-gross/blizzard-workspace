@@ -91,6 +91,7 @@ prefix = "wsb"                 # optional shorter prefix; takes precedence over 
 skills_dir = "skills"          # optional; explicit path overrides default discovery
 agents_dir = "agents"          # optional; explicit path overrides default discovery
 doctor = "scripts/doctor.sh"   # optional; executable that emits NDJSON probe events for `winter doctor`
+lint = "scripts/lint.sh"       # optional; executable that emits NDJSON findings for `winter lint`
 ```
 
 The final symlink prefix is resolved with this precedence: `prefix` on the workspace config entry > `prefix` in `winter-ext.toml` > `name` in `winter-ext.toml` > the standalone repo's directory name.
@@ -212,3 +213,69 @@ The probe's **cwd is the workspace root**. Probes are workspace-scoped, not per-
 | `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension. |
 
 Results appear under a `[<ext-prefix>]` source group, one block per installed extension that contributes probes.
+
+## Lint checks
+
+`winter lint` (see [usage.md#lint](./usage.md#lint)) is the convention-checking counterpart of `winter doctor`. It's a dispatcher: it discovers lint scripts contributed by the workspace and by installed extensions, runs the applicable ones over the selected scope, and aggregates their findings. It owns scope selection, aggregation, and reporting — the check logic lives entirely in the contributed scripts.
+
+### Finding output contract
+
+A lint script follows the **same NDJSON contract as a doctor probe** ([above](#probe-output-contract)) with two additions per object — `check` (the field name; `name` is also accepted as an alias, so an existing doctor probe can be repointed at lint with minimal change) and optional `file` / `line` location fields:
+
+```json
+{"check": "path-notation", "status": "fail", "message": "non-canonical ref `../harness`", "file": "ai/index.md", "line": 12, "remediation": "Use the `winter-harness:` prefix."}
+{"check": "agent-frontmatter", "status": "warn", "message": "missing `model`", "file": ".claude/agents/wf-developer.md"}
+```
+
+Required fields: `check` (string) and `status` (`pass` / `warn` / `fail`). Optional: `message`, `file`, `line`, `remediation`. Exit handling and misconfiguration behavior (missing field silently skipped; missing / non-executable / directory-escaping script surfaces as a `fail`; unparseable lines become `warn`) match the doctor probe contract exactly.
+
+### Scope environment variables
+
+On top of the doctor probe's env (`WINTER_WORKSPACE_DIR`, and for extension scripts also `WINTER_EXT_DIR` / `WINTER_EXT_PREFIX`), every lint script receives the resolved scope:
+
+| Var | Meaning |
+|-----|---------|
+| `WINTER_LINT_SCOPE` | The scope kind: `all`, `repo`, `env`, or `changed`. |
+| `WINTER_LINT_PATHS` | Newline-delimited absolute paths in scope. Under `changed` these are individual **files**; under `all` / `repo` / `env` they are **directory** roots. A check must `stat` each path and handle both. |
+
+**A check MUST confine itself to `WINTER_LINT_PATHS`.** `winter lint` runs every contributed script for every scope and never filters by content — keeping a run "applicable to that scope" is the script's job. A check walks the given paths, applies its rules only to files under them, and emits nothing for a scope whose content it doesn't recognize.
+
+- **Do**: iterate `WINTER_LINT_PATHS`, walk each (a file is itself; a directory is recursed), match the files you own, stay silent otherwise.
+- **Don't**: glob the whole workspace, read `$WINTER_WORKSPACE_DIR` wholesale, or use the current directory — that leaks findings outside the scope and silently breaks `--changed` and per-repo runs.
+
+### Workspace lint check
+
+The workspace contributes a lint script via a top-level field in `.winter/config.toml`, symmetric with the workspace doctor probe:
+
+```toml
+lint = "ai/project/lint.sh"
+```
+
+The path is **relative to the workspace root** and must point to an executable file. It runs first, before extension checks, with cwd at the workspace root. Findings appear under a `[project]` source group. Use it for checks this specific workspace owns. Ecosystem-general checks meant to travel between workspaces belong in an installed extension instead (the `lint` field below) — e.g. a dedicated `winter-lint` extension hosting the cross-cutting checks no single domain extension owns.
+
+### Extension lint checks
+
+Extensions opt in via the top-level `lint` field in `winter-ext.toml` (path **relative to the extension directory**, executable, at most one per extension — same rules as `doctor`). Each runs with cwd at the workspace root and the scope env vars above; findings appear under the extension's `[<ext-prefix>]` source group.
+
+A minimal check skeleton — walk the scope, match the files you own, emit one finding per violation, stay silent on the rest:
+
+```bash
+#!/usr/bin/env bash
+# Flag Markdown files that reference the harness with a bare relative path
+# instead of the canonical `winter-harness:` notation.
+set -euo pipefail
+
+emit() { printf '{"check":"path-notation","status":"%s","message":"%s","file":"%s","line":%s}\n' "$1" "$2" "$3" "$4"; }
+
+while IFS= read -r path; do
+  [ -z "$path" ] && continue
+  # A directory root is recursed; a single changed file is checked directly.
+  while IFS= read -r md; do
+    while IFS=: read -r line _; do
+      emit fail "use the \`winter-harness:\` prefix" "$md" "$line"
+    done < <(grep -nE '\.\./harness' "$md" || true)
+  done < <(find "$path" -type f -name '*.md' 2>/dev/null)
+done <<< "$WINTER_LINT_PATHS"
+```
+
+Exit non-zero only for the script's own failures — winter turns that into a synthetic `fail`. A clean run that found nothing exits `0` and emits nothing.

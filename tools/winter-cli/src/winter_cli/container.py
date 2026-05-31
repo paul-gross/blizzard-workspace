@@ -21,6 +21,12 @@ from winter_cli.modules.doctor.doctor_service import DoctorService
 from winter_cli.modules.doctor.extension_probe_service import ExtensionProbeService
 from winter_cli.modules.doctor.handler import DoctorHandler
 from winter_cli.modules.doctor.workspace_probe_service import WorkspaceProbeService
+from winter_cli.modules.lint.extension_lint_service import ExtensionLintService
+from winter_cli.modules.lint.handler import LintHandler
+from winter_cli.modules.lint.lint_reporter import JsonLintReporter, StreamLintReporter
+from winter_cli.modules.lint.lint_service import LintService
+from winter_cli.modules.lint.scope_resolver import LintScopeResolver
+from winter_cli.modules.lint.workspace_lint_service import WorkspaceLintService
 from winter_cli.modules.tui.error_log import ErrorLogService
 from winter_cli.modules.tui.screens.error_log import ErrorLogScreen
 from winter_cli.modules.tui.screens.standalone_detail import StandaloneDetailScreen
@@ -390,6 +396,57 @@ class Container(containers.DeclarativeContainer):
         doctor_service=doctor_svc,
         stream_reporter=stream_doctor_reporter,
         json_reporter=json_doctor_reporter,
+    )
+
+    # ── lint: dispatcher to extension-contributed convention checks ─────────
+
+    workspace_lint_svc = providers.Factory(
+        WorkspaceLintService,
+        config=workspace_config,
+        fs=fs,
+        subprocess_runner=subprocess_runner,
+    )
+
+    extension_lint_svc = providers.Factory(
+        ExtensionLintService,
+        config=workspace_config,
+        fs=fs,
+        subprocess_runner=subprocess_runner,
+        manifest_loader=extension_manifest_loader,
+    )
+
+    lint_scope_resolver = providers.Factory(
+        LintScopeResolver,
+        config=workspace_config,
+        repo_factory=repo_factory,
+        worktree_repo=worktree_repo,
+        repo_repo=repo_repo,
+        subprocess_runner=subprocess_runner,
+    )
+
+    lint_svc = providers.Factory(
+        LintService,
+        workspace_lint_svc=workspace_lint_svc,
+        extension_lint_svc=extension_lint_svc,
+        repo_factory=repo_factory,
+    )
+
+    stream_lint_reporter = providers.Factory(
+        StreamLintReporter,
+        click=providers.Object(click),
+    )
+
+    json_lint_reporter = providers.Factory(
+        JsonLintReporter,
+        click=providers.Object(click),
+    )
+
+    lint_handler = providers.Factory(
+        LintHandler,
+        lint_service=lint_svc,
+        scope_resolver=lint_scope_resolver,
+        stream_reporter=stream_lint_reporter,
+        json_reporter=json_lint_reporter,
     )
 
     # Session-scoped log buffer for RepoErrors captured during dashboard

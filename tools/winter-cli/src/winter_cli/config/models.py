@@ -159,3 +159,11 @@ class WorkspaceConfig(BaseModel):
     Symmetric with the per-extension `doctor` field in `winter-ext.toml`. When
     set, the script runs after core probes and before extension probes, and is
     expected to emit one NDJSON probe event per stdout line."""
+
+    lint: str | None = None
+    """Optional path to a workspace-level `winter lint` check script (relative to workspace_root).
+
+    Symmetric with the per-extension `lint` field in `winter-ext.toml`. When
+    set, the script runs before extension checks and emits one NDJSON finding
+    per stdout line (optionally with `file`/`line`). Hosts ecosystem-general
+    checks the workspace owns but no single extension does."""

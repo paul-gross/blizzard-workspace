@@ -46,6 +46,10 @@ class ExtensionManifest:
     `doctor` is the relative path of an executable probe script invoked by
     `winter doctor`. The script emits one NDJSON event per check on stdout;
     a non-zero exit is treated as a single fail with stderr as the message.
+
+    `lint` is the relative path of an executable lint script invoked by
+    `winter lint`. Same NDJSON contract as `doctor`, with optional `file`/`line`
+    fields per finding and the scope passed in via `WINTER_LINT_*` env vars.
     """
 
     prefix: str
@@ -53,6 +57,7 @@ class ExtensionManifest:
     agents_dirs: tuple[str, ...]
     hooks: dict[str, str] = field(default_factory=dict)
     doctor: str | None = None
+    lint: str | None = None
 
 
 class ExtensionManifestLoader:
@@ -94,10 +99,14 @@ class ExtensionManifestLoader:
         doctor_raw = data.get("doctor")
         doctor = doctor_raw if isinstance(doctor_raw, str) and doctor_raw else None
 
+        lint_raw = data.get("lint")
+        lint = lint_raw if isinstance(lint_raw, str) and lint_raw else None
+
         return ExtensionManifest(
             prefix=prefix,
             skills_dirs=skills_dirs,
             agents_dirs=agents_dirs,
             hooks=hooks,
             doctor=doctor,
+            lint=lint,
         )

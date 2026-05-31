@@ -62,6 +62,10 @@ ALLOWED_FILES = frozenset(
         "modules/doctor/core_probe_service.py",
         "modules/doctor/workspace_probe_service.py",
         "modules/doctor/extension_probe_service.py",
+        # Lint dispatcher services — walk every declared repo / extension / env.
+        "modules/lint/workspace_lint_service.py",
+        "modules/lint/extension_lint_service.py",
+        "modules/lint/scope_resolver.py",
     }
 )
 

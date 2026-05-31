@@ -90,6 +90,17 @@ def test_load_reads_shared_config() -> None:
     assert config.standalone_repos[0].name == "ext-one"
 
 
+def test_load_maps_workspace_doctor_and_lint_scripts() -> None:
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {"doctor": "ai/doctor.sh", "lint": "ai/lint.sh"}})
+
+    config = svc.load()
+
+    assert config.doctor == "ai/doctor.sh"
+    assert config.lint == "ai/lint.sh"
+
+
 def test_load_merges_local_overlay() -> None:
     config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
     local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE

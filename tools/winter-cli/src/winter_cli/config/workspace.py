@@ -121,6 +121,7 @@ class WorkspaceConfigService:
             project_repos=project_repos,
             standalone_repos=standalone_repos,
             doctor=merged.get("doctor") if isinstance(merged.get("doctor"), str) else None,
+            lint=merged.get("lint") if isinstance(merged.get("lint"), str) else None,
         )
 
     def _read_config(self, path: Path) -> dict:
