@@ -8,7 +8,7 @@ from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.core.subprocess_runner import ISubprocessRunner
 from winter_cli.modules.lint.finding_parser import parse_lint_output
 from winter_cli.modules.lint.models import LintCheckOutcome, LintFinding, LintScope, LintStatus
-from winter_cli.modules.lint.scope_env import lint_scope_env
+from winter_cli.modules.lint.scope_env import WINTER_CLI_VAR, lint_scope_env
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +32,12 @@ class WorkspaceLintService:
         config: WorkspaceConfig,
         fs: IFilesystemReader,
         subprocess_runner: ISubprocessRunner,
+        winter_cli_path: str,
     ) -> None:
         self._config = config
         self._fs = fs
         self._subprocess = subprocess_runner
+        self._winter_cli_path = winter_cli_path
 
     def run(self, scope: LintScope) -> LintCheckOutcome | None:
         if not self._config.lint:
@@ -53,6 +55,7 @@ class WorkspaceLintService:
 
         env = os.environ.copy()
         env["WINTER_WORKSPACE_DIR"] = str(self._config.workspace_root)
+        env[WINTER_CLI_VAR] = self._winter_cli_path
         env.update(lint_scope_env(scope))
         try:
             result = self._subprocess.run([str(script_path)], cwd=self._config.workspace_root, env=env)

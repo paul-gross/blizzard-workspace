@@ -54,6 +54,7 @@ def _build_service(
         fs=fs,
         subprocess_runner=runner,
         manifest_loader=loader,
+        winter_cli_path="/usr/bin/winter",
     )
     repo = StandaloneRepository(name="my-ext", path=EXT_PATH)
     return svc, runner, repo
@@ -75,6 +76,13 @@ def test_parses_findings_into_one_outcome_per_extension() -> None:
     assert outcome.findings[1].file == "a.md"
     assert outcome.findings[1].line == 3
     assert all(f.source == "my-ext" for f in outcome.findings)
+
+
+def test_passes_winter_cli_path_in_env() -> None:
+    svc, runner, repo = _build_service(run_response=SubprocessResult(0, "", ""))
+    svc.run(SCOPE, [repo])
+    assert runner.run_envs[-1] is not None
+    assert runner.run_envs[-1]["WINTER_CLI"] == "/usr/bin/winter"
 
 
 def test_clean_run_with_no_findings_still_counts_as_a_contributor() -> None:
@@ -121,6 +129,7 @@ def test_missing_manifest_skips_repo() -> None:
         fs=fs,
         subprocess_runner=FakeSubprocessRunner(),
         manifest_loader=loader,
+        winter_cli_path="/usr/bin/winter",
     )
     repo = StandaloneRepository(name="my-ext", path=EXT_PATH)
     assert svc.run(SCOPE, [repo]) == []

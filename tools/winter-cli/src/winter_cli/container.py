@@ -20,8 +20,8 @@ from winter_cli.core.internal.local_filesystem import LocalFilesystem
 from winter_cli.core.internal.local_subprocess_runner import LocalSubprocessRunner
 from winter_cli.core.internal.tomllib_config_file_reader import TomllibConfigFileReader
 
-# NB: the doctor, lint, and tui (textual) command trees are deliberately NOT
-# imported at module top — see `_lazy` below. They are pulled in on first
+# NB: the doctor, lint, graph, and tui (textual) command trees are deliberately
+# NOT imported at module top — see `_lazy` below. They are pulled in on first
 # provider resolution so the hot `winter ws` path (which instantiates this
 # container on every invocation) never pays for the textual / probe trees it
 # doesn't touch.
@@ -413,13 +413,44 @@ class Container(containers.DeclarativeContainer):
         json_reporter=json_doctor_reporter,
     )
 
+    # ── graph: module dependency graph from winter-ext.toml `requires` ──────
+
+    graph_svc = providers.Factory(
+        _lazy("winter_cli.modules.graph.graph_service:GraphService"),
+        fs=fs,
+        manifest_loader=extension_manifest_loader,
+        repo_factory=repo_factory,
+    )
+
+    stream_graph_reporter = providers.Factory(
+        _lazy("winter_cli.modules.graph.graph_reporter:StreamGraphReporter"),
+        click=providers.Object(click),
+    )
+
+    json_graph_reporter = providers.Factory(
+        _lazy("winter_cli.modules.graph.graph_reporter:JsonGraphReporter"),
+        click=providers.Object(click),
+    )
+
+    graph_handler = providers.Factory(
+        _lazy("winter_cli.modules.graph.handler:GraphHandler"),
+        graph_service=graph_svc,
+        stream_reporter=stream_graph_reporter,
+        json_reporter=json_graph_reporter,
+    )
+
     # ── lint: dispatcher to extension-contributed convention checks ─────────
+
+    # Path to the winter CLI that launched this run, handed to every lint
+    # script as WINTER_CLI so checks can call back (e.g. `$WINTER_CLI graph`).
+    winter_cli_path = providers.Callable(_lazy("winter_cli.modules.lint.scope_env:resolve_winter_cli_path"))
 
     workspace_lint_svc = providers.Factory(
         _lazy("winter_cli.modules.lint.workspace_lint_service:WorkspaceLintService"),
         config=workspace_config,
         fs=fs,
         subprocess_runner=subprocess_runner,
+        winter_cli_path=winter_cli_path,
     )
 
     extension_lint_svc = providers.Factory(
@@ -428,6 +459,7 @@ class Container(containers.DeclarativeContainer):
         fs=fs,
         subprocess_runner=subprocess_runner,
         manifest_loader=extension_manifest_loader,
+        winter_cli_path=winter_cli_path,
     )
 
     lint_scope_resolver = providers.Factory(

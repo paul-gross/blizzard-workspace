@@ -342,6 +342,7 @@ class FakeSubprocessRunner:
         self._run_responses = dict(run_responses or {})
         self._popen_responses = dict(popen_responses or {})
         self.run_calls: list[tuple[list[str], Path | None]] = []
+        self.run_envs: list[Any] = []
         self.popen_calls: list[tuple[list[str] | str, Path | None]] = []
 
     @staticmethod
@@ -356,6 +357,7 @@ class FakeSubprocessRunner:
         env: Any = None,
     ) -> SubprocessResult:
         self.run_calls.append((list(cmd), cwd))
+        self.run_envs.append(env)
         key = self._key(cmd)
         if key not in self._run_responses:
             raise AssertionError(f"FakeSubprocessRunner.run got unexpected command: {key!r}")

@@ -50,6 +50,12 @@ class ExtensionManifest:
     `lint` is the relative path of an executable lint script invoked by
     `winter lint`. Same NDJSON contract as `doctor`, with optional `file`/`line`
     fields per finding and the scope passed in via `WINTER_LINT_*` env vars.
+
+    `requires` is the module's declared dependency list — the other modules this
+    one references and therefore needs when shipped standalone. Each entry is a
+    module name (the `<context>` half of a `<context>:/path` reference, e.g.
+    `winter-product`). It is the data the `winter graph` command aggregates and
+    the extractability lint check validates references against. Empty by default.
     """
 
     prefix: str
@@ -58,6 +64,7 @@ class ExtensionManifest:
     hooks: dict[str, str] = field(default_factory=dict)
     doctor: str | None = None
     lint: str | None = None
+    requires: tuple[str, ...] = ()
 
 
 class ExtensionManifestLoader:
@@ -102,6 +109,9 @@ class ExtensionManifestLoader:
         lint_raw = data.get("lint")
         lint = lint_raw if isinstance(lint_raw, str) and lint_raw else None
 
+        requires_raw = data.get("requires")
+        requires = tuple(r for r in requires_raw if isinstance(r, str) and r) if isinstance(requires_raw, list) else ()
+
         return ExtensionManifest(
             prefix=prefix,
             skills_dirs=skills_dirs,
@@ -109,4 +119,5 @@ class ExtensionManifestLoader:
             hooks=hooks,
             doctor=doctor,
             lint=lint,
+            requires=requires,
         )

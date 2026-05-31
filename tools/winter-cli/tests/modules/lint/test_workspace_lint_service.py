@@ -39,8 +39,17 @@ def _build_service(
     if run_response is not None:
         responses[str(SCRIPT_PATH.resolve())] = run_response
     runner = FakeSubprocessRunner(run_responses=responses)
-    svc = WorkspaceLintService(config=_build_config(lint), fs=fs, subprocess_runner=runner)
+    svc = WorkspaceLintService(
+        config=_build_config(lint), fs=fs, subprocess_runner=runner, winter_cli_path="/usr/bin/winter"
+    )
     return svc, runner
+
+
+def test_passes_winter_cli_path_in_env() -> None:
+    svc, runner = _build_service(run_response=SubprocessResult(0, "", ""))
+    svc.run(SCOPE)
+    assert runner.run_envs[-1] is not None
+    assert runner.run_envs[-1]["WINTER_CLI"] == "/usr/bin/winter"
 
 
 def test_no_lint_field_contributes_nothing() -> None:

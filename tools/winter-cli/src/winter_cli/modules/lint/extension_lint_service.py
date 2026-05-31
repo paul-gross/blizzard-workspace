@@ -8,7 +8,7 @@ from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.core.subprocess_runner import ISubprocessRunner
 from winter_cli.modules.lint.finding_parser import parse_lint_output
 from winter_cli.modules.lint.models import LintCheckOutcome, LintFinding, LintScope, LintStatus
-from winter_cli.modules.lint.scope_env import lint_scope_env
+from winter_cli.modules.lint.scope_env import WINTER_CLI_VAR, lint_scope_env
 from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST, ExtensionManifestLoader
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
 
@@ -40,11 +40,13 @@ class ExtensionLintService:
         fs: IFilesystemReader,
         subprocess_runner: ISubprocessRunner,
         manifest_loader: ExtensionManifestLoader,
+        winter_cli_path: str,
     ) -> None:
         self._config = config
         self._fs = fs
         self._subprocess = subprocess_runner
         self._manifest_loader = manifest_loader
+        self._winter_cli_path = winter_cli_path
 
     def run(self, scope: LintScope, standalone_repos: list[StandaloneRepository]) -> list[LintCheckOutcome]:
         if self._config.adopt_extensions == AdoptExtensions.none:
@@ -95,6 +97,7 @@ class ExtensionLintService:
                 "WINTER_WORKSPACE_DIR": str(self._config.workspace_root),
                 "WINTER_EXT_DIR": str(repo.path),
                 "WINTER_EXT_PREFIX": manifest.prefix,
+                WINTER_CLI_VAR: self._winter_cli_path,
             }
         )
         env.update(lint_scope_env(scope))

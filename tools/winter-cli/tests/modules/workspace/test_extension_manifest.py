@@ -26,6 +26,7 @@ def test_load_returns_defaults_when_manifest_path_is_none() -> None:
     assert manifest.agents_dirs == DEFAULT_AGENTS_DIRS
     assert manifest.hooks == {}
     assert manifest.doctor is None
+    assert manifest.requires == ()
 
 
 def test_load_respects_manifest_prefix_and_hooks() -> None:
@@ -74,6 +75,51 @@ def test_load_ignores_non_string_doctor_value() -> None:
 
     manifest = loader.load(repo, manifest_path=manifest_path)
     assert manifest.doctor is None
+
+
+def test_load_parses_requires_list() -> None:
+    """`requires` is a list of module-name strings; preserved in order."""
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    config_files = {
+        manifest_path: {
+            "requires": ["winter-product", "winter-github"],
+        }
+    }
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    manifest = loader.load(repo, manifest_path=manifest_path)
+    assert manifest.requires == ("winter-product", "winter-github")
+
+
+def test_load_filters_non_string_and_empty_requires_entries() -> None:
+    """Non-string and empty entries are dropped; the rest survive in order."""
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    config_files = {
+        manifest_path: {
+            "requires": ["winter-product", 5, "", "winter-github"],
+        }
+    }
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    manifest = loader.load(repo, manifest_path=manifest_path)
+    assert manifest.requires == ("winter-product", "winter-github")
+
+
+def test_load_ignores_non_list_requires_value() -> None:
+    """A non-list `requires` (e.g. a bare string) falls back to empty."""
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    config_files = {
+        manifest_path: {
+            "requires": "winter-product",
+        }
+    }
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    manifest = loader.load(repo, manifest_path=manifest_path)
+    assert manifest.requires == ()
 
 
 def test_load_raises_repo_error_on_broken_manifest() -> None:

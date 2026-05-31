@@ -248,9 +248,20 @@ Runs winter-ecosystem **convention** checks — path notation, agent frontmatter
 
 A name that matches both a repo and an env is rejected as ambiguous; `--all` and `--changed` are mutually exclusive with each other and with a name.
 
-**Workspace checks** are contributed via a top-level `lint = "path/to/lint-script"` field in `.winter/config.toml`; **extension checks** via the same field in an extension's `winter-ext.toml`. Both follow the same script contract as doctor probes, plus the scope env vars — see [setup.md#lint-checks](./setup.md#lint-checks).
+**Workspace checks** are contributed via a top-level `lint = "path/to/lint-script"` field in `.winter/config.toml`; **extension checks** via the same field in an extension's `winter-ext.toml`. Both follow the same script contract as doctor probes, plus the scope env vars — see [setup.md#lint-checks](./setup.md#lint-checks). Each check also receives `WINTER_CLI`, the path to the running CLI, so it can call back for workspace-wide data it can't derive from its own scope — see [Graph](#graph).
 
 `--json` emits one NDJSON object per line: `{"type": "started", "scope": ..., "label": ..., "paths": [...]}` once, `{"type": "finding", "source": ..., "check": ..., "status": ..., "message": ..., "file": ..., "line": ..., "remediation": ...}` per finding, then `{"type": "finished", "contributors": N, "total": N, "fails": N, "warns": N}`. `contributors` is the number of lint scripts that ran — `0` means nothing was contributed.
+
+## Graph
+
+```bash
+winter graph            # human-readable `module → deps` listing
+winter graph --json     # {module: [requires...]} adjacency map
+```
+
+Prints the module dependency graph. Every installed module that ships a `winter-ext.toml` becomes a node; its `requires` list becomes its edges. `--json` emits a `{module: [requires...]}` adjacency map keyed by module name.
+
+It is a read-only data command with a stable JSON contract, meant for humans and tooling alike. In particular, lint checks consume it via `$WINTER_CLI graph --json` (the lint dispatcher hands every check the `WINTER_CLI` path) so they can reason about dependencies without re-parsing every manifest — e.g. the module-extractability check. A lint check may call `winter graph`, but must never call `winter lint` (which would recurse).
 
 ## Network resilience
 

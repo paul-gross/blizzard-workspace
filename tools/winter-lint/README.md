@@ -1,0 +1,85 @@
+# winter-lint — module extractability
+
+`extractability.py` is a `winter lint` check: it verifies that every winter
+module references only what it is guaranteed to have when shipped standalone.
+
+A winter module (anything with a `winter-ext.toml`) is developed inside this
+multi-repo workspace but installed on its own elsewhere. So an outbound
+reference to a sibling that isn't declared as a dependency is a dead pointer at
+the consumption edge, and a core module pointing at an extension is a layering
+inversion. This check catches both.
+
+## What counts as a reference
+
+- A path-notation reference `<context>:/path` (e.g. `winter-product:/ai/todos.md`).
+- A Claude `@import` whose target escapes the module's own directory.
+
+## Rules
+
+For a reference in module `M` pointing at context `T`:
+
+| Case | Result |
+|------|--------|
+| `T` is `M` itself | allowed |
+| `T` is core (`winter`, `winter-cli`, `workspace`) | allowed |
+| `T` is listed in `M`'s `winter-ext.toml` `requires` | allowed |
+| `M` is core and `T` is an extension | **fail** — layering violation |
+| `T` is a sibling not in `requires` | **fail** — undeclared dependency |
+| `T` is unknown / not installed | **fail** |
+
+The `requires` graph must also be **acyclic** — a cycle is a fail.
+
+## Functional vs. illustrative
+
+Every reference is a real dependency *by default*. A reference that only
+illustrates the notation (a conventions doc citing another module as an
+example, not depending on it) is exempted with a same-line marker:
+
+```markdown
+See `winter-service-tmux:/plugin.py` for a reference plugin. <!-- winter-lint:example -->
+```
+
+The marker exempts every reference on its line from the undeclared-sibling and
+layering rules.
+
+References inside a fenced code block (```` ``` ```` or `~~~`) are skipped
+entirely — code fences hold illustrative literals (sample commands, example
+prompts), not live dependencies, and can't carry an inline HTML-comment marker
+without corrupting the sample.
+
+## How it gets the graph
+
+The check is graph-driven. It does not rebuild the ecosystem graph itself — it
+calls back into the CLI that launched it: `$WINTER_CLI graph --json` returns the
+`{module: [requires...]}` adjacency map, used for the known-module set and cycle
+detection. A module's own `requires` is read from the local `winter-ext.toml` of
+the checkout being linted.
+
+**`WINTER_CLI` is required.** If it is unset the check fails loudly — there is no
+graph-less fallback. A lint script may call `winter graph` but must never call
+`winter lint` (that would recurse).
+
+## Wiring it into a workspace
+
+It is an opt-in workspace lint check. Point `.winter/config.toml` at it:
+
+```toml
+lint = "<path>/extractability.py"
+```
+
+`winter lint` then runs it over the selected scope with the standard lint env
+(`WINTER_LINT_SCOPE`, `WINTER_LINT_PATHS`, `WINTER_CLI`, …) and aggregates its
+NDJSON findings. It can also be run directly:
+
+```bash
+WINTER_CLI=$(command -v winter) python3 extractability.py <path>...
+```
+
+## Tests
+
+```bash
+python3 -m unittest test_extractability
+```
+
+Stdlib `unittest` only — no third-party dependency, so the whole directory can
+later move into a dedicated `winter-lint` extension intact.

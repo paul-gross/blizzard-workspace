@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Protocol
+
 from winter_cli.config.models import (
     ProjectRepositoryConfig,
     SingletonType,
@@ -16,6 +18,16 @@ _SINGLETON_PATHS: dict[SingletonType, tuple[str, ...]] = {
     SingletonType.product: ("product",),
     SingletonType.harness: ("ai", "harness"),
 }
+
+
+class IStandaloneRepoProvider(Protocol):
+    """The single capability `GraphService` needs from the repo factory:
+    enumerate the user-declared standalone repos (the installed extension
+    modules). Narrowing the dependency to this Protocol keeps the consumer
+    off the concrete `RepositoryFactory` and lets tests pass a plain stub.
+    """
+
+    def get_standalone_repos(self) -> list[StandaloneRepository]: ...
 
 
 class RepositoryFactory:
@@ -112,3 +124,9 @@ class RepositoryFactory:
         cut = max(stripped.rfind("/"), stripped.rfind(":"))
         candidate = stripped[cut + 1 :] if cut != -1 else stripped
         return candidate.removesuffix(".git")
+
+
+def _conforms_standalone_repo_provider(x: RepositoryFactory) -> IStandaloneRepoProvider:
+    # Typecheck-time sentinel (never called): pins RepositoryFactory as a valid
+    # IStandaloneRepoProvider so the seam GraphService depends on can't drift.
+    return x

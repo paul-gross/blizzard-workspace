@@ -112,7 +112,10 @@ skills_dir = "skills"          # optional; explicit path overrides default disco
 agents_dir = "agents"          # optional; explicit path overrides default discovery
 doctor = "scripts/doctor.sh"   # optional; executable that emits NDJSON probe events for `winter doctor`
 lint = "scripts/lint.sh"       # optional; executable that emits NDJSON findings for `winter lint`
+requires = ["winter-product"]  # optional; other modules this one depends on (see `winter graph`)
 ```
+
+`requires` declares the other winter modules this one references and therefore needs when installed on its own. Each entry is a module name — the `<context>` half of a `<context>:/path` reference. It is the data `winter graph` aggregates and the module-extractability lint check validates references against.
 
 The final symlink prefix is resolved with this precedence: `prefix` on the workspace config entry > `prefix` in `winter-ext.toml` > `name` in `winter-ext.toml` > the standalone repo's directory name.
 
@@ -257,6 +260,7 @@ On top of the doctor probe's env (`WINTER_WORKSPACE_DIR`, and for extension scri
 |-----|---------|
 | `WINTER_LINT_SCOPE` | The scope kind: `all`, `repo`, `env`, or `changed`. |
 | `WINTER_LINT_PATHS` | Newline-delimited absolute paths in scope. Under `changed` these are individual **files**; under `all` / `repo` / `env` they are **directory** roots. A check must `stat` each path and handle both. |
+| `WINTER_CLI` | Absolute path to the winter CLI that launched the run. A check may call back into it for workspace-wide data it can't derive from its own scope — e.g. `$WINTER_CLI graph --json` for the dependency graph — instead of rebuilding it. A check must **never** call `winter lint` (that recurses). |
 
 **A check MUST confine itself to `WINTER_LINT_PATHS`.** `winter lint` runs every contributed script for every scope and never filters by content — keeping a run "applicable to that scope" is the script's job. A check walks the given paths, applies its rules only to files under them, and emits nothing for a scope whose content it doesn't recognize.
 
