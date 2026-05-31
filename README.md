@@ -2,6 +2,8 @@
 
 Winter is a reusable workspace framework for AI-assisted development with Claude Code.
 
+📚 **Documentation:** <https://paul-gross.github.io/winter-docs/>
+
 ## ✨ Features
 
 - **Polyrepo multi-worktree management** — Multiple project repos managed as one workspace. Each worktree contains a coordinated set of git worktrees across every repo, all on the same branch.
