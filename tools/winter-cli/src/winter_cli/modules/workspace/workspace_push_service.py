@@ -79,6 +79,24 @@ class WorkspacePushService:
                 and matches_any_pattern(env.name, wt.repository.name, patterns)
             ]
             if not worktrees:
+                if pinned_scope == PinnedScope.exclude:
+                    pinned_with_commits = [
+                        wt
+                        for wt in env_worktrees.worktrees
+                        if wt.repository.pinned
+                        and matches_any_pattern(env.name, wt.repository.name, patterns)
+                        and self._has_commits_to_push(wt)
+                    ]
+                    if pinned_with_commits:
+                        skipped.append(
+                            EnvSkipped(
+                                env=env.name,
+                                reason=(
+                                    f"{len(pinned_with_commits)} pinned repo(s) with commits skipped"
+                                    " — use --include-pinned or --only-pinned"
+                                ),
+                            )
+                        )
                 continue
 
             non_pinned = [wt for wt in worktrees if not wt.repository.pinned]
