@@ -14,7 +14,7 @@ This workspace manages **multiple project repositories** as peers. All repos are
 │   ├── winter-cli/             # CLI command reference + setup guide
 │   ├── setup-project-setup.md  # Walkthrough for authoring project-setup.md
 │   ├── contributing-setup.md   # Walkthrough for authoring contributing.md
-│   └── project/                # Project-specific integration config (contributing.md, workflow.sh)
+│   └── project/                # Project-specific integration config (contributing.md, plus any extension config)
 ├── .claude/                    # Workspace-level agents, skills, and settings
 │   ├── agents/                 # Top-level .md files plus <prefix>-* symlinks from extensions
 │   └── skills/                 # Top-level skill dirs plus <prefix>-* symlinks from extensions

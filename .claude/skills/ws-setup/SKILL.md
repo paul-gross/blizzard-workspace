@@ -240,7 +240,7 @@ Then, for each extension **one at a time**:
 4. If no such section exists, tell the user "No feature-environment setup needed for `<ext-name>`." and move to the next extension.
 
 Examples of extensions that contribute feature-environment setup steps:
-- `winter-service-tmux` — generates `workspace:/ai/project/workflow.sh` so `./up`/`./down`/`./status` know which services to run.
+- `winter-service-tmux` — walks you through its service config so `./up`/`./down`/`./status` know which services to run.
 
 If no extensions are installed, or none declare feature-environment setup steps, tell the user "No extension setup needed." and continue.
 
@@ -263,7 +263,7 @@ Summarize everything that happened in a single message:
 - Git identity strategy: workspace-specific / global / unchanged
 - Standalone extensions: `<list>` (cloned / already existed)
 - Alpha feature environment: created / skipped / already existed
-- Integration files: project-setup.md / workflow.sh / contributing.md (created / skipped / already existed)
+- Integration files: project-setup.md / contributing.md (created / skipped / already existed)
 - Any manual steps still pending
 
 End with:

@@ -27,7 +27,7 @@ cd my-workspace
 /ws-setup
 ```
 
-`/ws-setup` walks you through configuring remotes, cloning project repos, resolving branches, creating worktrees, and setting up the winter config (`.winter/config.toml`) and integration config (project-setup.md, workflow.sh, contributing.md).
+`/ws-setup` walks you through configuring remotes, cloning project repos, resolving branches, creating worktrees, and setting up the winter config (`.winter/config.toml`) and integration config (project-setup.md, contributing.md, plus any config an installed extension's setup walks you through).
 
 After cloning, `/ws-setup` re-points the remotes for you: the original origin becomes `winter` (your upstream for framework updates) and `origin` connects to your own repository.
 
