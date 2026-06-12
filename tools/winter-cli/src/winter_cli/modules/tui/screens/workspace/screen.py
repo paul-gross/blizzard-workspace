@@ -28,6 +28,7 @@ from winter_cli.modules.workspace.models import (
     RepoError,
     StandaloneRepoStatus,
     Workspace,
+    WorktreeRepoStatus,
 )
 from winter_cli.modules.workspace.repo_repository import IReadRepoRepository
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
@@ -185,7 +186,17 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
             except RepoError as exc:
                 self._capture_error(f"WorkspaceScreen.refresh(standalone:{r.name})", exc)
 
-        self.app.call_from_thread(self._update_widgets, env_worktrees_map, overviews, singleton_statuses)
+        main_statuses: dict[str, WorktreeRepoStatus] = {}
+        if project_repos:
+
+            def _on_main_repo_error(repo, exc):
+                self._capture_error(f"WorkspaceScreen.refresh(main:{repo.name})", exc)
+
+            main_statuses = self._env_status_svc.get_main_branch_statuses(
+                self._workspace, project_repos, on_repo_error=_on_main_repo_error
+            )
+
+        self.app.call_from_thread(self._update_widgets, env_worktrees_map, overviews, singleton_statuses, main_statuses)
 
     def action_open_log(self) -> None:
         app = cast("WinterDashboardApp", self.app)
@@ -200,6 +211,7 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
         env_worktrees_map: dict[str, FeatureEnvironmentWorktrees],
         overviews: list[FeatureEnvironmentOverview],
         singleton_statuses: list[StandaloneRepoStatus],
+        main_statuses: dict[str, WorktreeRepoStatus] | None = None,
     ) -> None:
         self._env_worktrees = env_worktrees_map
         self.query_one("#loading-container").display = False
@@ -214,6 +226,10 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
         singletons.statuses = singleton_statuses
 
         grid = self.query_one("#grid", FeatureWorktreesGrid)
+        # Set main_statuses without firing its watcher — the statuses watcher
+        # calls _update_in_place(), which reads main_statuses, so one visual
+        # pass covers both updates.
+        grid.set_reactive(FeatureWorktreesGrid.main_statuses, main_statuses if main_statuses is not None else {})
         grid.statuses = overviews
 
         panel = self.query_one("#services", ServicePanel)

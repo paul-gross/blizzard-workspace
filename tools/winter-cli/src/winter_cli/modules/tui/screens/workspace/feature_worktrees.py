@@ -30,11 +30,13 @@ class FeatureWorktreesGrid(DataTable):
     ]
 
     statuses: reactive[list[FeatureEnvironmentOverview]] = reactive(list, always_update=True)
+    main_statuses: reactive[dict[str, WorktreeRepoStatus]] = reactive(dict, always_update=True)
 
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
         self._env_keys: list[str] = []
         self._repo_keys: list[str] = []
+        self._pinned_by_name: dict[str, bool] = {}
 
     def on_mount(self) -> None:
         self.cursor_type = "cell"
@@ -99,12 +101,15 @@ class FeatureWorktreesGrid(DataTable):
         repo_lookup = self._build_repo_lookup()
         first_repo_statuses = self.statuses[0].repo_statuses if self.statuses else []
         repo_names = [rs.worktree.repository.name for rs in first_repo_statuses]
-        pinned_by_name = {rs.worktree.repository.name: rs.worktree.repository.pinned for rs in first_repo_statuses}
+        self._pinned_by_name = {
+            rs.worktree.repository.name: rs.worktree.repository.pinned for rs in first_repo_statuses
+        }
         self._repo_keys = list(repo_names)
 
         for repo_name in repo_names:
-            prefix = f"{_PIN_GLYPH} " if pinned_by_name.get(repo_name) else f"{_PIN_PAD} "
-            row_cells: list = [f"{prefix}{repo_name}"]
+            prefix = f"{_PIN_GLYPH} " if self._pinned_by_name.get(repo_name) else f"{_PIN_PAD} "
+            label = self._build_repo_label(prefix, repo_name)
+            row_cells: list = [label]
             for overview in self.statuses:
                 repo_status = repo_lookup[overview.status.environment.name].get(repo_name)
                 row_cells.append(render_repo_cell(repo_status) if repo_status else Text("-"))
@@ -118,6 +123,9 @@ class FeatureWorktreesGrid(DataTable):
             self.columns[col_key].label = self._column_header(overview)
 
         for repo_name in self._repo_keys:
+            prefix = f"{_PIN_GLYPH} " if self._pinned_by_name.get(repo_name) else f"{_PIN_PAD} "
+            label = self._build_repo_label(prefix, repo_name)
+            self.update_cell(repo_name, "repo", label, update_width=True)
             for overview in self.statuses:
                 col_key = overview.status.environment.name
                 repo_status = repo_lookup[col_key].get(repo_name)
@@ -126,6 +134,19 @@ class FeatureWorktreesGrid(DataTable):
 
         self._update_count += 1
         self.refresh()
+
+    def _build_repo_label(self, prefix: str, repo_name: str) -> Text:
+        label = Text(f"{prefix}{repo_name}")
+        ms = self.main_statuses.get(repo_name)
+        if ms is not None:
+            label.append(" ")
+            label.append_text(render_repo_cell(ms, include_extensions=False))
+        return label
+
+    def watch_main_statuses(self) -> None:
+        if not self._repo_keys:
+            return
+        self._update_in_place()
 
     def _build_repo_lookup(self) -> dict[str, dict[str, WorktreeRepoStatus]]:
         lookup: dict[str, dict[str, WorktreeRepoStatus]] = {}

@@ -187,6 +187,8 @@ Interactive TUI showing workspace status, feature environments, and repo details
 
 **Tracking glyphs** in the repo rows: `[+N, -N]` shows commits ahead/behind upstream; `[+]` marks an unborn upstream ref (the local branch tracks a remote that doesn't exist yet); the pin glyph marks pinned repos.
 
+**Main-checkout indicator** in the repo-name label: each repo-name label in the feature-worktrees grid carries a status suffix sourced from the project's main checkout under `projects/<repo>` — dirty-file count (red), `+N`/`-N` commits ahead/behind `origin/<main>` (green/yellow). A clean, up-to-date checkout shows nothing.
+
 ### Keybindings
 
 Every built-in action listed below has a stable **action id**. A `[keybindings]` table in `.winter/config.toml` (with the `.winter/config.local.toml` overlay applying per-machine) maps action ids to key specs; an id with no entry keeps its default. Invalid specs and unknown ids are reported as a dashboard toast and otherwise ignored — the rest of the bindings still load. See [setup.md](./setup.md#keybindings) for the config schema. (The Log tab is a separate screen whose `q`/`r`/`c` keys are fixed and not part of this table.)

@@ -16,6 +16,7 @@ from winter_cli.modules.workspace.models import (
     ProjectRepository,
     RepoDiffResult,
     RepoError,
+    Workspace,
     WorktreeRepoStatus,
 )
 from winter_cli.modules.workspace.repo_repository import IWriteRepoRepository
@@ -130,6 +131,49 @@ class EnvStatusService:
                     decorator(wt_repo_status, repo_path)
 
         return wt_repo_statuses
+
+    def get_main_branch_statuses(
+        self,
+        workspace: Workspace,
+        project_repos: list[ProjectRepository],
+        on_repo_error: Callable[[ProjectRepository, RepoError], None] | None = None,
+    ) -> dict[str, WorktreeRepoStatus]:
+        """Read the main-branch checkout status for each project repo.
+
+        Returns a mapping of repo name → WorktreeRepoStatus for every repo whose
+        main checkout is dirty or diverged from origin. Clean, up-to-date repos are
+        omitted so the caller treats a missing entry as "nothing to show".
+
+        When `on_repo_error` is `None`, the first `RepoError` propagates. When a
+        callback is provided, the failed repo is reported and skipped — matching the
+        tolerance contract of `get_worktree_repo_statuses`.
+        """
+        result: dict[str, WorktreeRepoStatus] = {}
+        for repo in project_repos:
+            try:
+                rs = self._repo_repo.get_project_status(repo)
+                if not (rs.ahead > 0 or rs.behind > 0 or rs.dirty_files):
+                    continue
+                # The dummy env and worktree carry only repo.main_branch, which is
+                # what render_repo_cell reads — the empty-env sentinel is safe here.
+                dummy_env = FeatureEnvironment(workspace=workspace, name="", index=0, path=repo.main_path)
+                dummy_wt = FeatureWorktree(workspace=workspace, environment=dummy_env, repository=repo)
+                result[repo.name] = WorktreeRepoStatus(
+                    worktree=dummy_wt,
+                    branch=rs.branch,
+                    ahead=rs.ahead,
+                    behind=rs.behind,
+                    dirty_count=len(rs.dirty_files),
+                    tracking_branch=rs.tracking_branch,
+                    tracking_ahead=rs.tracking_ahead,
+                    tracking_behind=rs.tracking_behind,
+                    tracking_ref_present=rs.tracking_ref_present,
+                )
+            except RepoError as exc:
+                if on_repo_error is None:
+                    raise
+                on_repo_error(repo, exc)
+        return result
 
     def get_feature_environment_worktrees(
         self,
