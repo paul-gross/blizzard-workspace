@@ -16,6 +16,7 @@ from winter_cli.config.models import (
     AdoptExtensions,
     GitIdentity,
     ProjectRepositoryConfig,
+    StandaloneRepositoryConfig,
     WorkspaceConfig,
 )
 from winter_cli.core.subprocess_runner import SubprocessResult
@@ -321,3 +322,192 @@ def test_run_cmds_failure_surfaces_via_wrap_site(
     demo_errors = [msg for repo, msg in init_reporter.errors if repo == "demo"]
     assert len(demo_errors) == 1
     assert "exited with code 1" in demo_errors[0]
+
+
+# ── on_workspace_reconcile wiring tests ───────────────────────────────────────
+
+
+def _make_extension_config(fs: FakeFilesystem, config_files: dict, name: str) -> StandaloneRepositoryConfig:
+    """Register a fake standalone extension with an on_workspace_reconcile hook in fs."""
+    ext_path = WORKSPACE_ROOT / name
+    fs.directories.add(ext_path)
+    manifest_path = ext_path / "winter-ext.toml"
+    fs.files[manifest_path] = ""
+    config_files[manifest_path] = {
+        "name": name,
+        "hooks": {"on_workspace_reconcile": "hooks/ws-reconcile.sh"},
+    }
+    hook_path = (ext_path / "hooks" / "ws-reconcile.sh").resolve()
+    fs.files[hook_path] = ""
+    fs.executables.add(hook_path)
+    fs.directories.add(hook_path.parent)
+    return StandaloneRepositoryConfig(name=name, url=f"git@example.com:org/{name}.git")
+
+
+def _service_with_ext(
+    workspace_config: WorkspaceConfig,
+    fs: FakeFilesystem,
+    config_files: dict,
+    subprocess: FakeSubprocessRunner,
+    git: FakeGitRepository,
+) -> InitService:
+    """Build an InitService whose manifest loader uses the canned config_files dict."""
+    from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
+    from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
+
+    manifest_loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    return InitService(
+        config=workspace_config,
+        repo_factory=RepositoryFactory(workspace_config),
+        extension_symlink_svc=ExtensionSymlinkService(
+            config=workspace_config,
+            fs=fs,
+            manifest_loader=manifest_loader,
+        ),
+        extension_hook_svc=ExtensionHookService(
+            config=workspace_config,
+            fs=fs,
+            subprocess_runner=subprocess,
+            manifest_loader=manifest_loader,
+        ),
+        extension_exclude_svc=ExtensionExcludeService(
+            config=workspace_config,
+            fs=fs,
+            manifest_loader=manifest_loader,
+        ),
+        extension_claudemd_svc=ExtensionClaudemdService(
+            config=workspace_config,
+            fs=fs,
+        ),
+        fs=fs,
+        subprocess_runner=subprocess,
+        git_repo=git,
+        git_ops=GitOpsService(RepoErrorFactory()),
+    )
+
+
+def test_workspace_reconcile_hook_fires_once_on_reconcile_all(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """reconcile_all fires on_workspace_reconcile exactly once, after standalones."""
+    config_files: dict = {}
+    fs = FakeFilesystem()
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    fs.directories.add(WORKSPACE_ROOT / "projects")
+
+    ext_cfg = _make_extension_config(fs, config_files, "my-ext")
+    ext_path = WORKSPACE_ROOT / "my-ext"
+    hook_path = (ext_path / "hooks" / "ws-reconcile.sh").resolve()
+
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=GitIdentity(name="Bot", email="bot@example.com"),
+        project_repos=[
+            ProjectRepositoryConfig(name="demo", url="git@example.com:org/demo.git"),
+        ],
+        standalone_repos=[ext_cfg],
+    )
+
+    demo_path = WORKSPACE_ROOT / "projects" / "demo"
+    fs.directories.add(demo_path)
+
+    subprocess = FakeSubprocessRunner(
+        popen_responses={str(hook_path): (["workspace reconcile ran"], 0)},
+    )
+    git = FakeGitRepository()
+    git.local_branches[demo_path] = ["main"]
+
+    # reconcile_all discovers no existing worktrees (empty list_worktrees), so it
+    # only calls reconcile_projects + reconcile_standalones + workspace hook + zero envs.
+    git.worktree_paths[demo_path] = [demo_path]  # only the source checkout itself
+
+    svc = _service_with_ext(cfg, fs, config_files, subprocess, git)
+    ok = svc.reconcile_all(init_reporter)
+
+    assert ok is True
+    ws_reconcile_calls = [
+        call for call, _ in subprocess.popen_calls if str(hook_path) in str(call)
+    ]
+    assert len(ws_reconcile_calls) == 1, (
+        f"expected exactly 1 on_workspace_reconcile call, got {len(ws_reconcile_calls)}"
+    )
+
+
+def test_workspace_reconcile_hook_fires_once_on_no_target_path(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """The no-target path (reconcile_projects + reconcile_standalones) fires the hook once."""
+    config_files: dict = {}
+    fs = FakeFilesystem()
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    fs.directories.add(WORKSPACE_ROOT / "projects")
+
+    ext_cfg = _make_extension_config(fs, config_files, "my-ext")
+    ext_path = WORKSPACE_ROOT / "my-ext"
+    hook_path = (ext_path / "hooks" / "ws-reconcile.sh").resolve()
+
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=GitIdentity(name="Bot", email="bot@example.com"),
+        project_repos=[
+            ProjectRepositoryConfig(name="demo", url="git@example.com:org/demo.git"),
+        ],
+        standalone_repos=[ext_cfg],
+    )
+
+    demo_path = WORKSPACE_ROOT / "projects" / "demo"
+    fs.directories.add(demo_path)
+
+    subprocess = FakeSubprocessRunner(
+        popen_responses={str(hook_path): (["workspace hook ran"], 0)},
+    )
+    git = FakeGitRepository()
+
+    svc = _service_with_ext(cfg, fs, config_files, subprocess, git)
+
+    # Simulate the no-target path: reconcile_projects then reconcile_standalones,
+    # then run_workspace_reconcile_hooks (as the handler does).
+    ok = svc.reconcile_projects(init_reporter)
+    if not svc.reconcile_standalones(init_reporter):
+        ok = False
+    if not svc.run_workspace_reconcile_hooks(init_reporter):
+        ok = False
+
+    assert ok is True
+    ws_reconcile_calls = [
+        call for call, _ in subprocess.popen_calls if str(hook_path) in str(call)
+    ]
+    assert len(ws_reconcile_calls) == 1, (
+        f"expected exactly 1 on_workspace_reconcile call, got {len(ws_reconcile_calls)}"
+    )
+
+
+def test_workspace_reconcile_hook_does_not_fire_on_reconcile_env(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """reconcile_env must NOT trigger on_workspace_reconcile."""
+    demo_path = WORKSPACE_ROOT / "projects" / "demo"
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", demo_path])
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+
+    subprocess = FakeSubprocessRunner()
+    git = FakeGitRepository()
+    git.local_branches[demo_path] = ["main"]
+
+    svc = _service(workspace_config, fs, subprocess, git)
+    ok = svc.reconcile_env("alpha", init_reporter)
+
+    assert ok is True
+    # No subprocess calls at all — the workspace reconcile hook must not fire.
+    assert not subprocess.popen_calls, (
+        "on_workspace_reconcile must NOT fire inside reconcile_env"
+    )

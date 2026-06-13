@@ -15,6 +15,7 @@ PORT_STEP = 100
 
 HOOK_ON_ENV_INIT = "on_env_init"
 HOOK_ON_ENV_DESTROY = "on_env_destroy"
+HOOK_ON_WORKSPACE_RECONCILE = "on_workspace_reconcile"
 
 CLAUDEMD_BLOCK_NAME = "winter-extensions"
 CLAUDEMD_INDEX_FILENAME = "index.md"
@@ -51,10 +52,11 @@ class ExtensionManifest:
     (`.claude/skills/`/`.claude/agents/`), so vanilla Claude Code repos can be
     adopted as extensions without modification.
 
-    `hooks` maps hook names (e.g. `on_env_init`) to executable script paths
-    relative to the extension's repo root. Hooks let an extension contribute
-    setup steps that don't fit the symlink-skills/agents model — for example,
-    dropping additional files into a worktree or running provisioning commands.
+    `hooks` maps hook names (e.g. `on_env_init`, `on_workspace_reconcile`) to
+    executable script paths relative to the extension's repo root. Hooks let an
+    extension contribute setup steps that don't fit the symlink-skills/agents
+    model — for example, dropping additional files into a worktree or running
+    provisioning commands.
 
     `doctor` is the relative path of an executable probe script invoked by
     `winter doctor`. The script emits one NDJSON event per check on stdout;

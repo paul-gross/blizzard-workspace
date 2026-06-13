@@ -152,18 +152,20 @@ Extensions can also declare lifecycle hooks in `winter-ext.toml`:
 
 ```toml
 [hooks]
-on_env_init    = "./hooks/init-worktree.sh"
-on_env_destroy = "./hooks/destroy-worktree.sh"
+on_env_init            = "./hooks/init-worktree.sh"
+on_env_destroy         = "./hooks/destroy-worktree.sh"
+on_workspace_reconcile = "./hooks/reconcile-workspace.sh"
 ```
 
 - `on_env_init` fires after `winter ws init <env>` creates every per-repo worktree and seeds `.winter.env`. Use it to provision per-env state (tmux sessions, databases, watchers).
 - `on_env_destroy` fires *before* `winter ws destroy <env>` removes any per-repo worktree or the env directory. Use it to release whatever `on_env_init` provisioned.
+- `on_workspace_reconcile` fires **once per workspace-level reconcile** — specifically `winter ws init` (no target) and `winter ws init --all`. Fires after standalone/extension repos are reconciled so the extension exists on disk, and for the `--all` path, before the per-env loop. Use it for one-time workspace setup that should re-run when the workspace is re-reconciled (e.g. writing workspace-level config files, registering extensions with external tools).
 
 Hook scripts must be **relative paths inside the extension directory** (so the extension owns its scripts; winter resolves them against the extension root).
 
 #### Hook env-var contract
 
-Every hook is invoked with:
+**Env hooks** (`on_env_init`, `on_env_destroy`) are invoked with:
 
 | Var | Meaning |
 |-----|---------|
@@ -175,6 +177,16 @@ Every hook is invoked with:
 | `WINTER_PORT_BASE` | `4000 + 100 * WINTER_ENV_INDEX`. |
 
 The hook's **cwd is the env root** (`<workspace>/<env>/`). Hooks should read these env vars rather than parse `argv`.
+
+**Workspace hook** (`on_workspace_reconcile`) is invoked with only:
+
+| Var | Meaning |
+|-----|---------|
+| `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root. |
+| `WINTER_EXT_DIR` | Absolute path to this extension's clone. |
+| `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension. |
+
+The hook's **cwd is the workspace root**.
 
 **Strict vs non-strict on destroy.** By default, a non-zero exit from a destroy hook is logged and the teardown continues so a broken hook doesn't trap an env on disk. Pass `--strict` to `winter ws destroy` (or set it in CI/scripted use) when a hook failure must surface as a user-actionable error before any worktree is removed.
 

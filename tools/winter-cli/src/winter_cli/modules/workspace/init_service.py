@@ -192,9 +192,23 @@ class InitService:
                     success = False
         return success
 
+    def run_workspace_reconcile_hooks(self, reporter: IInitReporter) -> bool:
+        """Fire the `on_workspace_reconcile` hook for every installed extension.
+
+        Call this once per top-level reconcile invocation, after standalones
+        have been reconciled (so extension repos exist on disk) and, for the
+        all-target path, before the per-env loop.
+        """
+        standalones = self._repo_factory.get_standalone_repos()
+        return self._extension_hook_svc.run_workspace_reconcile_hooks(standalones, reporter)
+
     def reconcile_all(self, reporter: IInitReporter) -> bool:
         success = self.reconcile_projects(reporter)
         if not self.reconcile_standalones(reporter):
+            success = False
+        # Fire the workspace-level hook once, after standalones are present on
+        # disk and before the per-env loop so extensions see a consistent state.
+        if not self.run_workspace_reconcile_hooks(reporter):
             success = False
         for name in self._discover_existing_worktrees():
             if not self.reconcile_env(name, reporter):
