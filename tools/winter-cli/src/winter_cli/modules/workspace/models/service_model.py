@@ -44,6 +44,9 @@ class RepoStatus:
     ahead: int = 0
     behind: int = 0
     dirty_files: list[str] = dataclasses.field(default_factory=list)
+    staged_count: int = 0
+    unstaged_count: int = 0
+    untracked_count: int = 0
     recent_commits: list[RepoCommit] = dataclasses.field(default_factory=list)
     commit_graph: list[str] = dataclasses.field(default_factory=list)
     """`git log --graph --oneline`-style lines down to the merge-base with main.

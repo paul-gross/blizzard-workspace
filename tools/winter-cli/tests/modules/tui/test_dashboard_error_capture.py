@@ -98,7 +98,7 @@ async def test_refresh_swallows_repo_error_into_log():
         def boom(*args, **kwargs):
             raise _err("synthetic refresh failure", subcommand="status", cmd_args=())
 
-        screen._workspace_repo.get_environments = boom  # type: ignore[assignment]
+        screen._snapshot_svc.collect_for_dashboard = boom  # type: ignore[assignment]
 
         screen.action_refresh()
         await pilot.pause(1.5)

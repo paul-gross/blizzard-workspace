@@ -80,14 +80,17 @@ class _FakeRepoFactory:
         return next((r for r in [*self.get_singleton_repos(), *self.get_standalone_repos()] if r.name == name), None)
 
 
-class _FakeWorkspaceRepo:
-    def get_environments(self, _workspace, _project_repos):
-        return []
+class _FakeSnapshotSvc:
+    """Minimal snapshot service fake — returns one singleton in standalone_statuses."""
 
+    def collect_for_dashboard(self, **_kwargs: Any):
+        from winter_cli.modules.workspace.workspace_snapshot_service import DashboardRefreshData
 
-class _FakeRepoRepo:
-    def get_standalone_status(self, repo: StandaloneRepository) -> StandaloneRepoStatus:
-        return StandaloneRepoStatus(repository=repo)
+        return DashboardRefreshData(
+            overviews=[],
+            standalone_statuses=[StandaloneRepoStatus(repository=_REPO)],
+            main_statuses={},
+        )
 
 
 class _FakePluginRegistry:
@@ -115,9 +118,7 @@ def _make_screen(actions: list[TuiAction]) -> WorkspaceScreen:
     # the slice the refresh/dispatch path touches, so cast at the construction
     # edge (per testing.md's orchestration-edge guidance).
     return WorkspaceScreen(
-        env_status_svc=cast(Any, None),
-        workspace_repo=cast(Any, _FakeWorkspaceRepo()),
-        repo_repo=cast(Any, _FakeRepoRepo()),
+        snapshot_svc=cast(Any, _FakeSnapshotSvc()),
         repo_factory=cast(Any, _FakeRepoFactory()),
         workspace=_WORKSPACE,
         plugin_registry=cast(Any, _FakePluginRegistry(actions)),

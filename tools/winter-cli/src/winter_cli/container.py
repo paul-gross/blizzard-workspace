@@ -53,6 +53,7 @@ from winter_cli.modules.workspace.reporter_factory import ReporterFactory
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_merge_service import WorkspaceMergeService
 from winter_cli.modules.workspace.workspace_push_service import WorkspacePushService
+from winter_cli.modules.workspace.workspace_snapshot_service import WorkspaceSnapshotService
 from winter_cli.modules.workspace.workspace_sync_service import WorkspaceSyncService
 from winter_cli.plugins.internal.importlib_plugin_loader import ImportlibPluginLoader
 from winter_cli.plugins.loader import PluginRegistry
@@ -248,6 +249,17 @@ class Container(containers.DeclarativeContainer):
         git_repo=git_repo,
     )
 
+    workspace_snapshot_svc = providers.Factory(
+        WorkspaceSnapshotService,
+        workspace=workspace,
+        env_status_svc=env_status_svc,
+        workspace_repo=worktree_repo,
+        repo_repo=repo_repo,
+        repo_factory=repo_factory,
+        drift_warning_svc=drift_warning_svc,
+        prune_svc=prune_svc,
+    )
+
     init_svc = providers.Factory(
         InitService,
         config=workspace_config,
@@ -338,6 +350,7 @@ class Container(containers.DeclarativeContainer):
         reporter_factory=reporter_factory,
         cli_output_svc=cli_output_svc,
         workspace=workspace,
+        workspace_snapshot_svc=workspace_snapshot_svc,
     )
 
     repo_handler = providers.Factory(
@@ -510,9 +523,7 @@ class Container(containers.DeclarativeContainer):
 
     workspace_screen = providers.Factory(
         _lazy("winter_cli.modules.tui.screens.workspace:WorkspaceScreen"),
-        env_status_svc=env_status_svc,
-        workspace_repo=worktree_repo,
-        repo_repo=repo_repo,
+        snapshot_svc=workspace_snapshot_svc,
         repo_factory=repo_factory,
         workspace=workspace,
         plugin_registry=plugin_registry,

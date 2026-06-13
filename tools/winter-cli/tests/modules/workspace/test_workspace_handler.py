@@ -5,20 +5,29 @@ from pathlib import Path
 from typing import Any, cast
 from unittest.mock import MagicMock, PropertyMock, patch
 
+import click
 import pytest
 
 from winter_cli.modules.workspace.handlers.workspace_handler import (
     EnvFetchParams,
+    EnvStatusParams,
     EnvWorktreesParams,
     WorkspaceHandler,
+    compute_status_exit_code,
 )
 from winter_cli.modules.workspace.models import (
+    EnvSnapshot,
     FetchReport,
+    OrphanSnapshot,
     RepoFetchOutcome,
     RepoScope,
+    SourceCheckoutSnapshot,
     StandaloneRepository,
     StandaloneRepoStatus,
+    WorkspaceLevelSnapshot,
+    WorkspaceSnapshot,
     WorktreeRepoStatus,
+    WorktreeSnapshot,
 )
 
 
@@ -674,3 +683,463 @@ def test_worktrees_with_status_workspace_status_none_when_branch_absent(
     assert ws_item["ahead"] is None
     assert ws_item["behind"] is None
     assert ws_item["dirty"] is None
+
+
+# ---------------------------------------------------------------------------
+# compute_status_exit_code — pure helper
+# ---------------------------------------------------------------------------
+
+
+def _clean_wt_snapshot(repo: str = "repo-a") -> WorktreeSnapshot:
+    return WorktreeSnapshot(
+        repo=repo,
+        branch="alpha",
+        upstream="origin/feature/x",
+        ahead=0,
+        behind=0,
+        tracking_ahead=0,
+        tracking_behind=0,
+        tracking_ref_present=True,
+        staged=0,
+        unstaged=0,
+        untracked=0,
+        dirty=0,
+        last_commit_subject=None,
+    )
+
+
+def _dirty_wt_snapshot(repo: str = "repo-a", dirty: int = 1) -> WorktreeSnapshot:
+    return WorktreeSnapshot(
+        repo=repo,
+        branch="alpha",
+        upstream="origin/feature/x",
+        ahead=0,
+        behind=0,
+        tracking_ahead=0,
+        tracking_behind=0,
+        tracking_ref_present=True,
+        staged=1,
+        unstaged=0,
+        untracked=0,
+        dirty=dirty,
+        last_commit_subject=None,
+    )
+
+
+def _clean_env_snapshot(name: str = "alpha", worktrees: list[WorktreeSnapshot] | None = None) -> EnvSnapshot:
+    return EnvSnapshot(
+        name=name,
+        index=1,
+        port_base=4100,
+        feature_branch="feature/x",
+        worktrees=worktrees if worktrees is not None else [_clean_wt_snapshot()],
+    )
+
+
+def _clean_sc_snapshot(repo: str = "repo-a") -> SourceCheckoutSnapshot:
+    return SourceCheckoutSnapshot(
+        repo=repo,
+        branch="main",
+        behind_origin=0,
+        ahead_origin=0,
+        dirty=0,
+        drift=[],
+    )
+
+
+def _drifted_sc_snapshot(repo: str = "repo-a", behind: int = 3) -> SourceCheckoutSnapshot:
+    return SourceCheckoutSnapshot(
+        repo=repo,
+        branch="main",
+        behind_origin=behind,
+        ahead_origin=0,
+        dirty=0,
+        drift=[],
+    )
+
+
+def _clean_workspace_level(root: str = "/ws") -> WorkspaceLevelSnapshot:
+    return WorkspaceLevelSnapshot(
+        root_path=root,
+        extensions=[],
+        orphans=[],
+        drift_missing=[],
+        drift_undeclared=[],
+    )
+
+
+def _make_snapshot(
+    envs: list[EnvSnapshot] | None = None,
+    source_checkouts: list[SourceCheckoutSnapshot] | None = None,
+    workspace: WorkspaceLevelSnapshot | None = None,
+) -> WorkspaceSnapshot:
+    return WorkspaceSnapshot(
+        schema_version=1,
+        environments=envs if envs is not None else [_clean_env_snapshot()],
+        source_checkouts=source_checkouts if source_checkouts is not None else [_clean_sc_snapshot()],
+        workspace=workspace if workspace is not None else _clean_workspace_level(),
+    )
+
+
+def test_compute_status_exit_code_clean_snapshot_returns_zero() -> None:
+    snapshot = _make_snapshot()
+    assert compute_status_exit_code(snapshot, scoped=False) == 0
+
+
+def test_compute_status_exit_code_dirty_worktree_returns_one() -> None:
+    env = _clean_env_snapshot(worktrees=[_dirty_wt_snapshot(dirty=2)])
+    snapshot = _make_snapshot(envs=[env])
+    assert compute_status_exit_code(snapshot, scoped=False) == 1
+
+
+def test_compute_status_exit_code_drifted_source_checkout_returns_one() -> None:
+    snapshot = _make_snapshot(
+        envs=[_clean_env_snapshot()],
+        source_checkouts=[_drifted_sc_snapshot(behind=3)],
+    )
+    assert compute_status_exit_code(snapshot, scoped=False) == 1
+
+
+def test_compute_status_exit_code_scoped_clean_env_global_drift_returns_zero() -> None:
+    """Pattern scoping: clean env + global drift → exit 0 (drift ignored for scoped run)."""
+    env = _clean_env_snapshot(name="alpha", worktrees=[_clean_wt_snapshot()])
+    snapshot = _make_snapshot(
+        envs=[env],
+        source_checkouts=[_drifted_sc_snapshot(behind=5)],
+    )
+    assert compute_status_exit_code(snapshot, scoped=True) == 0
+
+
+def test_compute_status_exit_code_scoped_dirty_env_returns_one() -> None:
+    """Pattern scoping: dirty worktree in filtered snapshot → exit 1."""
+    env = _clean_env_snapshot(name="alpha", worktrees=[_dirty_wt_snapshot(dirty=3)])
+    snapshot = _make_snapshot(envs=[env])
+    assert compute_status_exit_code(snapshot, scoped=True) == 1
+
+
+def test_compute_status_exit_code_scoped_ignores_orphans() -> None:
+    """Pattern scoping: orphans in workspace level do not flip exit code."""
+    orphan = OrphanSnapshot(kind="project_clone", path="/ws/projects/ghost", safe_to_remove=True, notes="")
+    ws = WorkspaceLevelSnapshot(
+        root_path="/ws",
+        extensions=[],
+        orphans=[orphan],
+        drift_missing=[],
+        drift_undeclared=[],
+    )
+    env = _clean_env_snapshot(name="alpha", worktrees=[_clean_wt_snapshot()])
+    snapshot = _make_snapshot(envs=[env], workspace=ws)
+    assert compute_status_exit_code(snapshot, scoped=True) == 0
+
+
+def test_compute_status_exit_code_orphans_return_one_when_unscoped() -> None:
+    orphan = OrphanSnapshot(kind="project_clone", path="/ws/projects/ghost", safe_to_remove=True, notes="")
+    ws = WorkspaceLevelSnapshot(
+        root_path="/ws",
+        extensions=[],
+        orphans=[orphan],
+        drift_missing=[],
+        drift_undeclared=[],
+    )
+    env = _clean_env_snapshot(name="alpha", worktrees=[_clean_wt_snapshot()])
+    snapshot = _make_snapshot(envs=[env], workspace=ws)
+    assert compute_status_exit_code(snapshot, scoped=False) == 1
+
+
+# ---------------------------------------------------------------------------
+# status() handler integration — JSON shape + exit codes
+# ---------------------------------------------------------------------------
+
+
+def _make_status_handler(snapshot: WorkspaceSnapshot | None, raise_exc: Exception | None = None) -> WorkspaceHandler:
+    """Build a WorkspaceHandler wired with a stub WorkspaceSnapshotService."""
+    workspace_snapshot_svc = MagicMock()
+    if raise_exc is not None:
+        workspace_snapshot_svc.collect.side_effect = raise_exc
+    else:
+        workspace_snapshot_svc.collect.return_value = snapshot
+
+    cli_output_svc = MagicMock()
+    cli_output_svc.style.side_effect = lambda text, _style: text
+    cli_output_svc.render_table.return_value = []
+
+    return WorkspaceHandler(
+        env_status_svc=MagicMock(),
+        workspace_sync_svc=MagicMock(),
+        workspace_push_svc=MagicMock(),
+        workspace_merge_svc=MagicMock(),
+        env_checkout_svc=MagicMock(),
+        workspace_repo=MagicMock(),
+        repo_repo=MagicMock(),
+        repo_factory=MagicMock(),
+        drift_warning_svc=MagicMock(),
+        prune_svc=MagicMock(),
+        reporter_factory=MagicMock(),
+        cli_output_svc=cli_output_svc,
+        workspace=MagicMock(),
+        workspace_snapshot_svc=workspace_snapshot_svc,
+    )
+
+
+def test_status_json_clean_snapshot_exits_zero(capsys: pytest.CaptureFixture[Any]) -> None:
+    snapshot = _make_snapshot()
+    handler = _make_status_handler(snapshot)
+    handler.status(EnvStatusParams(patterns=[], output_json=True))  # no SystemExit
+    out = json.loads(capsys.readouterr().out)
+    assert out["schema_version"] == 1
+
+
+def test_status_json_emits_all_four_top_level_keys(capsys: pytest.CaptureFixture[Any]) -> None:
+    snapshot = _make_snapshot()
+    handler = _make_status_handler(snapshot)
+    handler.status(EnvStatusParams(patterns=[], output_json=True))
+    out = json.loads(capsys.readouterr().out)
+    assert "schema_version" in out
+    assert "environments" in out
+    assert "source_checkouts" in out
+    assert "workspace" in out
+
+
+def test_status_json_emits_nested_worktrees(capsys: pytest.CaptureFixture[Any]) -> None:
+    snapshot = _make_snapshot(
+        envs=[_clean_env_snapshot(name="alpha", worktrees=[_clean_wt_snapshot("repo-a")])],
+    )
+    handler = _make_status_handler(snapshot)
+    handler.status(EnvStatusParams(patterns=[], output_json=True))
+    out = json.loads(capsys.readouterr().out)
+    assert len(out["environments"]) == 1
+    assert len(out["environments"][0]["worktrees"]) == 1
+    assert out["environments"][0]["worktrees"][0]["repo"] == "repo-a"
+
+
+def test_status_dirty_worktree_exits_one() -> None:
+    env = _clean_env_snapshot(worktrees=[_dirty_wt_snapshot(dirty=1)])
+    snapshot = _make_snapshot(envs=[env])
+    handler = _make_status_handler(snapshot)
+    with pytest.raises(SystemExit) as excinfo:
+        handler.status(EnvStatusParams(patterns=[], output_json=False))
+    assert excinfo.value.code == 1
+
+
+def test_status_clean_env_global_drift_scoped_exits_zero(capsys: pytest.CaptureFixture[Any]) -> None:
+    """Pattern-scoped run on clean env: exits 0 even with global source-checkout drift."""
+    env = _clean_env_snapshot(name="alpha", worktrees=[_clean_wt_snapshot()])
+    snapshot = _make_snapshot(
+        envs=[env],
+        source_checkouts=[_drifted_sc_snapshot(behind=3)],
+    )
+    handler = _make_status_handler(snapshot)
+    handler.status(EnvStatusParams(patterns=["alpha"], output_json=False))  # no SystemExit
+    capsys.readouterr()  # consume output
+
+
+def test_status_command_error_exits_two() -> None:
+    """A ClickException from collect() maps to exit code 2."""
+    handler = _make_status_handler(None, raise_exc=click.ClickException("No worktrees match: nope"))
+    with pytest.raises(SystemExit) as excinfo:
+        handler.status(EnvStatusParams(patterns=["nope"], output_json=False))
+    assert excinfo.value.code == 2
+
+
+# ---------------------------------------------------------------------------
+# status() --fetch flag
+# ---------------------------------------------------------------------------
+
+
+def _make_status_handler_with_sync(
+    snapshot: WorkspaceSnapshot,
+    fetch_report: FetchReport | None = None,
+) -> tuple[WorkspaceHandler, MagicMock]:
+    """Build a WorkspaceHandler with both snapshot and sync service stubs.
+
+    Returns the handler and the workspace_sync_svc mock so tests can assert
+    fetch_all call counts and arguments.
+    """
+    workspace_snapshot_svc = MagicMock()
+    workspace_snapshot_svc.collect.return_value = snapshot
+
+    workspace_sync_svc = MagicMock()
+    if fetch_report is None:
+        fetch_report = FetchReport(projects=[], standalone=[])
+    workspace_sync_svc.fetch_all.return_value = fetch_report
+
+    reporter_factory = MagicMock()
+
+    cli_output_svc = MagicMock()
+    cli_output_svc.style.side_effect = lambda text, _style: text
+    cli_output_svc.render_table.return_value = []
+
+    handler = WorkspaceHandler(
+        env_status_svc=MagicMock(),
+        workspace_sync_svc=workspace_sync_svc,
+        workspace_push_svc=MagicMock(),
+        workspace_merge_svc=MagicMock(),
+        env_checkout_svc=MagicMock(),
+        workspace_repo=MagicMock(),
+        repo_repo=MagicMock(),
+        repo_factory=MagicMock(),
+        drift_warning_svc=MagicMock(),
+        prune_svc=MagicMock(),
+        reporter_factory=reporter_factory,
+        cli_output_svc=cli_output_svc,
+        workspace=MagicMock(),
+        workspace_snapshot_svc=workspace_snapshot_svc,
+    )
+    return handler, workspace_sync_svc
+
+
+def test_status_no_fetch_by_default_does_not_call_sync_service() -> None:
+    """Default (no --fetch): the sync service must not be invoked (no network)."""
+    snapshot = _make_snapshot()
+    handler, sync_svc = _make_status_handler_with_sync(snapshot)
+
+    handler.status(EnvStatusParams(patterns=[], output_json=False))
+
+    sync_svc.fetch_all.assert_not_called()
+
+
+def test_status_with_fetch_flag_calls_fetch_all_before_collect(capsys: pytest.CaptureFixture[Any]) -> None:
+    """--fetch: sync service is invoked before snapshot collection."""
+    snapshot = _make_snapshot()
+    handler, sync_svc = _make_status_handler_with_sync(snapshot)
+
+    call_order: list[str] = []
+    sync_svc.fetch_all.side_effect = lambda **kwargs: (
+        call_order.append("fetch") or FetchReport(projects=[], standalone=[])
+    )
+    ws_snap_svc = cast(MagicMock, handler._workspace_snapshot_svc)
+    ws_snap_svc.collect.side_effect = lambda **kwargs: call_order.append("collect") or snapshot
+
+    handler.status(EnvStatusParams(patterns=[], output_json=False, fetch=True))
+    capsys.readouterr()
+
+    assert call_order == ["fetch", "collect"]
+
+
+def test_status_with_fetch_unscoped_passes_empty_patterns(capsys: pytest.CaptureFixture[Any]) -> None:
+    """--fetch without patterns passes patterns=[] (fetch_all expands to */* internally)."""
+    snapshot = _make_snapshot()
+    handler, sync_svc = _make_status_handler_with_sync(snapshot)
+
+    handler.status(EnvStatusParams(patterns=[], output_json=False, fetch=True))
+    capsys.readouterr()
+
+    sync_svc.fetch_all.assert_called_once()
+    _, kwargs = sync_svc.fetch_all.call_args
+    assert kwargs["patterns"] == []
+    assert kwargs["scope"] == RepoScope.project
+
+
+def test_status_with_fetch_scoped_passes_patterns_to_fetch(capsys: pytest.CaptureFixture[Any]) -> None:
+    """--fetch with patterns passes those patterns to scope the fetch."""
+    env = _clean_env_snapshot(name="alpha", worktrees=[_clean_wt_snapshot()])
+    snapshot = _make_snapshot(envs=[env])
+    handler, sync_svc = _make_status_handler_with_sync(snapshot)
+
+    handler.status(EnvStatusParams(patterns=["alpha"], output_json=False, fetch=True))
+    capsys.readouterr()
+
+    sync_svc.fetch_all.assert_called_once()
+    _, kwargs = sync_svc.fetch_all.call_args
+    assert kwargs["patterns"] == ["alpha"]
+    assert kwargs["scope"] == RepoScope.project
+
+
+# ---------------------------------------------------------------------------
+# compute_status_exit_code — dirty source checkout (fix 2)
+# ---------------------------------------------------------------------------
+
+
+def _dirty_sc_snapshot(repo: str = "repo-a", dirty: int = 1) -> SourceCheckoutSnapshot:
+    return SourceCheckoutSnapshot(
+        repo=repo,
+        branch="main",
+        behind_origin=0,
+        ahead_origin=0,
+        dirty=dirty,
+        drift=[],
+    )
+
+
+def test_compute_status_exit_code_dirty_source_checkout_returns_one() -> None:
+    """A source checkout with dirty files (but in-sync with origin) returns exit 1."""
+    snapshot = _make_snapshot(
+        envs=[_clean_env_snapshot()],
+        source_checkouts=[_dirty_sc_snapshot(dirty=3)],
+    )
+    assert compute_status_exit_code(snapshot, scoped=False) == 1
+
+
+def test_compute_status_exit_code_dirty_source_checkout_scoped_returns_zero() -> None:
+    """Pattern scoping: dirty source checkout does NOT flip exit code for a scoped run."""
+    env = _clean_env_snapshot(name="alpha", worktrees=[_clean_wt_snapshot()])
+    snapshot = _make_snapshot(
+        envs=[env],
+        source_checkouts=[_dirty_sc_snapshot(dirty=2)],
+    )
+    assert compute_status_exit_code(snapshot, scoped=True) == 0
+
+
+# ---------------------------------------------------------------------------
+# status() JSON wire-shape test — schema v1 contract including pinned (fix 6)
+# ---------------------------------------------------------------------------
+
+
+def _pinned_wt_snapshot(repo: str = "repo-a") -> WorktreeSnapshot:
+    return WorktreeSnapshot(
+        repo=repo,
+        branch="alpha",
+        upstream="origin/feature/x",
+        ahead=2,
+        behind=1,
+        tracking_ahead=2,
+        tracking_behind=1,
+        tracking_ref_present=True,
+        staged=1,
+        unstaged=2,
+        untracked=3,
+        dirty=6,
+        last_commit_subject="feat: add thing",
+        pinned=True,
+    )
+
+
+def test_status_json_emits_v1_schema(capsys: pytest.CaptureFixture[Any]) -> None:
+    """JSON output satisfies the v1 schema contract: top-level keys, worktrees[] includes pinned.
+
+    The snapshot has a dirty worktree so compute_status_exit_code returns 1; the
+    JSON is emitted before sys.exit, so we catch the SystemExit and inspect the
+    already-captured stdout.
+    """
+    env = _clean_env_snapshot(name="alpha", worktrees=[_pinned_wt_snapshot("repo-a")])
+    snapshot = _make_snapshot(envs=[env])
+    handler = _make_status_handler(snapshot)
+
+    with pytest.raises(SystemExit) as excinfo:
+        handler.status(EnvStatusParams(patterns=[], output_json=True))
+    assert excinfo.value.code == 1  # dirty worktree → exit 1 (JSON still emitted)
+
+    out = json.loads(capsys.readouterr().out)
+
+    # top-level keys
+    assert out["schema_version"] == 1
+    assert "environments" in out
+    assert "source_checkouts" in out
+    assert "workspace" in out
+
+    # worktrees[] entry — every documented field including pinned
+    wt = out["environments"][0]["worktrees"][0]
+    assert wt["repo"] == "repo-a"
+    assert wt["branch"] == "alpha"
+    assert wt["upstream"] == "origin/feature/x"
+    assert wt["ahead"] == 2
+    assert wt["behind"] == 1
+    assert wt["tracking_ahead"] == 2
+    assert wt["tracking_behind"] == 1
+    assert wt["tracking_ref_present"] is True
+    assert wt["staged"] == 1
+    assert wt["unstaged"] == 2
+    assert wt["untracked"] == 3
+    assert wt["dirty"] == 6
+    assert wt["last_commit_subject"] == "feat: add thing"
+    assert wt["pinned"] is True

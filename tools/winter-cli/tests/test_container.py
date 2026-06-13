@@ -11,6 +11,7 @@ from winter_cli.modules.workspace.extension_symlink_service import ExtensionSyml
 from winter_cli.modules.workspace.init_service import InitService
 from winter_cli.modules.workspace.prune_service import PruneService
 from winter_cli.modules.workspace.workspace_push_service import WorkspacePushService
+from winter_cli.modules.workspace.workspace_snapshot_service import WorkspaceSnapshotService
 from winter_cli.modules.workspace.workspace_sync_service import WorkspaceSyncService
 
 
@@ -28,6 +29,7 @@ def test_container_resolves_workspace_services_end_to_end(container: Container) 
     assert isinstance(container.workspace_sync_svc(), WorkspaceSyncService)
     assert isinstance(container.workspace_push_svc(), WorkspacePushService)
     assert isinstance(container.env_checkout_svc(), EnvCheckoutService)
+    assert isinstance(container.workspace_snapshot_svc(), WorkspaceSnapshotService)
 
 
 def test_container_resolves_every_top_level_service(container: Container) -> None:

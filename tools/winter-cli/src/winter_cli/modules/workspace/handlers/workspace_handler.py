@@ -17,17 +17,20 @@ from winter_cli.modules.workspace.models import (
     CheckoutResult,
     DiffMode,
     EnvCheckoutReport,
-    FeatureEnvironmentOverview,
-    FeatureEnvironmentStatus,
+    EnvSnapshot,
     MergeMode,
     PinnedScope,
     PullMode,
     PushReport,
     RepoError,
     RepoScope,
+    SourceCheckoutSnapshot,
     SyncResult,
     Workspace,
+    WorkspaceLevelSnapshot,
+    WorkspaceSnapshot,
     WorktreeRepoStatus,
+    WorktreeSnapshot,
 )
 from winter_cli.modules.workspace.prune_service import PruneOrphan, PruneService
 from winter_cli.modules.workspace.repo_repository import IReadRepoRepository
@@ -36,6 +39,7 @@ from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_merge_service import WorkspaceMergeService
 from winter_cli.modules.workspace.workspace_push_service import WorkspacePushService
 from winter_cli.modules.workspace.workspace_repository import IReadWorkspaceRepository
+from winter_cli.modules.workspace.workspace_snapshot_service import WorkspaceSnapshotService
 from winter_cli.modules.workspace.workspace_sync_service import WorkspaceSyncService
 
 
@@ -46,8 +50,9 @@ class EnvListParams:
 
 @dataclasses.dataclass
 class EnvStatusParams:
-    env: str | None
+    patterns: list[str]
     output_json: bool
+    fetch: bool = False
 
 
 @dataclasses.dataclass
@@ -170,6 +175,7 @@ class WorkspaceHandler:
         reporter_factory: ReporterFactory,
         cli_output_svc: ICliOutputService,
         workspace: Workspace,
+        workspace_snapshot_svc: WorkspaceSnapshotService | None = None,
     ) -> None:
         self._env_status_svc = env_status_svc
         self._workspace_sync_svc = workspace_sync_svc
@@ -184,6 +190,7 @@ class WorkspaceHandler:
         self._reporter_factory = reporter_factory
         self._cli_output_svc = cli_output_svc
         self._workspace = workspace
+        self._workspace_snapshot_svc = workspace_snapshot_svc
 
     def list(self, params: EnvListParams) -> None:
         project_repos = self._repo_factory.get_project_repos()
@@ -206,23 +213,37 @@ class WorkspaceHandler:
             click.echo(line)
 
     def status(self, params: EnvStatusParams) -> None:
-        project_repos = self._repo_factory.get_project_repos()
-        self._drift_warning_svc.raise_warning()
-        if params.env:
-            env = self._workspace_repo.get_environment(self._workspace, params.env)
-            env_status = self._workspace_repo.get_environment_status(env, project_repos)
-            env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-            repo_statuses = self._env_status_svc.get_worktree_repo_statuses(env_worktrees)
-            self._render_single(env_status, repo_statuses, params.output_json)
+        if self._workspace_snapshot_svc is None:
+            raise click.ClickException("workspace_snapshot_svc not wired — internal configuration error")
+
+        if params.fetch:
+            reporter = self._reporter_factory.get_fetch_reporter(params.output_json)
+            self._workspace_sync_svc.fetch_all(
+                scope=RepoScope.project,
+                patterns=params.patterns,
+                reporter=reporter,
+            )
+
+        try:
+            snapshot = self._workspace_snapshot_svc.collect(
+                patterns=params.patterns,
+                on_repo_error=None,
+            )
+        except click.ClickException as exc:
+            click.echo(f"Error: {exc.format_message()}", err=True)
+            sys.exit(2)
+        except Exception as exc:
+            click.echo(f"Error: {exc}", err=True)
+            sys.exit(2)
+
+        if params.output_json:
+            _echo_json(_snapshot_to_dict(snapshot))
         else:
-            environments = self._workspace_repo.get_environments(self._workspace, project_repos)
-            overviews = []
-            for env in environments:
-                env_status = self._workspace_repo.get_environment_status(env, project_repos)
-                env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-                repo_statuses = self._env_status_svc.get_worktree_repo_statuses(env_worktrees)
-                overviews.append(FeatureEnvironmentOverview(status=env_status, repo_statuses=repo_statuses))
-            self._render_grid(overviews, params.output_json)
+            self._render_status_table(snapshot)
+
+        exit_code = compute_status_exit_code(snapshot, scoped=bool(params.patterns))
+        if exit_code != 0:
+            sys.exit(exit_code)
 
     def connect(self, params: EnvConnectParams) -> None:
         env = self._workspace_repo.get_environment(self._workspace, params.env)
@@ -732,158 +753,213 @@ class WorkspaceHandler:
             table_rows.append([r.repo_name, pushed_cell, commits])
         return self._cli_output_svc.render_table(table_rows, headers=["REPO", "PUSHED", "COMMITS"])
 
-    def _render_single(
-        self,
-        env_status: FeatureEnvironmentStatus,
-        repo_statuses: list[WorktreeRepoStatus],
-        output_json: bool,
-    ) -> None:
-        if output_json:
-            _echo_json({"environment": _to_dict(env_status), "repos": _to_dict(repo_statuses)})
+    def _render_status_table(self, snapshot: WorkspaceSnapshot) -> None:
+        """Render the human-readable `ws status` output from a WorkspaceSnapshot."""
+        out = self._cli_output_svc
+
+        # ── environments ──────────────────────────────────────────────────────
+        for env_snap in snapshot.environments:
+            click.echo(f"{out.style('Env:', 'bold')} {env_snap.name}")
+            if env_snap.feature_branch:
+                click.echo(f"{out.style('Branch:', 'bold')}   {env_snap.feature_branch}")
+            click.echo()
+
+            if not env_snap.worktrees:
+                click.echo(out.style("  No repos", "dim"))
+                click.echo()
+                continue
+
+            rows: list[list[str | Cell]] = []
+            row_styles: list[str | None] = []
+            for wt in env_snap.worktrees:
+                sync_parts: list[str] = []
+                if wt.ahead:
+                    sync_parts.append(f"+{wt.ahead}")
+                if wt.behind:
+                    sync_parts.append(f"-{wt.behind}")
+                sync_str = ", ".join(sync_parts) if sync_parts else ""
+
+                if wt.dirty == 0:
+                    dirty_str = ""
+                elif wt.dirty == 1:
+                    dirty_str = "1 file"
+                else:
+                    dirty_str = f"{wt.dirty} files"
+
+                if wt.dirty:
+                    row_style: str | None = "red"
+                elif wt.ahead and wt.behind:
+                    row_style = "dark_orange"
+                elif wt.ahead:
+                    row_style = "green"
+                elif wt.behind:
+                    row_style = "yellow"
+                else:
+                    row_style = None
+
+                rows.append([wt.repo, sync_str, dirty_str])
+                row_styles.append(row_style)
+
+            for line in out.render_table(rows, headers=["REPO", "SYNC", "DIRTY"], row_styles=row_styles):
+                click.echo(line)
+            click.echo()
+
+        # ── source checkouts ──────────────────────────────────────────────────
+        if snapshot.source_checkouts:
+            click.echo(out.style("Source checkouts:", "bold"))
+            sc_rows: list[list[str | Cell]] = []
+            sc_styles: list[str | None] = []
+            for sc in snapshot.source_checkouts:
+                sc_sync_parts: list[str] = []
+                if sc.ahead_origin:
+                    sc_sync_parts.append(f"+{sc.ahead_origin}")
+                if sc.behind_origin:
+                    sc_sync_parts.append(f"-{sc.behind_origin}")
+                sc_sync_str = ", ".join(sc_sync_parts) if sc_sync_parts else ""
+                drift_str = "; ".join(sc.drift) if sc.drift else ""
+
+                if sc.behind_origin or sc.drift:
+                    sc_style: str | None = "yellow"
+                elif sc.ahead_origin:
+                    sc_style = "green"
+                else:
+                    sc_style = None
+
+                sc_rows.append([sc.repo, sc.branch or "-", sc_sync_str, drift_str])
+                sc_styles.append(sc_style)
+
+            for line in out.render_table(sc_rows, headers=["REPO", "BRANCH", "SYNC", "DRIFT"], row_styles=sc_styles):
+                click.echo(line)
+            click.echo()
+
+        # ── workspace-level ───────────────────────────────────────────────────
+        ws = snapshot.workspace
+        has_workspace_issues = ws.orphans or ws.drift_missing or ws.drift_undeclared
+        if not has_workspace_issues:
             return
 
-        out = self._cli_output_svc
-        click.echo(f"{out.style('Env:', 'bold')} {env_status.environment.name}")
-        if env_status.feature_branch:
-            click.echo(f"{out.style('Branch:', 'bold')}   {env_status.feature_branch}")
-        for key, value in env_status.extensions.items():
-            if value:
-                click.echo(f"{out.style(key + ':', 'bold')} {value}")
+        click.echo(out.style("Workspace:", "bold"))
+        if ws.drift_missing:
+            click.echo(f"  {out.style('missing:', 'yellow')} {', '.join(ws.drift_missing)}")
+        if ws.drift_undeclared:
+            click.echo(f"  {out.style('undeclared:', 'yellow')} {', '.join(ws.drift_undeclared)}")
+        if ws.orphans:
+            click.echo(f"  {out.style('orphans:', 'yellow')} {len(ws.orphans)}")
+            for o in ws.orphans:
+                marker = "  " if o.safe_to_remove else "! "
+                click.echo(f"    {marker}{o.kind}  {o.path}")
         click.echo()
 
-        if not repo_statuses:
-            click.echo(out.style("No repos", "dim"))
-            return
 
-        extension_keys: list[str] = []
-        for repo_status in repo_statuses:
-            for k in repo_status.extensions:
-                if k not in extension_keys:
-                    extension_keys.append(k)
+def compute_status_exit_code(snapshot: WorkspaceSnapshot, *, scoped: bool) -> int:
+    """Compute the exit code for `ws status`.
 
-        headers: list[str | Cell] = ["REPO", "SYNC", "DIRTY", *(k.upper() for k in extension_keys)]
-        rows: list[list[str | Cell]] = []
-        row_styles: list[str | None] = []
+    Contract (locked):
+      0 = clean
+      1 = dirty OR drifted
+      2 = command error  (callers map exceptions → 2 before reaching here)
 
-        for repo_status in repo_statuses:
-            sync_parts = []
-            if repo_status.ahead:
-                sync_parts.append(f"+{repo_status.ahead}")
-            if repo_status.behind:
-                sync_parts.append(f"-{repo_status.behind}")
-            sync_str = ", ".join(sync_parts) if sync_parts else ""
+    When ``scoped`` is True (patterns were given), only the already-filtered
+    snapshot's worktree dirtiness is considered for the exit code.  Global
+    source-checkout drift, config drift, and orphans are still rendered as
+    context but do NOT flip the exit code.
 
-            if repo_status.dirty_count == 0:
-                dirty_str = ""
-            elif repo_status.dirty_count == 1:
-                dirty_str = "1 file"
-            else:
-                dirty_str = f"{repo_status.dirty_count} files"
+    When ``scoped`` is False (no patterns, full workspace) the full workspace is
+    considered: any dirty worktree OR any source-checkout drift (behind_origin >
+    0 or ahead_origin > 0 or non-empty drift list) OR any orphans OR any config
+    drift counts as ``1``.
+    """
+    if scoped:
+        # Scoped: only the matched worktrees contribute to dirtiness.
+        for env_snap in snapshot.environments:
+            for wt in env_snap.worktrees:
+                if wt.dirty > 0:
+                    return 1
+        return 0
 
-            if repo_status.dirty_count:
-                row_style: str | None = "red"
-            elif repo_status.ahead and repo_status.behind:
-                row_style = "dark_orange"
-            elif repo_status.ahead:
-                row_style = "green"
-            elif repo_status.behind:
-                row_style = "yellow"
-            else:
-                row_style = None
+    # Unscoped: check everything.
+    for env_snap in snapshot.environments:
+        for wt in env_snap.worktrees:
+            if wt.dirty > 0:
+                return 1
 
-            row: list[str | Cell] = [repo_status.worktree.repository.name, sync_str, dirty_str]
-            for key in extension_keys:
-                ext = repo_status.extensions.get(key, {})
-                row.append(str(ext) if ext else "-")
-            rows.append(row)
-            row_styles.append(row_style)
+    for sc in snapshot.source_checkouts:
+        if sc.behind_origin > 0 or sc.ahead_origin > 0 or sc.dirty > 0 or sc.drift:
+            return 1
 
-        for line in self._cli_output_svc.render_table(rows, headers=headers, row_styles=row_styles):
-            click.echo(line)
+    ws = snapshot.workspace
+    if ws.orphans or ws.drift_missing or ws.drift_undeclared:
+        return 1
 
-    def _render_grid(
-        self,
-        overviews: list[FeatureEnvironmentOverview],
-        output_json: bool,
-    ) -> None:
-        if output_json:
-            _echo_json([{"environment": _to_dict(o.status), "repos": _to_dict(o.repo_statuses)} for o in overviews])
-            return
+    return 0
 
-        repo_names: list[str] = []
-        if overviews:
-            repo_names = [rs.worktree.repository.name for rs in overviews[0].repo_statuses]
 
-        # Two header rows: env name (+ badges) on top, feature branch on the bottom.
-        headers_top: list[str | Cell] = ["REPO"]
-        headers_bottom: list[str | Cell] = [""]
-        for overview in overviews:
-            badges = " ".join(v for v in overview.status.extensions.values() if v)
+def _snapshot_to_dict(snapshot: WorkspaceSnapshot) -> dict[str, Any]:
+    """Serialize a WorkspaceSnapshot to a stable v1 dict (snake_case, schema_version=1)."""
+    return {
+        "schema_version": snapshot.schema_version,
+        "environments": [_env_snap_to_dict(e) for e in snapshot.environments],
+        "source_checkouts": [_sc_snap_to_dict(sc) for sc in snapshot.source_checkouts],
+        "workspace": _workspace_level_to_dict(snapshot.workspace),
+    }
 
-            has_ahead = any(rs.ahead for rs in overview.repo_statuses)
-            has_behind = any(rs.behind for rs in overview.repo_statuses)
 
-            if has_ahead and has_behind:
-                header_color: str | None = "dark_orange"
-            elif has_ahead:
-                header_color = "green"
-            elif has_behind:
-                header_color = "yellow"
-            else:
-                header_color = None
+def _env_snap_to_dict(env: EnvSnapshot) -> dict[str, Any]:
+    return {
+        "name": env.name,
+        "index": env.index,
+        "port_base": env.port_base,
+        "feature_branch": env.feature_branch,
+        "worktrees": [_worktree_snap_to_dict(wt) for wt in env.worktrees],
+    }
 
-            name_label = overview.status.environment.name.capitalize()
-            top_text = f"{name_label} {badges}".rstrip()
-            if header_color:
-                headers_top.append(Cell.of(top_text, header_color))
-            else:
-                headers_top.append(top_text)
-            branch = overview.status.feature_branch or "—"
-            headers_bottom.append(Cell.of(branch, "dim"))
 
-        repo_lookup: dict[str, dict[str, WorktreeRepoStatus]] = {}
-        for overview in overviews:
-            repo_lookup[overview.status.environment.name] = {
-                rs.worktree.repository.name: rs for rs in overview.repo_statuses
+def _worktree_snap_to_dict(wt: WorktreeSnapshot) -> dict[str, Any]:
+    return {
+        "repo": wt.repo,
+        "branch": wt.branch,
+        "upstream": wt.upstream,
+        "ahead": wt.ahead,
+        "behind": wt.behind,
+        "tracking_ahead": wt.tracking_ahead,
+        "tracking_behind": wt.tracking_behind,
+        "tracking_ref_present": wt.tracking_ref_present,
+        "staged": wt.staged,
+        "unstaged": wt.unstaged,
+        "untracked": wt.untracked,
+        "dirty": wt.dirty,
+        "last_commit_subject": wt.last_commit_subject,
+        "pinned": wt.pinned,
+    }
+
+
+def _sc_snap_to_dict(sc: SourceCheckoutSnapshot) -> dict[str, Any]:
+    return {
+        "repo": sc.repo,
+        "branch": sc.branch,
+        "behind_origin": sc.behind_origin,
+        "ahead_origin": sc.ahead_origin,
+        "dirty": sc.dirty,
+        "drift": list(sc.drift),
+    }
+
+
+def _workspace_level_to_dict(ws: WorkspaceLevelSnapshot) -> dict[str, Any]:
+    return {
+        "root_path": ws.root_path,
+        "extensions": list(ws.extensions),
+        "orphans": [
+            {
+                "kind": o.kind,
+                "path": o.path,
+                "safe_to_remove": o.safe_to_remove,
+                "notes": o.notes,
             }
-
-        rows: list[list[str | Cell]] = [headers_bottom]
-        for repo_name in repo_names:
-            row: list[str | Cell] = [repo_name]
-            for overview in overviews:
-                repo_status = repo_lookup[overview.status.environment.name].get(repo_name)
-                if repo_status is None:
-                    row.append(Cell.of("-", "dim"))
-                    continue
-                cell = self._format_cell(repo_status)
-                row.append(cell)
-            rows.append(row)
-
-        for line in self._cli_output_svc.render_table(rows, headers=headers_top):
-            click.echo(line)
-
-    @staticmethod
-    def _format_cell(repo_status: WorktreeRepoStatus) -> Cell:
-        segments: list[tuple[str, str | None]] = []
-        if repo_status.ahead:
-            if segments:
-                segments.append((" ", None))
-            segments.append((f"+{repo_status.ahead}", "green"))
-        if repo_status.behind:
-            if segments:
-                segments.append((" ", None))
-            segments.append((f"-{repo_status.behind}", "yellow"))
-        if repo_status.dirty_count == 1:
-            if segments:
-                segments.append((" ", None))
-            segments.append(("1 file", "red"))
-        elif repo_status.dirty_count > 1:
-            if segments:
-                segments.append((" ", None))
-            segments.append((f"{repo_status.dirty_count} files", "red"))
-        if not segments:
-            return Cell.of("·", "dim")
-        return Cell.compose(segments)
+            for o in ws.orphans
+        ],
+        "drift_missing": list(ws.drift_missing),
+        "drift_undeclared": list(ws.drift_undeclared),
+    }
 
 
 def _worktree_location_to_dict(loc: WorktreeLocation, with_status: bool) -> dict[str, Any]:

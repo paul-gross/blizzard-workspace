@@ -204,14 +204,34 @@ def ws_worktrees(ctx: click.Context, output_json: bool, with_status: bool):
 
 
 @ws_group.command("status")
-@click.argument("env", required=False)
+@click.argument("patterns", nargs=-1)
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
+@click.option(
+    "--fetch",
+    "fetch",
+    is_flag=True,
+    default=False,
+    help="Refresh remote-tracking refs across the in-scope repos before reporting (network). Off by default.",
+)
 @click.pass_context
-def ws_status(ctx: click.Context, env: str | None, output_json: bool):
-    """Show status for a feature environment (defaults to all)."""
+def ws_status(ctx: click.Context, patterns: tuple[str, ...], output_json: bool, fetch: bool):
+    """Show status for the workspace, filtered by PATTERNS (defaults to all).
+
+    Each PATTERN is a segment-aware glob over <env>/<repo>. Bare env names
+    (no '/') are treated as <env>/*. * does not cross /.
+
+    \b
+      winter ws status                    # all environments
+      winter ws status alpha              # alpha's worktrees (== 'alpha/*')
+      winter ws status alpha/winter       # one specific worktree
+      winter ws status '*/winter'         # every env's winter worktree
+      winter ws status alpha/winter --json  # JSON output for one worktree
+    """
+    for pattern in patterns:
+        _validate_pattern(pattern)
     container = cli_ctx(ctx).container
     handler = container.workspace_handler()
-    handler.status(EnvStatusParams(env=env, output_json=output_json))
+    handler.status(EnvStatusParams(patterns=list(patterns), output_json=output_json, fetch=fetch))
 
 
 @ws_group.command("connect")

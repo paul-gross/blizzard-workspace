@@ -41,6 +41,14 @@ from winter_cli.modules.workspace.models.service_model import (
     SyncResult,
     WorktreeRepoStatus,
 )
+from winter_cli.modules.workspace.models.snapshot_model import (
+    EnvSnapshot,
+    OrphanSnapshot,
+    SourceCheckoutSnapshot,
+    WorkspaceLevelSnapshot,
+    WorkspaceSnapshot,
+    WorktreeSnapshot,
+)
 
 __all__ = [
     "CheckoutResult",
@@ -50,6 +58,7 @@ __all__ = [
     "EnvMergeReport",
     "EnvPushReport",
     "EnvSkipped",
+    "EnvSnapshot",
     "EnvSyncReport",
     "FeatureEnvironment",
     "FeatureEnvironmentOverview",
@@ -62,6 +71,7 @@ __all__ = [
     "MergeMode",
     "MergeReport",
     "MergeResult",
+    "OrphanSnapshot",
     "PinnedScope",
     "ProjectRepository",
     "PullMode",
@@ -77,9 +87,13 @@ __all__ = [
     "RepoScope",
     "RepoStatus",
     "RepoSyncOutcome",
+    "SourceCheckoutSnapshot",
     "StandaloneRepoStatus",
     "StandaloneRepository",
     "SyncResult",
     "Workspace",
+    "WorkspaceLevelSnapshot",
+    "WorkspaceSnapshot",
     "WorktreeRepoStatus",
+    "WorktreeSnapshot",
 ]

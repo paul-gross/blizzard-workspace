@@ -21,7 +21,6 @@ from winter_cli.modules.tui.screens.workspace.feature_worktrees import FeatureWo
 from winter_cli.modules.tui.screens.workspace.standalone_repos import StandaloneReposTable
 from winter_cli.modules.tui.widgets.refresh_status import RefreshStatus
 from winter_cli.modules.tui.widgets.service_panel import ServicePanel
-from winter_cli.modules.workspace.env_status_service import EnvStatusService
 from winter_cli.modules.workspace.models import (
     FeatureEnvironmentOverview,
     FeatureEnvironmentWorktrees,
@@ -30,9 +29,8 @@ from winter_cli.modules.workspace.models import (
     Workspace,
     WorktreeRepoStatus,
 )
-from winter_cli.modules.workspace.repo_repository import IReadRepoRepository
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
-from winter_cli.modules.workspace.workspace_repository import IReadWorkspaceRepository
+from winter_cli.modules.workspace.workspace_snapshot_service import WorkspaceSnapshotService
 from winter_cli.plugins.loader import PluginRegistry
 from winter_cli.plugins.types import (
     ActionScope,
@@ -53,9 +51,7 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
 
     def __init__(
         self,
-        env_status_svc: EnvStatusService,
-        workspace_repo: IReadWorkspaceRepository,
-        repo_repo: IReadRepoRepository,
+        snapshot_svc: WorkspaceSnapshotService,
         repo_factory: RepositoryFactory,
         workspace: Workspace,
         plugin_registry: PluginRegistry,
@@ -64,9 +60,7 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self._env_status_svc = env_status_svc
-        self._workspace_repo = workspace_repo
-        self._repo_repo = repo_repo
+        self._snapshot_svc = snapshot_svc
         self._repo_factory = repo_factory
         self._workspace = workspace
         self._plugin_registry = plugin_registry
@@ -139,64 +133,45 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
         dashboard stays stuck on the loading splash. Catching at the env /
         standalone-repo boundary keeps the rest of the dashboard responsive
         while every individual failure still lands in the Log tab.
+
+        All git-probing is delegated to `WorkspaceSnapshotService.collect_for_dashboard()`
+        so the dashboard and `ws status` cannot diverge on what they read.
         """
         self.app.call_from_thread(self._on_refresh_start)
         worktree_repo_decorators = list(self._plugin_registry.worktree_repo_decorators)
         environment_decorators = list(self._plugin_registry.environment_decorators)
 
+        def _on_repo_error(wt, exc):
+            self._capture_error(f"WorkspaceScreen.refresh({wt.repository.name})", exc)
+
         try:
-            project_repos = self._repo_factory.get_project_repos()
-            environments = self._workspace_repo.get_environments(self._workspace, project_repos)
+            data = self._snapshot_svc.collect_for_dashboard(
+                on_repo_error=_on_repo_error,
+                env_decorators=environment_decorators or None,
+                worktree_repo_decorators=worktree_repo_decorators or None,
+            )
         except RepoError as exc:
             self._capture_error("WorkspaceScreen.refresh", exc)
             self.app.call_from_thread(self._update_widgets, {}, [], [])
             return
 
-        env_worktrees_map: dict[str, FeatureEnvironmentWorktrees] = {}
-        overviews: list[FeatureEnvironmentOverview] = []
-        for env in environments:
-
-            def _on_repo_error(wt, exc, env_name=env.name):
-                self._capture_error(f"WorkspaceScreen.refresh({env_name}/{wt.repository.name})", exc)
-
-            try:
-                env_status = self._env_status_svc.get_environment_status(
-                    env,
-                    project_repos,
-                    environment_decorators or None,
-                )
-                env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-                env_worktrees_map[env.name] = env_worktrees
-                repo_statuses = self._env_status_svc.get_worktree_repo_statuses(
-                    env_worktrees,
-                    worktree_repo_decorators or None,
-                    on_repo_error=_on_repo_error,
-                )
-                overviews.append(FeatureEnvironmentOverview(status=env_status, repo_statuses=repo_statuses))
-            except RepoError as exc:
-                self._capture_error(f"WorkspaceScreen.refresh({env.name})", exc)
-
-        singleton_statuses: list[StandaloneRepoStatus] = []
-        for r in [
-            *self._repo_factory.get_singleton_repos(),
-            *self._repo_factory.get_standalone_repos(),
-        ]:
-            try:
-                singleton_statuses.append(self._repo_repo.get_standalone_status(r))
-            except RepoError as exc:
-                self._capture_error(f"WorkspaceScreen.refresh(standalone:{r.name})", exc)
-
-        main_statuses: dict[str, WorktreeRepoStatus] = {}
-        if project_repos:
-
-            def _on_main_repo_error(repo, exc):
-                self._capture_error(f"WorkspaceScreen.refresh(main:{repo.name})", exc)
-
-            main_statuses = self._env_status_svc.get_main_branch_statuses(
-                self._workspace, project_repos, on_repo_error=_on_main_repo_error
+        # Reconstruct FeatureEnvironmentWorktrees from the overviews for the
+        # plugin action execution methods — no extra git probing needed.
+        env_worktrees_map: dict[str, FeatureEnvironmentWorktrees] = {
+            overview.status.environment.name: FeatureEnvironmentWorktrees(
+                environment=overview.status.environment,
+                worktrees=[rs.worktree for rs in overview.repo_statuses],
             )
+            for overview in data.overviews
+        }
 
-        self.app.call_from_thread(self._update_widgets, env_worktrees_map, overviews, singleton_statuses, main_statuses)
+        self.app.call_from_thread(
+            self._update_widgets,
+            env_worktrees_map,
+            data.overviews,
+            data.standalone_statuses,
+            data.main_statuses,
+        )
 
     def action_open_log(self) -> None:
         app = cast("WinterDashboardApp", self.app)

@@ -34,17 +34,35 @@ Greek letters (`alpha`, `beta`, …) are the suggested convention for feature en
 | `winter ws destroy` | `winter ws destroy ENV [--force\|--strict\|--dry-run] [--json]` | Tear down a feature env: fire `on_env_destroy` hooks, then remove every per-repo worktree and the env directory |
 | `winter ws checkout` | `winter ws checkout ENV FEATURE_BRANCH [--new] [--force] [--json]` | Connect every non-pinned worktree in ENV to FEATURE_BRANCH and reset to it (or to `origin/<main>` where it doesn't exist — requires `--new` when it exists in no repo), all-or-nothing (no network — run `winter ws fetch` first if needed) |
 | `winter ws list` | `winter ws list [--json]` | List all feature environments |
-| `winter ws status` | `winter ws status [ENV] [--json]` | Git status across all repos in a feature environment |
-| `winter ws fetch` | `winter ws fetch [PATTERNS...] [--standalone\|--all] [--json]` | Fetch refs from `origin` for project worktrees matched by PATTERNS, and fast-forward each matched source checkout's local main |
-| `winter ws pull` | `winter ws pull [PATTERNS...] [--standalone\|--all] [--ff-only\|--merge\|--rebase] [--autostash] [--json]` | Fetch + ff-only integrate (default) project worktrees matched by PATTERNS |
-| `winter ws merge` | `winter ws merge SOURCE_REF [PATTERNS...] [--standalone\|--all] [--ff-only\|--merge\|--no-ff] [--autostash] [--exclude-pinned\|--only-pinned] [--json]` | Merge an arbitrary SOURCE_REF (env name, branch, `origin/...`) into project worktrees matched by PATTERNS |
-| `winter ws push` | `winter ws push [PATTERNS...] [--standalone\|--all] [--include-pinned\|--only-pinned] [--json]` | Push project worktrees matched by PATTERNS to their tracked upstream |
+| `winter ws status` | `winter ws status [PATTERNS]... [--json] [--fetch]` | Machine-readable + human-readable workspace state snapshot |
+| `winter ws fetch` | `winter ws fetch [PATTERNS]... [--standalone\|--all] [--json]` | Fetch refs from `origin` for project worktrees matched by PATTERNS, and fast-forward each matched source checkout's local main |
+| `winter ws pull` | `winter ws pull [PATTERNS]... [--standalone\|--all] [--ff-only\|--merge\|--rebase] [--autostash] [--json]` | Fetch + ff-only integrate (default) project worktrees matched by PATTERNS |
+| `winter ws merge` | `winter ws merge SOURCE_REF [PATTERNS]... [--standalone\|--all] [--ff-only\|--merge\|--no-ff] [--autostash] [--exclude-pinned\|--only-pinned] [--json]` | Merge an arbitrary SOURCE_REF (env name, branch, `origin/...`) into project worktrees matched by PATTERNS |
+| `winter ws push` | `winter ws push [PATTERNS]... [--standalone\|--all] [--include-pinned\|--only-pinned] [--json]` | Push project worktrees matched by PATTERNS to their tracked upstream |
 | `winter ws connect` | `winter ws connect ENV FEATURE_BRANCH [--json]` | Connect a feature environment to a remote feature branch |
 | `winter ws disconnect` | `winter ws disconnect ENV [--json]` | Disconnect a feature environment from its feature branch |
 | `winter ws diff` | `winter ws diff ENV [--staged\|--branch] [--repo REPO] [--no-headers] [--json]` | Unified diff across all repos in a feature environment (`--no-headers` omits the per-repo separator headers) |
 | `winter ws index` | `winter ws index NAME [--json]` | Print the port-offset index for a feature environment name (Greek = 1..24, other = hashed 26..281) |
 | `winter ws prune` | `winter ws prune [--dry-run\|--force] [--json]` | Remove disk state for repos no longer in the workspace config (orphan project clones, orphan standalone clones, broken `.claude/` symlinks). Refuses repos with uncommitted changes or attached worktrees |
 | `winter ws worktrees` | `winter ws worktrees [--status] [--json]` | List every existing feature-environment worktree and standalone repo as a flat table or JSON array — intended for editor integrations (e.g. Neovim fuzzy-finder `cd` picker). Each entry's `kind` is one of `worktree` \| `standalone` \| `workspace`; the implicit workspace repo (the workspace root) is the single `workspace` entry, labelled `<workspace>` (the other singletons, product/harness, are not listed here, unlike the dashboard). Omits entries whose directory does not exist on disk. `--status` adds per-repo git status (ahead/behind/dirty) at the cost of a git call per repo |
+
+### `status` — workspace state snapshot
+
+`winter ws status` emits a human-readable and machine-readable state snapshot of every feature environment, source checkout, and workspace-level metadata.
+
+**Synopsis:**
+
+```
+winter ws status [PATTERNS]... [--json] [--fetch]
+```
+
+Each `PATTERN` is a segment-aware glob over `<env>/<repo>`. Bare env names expand to `<env>/*`; `*` does not cross `/`. With no patterns, all environments are shown. With patterns, only matched worktrees appear in the output; source checkouts and workspace sections are always shown as context.
+
+**Exit codes:** `0` = clean, `1` = dirty or drifted, `2` = command error (e.g. no pattern match). When patterns are given, only matched worktrees determine the exit code — global drift does not flip it.
+
+See [usage/status.md](./usage/status.md) for the full pattern vocabulary, JSON schema, and exit-code reference.
+
+See also: [Drift warnings](#drift-warnings) for the source-checkout drift detection that contributes to exit code 1 on an unscoped run.
 
 ### `fetch` / `pull` / `push` / `merge` patterns and scope
 

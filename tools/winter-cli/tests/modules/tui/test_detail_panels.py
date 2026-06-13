@@ -321,15 +321,8 @@ class _WsRepoFactory:
     def get_standalone_repos(self) -> list[StandaloneRepository]:
         return []
 
-
-class _WsWorkspaceRepo:
-    def get_environments(self, _workspace, _project_repos) -> list[Any]:
-        return []
-
-
-class _WsRepoRepo:
-    def get_standalone_status(self, repo: StandaloneRepository) -> StandaloneRepoStatus:
-        return StandaloneRepoStatus(repository=repo)
+    def find_standalone(self, name: str) -> StandaloneRepository | None:
+        return next((r for r in self.get_singleton_repos() if r.name == name), None)
 
 
 class _WsPluginRegistry:
@@ -339,6 +332,19 @@ class _WsPluginRegistry:
 
     def actions_for_scope(self, _scope) -> list[Any]:
         return []
+
+
+class _WsSnapshotSvc:
+    """Minimal snapshot service fake for WorkspaceScreen tests."""
+
+    def collect_for_dashboard(self, **_kwargs: Any):
+        from winter_cli.modules.workspace.workspace_snapshot_service import DashboardRefreshData
+
+        return DashboardRefreshData(
+            overviews=[],
+            standalone_statuses=[StandaloneRepoStatus(repository=_REPO)],
+            main_statuses={},
+        )
 
 
 class _WsApp(App):
@@ -353,9 +359,7 @@ class _WsApp(App):
 
 def _make_workspace_screen() -> WorkspaceScreen:
     return WorkspaceScreen(
-        env_status_svc=cast(Any, None),
-        workspace_repo=cast(Any, _WsWorkspaceRepo()),
-        repo_repo=cast(Any, _WsRepoRepo()),
+        snapshot_svc=cast(Any, _WsSnapshotSvc()),
         repo_factory=cast(Any, _WsRepoFactory()),
         workspace=_WORKSPACE,
         plugin_registry=cast(Any, _WsPluginRegistry()),
