@@ -466,6 +466,7 @@ class Container(containers.DeclarativeContainer):
         _lazy("winter_cli.modules.service.service_dispatch_service:ServiceDispatchService"),
         subprocess_runner=subprocess_runner,
         orchestrator_resolver=service_orchestrator_resolver,
+        workspace_root=workspace_config.provided.workspace_root,
     )
 
     service_logs_svc = providers.Factory(
@@ -473,6 +474,7 @@ class Container(containers.DeclarativeContainer):
         subprocess_runner=subprocess_runner,
         orchestrator_resolver=service_orchestrator_resolver,
         click=providers.Object(click),
+        workspace_root=workspace_config.provided.workspace_root,
     )
 
     service_handler = providers.Factory(

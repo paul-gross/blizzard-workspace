@@ -58,6 +58,7 @@ def _service(runner: FakeSubprocessRunner | None = None) -> ServiceDispatchServi
     return ServiceDispatchService(
         subprocess_runner=runner or FakeSubprocessRunner(),
         orchestrator_resolver=_configured_resolver(),
+        workspace_root=WS,
     )
 
 
@@ -68,7 +69,7 @@ def test_dispatch_executes_entrypoint_with_action_and_env() -> None:
     runner = FakeSubprocessRunner()
     code = _service(runner).dispatch("up", "alpha")
     assert code == 0
-    assert runner.call_calls == [([str(WS / "winter-service-tmux/workflow/service"), "up", "alpha"], None)]
+    assert runner.call_calls == [([str(WS / "winter-service-tmux/workflow/service"), "up", "alpha"], WS)]
 
 
 def test_dispatch_passes_extra_env_to_call() -> None:
@@ -98,19 +99,31 @@ def test_dispatch_passes_exit_code_through_unmodified() -> None:
     assert _service(runner).dispatch("status", "alpha") == 3
 
 
+def test_dispatch_sets_workspace_context_env_vars() -> None:
+    """Dispatch injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, and cwd."""
+    runner = FakeSubprocessRunner()
+    _service(runner).dispatch("up", "alpha")
+    assert len(runner.call_envs) == 1
+    env = runner.call_envs[0]
+    assert env["WINTER_WORKSPACE_DIR"] == str(WS)
+    assert env["WINTER_EXT_DIR"] == str(WS / "winter-service-tmux")
+    assert env["WINTER_EXT_PREFIX"] == "winter-service-tmux"
+    assert runner.call_calls[0][1] == WS
+
+
 # ── misconfiguration errors (tested via the resolver) ────────────────────────
 
 
 def test_no_orchestrator_registered_raises() -> None:
     res = _resolver(orchestrator=None, repos=[], manifests={}, files={})
-    svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res)
+    svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res, workspace_root=WS)
     with pytest.raises(RepoError, match="no service orchestrator registered"):
         svc.dispatch("up", "alpha")
 
 
 def test_unknown_extension_name_raises() -> None:
     res = _resolver(orchestrator="winter-service-docker", repos=[_tmux_repo()], manifests={}, files={})
-    svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res)
+    svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res, workspace_root=WS)
     with pytest.raises(RepoError, match="not an installed extension"):
         svc.dispatch("up", "alpha")
 
@@ -123,7 +136,7 @@ def test_extension_missing_service_key_raises() -> None:
         manifests={repo.path / EXT_MANIFEST: {}},
         files={repo.path / EXT_MANIFEST: ""},
     )
-    svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res)
+    svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res, workspace_root=WS)
     with pytest.raises(RepoError, match="declares no `orchestrate_services` entrypoint"):
         svc.dispatch("up", "alpha")
 
@@ -136,6 +149,6 @@ def test_missing_entrypoint_file_raises() -> None:
         manifests={repo.path / EXT_MANIFEST: {"orchestrate_services": "workflow/service"}},
         files={repo.path / EXT_MANIFEST: ""},  # manifest present, entrypoint absent
     )
-    svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res)
+    svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res, workspace_root=WS)
     with pytest.raises(RepoError, match="entrypoint not found"):
         svc.dispatch("up", "alpha")

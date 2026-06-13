@@ -34,7 +34,21 @@ winter always invokes the entrypoint as exactly:
 
 `<action>` is one of `up`, `down`, `status`, `restart`, `logs`; `<env>` is the feature-env name (`alpha`, `beta`, …). **No raw user tokens ever reach the entrypoint argv** — all action-specific parameters are conveyed via `WINTER_*` environment variables (see below). An implementation **must accept all five action words** even if only to refuse one it does not implement: for an unsupported action it should exit non-zero with a message, which winter passes through.
 
+### Always-present environment variables
+
+Every dispatch — regardless of action — sets these three variables and runs the entrypoint with **cwd at the workspace root**:
+
+| Var | Meaning |
+|-----|---------|
+| `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root. |
+| `WINTER_EXT_DIR` | Absolute path to this orchestrator extension's clone (the dir containing `winter-ext.toml`). |
+| `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension. |
+
+These three are winter's shared extension-subprocess context, defined for the hook/doctor/lint dispatches in [setup.md](../setup.md#hook-env-var-contract); `winter service` provides them identically. Working directory varies by surface: `winter service`, `doctor`, `lint`, and the `on_workspace_reconcile` hook run at the workspace root, while the `on_env_*` hooks run at the env root.
+
 ### Per-action environment variables
+
+These are layered on top of the always-present set above, scoped to the action that needs them:
 
 | Action | Env var | Value |
 |--------|---------|-------|
@@ -46,7 +60,7 @@ winter always invokes the entrypoint as exactly:
 | `logs` | `WINTER_LOG_UNTIL` | RFC3339 absolute timestamp; empty if unset. |
 | `logs` | `WINTER_LOG_TIMESTAMPS` | `1` = per-line timestamps requested; `0` = not requested. |
 
-For `up`, `down`, and `status` no extra env vars are set.
+For `up`, `down`, and `status` no action-specific env vars are set beyond the always-present set above.
 
 ### Wire contract (orchestrator stdout → winter) — `logs` only
 

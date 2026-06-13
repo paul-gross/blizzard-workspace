@@ -48,9 +48,9 @@ def _resolver(runner: FakeSubprocessRunner) -> ServiceOrchestratorResolver:
 
 def _handler(runner: FakeSubprocessRunner, click: Any = None) -> ServiceHandler:
     res = _resolver(runner)
-    dispatch = ServiceDispatchService(subprocess_runner=runner, orchestrator_resolver=res)
+    dispatch = ServiceDispatchService(subprocess_runner=runner, orchestrator_resolver=res, workspace_root=WS)
     click_obj = click or ClickRecorder()
-    logs = ServiceLogsService(subprocess_runner=runner, orchestrator_resolver=res, click=click_obj)
+    logs = ServiceLogsService(subprocess_runner=runner, orchestrator_resolver=res, click=click_obj, workspace_root=WS)
     return ServiceHandler(dispatch, logs)
 
 
@@ -60,13 +60,13 @@ def _handler(runner: FakeSubprocessRunner, click: Any = None) -> ServiceHandler:
 def test_handler_up_invokes_entrypoint_with_action_and_env() -> None:
     runner = FakeSubprocessRunner()
     _handler(runner).run(ServiceParams(action="up", env="alpha"))
-    assert runner.call_calls == [([ENTRYPOINT, "up", "alpha"], None)]
+    assert runner.call_calls == [([ENTRYPOINT, "up", "alpha"], WS)]
 
 
 def test_handler_down_invokes_correct_argv() -> None:
     runner = FakeSubprocessRunner()
     _handler(runner).run(ServiceParams(action="down", env="beta"))
-    assert runner.call_calls == [([ENTRYPOINT, "down", "beta"], None)]
+    assert runner.call_calls == [([ENTRYPOINT, "down", "beta"], WS)]
 
 
 def test_handler_status_exits_zero_without_raising() -> None:
@@ -77,11 +77,14 @@ def test_handler_status_exits_zero_without_raising() -> None:
 def test_handler_restart_sets_service_name_env_var() -> None:
     runner = FakeSubprocessRunner()
     _handler(runner).run(ServiceParams(action="restart", env="alpha", service_name="api"))
-    assert runner.call_calls == [([ENTRYPOINT, "restart", "alpha"], None)]
+    assert runner.call_calls == [([ENTRYPOINT, "restart", "alpha"], WS)]
     assert len(runner.call_envs) == 1
     env = runner.call_envs[0]
     assert env["WINTER_SERVICE_NAME"] == "api"
     assert "PATH" in env
+    assert env["WINTER_WORKSPACE_DIR"] == str(WS)
+    assert env["WINTER_EXT_DIR"] == str(WS / "winter-service-tmux")
+    assert env["WINTER_EXT_PREFIX"] == "winter-service-tmux"
 
 
 def test_handler_adopts_nonzero_exit_code() -> None:
@@ -125,3 +128,16 @@ def test_handler_run_logs_exits_nonzero_on_orchestrator_error() -> None:
     with pytest.raises(SystemExit) as excinfo:
         _handler(runner, ClickRecorder()).run_logs("alpha", _default_log_options())
     assert excinfo.value.code == 2
+
+
+def test_handler_run_logs_sets_workspace_context_env_vars() -> None:
+    """Logs stream injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, and cwd."""
+    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha": ([], 0)})
+    _handler(runner, ClickRecorder()).run_logs("alpha", _default_log_options())
+    assert len(runner.popen_calls) == 1
+    assert runner.popen_calls[0][1] == WS
+    assert len(runner.popen_envs) == 1
+    env = runner.popen_envs[0]
+    assert env["WINTER_WORKSPACE_DIR"] == str(WS)
+    assert env["WINTER_EXT_DIR"] == str(WS / "winter-service-tmux")
+    assert env["WINTER_EXT_PREFIX"] == "winter-service-tmux"

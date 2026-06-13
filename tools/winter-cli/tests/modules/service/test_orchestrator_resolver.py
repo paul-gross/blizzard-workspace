@@ -52,8 +52,10 @@ def _configured() -> ServiceOrchestratorResolver:
 
 
 def test_resolve_returns_correct_entrypoint_path() -> None:
-    path = _configured().resolve()
-    assert path == WS / "winter-service-tmux/workflow/service"
+    resolved = _configured().resolve()
+    assert resolved.entrypoint == WS / "winter-service-tmux/workflow/service"
+    assert resolved.ext_dir == WS / "winter-service-tmux"
+    assert resolved.prefix == "winter-service-tmux"
 
 
 def test_no_orchestrator_registered_raises() -> None:

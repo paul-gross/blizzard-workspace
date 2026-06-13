@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST, ExtensionManifestLoader
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
 from winter_cli.modules.workspace.repository_factory import IStandaloneRepoProvider
+
+
+@dataclass(frozen=True)
+class ResolvedOrchestrator:
+    entrypoint: Path
+    ext_dir: Path
+    prefix: str
 
 
 class ServiceOrchestratorResolver:
@@ -33,7 +41,7 @@ class ServiceOrchestratorResolver:
         self._manifest_loader = manifest_loader
         self._fs = fs
 
-    def resolve(self) -> Path:
+    def resolve(self) -> ResolvedOrchestrator:
         """Return the resolved entrypoint path or raise RepoError."""
         name = self._service_orchestrator
         if not name:
@@ -66,7 +74,7 @@ class ServiceOrchestratorResolver:
                 f"service orchestrator {name!r} entrypoint not found at {entrypoint} "
                 f'(declared as `orchestrate_services = "{manifest.orchestrate_services}"` in {manifest_path}).'
             )
-        return entrypoint
+        return ResolvedOrchestrator(entrypoint=entrypoint, ext_dir=repo.path, prefix=manifest.prefix)
 
     def _find_extension(self, name: str) -> StandaloneRepository | None:
         for repo in self._repo_factory.get_standalone_repos():
