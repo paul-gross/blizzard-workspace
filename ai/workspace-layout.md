@@ -45,6 +45,16 @@ The following directories are source checkouts — **never work in these directl
 
 All development happens in feature worktrees (e.g., `./alpha/<repo-name>/`).
 
+## Inherited docs at the workspace root
+
+Many files at the workspace root — most `ai/` docs, `CLAUDE.md`, and others — are **not authored here**. They are inherited copies carried in from an upstream project repo (chiefly the `winter` tool) by the shared-lineage rebase: the workspace sits one customization commit on top of `winter/master`, so everything that commit doesn't own arrives from upstream and travels downstream automatically on the next sync.
+
+**Before editing any root file, check whether it is an inherited copy.** If it is, fix it at the source repo (in that repo's feature env) and let the sync carry it down — never hand-edit the downstream copy. The next rebase clobbers the edit (if upstream touched the same lines) or silently diverges (if it didn't), so a downstream hand-edit disappears or drifts back without warning.
+
+How to tell: run `git show winter/master:<path>` — if the file exists there, it is inherited. The customization commit's own diff (`git show HEAD`) lists every file the workspace owns independently; anything not in that diff is inherited.
+
+The dual-remote layout and the sync mechanics that carry a source fix downstream are in `winter-harness:/workflows/upstream-tracking.md`.
+
 ## Feature Worktree Structure
 
 Each Greek letter directory (e.g., `alpha/`) contains a git worktree for **every** repository in `projects/`. All worktrees within a feature directory share the same branch name (the Greek letter).

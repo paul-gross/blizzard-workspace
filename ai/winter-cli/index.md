@@ -36,4 +36,3 @@ Most flows are multi-repo: a single `winter ws` invocation fans out over every m
 | [Common workflows](./workflows.md) | …you want a ready-made command sequence for a routine multi-step operation — bootstrap, start a feature, merge main, push, tear down. |
 | [Resilience & drift](./resilience.md) | …you hit a flaky-network retry, a hung remote git call, or a config↔filesystem drift warning, and want the cross-cutting behavior behind it. |
 | [Install & configure](./setup.md) | …you're installing winter or editing `.winter/config.toml` — schema, local overlay, and extensions. |
-| [Author a TUI plugin](winter-harness:/python/plugin-author.md) | …you're extending the dashboard from a `plugin.py` — badges, screens, keybound actions. |
