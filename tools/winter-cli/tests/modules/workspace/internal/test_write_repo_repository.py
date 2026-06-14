@@ -212,3 +212,48 @@ def test_get_worktree_upstream_returns_none_when_unset(
     wt = _wt(_REPO_PATH)
 
     assert repo.get_worktree_upstream(wt) is None
+
+
+def test_get_worktree_push_branch_reads_bare_branch_from_config(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
+) -> None:
+    """Resolves the bare push branch from config — works even with no remote-tracking ref.
+
+    Reads `branch.<head>.{remote,merge}` directly rather than via
+    `tracking_branch()`, so a freshly connected, never-fetched feature
+    branch (the first-push case) still resolves a target.
+    """
+    git_mock = _fake_git_repo(monkeypatch)
+    r = git_mock.Repo.return_value
+    r.active_branch.name = "alpha"
+    r.active_branch.tracking_branch.return_value = None  # never fetched: no remote-tracking ref
+    r.git.config.side_effect = ["origin", "refs/heads/feature/never-fetched"]
+    wt = _wt(_REPO_PATH)
+
+    assert repo.get_worktree_push_branch(wt) == "feature/never-fetched"
+
+
+def test_get_worktree_push_branch_returns_none_when_no_upstream(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    r = git_mock.Repo.return_value
+    r.active_branch.name = "alpha"
+    config_not_found = git.GitCommandError(("git", "config", "--get"), 1, stderr=b"")
+    config_not_found.status = 1
+    r.git.config.side_effect = config_not_found
+    wt = _wt(_REPO_PATH)
+
+    assert repo.get_worktree_push_branch(wt) is None
+
+
+def test_get_worktree_push_branch_returns_none_for_non_origin_remote(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    r = git_mock.Repo.return_value
+    r.active_branch.name = "alpha"
+    r.git.config.side_effect = ["upstream", "refs/heads/feature/x"]
+    wt = _wt(_REPO_PATH)
+
+    assert repo.get_worktree_push_branch(wt) is None

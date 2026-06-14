@@ -56,7 +56,10 @@ class WorkspacePushService:
         `patterns` filters project worktrees by segment-aware glob over
         `<env>/<repo>` (empty list ⇒ `*/*`). `pinned_scope` controls whether
         pinned worktrees are included, excluded (default), or pushed alone.
-        Non-pinned worktrees push HEAD:refs/heads/<feature_branch>; pinned
+        Each non-pinned worktree pushes to the branch *its own* tracking
+        config names (resolved per worktree, not from one env-wide feature
+        branch); a non-pinned worktree with no upstream is reported per-repo
+        as `no upstream` rather than forced onto a sibling's branch. Pinned
         worktrees plain-push to whatever their local branch tracks. Standalone
         repos plain-push to their tracked upstream and ignore `patterns`. Only
         repos with commits ahead of upstream are pushed.
@@ -69,7 +72,6 @@ class WorkspacePushService:
         env_reports: list[EnvPushReport] = []
         skipped: list[EnvSkipped] = []
         for env in envs:
-            env_status = self._worktree_repo.get_environment_status(env, project_repos)
             env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
 
             worktrees = [
@@ -99,19 +101,7 @@ class WorkspacePushService:
                         )
                 continue
 
-            non_pinned = [wt for wt in worktrees if not wt.repository.pinned]
-            if non_pinned and not env_status.feature_branch:
-                skipped.append(
-                    EnvSkipped(
-                        env=env.name,
-                        reason="not connected — run `winter ws connect` first",
-                    )
-                )
-                worktrees = [wt for wt in worktrees if wt.repository.pinned]
-
-            outcomes = [
-                self._push_one(wt, env_status.feature_branch) for wt in worktrees if self._has_commits_to_push(wt)
-            ]
+            outcomes = [self._push_one(wt) for wt in worktrees if self._has_commits_to_push(wt)]
             env_reports.append(EnvPushReport(env=env.name, repos=outcomes))
 
         standalone_outcomes: list[RepoPushOutcome] = []
@@ -143,8 +133,25 @@ class WorkspacePushService:
             return pinned_scope.matches_pinned
         return pinned_scope.matches_non_pinned
 
-    def _push_one(self, wt: FeatureWorktree, feature_branch: str | None) -> RepoPushOutcome:
-        target_branch = None if wt.repository.pinned else feature_branch
+    def _push_one(self, wt: FeatureWorktree) -> RepoPushOutcome:
+        """Push one worktree to the branch its own tracking config names.
+
+        Pinned worktrees plain-push (target_branch=None). A non-pinned
+        worktree resolves its own push branch from `branch.<head>.merge`; a
+        worktree with no upstream is reported `no upstream` per-repo —
+        parity with the standalone path — instead of being forced onto a
+        sibling repo's feature branch.
+        """
+        if wt.repository.pinned:
+            target_branch = None
+        else:
+            target_branch = self._repo_repo.get_worktree_push_branch(wt)
+            if target_branch is None:
+                return RepoPushOutcome(
+                    repo_name=wt.repository.name,
+                    pushed=False,
+                    error="no upstream — run `winter ws connect` first",
+                )
         try:
             commits = self._repo_repo.push(wt, target_branch)
         except RepoError as exc:

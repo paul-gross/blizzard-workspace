@@ -14,6 +14,7 @@ from winter_cli.modules.workspace.env_status_service import EnvStatusService
 from winter_cli.modules.workspace.models import (
     FeatureEnvironment,
     FeatureEnvironmentStatus,
+    PinnedScope,
     ProjectRepository,
     RepoScope,
     RepoStatus,
@@ -150,6 +151,140 @@ def test_push_all_reports_skipped_when_only_pinned_repos_have_commits(workspace:
     assert report.skipped[0].env == "alpha"
     assert "--include-pinned" in report.skipped[0].reason
     assert report.envs == []
+
+
+class _PushSpyRepoRepo:
+    """Spy write-repo for push: per-worktree push branches + recorded pushes.
+
+    `push_branches` maps repo name → the worktree's own push branch (bare,
+    e.g. `abc`) or `None` for a worktree with no upstream. `push` records
+    `(repo_name, target_branch)` so a test can pin *which* branch each
+    worktree pushed to — proving per-worktree resolution rather than one
+    env-wide branch. Every matched repo is reported with commits to push.
+    """
+
+    def __init__(self, push_branches: dict[str, str | None]) -> None:
+        self._push_branches = push_branches
+        self.pushes: list[tuple[str, str | None]] = []
+
+    def get_worktree_status(self, worktree: Any) -> RepoStatus:
+        return RepoStatus(
+            name=worktree.repository.name,
+            path=str(worktree.path),
+            main_branch="main",
+            ahead=1,
+            tracking_ahead=1,
+        )
+
+    def get_worktree_push_branch(self, worktree: Any) -> str | None:
+        return self._push_branches.get(worktree.repository.name)
+
+    def push(self, worktree: Any, feature_branch: str | None = None) -> int:
+        self.pushes.append((worktree.repository.name, feature_branch))
+        return 1
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"_PushSpyRepoRepo.{name} called unexpectedly")
+
+
+def _two_repo_factory(workspace: Workspace, repo_names: list[str]) -> Any:
+    """Stub factory with several non-pinned project repos, in the given order."""
+    repos = [
+        ProjectRepository(
+            name=name,
+            main_path=workspace.root_path / "projects" / name,
+            main_branch="main",
+        )
+        for name in repo_names
+    ]
+
+    class _StubFactory:
+        def get_project_repos(self) -> list[ProjectRepository]:
+            return repos
+
+        def get_standalone_repos(self) -> list[StandaloneRepository]:
+            return []
+
+    return _StubFactory()
+
+
+def _push_service(workspace: Workspace, repo_repo: Any, factory: Any) -> WorkspacePushService:
+    worktree_repo = _FakeWorkspaceRepoWithBranch(env_name="alpha", feature_branch="ignored")
+    env_status_svc = EnvStatusService(
+        worktree_repo=worktree_repo,  # type: ignore[arg-type]
+        repo_repo=repo_repo,  # type: ignore[arg-type]
+    )
+    return WorkspacePushService(
+        env_status_svc=env_status_svc,
+        worktree_repo=worktree_repo,  # type: ignore[arg-type]
+        repo_repo=repo_repo,  # type: ignore[arg-type]
+        repo_factory=factory,
+        workspace=workspace,
+    )
+
+
+def test_push_resolves_each_worktree_to_its_own_branch(workspace: Workspace) -> None:
+    """Mixed env: repos tracking different branches each push to their own ref."""
+    repo_repo = _PushSpyRepoRepo({"repo-a": "abc", "repo-b": "xyz"})
+    svc = _push_service(workspace, repo_repo, _two_repo_factory(workspace, ["repo-a", "repo-b"]))
+
+    report = svc.push_all(scope=RepoScope.project, patterns=None)
+
+    assert dict(repo_repo.pushes) == {"repo-a": "abc", "repo-b": "xyz"}
+    outcomes = {o.repo_name: o for o in report.envs[0].repos}
+    assert outcomes["repo-a"].pushed and outcomes["repo-b"].pushed
+    assert report.skipped == []
+
+
+def test_push_target_is_repo_order_independent(workspace: Workspace) -> None:
+    """Reversing repo order leaves each worktree's own push target unchanged."""
+    repo_repo = _PushSpyRepoRepo({"repo-a": "abc", "repo-b": "xyz"})
+    svc = _push_service(workspace, repo_repo, _two_repo_factory(workspace, ["repo-b", "repo-a"]))
+
+    svc.push_all(scope=RepoScope.project, patterns=None)
+
+    assert dict(repo_repo.pushes) == {"repo-a": "abc", "repo-b": "xyz"}
+
+
+def test_push_reports_no_upstream_per_repo_without_skipping_env(workspace: Workspace) -> None:
+    """A no-upstream worktree is reported per-repo; its connected sibling still pushes."""
+    repo_repo = _PushSpyRepoRepo({"repo-a": "abc", "repo-b": None})
+    svc = _push_service(workspace, repo_repo, _two_repo_factory(workspace, ["repo-a", "repo-b"]))
+
+    report = svc.push_all(scope=RepoScope.project, patterns=None)
+
+    assert repo_repo.pushes == [("repo-a", "abc")]  # repo-b never reaches push
+    outcomes = {o.repo_name: o for o in report.envs[0].repos}
+    assert outcomes["repo-a"].pushed is True
+    assert outcomes["repo-b"].pushed is False
+    assert "no upstream" in (outcomes["repo-b"].error or "")
+    assert report.skipped == []  # per-repo outcome, not an env-wide group skip
+
+
+def test_push_pinned_plain_pushes_without_resolving_a_branch(workspace: Workspace) -> None:
+    """Pinned worktrees plain-push (target_branch=None) and never resolve a feature branch."""
+    repo_repo = _PushSpyRepoRepo({})  # empty: get_worktree_push_branch must not matter for pinned
+
+    pinned_repo = ProjectRepository(
+        name="pinned-repo",
+        main_path=workspace.root_path / "projects" / "pinned-repo",
+        main_branch="main",
+        pinned=True,
+    )
+
+    class _PinnedFactory:
+        def get_project_repos(self) -> list[ProjectRepository]:
+            return [pinned_repo]
+
+        def get_standalone_repos(self) -> list[StandaloneRepository]:
+            return []
+
+    svc = _push_service(workspace, repo_repo, _PinnedFactory())
+
+    report = svc.push_all(scope=RepoScope.project, patterns=None, pinned_scope=PinnedScope.include)
+
+    assert repo_repo.pushes == [("pinned-repo", None)]
+    assert report.envs[0].repos[0].pushed is True
 
 
 def test_push_all_with_no_envs_returns_empty_report(workspace: Workspace, workspace_config: WorkspaceConfig) -> None:

@@ -71,8 +71,11 @@ class WorktreeSnapshot:
 class EnvSnapshot:
     """Full snapshot of one feature environment.
 
-    `feature_branch` is the remote feature branch the env is tracking (e.g.
-    ``"feature/my-branch"``), or None when the env is not yet connected.
+    `feature_branch` is a display-only env-wide summary read from the first
+    non-pinned repo (e.g. ``"feature/my-branch"``), or None when the env is not
+    yet connected — not a per-worktree truth. `ws push` / `ws pull` resolve each
+    worktree's target independently from its own tracking config, so a worktree
+    re-pointed to a different branch is not reflected here.
     `port_base` is the env's assigned port base derived from its index.
     """
 

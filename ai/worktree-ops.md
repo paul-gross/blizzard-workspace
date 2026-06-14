@@ -62,7 +62,7 @@ git -C ./projects/<repo-name> worktree add ../../<name>/<repo-name> -b <name> <m
 winter ws connect <name> <feature-branch>
 ```
 
-Sets `push.default=upstream` and the upstream (`origin/<feature-branch>`) on each non-pinned repo's worktree. The connected feature branch is read back from git's upstream tracking on the first non-pinned repo, so all non-pinned repos in an env must use the same remote feature branch name. The remote branch is not created yet — that happens on first push:
+Sets `push.default=upstream` and the upstream (`origin/<feature-branch>`) on each non-pinned repo's worktree — pointing every non-pinned repo at the same remote feature branch (the usual shape). The env-wide feature branch shown by `winter ws status` is read back from git's upstream tracking on the first non-pinned repo, so that summary assumes the uniform case; `ws push`/`ws pull` do not depend on it, resolving each worktree's target per-worktree from its own tracking config, so a worktree you re-point individually still works. The remote branch is not created yet — that happens on first push:
 
 ```bash
 git -C "./<name>/<repo-name>" push -u origin <name>:<feature-branch>
@@ -151,9 +151,9 @@ winter ws push --all                    # non-pinned worktrees + standalone
 
 `PATTERNS` are segment-aware globs over `<env>/<repo>`. `*` matches within a segment (does not cross `/`); `?` matches one char. A bare env name expands to `<env>/*`. Quote patterns in your shell.
 
-Non-pinned worktrees push to the feature branch recorded during `winter ws connect` (`HEAD:refs/heads/<feature-branch>`, upstream set on first push). Pinned worktrees (when included) and standalone repos plain-push to whatever their local branch tracks. Only repos with commits ahead of upstream are pushed.
+Each non-pinned worktree pushes to the branch *its own* tracking config names — resolved per worktree from what `winter ws connect` recorded, not from one env-wide value (`HEAD:refs/heads/<branch>`, upstream set on first push). Worktrees in one env can therefore track different remote branches and each lands on its own, independent of repo order. Pinned worktrees (when included) and standalone repos plain-push to whatever their local branch tracks. Only repos with commits ahead of upstream are pushed.
 
-If an env has non-pinned repos matched by your patterns but isn't connected, those repos are skipped with an error in the report. Pinned repos matched in the same env still push because they don't need a feature branch.
+A non-pinned worktree with no upstream is reported per-repo as `no upstream — run winter ws connect first` (each repo individually, not an env-wide group skip); its connected siblings — and any matched pinned repos — still push. Run `winter ws connect` for the unconnected repo, then retry.
 
 If the only matched repos with commits to push are pinned (so the default scope excludes them), the report shows a `! <env>: N pinned repo(s) with commits skipped` line rather than silently doing nothing — re-run with `--include-pinned`/`--only-pinned`. See [winter-cli/usage/ws/push.md](./winter-cli/usage/ws/push.md) ("Output signal — pinned repos skipped").
 

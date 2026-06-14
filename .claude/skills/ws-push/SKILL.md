@@ -80,13 +80,13 @@ winter ws push <name> --include-pinned # non-pinned + pinned
 winter ws push <name> --only-pinned    # pinned only
 ```
 
-`PATTERNS` are segment-aware globs over `<env>/<repo>`. A connected environment has each non-pinned worktree's remote tracking branch already set, so `winter ws push <name>` just works — it pushes each non-pinned repo to the feature branch recorded by `winter ws connect`.
+`PATTERNS` are segment-aware globs over `<env>/<repo>`. A fully connected environment has each non-pinned worktree's remote tracking branch already set, so `winter ws push <name>` just works — each non-pinned repo pushes to the branch *its own* tracking config names (resolved per worktree from what `winter ws connect` recorded), so worktrees in one env can track different remote branches and each lands on its own.
 
 Pinned worktrees are excluded by default. If you've landed commits on a pinned repo's main branch and want to ship them, pass `--include-pinned` (alongside non-pinned) or `--only-pinned` (alone). Pushed pinned worktrees go to whatever upstream their local branch tracks.
 
 **All-pinned workspaces:** if every repo matched by your pattern is pinned (each tracks `origin/<main>` directly, with no feature branching), a bare `winter ws push <name>` pushes nothing by default and prints `! <name>: N pinned repo(s) with commits skipped — use --include-pinned or --only-pinned`. That is **not** "nothing to push" — the commits exist; the default scope excluded them. Re-run with `--include-pinned` (or `--only-pinned`), or push the pinned repos directly with `git push` per the workspace's delivery convention (`workspace:/ai/project/contributing.md`).
 
-If an env isn't connected (no recorded feature branch), `winter ws push` reports the non-pinned repos as skipped. Run `winter ws connect <name> <feature-branch>` first, then retry.
+A non-pinned worktree with no upstream is reported per-repo as `no upstream — run winter ws connect first` (each repo individually, not an env-wide group skip), while its connected siblings still push. Run `winter ws connect <name> <feature-branch>` for the unconnected repo, then retry.
 
 ## Report
 
@@ -99,7 +99,7 @@ For a feature environment, include a per-repo line — what each repo did (pushe
 
 - repo-a: pushed 2 commits to origin/<feature-branch>
 - repo-b: nothing to push
-- repo-c: skipped (env not connected)
+- repo-c: failed (no upstream — run winter ws connect first)
 - repo-d: skipped (pinned — needs --include-pinned/--only-pinned)
 ```
 

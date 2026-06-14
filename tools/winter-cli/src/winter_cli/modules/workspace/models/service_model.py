@@ -92,6 +92,9 @@ class StandaloneRepoStatus:
 class FeatureEnvironmentStatus:
     """Runtime status of a feature environment — feature branch plus extension-contributed badges.
 
+    `feature_branch` is a display-only env-wide summary read from the first non-pinned repo, not a
+    per-worktree truth — `ws push` / `ws pull` resolve each worktree's target from its own tracking
+    config (see `WriteRepoRepository.get_worktree_push_branch`).
     `extensions` is keyed by extension prefix (e.g. `wst` for winter-service-tmux); each value
     is a short badge string an `IEnvironmentDecorator` plugin contributed for this env. Renderers
     append the values to the env header so each plugin can advertise whatever it wants.

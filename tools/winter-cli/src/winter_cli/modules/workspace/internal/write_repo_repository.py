@@ -4,6 +4,7 @@ import logging
 
 import git
 
+from winter_cli.modules.workspace.internal.branch_tracking import read_origin_merge_branch
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.read_repo_repository import ReadRepoRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
@@ -226,6 +227,19 @@ class WriteRepoRepository(ReadRepoRepository):
         """The worktree branch's current upstream (e.g. `origin/feature-123`), or None. No network."""
         with git.Repo(str(worktree.path)) as r:
             return self._tracking_branch_name(r)
+
+    def get_worktree_push_branch(self, worktree: FeatureWorktree) -> str | None:
+        """The bare branch this worktree pushes to, read from its own tracking config.
+
+        Returns the branch name from `branch.<head>.merge` when the worktree
+        tracks `origin`, or None when no upstream is configured. Unlike
+        `get_worktree_upstream` (which goes through `tracking_branch()` and so
+        sees None for a never-fetched feature branch), this reads config
+        directly via `read_origin_merge_branch`, which resolves the first-push
+        target. No network.
+        """
+        with git.Repo(str(worktree.path)) as r:
+            return read_origin_merge_branch(r, self._error_factory, cwd=worktree.path, label=worktree.repository.name)
 
     def set_push_default(self, worktree: FeatureWorktree) -> None:
         with git.Repo(str(worktree.path)) as r, r.config_writer() as cw:
