@@ -454,12 +454,20 @@ class Container(containers.DeclarativeContainer):
 
     # ── service: dispatch to the registered orchestrator extension ──────────
 
+    # Holds the effective `--service-orchestrator` / WINTER_SERVICE_ORCHESTRATOR
+    # override for this invocation. Defaults to None (use config value). The CLI
+    # boundary overwrites this via `container.service_orchestrator_override.override()`
+    # when a non-None override is present, before resolving `service_handler`.
+    service_orchestrator_override = providers.Object(None)
+
     service_orchestrator_resolver = providers.Factory(
         _lazy("winter_cli.modules.service.orchestrator_resolver:ServiceOrchestratorResolver"),
         service_orchestrator=workspace_config.provided.service_orchestrator,
         repo_factory=repo_factory,
         manifest_loader=extension_manifest_loader,
         fs=fs,
+        override=service_orchestrator_override,
+        workspace_root=workspace_config.provided.workspace_root,
     )
 
     service_dispatch_svc = providers.Factory(

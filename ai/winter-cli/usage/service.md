@@ -20,6 +20,41 @@ winter service logs alpha -t           # prefix each line with its timestamp
 
 Registering an orchestrator is two config keys — `service_orchestrator` in `.winter/config.toml` (naming the extension) and `orchestrate_services` in the extension's `winter-ext.toml` (the entrypoint path). See [setup.md#service-orchestration](../setup.md#service-orchestration) for the schema and the failure modes when either is missing.
 
+## Local-path override
+
+Use the `--service-orchestrator` root flag or the `WINTER_SERVICE_ORCHESTRATOR` environment variable to point `winter service` at a **local extension directory** for a single invocation — without changing `.winter/config.toml` or reinstalling anything. This is the primary way to test an in-progress orchestrator whose installed copy still lags the worktree:
+
+```bash
+# flag form (highest precedence)
+winter --service-orchestrator=alpha/winter-service-tmux service up alpha
+
+# env-var form
+WINTER_SERVICE_ORCHESTRATOR=alpha/winter-service-tmux winter service status alpha
+```
+
+**Precedence (highest wins):** `--service-orchestrator` flag → `WINTER_SERVICE_ORCHESTRATOR` env var → `service_orchestrator` in `.winter/config.toml`.
+
+**Path-vs-name disambiguation:**
+- If the value contains an OS path separator (`/` on POSIX) or resolves to an existing directory → **path mode**: reads `winter-ext.toml` from that directory directly, skipping the config-key-present and matches-an-installed-extension checks. The directory must still declare an `orchestrate_services` entrypoint in its `winter-ext.toml`, and that entrypoint file must exist on disk.
+- Otherwise (bare name like `winter-service-tmux`) → **name mode**: falls through to the normal registered-extension lookup, same as the config key.
+
+**Doctor note:** `winter doctor` reflects the *installed* extension (not the override target), so during an override window, warnings about a lagging or mismatched installed extension are expected and can be ignored.
+
+**Scope:** the override affects **dispatch only** — `WINTER_EXT_DIR`/`WINTER_EXT_PREFIX` are set from the resolved local directory, and the entrypoint is invoked from it. It does NOT affect `winter-service-tmux:` path-notation used in agent docs, nor `@`-loaded markdown references. The override is per-invocation only; it is not persisted.
+
+**Typical use:** during orchestrator development, when the workspace's installed extension copy is behind your working branch:
+
+```bash
+# All four verbs work via the override:
+winter --service-orchestrator=alpha/winter-service-tmux service up alpha
+winter --service-orchestrator=alpha/winter-service-tmux service status alpha
+winter --service-orchestrator=alpha/winter-service-tmux service down alpha
+
+# Control: without the override, the installed (lagging) copy is used — expect
+# "no orchestrate_services" or "not an installed extension" if it hasn't shipped yet.
+winter service up alpha
+```
+
 ## Orchestrator contract
 
 This is the full spec a service-orchestrator extension is written against — conform to it without reading winter's source.

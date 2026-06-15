@@ -84,12 +84,33 @@ class LazyGroup(click.Group):
 @click.group(cls=LazyGroup, lazy_subcommands=_LAZY_SUBCOMMANDS)
 @click.version_option(package_name="winter-cli", message="%(prog)s, version %(version)s")
 @click.option("--source-override", default=None, hidden=True)
+@click.option(
+    "--service-orchestrator",
+    default=None,
+    metavar="PATH_OR_NAME",
+    help=(
+        "Override the service orchestrator for this invocation. "
+        "A local path (contains a path separator or resolves to an existing directory) "
+        "short-circuits the registered-extension lookup and reads that directory's "
+        "winter-ext.toml directly. A bare name falls back to the registered-extension "
+        "lookup. Takes precedence over WINTER_SERVICE_ORCHESTRATOR and "
+        "service_orchestrator in .winter/config.toml."
+    ),
+)
 @click.pass_context
-def _cli_group(ctx: click.Context, source_override: str | None):
+def _cli_group(ctx: click.Context, source_override: str | None, service_orchestrator: str | None):
     """Winter — workspace management CLI."""
     from winter_cli.container import Container
 
-    ctx.obj = CliContext(container=Container(), source_override=source_override)
+    # Resolve effective orchestrator override: flag > env var > config (config is
+    # handled by the resolver itself; we only surface the boundary-level override here).
+    effective_orchestrator_override = service_orchestrator or os.environ.get("WINTER_SERVICE_ORCHESTRATOR")
+
+    ctx.obj = CliContext(
+        container=Container(),
+        source_override=source_override,
+        service_orchestrator_override=effective_orchestrator_override or None,
+    )
 
 
 def cli() -> None:

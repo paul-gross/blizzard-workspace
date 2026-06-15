@@ -14,6 +14,8 @@ The `winter` command is a workspace-level tool for managing worktrees and reposi
 
 `winter --version` prints the installed CLI version (sourced from package metadata, so it tracks the running source) and exits 0. `winter --help` lists every command and root flag.
 
+`winter --service-orchestrator=<path-or-name> service …` overrides the service orchestrator for a single `winter service` invocation — points dispatch at a local extension directory or a registered name instead of the config-registered extension. See [usage/service.md#local-path-override](./usage/service.md#local-path-override) for the full precedence rule and path-vs-name semantics.
+
 ## What the CLI can do
 
 The surface is two command groups plus five standalone commands:

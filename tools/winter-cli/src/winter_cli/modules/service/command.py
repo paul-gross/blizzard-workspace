@@ -1,12 +1,35 @@
 from __future__ import annotations
 
+import sys
 from datetime import UTC, datetime
 
 import click
+from dependency_injector import providers
 
 from winter_cli.cli_context import cli_ctx
 from winter_cli.modules.service.handler import ServiceParams
 from winter_cli.modules.service.models import LogOptions, parse_since_until
+
+
+def _service_handler(ctx: click.Context):
+    """Resolve a ServiceHandler, injecting any active orchestrator override first.
+
+    When `--service-orchestrator` or `WINTER_SERVICE_ORCHESTRATOR` is set, this
+    overrides the container's `service_orchestrator_override` provider for the
+    duration of this call so the resolver uses the local path or name supplied
+    at the CLI boundary rather than the config-registered extension.
+    """
+    cli_context = cli_ctx(ctx)
+    container = cli_context.container
+    override = cli_context.service_orchestrator_override
+    if override is not None:
+        print(f"using service orchestrator override: {override}", file=sys.stderr)
+        container.service_orchestrator_override.override(providers.Object(override))
+    try:
+        return container.service_handler()
+    finally:
+        if override is not None:
+            container.service_orchestrator_override.reset_override()
 
 
 @click.group("service")
@@ -25,7 +48,7 @@ def service_group() -> None:
 @click.pass_context
 def up_cmd(ctx: click.Context, env: str) -> None:
     """Start services for ENV."""
-    handler = cli_ctx(ctx).container.service_handler()
+    handler = _service_handler(ctx)
     handler.run(ServiceParams(action="up", env=env))
 
 
@@ -34,7 +57,7 @@ def up_cmd(ctx: click.Context, env: str) -> None:
 @click.pass_context
 def down_cmd(ctx: click.Context, env: str) -> None:
     """Stop services for ENV."""
-    handler = cli_ctx(ctx).container.service_handler()
+    handler = _service_handler(ctx)
     handler.run(ServiceParams(action="down", env=env))
 
 
@@ -43,7 +66,7 @@ def down_cmd(ctx: click.Context, env: str) -> None:
 @click.pass_context
 def status_cmd(ctx: click.Context, env: str) -> None:
     """Report service status for ENV."""
-    handler = cli_ctx(ctx).container.service_handler()
+    handler = _service_handler(ctx)
     handler.run(ServiceParams(action="status", env=env))
 
 
@@ -56,7 +79,7 @@ def restart_cmd(ctx: click.Context, env: str, service: str) -> None:
 
     The service name is conveyed to the orchestrator via WINTER_SERVICE_NAME.
     """
-    handler = cli_ctx(ctx).container.service_handler()
+    handler = _service_handler(ctx)
     handler.run(ServiceParams(action="restart", env=env, service_name=service))
 
 
@@ -139,5 +162,5 @@ def logs_cmd(
         until_rfc3339=until_rfc3339,
         timestamps=timestamps,
     )
-    handler = cli_ctx(ctx).container.service_handler()
+    handler = _service_handler(ctx)
     handler.run_logs(env, options)

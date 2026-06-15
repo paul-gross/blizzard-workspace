@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 class CliContext:
     container: Container
     source_override: str | None = None
+    service_orchestrator_override: str | None = None
 
 
 def cli_ctx(ctx: click.Context) -> CliContext:
