@@ -45,6 +45,7 @@ from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.gitpython_repository import GitPythonRepository
 from winter_cli.modules.workspace.internal.read_workspace_repository import ReadWorkspaceRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
+from winter_cli.modules.workspace.internal.toml_env_index_registry import TomlEnvIndexRegistry
 from winter_cli.modules.workspace.internal.write_repo_repository import WriteRepoRepository
 from winter_cli.modules.workspace.merge_reporter import JsonMergeReporter, StreamMergeReporter
 from winter_cli.modules.workspace.prune_service import PruneService
@@ -113,6 +114,17 @@ class Container(containers.DeclarativeContainer):
         fs=fs,
     )
 
+    _env_index_registry_path = providers.Callable(
+        lambda cfg: cfg.workspace_root / ".winter" / "state.toml",
+        workspace_config,
+    )
+
+    env_index_registry = providers.Singleton(
+        TomlEnvIndexRegistry,
+        state_path=_env_index_registry_path,
+        fs=fs,
+    )
+
     # Factory for structured RepoError instances — injected into every class
     # that translates GitPython exceptions into winter's error type.
     repo_error_factory = providers.Singleton(RepoErrorFactory)
@@ -140,6 +152,8 @@ class Container(containers.DeclarativeContainer):
             workspace_config.provided.workspace_root,
             workspace_config.provided.session_prefix,
             workspace_config.provided.main_branch,
+            workspace_config.provided.base_port,
+            workspace_config.provided.ports_per_env,
         ),
     )
 
@@ -157,7 +171,13 @@ class Container(containers.DeclarativeContainer):
         standalone_repos=repo_factory.provided.get_standalone_repos.call(),
     )
 
-    worktree_repo = providers.Factory(ReadWorkspaceRepository, error_factory=repo_error_factory)
+    worktree_repo = providers.Factory(
+        ReadWorkspaceRepository,
+        error_factory=repo_error_factory,
+        env_aliases=workspace_config.provided.env_aliases,
+        envs_per_workspace=workspace_config.provided.envs_per_workspace,
+        registry=env_index_registry,
+    )
 
     drift_warning_svc = providers.Factory(
         DriftWarningService,
@@ -225,6 +245,7 @@ class Container(containers.DeclarativeContainer):
         fs=fs,
         subprocess_runner=subprocess_runner,
         manifest_loader=extension_manifest_loader,
+        registry=env_index_registry,
     )
 
     extension_exclude_svc = providers.Singleton(
@@ -272,6 +293,7 @@ class Container(containers.DeclarativeContainer):
         subprocess_runner=subprocess_runner,
         git_repo=git_repo,
         git_ops=git_ops_svc,
+        registry=env_index_registry,
     )
 
     destroy_svc = providers.Factory(
@@ -281,6 +303,7 @@ class Container(containers.DeclarativeContainer):
         extension_hook_svc=extension_hook_svc,
         fs=fs,
         git_repo=git_repo,
+        registry=env_index_registry,
     )
 
     stream_reporter = providers.Factory(
@@ -351,6 +374,9 @@ class Container(containers.DeclarativeContainer):
         cli_output_svc=cli_output_svc,
         workspace=workspace,
         workspace_snapshot_svc=workspace_snapshot_svc,
+        env_aliases=workspace_config.provided.env_aliases,
+        envs_per_workspace=workspace_config.provided.envs_per_workspace,
+        env_index_registry=env_index_registry,
     )
 
     repo_handler = providers.Factory(
@@ -414,6 +440,13 @@ class Container(containers.DeclarativeContainer):
         registry=capability_registry_svc,
     )
 
+    port_probe_svc = providers.Factory(
+        _lazy("winter_cli.modules.doctor.port_probe_service:PortProbeService"),
+        config=workspace_config,
+        fs=fs,
+        registry=env_index_registry,
+    )
+
     doctor_svc = providers.Factory(
         _lazy("winter_cli.modules.doctor.doctor_service:DoctorService"),
         core_probe_svc=core_probe_svc,
@@ -421,6 +454,7 @@ class Container(containers.DeclarativeContainer):
         extension_probe_svc=extension_probe_svc,
         repo_factory=repo_factory,
         capability_probe_svc=capability_probe_svc,
+        port_probe_svc=port_probe_svc,
     )
 
     stream_doctor_reporter = providers.Factory(

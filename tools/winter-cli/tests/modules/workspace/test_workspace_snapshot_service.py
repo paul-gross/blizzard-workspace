@@ -15,7 +15,6 @@ from winter_cli.config.models import (
 )
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
-from winter_cli.modules.workspace.extension_manifest import PORT_BASE, PORT_STEP
 from winter_cli.modules.workspace.models import (
     FeatureEnvironment,
     FeatureEnvironmentStatus,
@@ -463,7 +462,7 @@ def test_collect_port_base_derived_from_index(workspace: Workspace, workspace_co
 
     env_snap = snapshot.environments[0]
     assert env_snap.index == 1
-    assert env_snap.port_base == PORT_BASE + 1 * PORT_STEP
+    assert env_snap.port_base == workspace.base_port + 1 * workspace.ports_per_env
 
 
 def test_collect_dirty_worktree_counts_surface_correctly(

@@ -8,13 +8,12 @@ from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.core.subprocess_runner import ISubprocessRunner
 from winter_cli.modules.workspace.env_index import resolve_env_index
+from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
 from winter_cli.modules.workspace.extension_manifest import (
     EXT_MANIFEST,
     HOOK_ON_ENV_DESTROY,
     HOOK_ON_ENV_INIT,
     HOOK_ON_WORKSPACE_RECONCILE,
-    PORT_BASE,
-    PORT_STEP,
     ExtensionManifest,
     ExtensionManifestLoader,
 )
@@ -55,11 +54,13 @@ class ExtensionHookService:
         fs: IFilesystemWriter,
         subprocess_runner: ISubprocessRunner,
         manifest_loader: ExtensionManifestLoader,
+        registry: IEnvIndexRegistry | None = None,
     ) -> None:
         self._config = config
         self._fs = fs
         self._subprocess = subprocess_runner
         self._manifest_loader = manifest_loader
+        self._registry = registry
 
     def run_env_init_hooks(
         self,
@@ -226,12 +227,22 @@ class ExtensionHookService:
             }
         )
         if env_name is not None:
-            index = resolve_env_index(env_name)
+            # Resolve registry-first so WINTER_ENV_INDEX/WINTER_PORT_BASE agree
+            # with the .winter.env that init_service already wrote.  Fall back
+            # to the config-aware formula for envs not yet recorded (pre-init
+            # hooks or pre-registry environments).
+            index = self._registry.get_index(env_name) if self._registry is not None else None
+            if index is None:
+                index = resolve_env_index(
+                    env_name,
+                    self._config.env_aliases,
+                    self._config.envs_per_workspace,
+                )
             env.update(
                 {
                     "WINTER_ENV": env_name,
                     "WINTER_ENV_INDEX": str(index),
-                    "WINTER_PORT_BASE": str(PORT_BASE + index * PORT_STEP),
+                    "WINTER_PORT_BASE": str(self._config.port_base_for_index(index)),
                 }
             )
 

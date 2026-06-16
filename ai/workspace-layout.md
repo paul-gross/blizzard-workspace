@@ -21,6 +21,7 @@ This workspace manages **multiple project repositories** as peers. All repos are
 ├── .winter/                    # Workspace-level winter config and installed extensions
 │   ├── config.toml             # Repo declarations (project + standalone)
 │   ├── config.local.toml       # Optional local override (gitignored)
+│   ├── state.toml              # Machine-local env-index registry (gitignored, managed by winter)
 │   └── ext/<short-name>/       # Standalone clones for installed extensions
 ├── tools/                      # Workspace tooling
 │   └── winter-cli/             # The `winter` CLI source

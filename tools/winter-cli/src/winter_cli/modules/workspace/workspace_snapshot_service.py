@@ -8,7 +8,6 @@ import click
 
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
-from winter_cli.modules.workspace.extension_manifest import PORT_BASE, PORT_STEP
 from winter_cli.modules.workspace.models import (
     EnvSnapshot,
     FeatureEnvironment,
@@ -173,7 +172,7 @@ class WorkspaceSnapshotService:
                 EnvSnapshot(
                     name=env.name,
                     index=env.index,
-                    port_base=PORT_BASE + env.index * PORT_STEP,
+                    port_base=self._workspace.port_base_for(env.index),
                     feature_branch=env_status.feature_branch,
                     worktrees=worktree_snapshots,
                 )

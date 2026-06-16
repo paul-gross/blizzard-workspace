@@ -10,9 +10,6 @@ EXT_MANIFEST = "winter-ext.toml"
 DEFAULT_SKILLS_DIRS = ("skills", ".claude/skills")
 DEFAULT_AGENTS_DIRS = ("agents", ".claude/agents")
 
-PORT_BASE = 4000
-PORT_STEP = 100
-
 HOOK_ON_ENV_INIT = "on_env_init"
 HOOK_ON_ENV_DESTROY = "on_env_destroy"
 HOOK_ON_WORKSPACE_RECONCILE = "on_workspace_reconcile"

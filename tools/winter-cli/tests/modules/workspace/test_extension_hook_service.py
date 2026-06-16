@@ -18,6 +18,25 @@ from winter_cli.modules.workspace.models import StandaloneRepository
 WORKSPACE_ROOT = Path("/ws")
 
 
+class _InMemoryRegistry:
+    """Minimal in-memory IEnvIndexRegistry for tests."""
+
+    def __init__(self) -> None:
+        self._data: dict[str, int] = {}
+
+    def get_index(self, name: str) -> int | None:
+        return self._data.get(name)
+
+    def all_assignments(self) -> dict[str, int]:
+        return dict(self._data)
+
+    def assign(self, name: str, index: int) -> None:
+        self._data[name] = index
+
+    def remove(self, name: str) -> None:
+        self._data.pop(name, None)
+
+
 @pytest.fixture
 def workspace_config() -> WorkspaceConfig:
     return WorkspaceConfig(
@@ -33,6 +52,7 @@ def _service(
     fs: FakeFilesystem,
     config_files: dict[Path, dict],
     subprocess: FakeSubprocessRunner,
+    registry: _InMemoryRegistry | None = None,
 ) -> ExtensionHookService:
     loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
     return ExtensionHookService(
@@ -40,7 +60,27 @@ def _service(
         fs=fs,
         subprocess_runner=subprocess,
         manifest_loader=loader,
+        registry=registry,
     )
+
+
+def _setup_hook_ext(
+    fs: FakeFilesystem,
+    config_files: dict[Path, dict],
+    hook_name: str = "on_env_init",
+    script_rel: str = "hooks/init.sh",
+) -> tuple[StandaloneRepository, Path]:
+    """Helper: register a single extension with one hook script; returns repo + hook path."""
+    ext_path = WORKSPACE_ROOT / "my-ext"
+    fs.directories.add(ext_path)
+    manifest_path = ext_path / "winter-ext.toml"
+    fs.files[manifest_path] = ""
+    config_files[manifest_path] = {"name": "my-ext", "hooks": {hook_name: script_rel}}
+    hook_path = (ext_path / script_rel).resolve()
+    fs.files[hook_path] = ""
+    fs.executables.add(hook_path)
+    fs.directories.add(hook_path.parent)
+    return StandaloneRepository(name="my-ext", path=ext_path), hook_path
 
 
 def test_run_env_init_hook_streams_output_and_succeeds(
@@ -450,3 +490,111 @@ def test_env_hook_env_contains_env_scoped_vars(
     assert env["WINTER_ENV"] == "alpha"
     assert "WINTER_ENV_INDEX" in env
     assert "WINTER_PORT_BASE" in env
+
+
+# ── M1: hook vars == persisted/config-derived values ─────────────────────────
+
+
+def test_hook_env_index_matches_registry_persisted_index(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """WINTER_ENV_INDEX in the hook env equals the registry-persisted index, not a
+    freshly-resolved suggestion.  Proves that registry-first lookup is used."""
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    repo, hook_path = _setup_hook_ext(fs, config_files)
+    repos = [repo]
+    env_root = WORKSPACE_ROOT / "alpha"
+
+    subprocess = FakeSubprocessRunner(popen_responses={str(hook_path): ([], 0)})
+
+    # Assign an unusual index to alpha so the test would fail if the hook
+    # service ignored the registry and recomputed (which would return 1).
+    registry = _InMemoryRegistry()
+    registry.assign("alpha", 7)
+
+    svc = _service(workspace_config, fs, config_files, subprocess, registry=registry)
+    svc.run_env_init_hooks(repos, env_root, "alpha", init_reporter)
+
+    assert subprocess.popen_envs
+    env = subprocess.popen_envs[0]
+    assert env["WINTER_ENV_INDEX"] == "7"
+
+
+def test_hook_port_base_matches_registry_persisted_index(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """WINTER_PORT_BASE equals base_port + persisted_index * ports_per_env."""
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    repo, hook_path = _setup_hook_ext(fs, config_files)
+    repos = [repo]
+    env_root = WORKSPACE_ROOT / "alpha"
+
+    subprocess = FakeSubprocessRunner(popen_responses={str(hook_path): ([], 0)})
+
+    registry = _InMemoryRegistry()
+    registry.assign("alpha", 7)
+
+    # Custom port config to make the check non-trivial.
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        base_port=5000,
+        ports_per_env=30,
+    )
+
+    svc = _service(cfg, fs, config_files, subprocess, registry=registry)
+    svc.run_env_init_hooks(repos, env_root, "alpha", init_reporter)
+
+    assert subprocess.popen_envs
+    env = subprocess.popen_envs[0]
+    expected_port_base = 5000 + 7 * 30  # base_port + index * ports_per_env
+    assert env["WINTER_PORT_BASE"] == str(expected_port_base)
+
+
+def test_hook_falls_back_to_config_aware_resolve_when_no_registry(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """When no registry is wired, the hook falls back to config-aware resolve_env_index."""
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    repo, hook_path = _setup_hook_ext(fs, config_files)
+    repos = [repo]
+    env_root = WORKSPACE_ROOT / "alpha"
+
+    subprocess = FakeSubprocessRunner(popen_responses={str(hook_path): ([], 0)})
+
+    # No registry — should use resolve_env_index with config knobs.
+    # workspace_config uses default env_aliases (first 10 Greek), alpha → index 1.
+    svc = _service(workspace_config, fs, config_files, subprocess, registry=None)
+    svc.run_env_init_hooks(repos, env_root, "alpha", init_reporter)
+
+    assert subprocess.popen_envs
+    env = subprocess.popen_envs[0]
+    assert env["WINTER_ENV_INDEX"] == "1"
+
+
+def test_hook_falls_back_to_config_aware_resolve_when_name_not_in_registry(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """When the registry is wired but has no entry for the env, config-aware resolve is used."""
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    repo, hook_path = _setup_hook_ext(fs, config_files)
+    repos = [repo]
+    env_root = WORKSPACE_ROOT / "alpha"
+
+    subprocess = FakeSubprocessRunner(popen_responses={str(hook_path): ([], 0)})
+
+    registry = _InMemoryRegistry()
+    # alpha is NOT in the registry — should fall back to resolve_env_index → 1.
+
+    svc = _service(workspace_config, fs, config_files, subprocess, registry=registry)
+    svc.run_env_init_hooks(repos, env_root, "alpha", init_reporter)
+
+    assert subprocess.popen_envs
+    env = subprocess.popen_envs[0]
+    assert env["WINTER_ENV_INDEX"] == "1"

@@ -72,7 +72,7 @@ The env-file *generation logic* (heredocs that write per-environment values into
 # >>> winter (managed) — base environment variables; do not edit by hand
 WINTER_ENV=alpha
 WINTER_ENV_INDEX=1
-WINTER_PORT_BASE=4100
+WINTER_PORT_BASE=4020
 # <<< winter (managed) — project-specific variables go below this marker
 ```
 
@@ -90,8 +90,8 @@ EOF
 ```
 
 Two patterns for port offsets:
-- **Worktree base + service offset:** `BACKEND_PORT=$((WINTER_PORT_BASE + 0))`, `FRONTEND_PORT=$((WINTER_PORT_BASE + 1))` — every environment gets a 100-port window starting at its base. Default this when the project doesn't already have a port table.
-- **Service base + index:** `BACKEND_PORT=$((4200 + WINTER_ENV_INDEX))` — backend runs on 4201/4202/4203 in alpha/beta/gamma. Use this when the project pre-assigns service slots.
+- **Worktree base + service offset:** `BACKEND_PORT=$((WINTER_PORT_BASE + 0))`, `FRONTEND_PORT=$((WINTER_PORT_BASE + 1))` — every environment gets a port window starting at its base (default 20 ports per env). Default this when the project doesn't already have a port table.
+- **Service base + index:** `BACKEND_PORT=$((3000 + WINTER_ENV_INDEX))` — backend runs on 3001/3002/3003 in alpha/beta/gamma. Use this when the project pre-assigns service slots by index rather than by port-window offset.
 
 Never `>` (overwrite) `.winter.env` — that clobbers the managed block. Always `>>`.
 

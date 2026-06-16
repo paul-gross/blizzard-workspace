@@ -1,6 +1,9 @@
 # Local-only winter config (git identity, machine-specific overrides)
 /.winter/config.local.toml
 
+# Machine-local env-index registry — never committed (tracks index assignments per machine)
+/.winter/state.toml
+
 # Auto-managed by `winter ws init` — extension list imported from CLAUDE.md
 /CLAUDE.winter.md
 

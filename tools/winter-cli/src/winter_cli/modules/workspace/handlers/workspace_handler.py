@@ -12,6 +12,7 @@ from winter_cli.core.cli_output_service import Cell, ICliOutputService
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
 from winter_cli.modules.workspace.env_index import resolve_env_index
+from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
 from winter_cli.modules.workspace.models import (
     CheckoutResult,
@@ -178,6 +179,9 @@ class WorkspaceHandler:
         cli_output_svc: ICliOutputService,
         workspace: Workspace,
         workspace_snapshot_svc: WorkspaceSnapshotService | None = None,
+        env_aliases: list[str] | None = None,
+        envs_per_workspace: int | None = None,
+        env_index_registry: IEnvIndexRegistry | None = None,
     ) -> None:
         self._env_status_svc = env_status_svc
         self._workspace_sync_svc = workspace_sync_svc
@@ -193,6 +197,9 @@ class WorkspaceHandler:
         self._cli_output_svc = cli_output_svc
         self._workspace = workspace
         self._workspace_snapshot_svc = workspace_snapshot_svc
+        self._env_aliases = env_aliases
+        self._envs_per_workspace = envs_per_workspace
+        self._env_index_registry = env_index_registry
 
     def list(self, params: EnvListParams) -> None:
         project_repos = self._repo_factory.get_project_repos()
@@ -469,11 +476,45 @@ class WorkspaceHandler:
             sys.exit(1)
 
     def index(self, params: EnvIndexParams) -> None:
-        idx = resolve_env_index(params.name)
+        """Report the env index for *name*.
+
+        If *name* has a recorded entry in the registry (i.e. the env was
+        created via ``winter ws init``), the persisted index is returned and
+        is authoritative.
+
+        If *name* is not registered (a hypothetical / not-yet-created env),
+        the suggested index from ``resolve_env_index`` is returned instead.
+        This suggestion is deterministic for aliases (fixed slots) but may
+        shift on actual creation for ad-hoc names, because the allocator
+        linear-probes on collision within the hash band.
+
+        ``--json`` output distinguishes the two cases via
+        ``"source": "registry"`` (persisted) or ``"source": "suggested"``
+        (not yet created; may shift on create for non-alias names).
+        """
+        # Check registry first.
+        if self._env_index_registry is not None:
+            persisted = self._env_index_registry.get_index(params.name)
+            if persisted is not None:
+                if params.output_json:
+                    _echo_json({"name": params.name, "index": persisted, "source": "registry"})
+                else:
+                    click.echo(persisted)
+                return
+
+        # Not in registry — return the suggested slot.
+        suggested = resolve_env_index(params.name, self._env_aliases, self._envs_per_workspace)
         if params.output_json:
-            _echo_json({"name": params.name, "index": idx})
-            return
-        click.echo(idx)
+            _echo_json({"name": params.name, "index": suggested, "source": "suggested"})
+        else:
+            # Surface the caveat for ad-hoc names: aliases have fixed slots, but
+            # ad-hoc names may probe on collision at create time.
+            aliases = self._env_aliases or []
+            if params.name in aliases:
+                click.echo(suggested)
+            else:
+                click.echo(f"{suggested} (suggested; may shift on create)")
+
 
     def worktrees(self, params: EnvWorktreesParams) -> None:
         project_repos = self._repo_factory.get_project_repos()

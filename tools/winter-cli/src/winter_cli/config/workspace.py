@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from winter_cli.config.models import (
+    _DEFAULT_ENV_ALIASES,
     AdoptExtensions,
     GitIdentity,
     KeybindingsConfig,
@@ -33,6 +34,15 @@ def _coerce_str_list(value: object) -> list[str]:
     if isinstance(value, list):
         return [item for item in value if isinstance(item, str) and item]
     return []
+
+
+def _coerce_int(value: object, default: int) -> int:
+    """Coerce a TOML scalar into an int, falling back to *default*.
+
+    ``bool`` is rejected even though it is an ``int`` subclass, so a stray
+    ``base_port = true`` does not silently become ``1``.
+    """
+    return int(value) if isinstance(value, int) and not isinstance(value, bool) else default
 
 
 class WorkspaceConfigService:
@@ -139,6 +149,20 @@ class WorkspaceConfigService:
                 f"Invalid adopt_extensions value: {adopt_value!r}. Must be one of: 'none', 'winter', 'all'."
             ) from exc
 
+        base_port = _coerce_int(merged.get("base_port", 4000), 4000)
+        ports_per_env = _coerce_int(merged.get("ports_per_env", 20), 20)
+
+        env_aliases = _coerce_str_list(merged.get("env_aliases", list(_DEFAULT_ENV_ALIASES)))
+
+        envs_per_workspace = _coerce_int(merged.get("envs_per_workspace", 48), 48)
+
+        if envs_per_workspace < len(env_aliases) + 2:
+            raise RuntimeError(
+                f"Invalid config: envs_per_workspace ({envs_per_workspace}) must be >= "
+                f"len(env_aliases) + 2 ({len(env_aliases) + 2}). "
+                f"Either reduce env_aliases (currently {len(env_aliases)} entries) or increase envs_per_workspace."
+            )
+
         return WorkspaceConfig(
             workspace_root=workspace_root,
             session_prefix=merged.get("session_prefix", "winter"),
@@ -156,6 +180,10 @@ class WorkspaceConfigService:
             doctor=merged.get("doctor") if isinstance(merged.get("doctor"), str) else None,
             lint=_coerce_str_list(merged.get("lint")),
             keybindings=keybindings,
+            base_port=base_port,
+            ports_per_env=ports_per_env,
+            env_aliases=env_aliases,
+            envs_per_workspace=envs_per_workspace,
         )
 
     @staticmethod

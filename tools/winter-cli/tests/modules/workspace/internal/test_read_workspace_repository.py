@@ -43,16 +43,20 @@ def _project(name: str) -> ProjectRepository:
 
 
 def test_resolve_env_index_for_greek_letter_is_fixed() -> None:
-    assert resolve_env_index("alpha") == 1
-    assert resolve_env_index("beta") == 2
-    assert resolve_env_index("omega") == len(GREEK_LETTERS)
+    # With the full GREEK_LETTERS list as aliases, alpha→1 and omega→24.
+    assert resolve_env_index("alpha", GREEK_LETTERS, 48) == 1
+    assert resolve_env_index("beta", GREEK_LETTERS, 48) == 2
+    assert resolve_env_index("omega", GREEK_LETTERS, 48) == len(GREEK_LETTERS)
 
 
 def test_resolve_env_index_for_non_greek_is_deterministic() -> None:
-    first = resolve_env_index("feature-x")
-    second = resolve_env_index("feature-x")
+    # With the full 24-letter list as aliases and 48 envs, the hash band is
+    # 26..48 (N=24, buffer=25, band=26..48).  Non-alias names hash
+    # deterministically into that range.
+    first = resolve_env_index("feature-x", GREEK_LETTERS, 48)
+    second = resolve_env_index("feature-x", GREEK_LETTERS, 48)
     assert first == second
-    assert 26 <= first < 26 + 256
+    assert 26 <= first <= 48
 
 
 def test_get_environments_discovers_greek_dirs_with_known_repos(

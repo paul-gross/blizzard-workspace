@@ -8,7 +8,8 @@ from pathlib import Path
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.core.subprocess_runner import ISubprocessRunner
-from winter_cli.modules.workspace.env_index import resolve_env_index
+from winter_cli.modules.workspace.env_index import EnvIndexAllocator
+from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
 from winter_cli.modules.workspace.extension_claudemd_service import ExtensionClaudemdService
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
 from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
@@ -34,8 +35,6 @@ logger = logging.getLogger(__name__)
 WINTER_ENV_FILE = ".winter.env"
 WINTER_ENV_BEGIN = "# >>> winter (managed) — base environment variables; do not edit by hand"
 WINTER_ENV_END = "# <<< winter (managed) — project-specific variables go below this marker"
-PORT_BASE = 4000
-PORT_STEP = 100
 
 TUI_SUPPRESS_ENV = {
     "CI": "1",
@@ -78,6 +77,7 @@ class InitService:
         subprocess_runner: ISubprocessRunner,
         git_repo: IGitRepository,
         git_ops: GitOpsService,
+        registry: IEnvIndexRegistry | None = None,
     ) -> None:
         self._config = config
         self._repo_factory = repo_factory
@@ -89,6 +89,7 @@ class InitService:
         self._subprocess = subprocess_runner
         self._git_repo = git_repo
         self._git_ops = git_ops
+        self._registry = registry
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -433,8 +434,17 @@ class InitService:
         and are preserved across re-runs. The block itself is rewritten in full
         each time, so changing the worktree's index updates the file cleanly.
         """
-        index = resolve_env_index(env_name)
-        port_base = PORT_BASE + index * PORT_STEP
+        if self._registry is not None:
+            index = EnvIndexAllocator(self._registry).allocate(
+                env_name,
+                self._config.env_aliases,
+                self._config.envs_per_workspace,
+            )
+        else:
+            from winter_cli.modules.workspace.env_index import resolve_env_index
+
+            index = resolve_env_index(env_name, self._config.env_aliases, self._config.envs_per_workspace)
+        port_base = self._config.port_base_for_index(index)
 
         block_lines = [
             WINTER_ENV_BEGIN,

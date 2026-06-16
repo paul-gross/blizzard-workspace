@@ -28,6 +28,18 @@ class Workspace:
     root_path: Path
     session_prefix: str
     main_branch: str
+    base_port: int = 4000
+    """Start of this workspace's port band. Per-env port base = base_port + index * ports_per_env."""
+
+    ports_per_env: int = 20
+    """Number of ports allocated per feature environment."""
+
+    def port_base_for(self, index: int) -> int:
+        """Return the per-env port base for the given env index.
+
+        Canonical single definition: ``base_port + index * ports_per_env``.
+        """
+        return self.base_port + index * self.ports_per_env
 
 
 @dataclasses.dataclass

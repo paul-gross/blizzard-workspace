@@ -65,8 +65,8 @@ Shell reminder: quote patterns containing `*` or `?` to prevent shell glob expan
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | `string` | Environment name (e.g. `"alpha"`). |
-| `index` | `int` | Port-offset index (Greek: 1..24; other: hashed 26..281). |
-| `port_base` | `int` | Assigned port base (`4000 + index * 100`). |
+| `index` | `int` | Persisted port-offset index for this env (from `.winter/state.toml`). |
+| `port_base` | `int` | Assigned port base (`base_port + index * ports_per_env`; defaults to `4000 + index * 20`). |
 | `feature_branch` | `string \| null` | Remote feature branch this env tracks (e.g. `"feature/my-branch"`), or `null` when not connected. |
 | `worktrees` | `array` | One `WorktreeSnapshot` per matching repo worktree in the env. When patterns are given, only matched worktrees appear. |
 

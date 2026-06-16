@@ -346,8 +346,21 @@ class ReadRepoRepository:
                 deletions=deletions,
             )
 
-    def get_workspace(self, root_path: Path, session_prefix: str, main_branch: str) -> Workspace:
-        return Workspace(root_path=root_path, session_prefix=session_prefix, main_branch=main_branch)
+    def get_workspace(
+        self,
+        root_path: Path,
+        session_prefix: str,
+        main_branch: str,
+        base_port: int = 4000,
+        ports_per_env: int = 20,
+    ) -> Workspace:
+        return Workspace(
+            root_path=root_path,
+            session_prefix=session_prefix,
+            main_branch=main_branch,
+            base_port=base_port,
+            ports_per_env=ports_per_env,
+        )
 
     def _build_repo_status(
         self,

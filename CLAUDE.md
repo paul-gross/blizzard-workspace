@@ -12,17 +12,19 @@ Read [ai/workspace-layout.md](./ai/workspace-layout.md) to understand the direct
 
 Feature environments are named after Greek letters: `alpha/`, `beta/`, `gamma/`, etc. Each env contains a feature worktree for every project repository, all on a branch matching the env name. For example, `./alpha/my-app/` is a worktree of `my-app` on branch `alpha`.
 
-Each env has an index used to assign unique ports per env. Ports start at **4000** and each index adds **+100**: alpha (1) → 4100, beta (2) → 4200, gamma (3) → 4300, and so on. This ensures multiple envs can run services simultaneously without port conflicts.
+Each env has an index used to assign unique ports per env. The port layout is config-driven: `per-env port base = base_port + index * ports_per_env`. With defaults (`base_port=4000`, `ports_per_env=20`): alpha (1) → 4020, beta (2) → 4040, gamma (3) → 4060, and so on. This ensures multiple envs can run services simultaneously without port conflicts.
 
-Greek letters have fixed indices 1..24. For non-Greek env names (arbitrary feature branches), get the deterministic hashed index with:
+The first 10 Greek letters (`alpha`…`kappa`) are configured as `env_aliases` with fixed indices `1..10`. Other Greek letters and non-Greek env names hash into a higher index band. To look up the index for any name:
 
 ```bash
 winter ws index <name>
 ```
 
+For an existing env this returns the **persisted** index from `.winter/state.toml`. For a hypothetical name it returns the **suggested** slot (which may shift on create if there is a collision).
+
 Default to **alpha**. Use **beta** if alpha is occupied. Only create additional envs when needed, and confirm with the user first.
 
-Full alphabet: alpha, beta, gamma, delta, epsilon, zeta, eta, theta, iota, kappa, lambda, mu, nu, xi, omicron, pi, rho, sigma, tau, upsilon, phi, chi, psi, omega
+Conventional names: alpha, beta, gamma, delta, epsilon, zeta, eta, theta, iota, kappa, lambda, mu, nu, xi, omicron, pi, rho, sigma, tau, upsilon, phi, chi, psi, omega
 
 ## Winter CLI
 

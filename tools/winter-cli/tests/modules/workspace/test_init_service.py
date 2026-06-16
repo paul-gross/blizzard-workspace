@@ -158,7 +158,7 @@ def test_reconcile_env_creates_worktree_and_seeds_env_file(
     content = fs.files[env_file]
     assert "WINTER_ENV=alpha" in content
     assert "WINTER_ENV_INDEX=1" in content
-    assert "WINTER_PORT_BASE=4100" in content
+    assert "WINTER_PORT_BASE=4020" in content
     # Identity applied to the worktree.
     assert (WORKSPACE_ROOT / "alpha" / "demo", "Bot", "bot@example.com") in git.identities
 

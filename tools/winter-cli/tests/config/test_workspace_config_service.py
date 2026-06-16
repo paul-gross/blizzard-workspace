@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import FakeFilesystem
-from winter_cli.config.models import AdoptExtensions, SingletonType
+from winter_cli.config.models import _DEFAULT_ENV_ALIASES, AdoptExtensions, SingletonType
 from winter_cli.config.workspace import (
     CONFIG_FILE,
     LOCAL_CONFIG_FILE,
@@ -306,3 +306,181 @@ def test_capabilities_empty_when_neither_key_present() -> None:
     svc = _service(fs, {config_path: {}})
 
     assert svc.load().capabilities == {}
+
+
+# ── port allocation config knobs ─────────────────────────────────────────────
+
+
+def test_port_config_defaults() -> None:
+    """Omitting port knobs from config.toml produces the documented defaults."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {}})
+
+    config = svc.load()
+
+    assert config.base_port == 4000
+    assert config.ports_per_env == 20
+    assert config.env_aliases == list(_DEFAULT_ENV_ALIASES)
+    assert config.envs_per_workspace == 48
+
+
+def test_port_config_knobs_parsed_from_config() -> None:
+    """Explicit values in config.toml override the defaults."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "base_port": 5000,
+                "ports_per_env": 50,
+                "env_aliases": ["dev", "staging"],
+                "envs_per_workspace": 10,
+            }
+        },
+    )
+
+    config = svc.load()
+
+    assert config.base_port == 5000
+    assert config.ports_per_env == 50
+    assert config.env_aliases == ["dev", "staging"]
+    assert config.envs_per_workspace == 10
+
+
+def test_port_config_local_overlay_overrides_scalar_knobs() -> None:
+    """config.local.toml scalar values override config.toml values for base_port, ports_per_env, envs_per_workspace."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: "", local_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "base_port": 4000,
+                "ports_per_env": 20,
+                "env_aliases": [],
+                "envs_per_workspace": 48,
+            },
+            local_path: {
+                "base_port": 6000,
+                "ports_per_env": 30,
+                "envs_per_workspace": 20,
+            },
+        },
+    )
+
+    config = svc.load()
+
+    # Scalars in the overlay win.
+    assert config.base_port == 6000
+    assert config.ports_per_env == 30
+    assert config.envs_per_workspace == 20
+
+
+def test_port_config_local_overlay_extends_env_aliases_list() -> None:
+    """config.local.toml env_aliases list is appended to the base config list (deep_merge concatenation)."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: "", local_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "env_aliases": ["alpha", "beta"],
+                "envs_per_workspace": 48,
+            },
+            local_path: {
+                "env_aliases": ["gamma"],
+            },
+        },
+    )
+
+    config = svc.load()
+
+    # Lists concatenate via deep_merge — same as git_excludes and [[project_repository]].
+    assert config.env_aliases == ["alpha", "beta", "gamma"]
+
+
+def test_envs_per_workspace_validation_rejects_too_small() -> None:
+    """Config load raises RuntimeError when envs_per_workspace < len(env_aliases) + 2."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    # 3 aliases requires envs_per_workspace >= 5; providing 4 is too small.
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "env_aliases": ["a", "b", "c"],
+                "envs_per_workspace": 4,
+            }
+        },
+    )
+
+    with pytest.raises(RuntimeError, match="envs_per_workspace"):
+        svc.load()
+
+
+def test_envs_per_workspace_validation_accepts_exact_minimum() -> None:
+    """envs_per_workspace == len(env_aliases) + 2 is exactly valid."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    # 3 aliases → minimum envs_per_workspace = 5.
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "env_aliases": ["a", "b", "c"],
+                "envs_per_workspace": 5,
+            }
+        },
+    )
+
+    config = svc.load()
+    assert config.envs_per_workspace == 5
+    assert config.env_aliases == ["a", "b", "c"]
+
+
+def test_empty_env_aliases_is_valid_with_default_envs_per_workspace() -> None:
+    """Empty env_aliases with default envs_per_workspace=48 is valid (48 >= 0 + 2)."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {"env_aliases": []}})
+
+    config = svc.load()
+    assert config.env_aliases == []
+    assert config.envs_per_workspace == 48
+
+
+def test_port_base_for_index_uses_config_values() -> None:
+    """config.port_base_for_index(index) = base_port + index * ports_per_env."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    # Empty env_aliases so envs_per_workspace=10 passes the >= 0+2 invariant.
+    svc = _service(
+        fs,
+        {config_path: {"base_port": 5000, "ports_per_env": 50, "env_aliases": [], "envs_per_workspace": 10}},
+    )
+
+    config = svc.load()
+
+    # index=0 → base
+    assert config.port_base_for_index(0) == 5000
+    # index=1 → 5000 + 1 * 50 = 5050
+    assert config.port_base_for_index(1) == 5050
+    # index=3 → 5000 + 3 * 50 = 5150
+    assert config.port_base_for_index(3) == 5150
+
+
+def test_port_base_for_index_default_config_beta() -> None:
+    """With default config, beta (index=2) → 4000 + 2*20 = 4040."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {}})
+
+    config = svc.load()
+
+    # Default: base_port=4000, ports_per_env=20
+    # beta has index 2 in the default env_aliases list
+    assert config.port_base_for_index(2) == 4000 + 2 * 20

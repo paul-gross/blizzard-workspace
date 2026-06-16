@@ -7,6 +7,7 @@ from winter_cli.modules.doctor.core_probe_service import CoreProbeService
 from winter_cli.modules.doctor.doctor_reporter import IDoctorReporter
 from winter_cli.modules.doctor.extension_probe_service import ExtensionProbeService
 from winter_cli.modules.doctor.models import ProbeResult, ProbeStatus
+from winter_cli.modules.doctor.port_probe_service import PortProbeService
 from winter_cli.modules.doctor.workspace_probe_service import WorkspaceProbeService
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
@@ -37,12 +38,14 @@ class DoctorService:
         extension_probe_svc: ExtensionProbeService,
         repo_factory: RepositoryFactory,
         capability_probe_svc: CapabilityProbeService,
+        port_probe_svc: PortProbeService | None = None,
     ) -> None:
         self._core_probe_svc = core_probe_svc
         self._workspace_probe_svc = workspace_probe_svc
         self._extension_probe_svc = extension_probe_svc
         self._repo_factory = repo_factory
         self._capability_probe_svc = capability_probe_svc
+        self._port_probe_svc = port_probe_svc
 
     def run(self, reporter: IDoctorReporter) -> DoctorSummary:
         reporter.started()
@@ -51,6 +54,11 @@ class DoctorService:
         for result in self._core_probe_svc.run():
             reporter.probe_result(result)
             results.append(result)
+
+        if self._port_probe_svc is not None:
+            for result in self._port_probe_svc.run():
+                reporter.probe_result(result)
+                results.append(result)
 
         for result in self._workspace_probe_svc.run():
             reporter.probe_result(result)

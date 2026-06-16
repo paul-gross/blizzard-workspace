@@ -5,6 +5,7 @@ from pathlib import Path
 
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
+from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
 from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
 from winter_cli.modules.workspace.git_repository import IGitRepository
 from winter_cli.modules.workspace.init_reporter import IInitReporter
@@ -41,12 +42,14 @@ class DestroyService:
         extension_hook_svc: ExtensionHookService,
         fs: IFilesystemWriter,
         git_repo: IGitRepository,
+        registry: IEnvIndexRegistry | None = None,
     ) -> None:
         self._config = config
         self._repo_factory = repo_factory
         self._extension_hook_svc = extension_hook_svc
         self._fs = fs
         self._git_repo = git_repo
+        self._registry = registry
 
     def destroy_env(
         self,
@@ -144,6 +147,11 @@ class DestroyService:
         # leaving it behind would orphan a stale ignore rule.
         if not self._strip_self_exclude(name, reporter):
             success = False
+
+        # Phase 6: remove the env-index registry entry so the index can be
+        # reused by a future env with the same name.
+        if self._registry is not None:
+            self._registry.remove(name)
 
         reporter.target_completed(name, success)
         return success

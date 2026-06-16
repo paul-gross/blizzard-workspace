@@ -28,6 +28,15 @@ doctor = "ai/project/doctor.sh"               # optional; workspace-level `winte
 [capabilities]
 service = "winter-service-tmux"               # bind the `service` capability slot to an installed provider extension
 
+# Port allocation — all four keys are optional; shown here with their defaults.
+base_port = 4000          # start of this workspace's port band; set a different value to separate co-located workspaces
+ports_per_env = 20        # ports per feature env; per-env base = base_port + index * ports_per_env
+env_aliases = [           # fixed-index env names (1..N); aliases get stable slots, all other names hash into the remainder
+  "alpha", "beta", "gamma", "delta", "epsilon",
+  "zeta", "eta", "theta", "iota", "kappa",
+]
+envs_per_workspace = 48   # max feature-env index (1..envs_per_workspace); must be >= len(env_aliases) + 2
+
 # Entries appended to every repo's .git/info/exclude on `winter ws init`.
 git_excludes = ["*.Local.csproj"]
 
@@ -71,6 +80,18 @@ user.email = "john.doe@example.com"
 ```
 
 The overlay uses the same schema as the shared config. Keys in the overlay override the shared config key-by-key. The `[git]` identity is applied to every repo winter-cli manages during `winter ws init`.
+
+### State registry (`.winter/state.toml`)
+
+`.winter/state.toml` is a machine-local, gitignored file (not a config file) that winter manages automatically. It records the **env name → assigned index** mapping written by `winter ws init` and cleared by `winter ws destroy`. You never edit it by hand.
+
+- `winter ws init <name>` allocates an index (alias → fixed slot; ad-hoc → hash then linear-probe upward within the hash band) and writes the assignment here.
+- `winter ws destroy <name>` removes the entry.
+- The read path loads the recorded index from this file; when no entry exists (pre-registry env), it falls back to recomputing from the name.
+- `winter ws index <name>` returns the persisted index for an existing env, or the suggested (hash) slot for a hypothetical name — with a note that the suggestion may shift on create if another env already occupies that slot.
+- `winter doctor` cross-checks this registry against on-disk env directories and warns on stale entries, unregistered env dirs, out-of-range indices, and duplicate assignments.
+
+**Index reservation:** index 0 (`base_port`..`base_port+ports_per_env-1`) is reserved for a future single-slot "local" environment — a pre-seeded shared dataset/area distinct in purpose from the regular alias and hash-band slots. It is never assigned. The slot immediately after the aliases (`N+1`, default index 11 with the 10-alias default) is reserved as a buffer between the fixed alias band and the hash band; this is why the invariant requires `envs_per_workspace >= len(env_aliases) + 2` (not `+1`).
 
 ### Keybindings
 
@@ -177,8 +198,8 @@ Hook scripts must be **relative paths inside the extension directory** (so the e
 | `WINTER_EXT_DIR` | Absolute path to this extension's clone (the dir containing `winter-ext.toml`). |
 | `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension (`wf`, `wst`, …). |
 | `WINTER_ENV` | The env name (`alpha`, `beta`, …). |
-| `WINTER_ENV_INDEX` | The port-offset index (1..24 for Greek letters, hashed 26..281 otherwise). |
-| `WINTER_PORT_BASE` | `4000 + 100 * WINTER_ENV_INDEX`. |
+| `WINTER_ENV_INDEX` | The persisted port-offset index for this env (alias envs get fixed slots `1..N`; ad-hoc names hash into the remainder band). |
+| `WINTER_PORT_BASE` | `base_port + ports_per_env * WINTER_ENV_INDEX` (defaults: `4000 + 20 * index`). |
 
 The hook's **cwd is the env root** (`<workspace>/<env>/`). Hooks should read these env vars rather than parse `argv`.
 

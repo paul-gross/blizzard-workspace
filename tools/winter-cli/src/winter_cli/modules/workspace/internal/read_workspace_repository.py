@@ -5,6 +5,7 @@ from pathlib import Path
 import git
 
 from winter_cli.modules.workspace.env_index import GREEK_LETTERS, resolve_env_index
+from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
 from winter_cli.modules.workspace.internal.branch_tracking import read_origin_merge_branch
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.models import (
@@ -27,8 +28,17 @@ class ReadWorkspaceRepository:
     leaves `extensions={}` and has no awareness of any service-orchestration extension.
     """
 
-    def __init__(self, error_factory: RepoErrorFactory) -> None:
+    def __init__(
+        self,
+        error_factory: RepoErrorFactory,
+        env_aliases: list[str] | None = None,
+        envs_per_workspace: int | None = None,
+        registry: IEnvIndexRegistry | None = None,
+    ) -> None:
         self._error_factory = error_factory
+        self._env_aliases = env_aliases
+        self._envs_per_workspace = envs_per_workspace
+        self._registry = registry
 
     def get_environments(
         self, workspace: Workspace, project_repos: list[ProjectRepository]
@@ -72,12 +82,26 @@ class ReadWorkspaceRepository:
 
     def _build_environment(self, workspace: Workspace, name: str) -> FeatureEnvironment:
         path = workspace.root_path / name
+        index = self._resolve_index(name)
         return FeatureEnvironment(
             workspace=workspace,
             name=name,
-            index=resolve_env_index(name),
+            index=index,
             path=path,
         )
+
+    def _resolve_index(self, name: str) -> int:
+        """Return the env index for *name*.
+
+        Checks the registry first (returns the persisted assignment when present).
+        Falls back to ``resolve_env_index`` for pre-registry envs that have no
+        recorded entry (created before the registry existed).
+        """
+        if self._registry is not None:
+            recorded = self._registry.get_index(name)
+            if recorded is not None:
+                return recorded
+        return resolve_env_index(name, self._env_aliases, self._envs_per_workspace)
 
     def _read_feature_branches(
         self,

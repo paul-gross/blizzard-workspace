@@ -62,6 +62,7 @@ ALLOWED_FILES = frozenset(
         "modules/doctor/core_probe_service.py",
         "modules/doctor/workspace_probe_service.py",
         "modules/doctor/extension_probe_service.py",
+        "modules/doctor/port_probe_service.py",  # doctor probe service — validates port-config invariant and registry drift (lifecycle carve-out: walks every declared env)
         # Lint dispatcher services — walk every declared repo / extension / env.
         "modules/lint/workspace_lint_service.py",
         "modules/lint/extension_lint_service.py",

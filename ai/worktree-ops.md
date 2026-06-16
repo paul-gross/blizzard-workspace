@@ -46,7 +46,7 @@ This command:
 - Seeds `./<name>/.winter.env` with `WINTER_ENV`, `WINTER_ENV_INDEX`, and `WINTER_PORT_BASE`.
 - Runs every installed extension's `on_env_init` hook.
 
-Greek letters (`alpha`, `beta`, …) are the convention because they carry a port-offset index, but any valid name works.
+Greek letters (`alpha`, `beta`, …) are the convention. The first 10 (`alpha`…`kappa`) are the default `env_aliases` and receive fixed port-offset indices; other names hash into a higher band. Any valid directory name is accepted.
 
 After this runs, follow `workspace:/ai/project/project-setup.md` for project-specific orchestration (appending project-specific vars to `.winter.env`, provisioning per-environment resources, generating other env files, anything else the project needs).
 

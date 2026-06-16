@@ -139,6 +139,20 @@ class KeybindingsConfig(BaseModel):
     """Map of action id -> key spec. Absent ids keep their hardcoded default."""
 
 
+_DEFAULT_ENV_ALIASES = [
+    "alpha",
+    "beta",
+    "gamma",
+    "delta",
+    "epsilon",
+    "zeta",
+    "eta",
+    "theta",
+    "iota",
+    "kappa",
+]
+
+
 class WorkspaceConfig(BaseModel):
     """Immutable configuration snapshot for the current workspace."""
 
@@ -153,6 +167,18 @@ class WorkspaceConfig(BaseModel):
 
     git_excludes: list[str] = Field(default_factory=list)
     """Workspace-wide entries written into every repo's .git/info/exclude on init."""
+
+    base_port: int = 4000
+    """Start of this workspace's port band. Per-env port base = base_port + index * ports_per_env."""
+
+    ports_per_env: int = 20
+    """Number of ports allocated per feature environment."""
+
+    env_aliases: list[str] = Field(default_factory=lambda: list(_DEFAULT_ENV_ALIASES))
+    """Fixed-index env names (1..N). Aliases get stable index slots; all other names hash into the remainder."""
+
+    envs_per_workspace: int = 48
+    """Maximum number of feature-env indices (1..envs_per_workspace). Must be >= len(env_aliases) + 2."""
 
     git_identity: GitIdentity | None = None
     """Git author identity applied to every repo winter-cli manages. Typically from config.local.toml."""
@@ -207,3 +233,10 @@ class WorkspaceConfig(BaseModel):
 
     keybindings: KeybindingsConfig = Field(default_factory=KeybindingsConfig)
     """Dashboard keybinding overrides from the `[keybindings]` table."""
+
+    def port_base_for_index(self, index: int) -> int:
+        """Return the per-env port base for the given env index.
+
+        Derived from config: ``base_port + index * ports_per_env``.
+        """
+        return self.base_port + index * self.ports_per_env

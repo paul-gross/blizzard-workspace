@@ -61,6 +61,19 @@ class _RecordingReporter:
         self.finished_summary = (total, fails, warns)
 
 
+def _doctor(
+    core: Any,
+    workspace: Any,
+    extensions: Any,
+    repo_factory: Any,
+    port_probe: Any = None,
+    capabilities: Any = None,
+) -> DoctorService:
+    """Build a DoctorService from duck-typed fakes, bridging the concrete-type seam."""
+    caps: Any = capabilities or _FakeCapabilities()
+    return DoctorService(core, workspace, extensions, repo_factory, caps, port_probe)
+
+
 def _make(status: ProbeStatus, name: str = "probe") -> ProbeResult:
     return ProbeResult(source="core", name=name, status=status)
 
@@ -68,7 +81,7 @@ def _make(status: ProbeStatus, name: str = "probe") -> ProbeResult:
 def test_emits_each_result_and_returns_zero_exit_when_no_fails() -> None:
     core = _FakeCore([_make(ProbeStatus.pass_), _make(ProbeStatus.warn)])
     exts = _FakeExtensions([_make(ProbeStatus.pass_)])
-    svc = DoctorService(core, _FakeWorkspace([]), exts, _FakeRepoFactory(), _FakeCapabilities())  # type: ignore[arg-type]
+    svc = _doctor(core, _FakeWorkspace([]), exts, _FakeRepoFactory())
     reporter = _RecordingReporter()
 
     summary = svc.run(reporter)  # type: ignore[arg-type]
@@ -85,7 +98,7 @@ def test_emits_each_result_and_returns_zero_exit_when_no_fails() -> None:
 def test_any_fail_flips_exit_code_to_one() -> None:
     core = _FakeCore([_make(ProbeStatus.pass_), _make(ProbeStatus.fail)])
     exts = _FakeExtensions([])
-    svc = DoctorService(core, _FakeWorkspace([]), exts, _FakeRepoFactory(), _FakeCapabilities())  # type: ignore[arg-type]
+    svc = _doctor(core, _FakeWorkspace([]), exts, _FakeRepoFactory())
     reporter = _RecordingReporter()
 
     summary = svc.run(reporter)  # type: ignore[arg-type]
@@ -95,7 +108,7 @@ def test_any_fail_flips_exit_code_to_one() -> None:
 
 def test_passes_standalone_repos_to_extension_runner() -> None:
     exts = _FakeExtensions([])
-    svc = DoctorService(_FakeCore([]), _FakeWorkspace([]), exts, _FakeRepoFactory(), _FakeCapabilities())  # type: ignore[arg-type]
+    svc = _doctor(_FakeCore([]), _FakeWorkspace([]), exts, _FakeRepoFactory())
     svc.run(_RecordingReporter())  # type: ignore[arg-type]
     assert exts.calls == [["repo-a"]]
 
@@ -104,17 +117,20 @@ def test_workspace_probe_results_appear_between_core_and_extensions() -> None:
     core = _FakeCore([ProbeResult(source="core", name="c", status=ProbeStatus.pass_)])
     workspace = _FakeWorkspace([ProbeResult(source="project", name="p", status=ProbeStatus.pass_)])
     exts = _FakeExtensions([ProbeResult(source="ext", name="e", status=ProbeStatus.pass_)])
-    svc = DoctorService(core, workspace, exts, _FakeRepoFactory(), _FakeCapabilities())  # type: ignore[arg-type]
+    svc = _doctor(core, workspace, exts, _FakeRepoFactory())
     reporter = _RecordingReporter()
 
     svc.run(reporter)  # type: ignore[arg-type]
     assert [r.source for r in reporter.results] == ["core", "project", "ext"]
 
 
+# ── Capability-probe integration ───────────────────────────────────────────────
+
+
 def test_capability_probe_results_flow_into_aggregate() -> None:
     cap_result = ProbeResult(source="capabilities", name="slot: service", status=ProbeStatus.pass_)
     caps = _FakeCapabilities([cap_result])
-    svc = DoctorService(_FakeCore([]), _FakeWorkspace([]), _FakeExtensions([]), _FakeRepoFactory(), caps)  # type: ignore[arg-type]
+    svc = _doctor(_FakeCore([]), _FakeWorkspace([]), _FakeExtensions([]), _FakeRepoFactory(), capabilities=caps)
     reporter = _RecordingReporter()
 
     summary = svc.run(reporter)  # type: ignore[arg-type]
@@ -127,10 +143,75 @@ def test_capability_probe_results_flow_into_aggregate() -> None:
 def test_capability_fail_bumps_exit_code() -> None:
     cap_result = ProbeResult(source="capabilities", name="slot: service", status=ProbeStatus.fail)
     caps = _FakeCapabilities([cap_result])
-    svc = DoctorService(_FakeCore([]), _FakeWorkspace([]), _FakeExtensions([]), _FakeRepoFactory(), caps)  # type: ignore[arg-type]
+    svc = _doctor(_FakeCore([]), _FakeWorkspace([]), _FakeExtensions([]), _FakeRepoFactory(), capabilities=caps)
     reporter = _RecordingReporter()
 
     summary = svc.run(reporter)  # type: ignore[arg-type]
 
     assert summary.fails == 1
     assert summary.exit_code == 1
+
+
+# ── Port-probe integration ────────────────────────────────────────────────────
+
+
+class _FakePortProbe:
+    """Stub PortProbeService — returns canned results from run()."""
+
+    def __init__(self, results: list[ProbeResult]) -> None:
+        self._results = results
+        self.run_calls = 0
+
+    def run(self) -> list[ProbeResult]:
+        self.run_calls += 1
+        return list(self._results)
+
+
+def test_port_probe_results_land_in_summary() -> None:
+    """When port_probe_svc is wired, its results appear in the summary."""
+    port_probe = _FakePortProbe(
+        [
+            ProbeResult(source="port", name="port config invariant", status=ProbeStatus.pass_),
+            ProbeResult(source="port", name="registry drift", status=ProbeStatus.pass_),
+        ]
+    )
+    svc = _doctor(_FakeCore([]), _FakeWorkspace([]), _FakeExtensions([]), _FakeRepoFactory(), port_probe)
+    reporter = _RecordingReporter()
+
+    summary = svc.run(reporter)  # type: ignore[arg-type]
+
+    assert port_probe.run_calls == 1
+    assert summary.total == 2
+    port_sources = [r.source for r in reporter.results if r.source == "port"]
+    assert len(port_sources) == 2
+
+
+def test_port_probe_fail_increments_exit_code() -> None:
+    """A port probe failure propagates to the summary exit code."""
+    port_probe = _FakePortProbe(
+        [ProbeResult(source="port", name="port config invariant", status=ProbeStatus.fail)]
+    )
+    svc = _doctor(_FakeCore([]), _FakeWorkspace([]), _FakeExtensions([]), _FakeRepoFactory(), port_probe)
+    reporter = _RecordingReporter()
+
+    summary = svc.run(reporter)  # type: ignore[arg-type]
+
+    assert summary.fails == 1
+    assert summary.exit_code == 1
+
+
+def test_port_probe_skipped_when_none() -> None:
+    """When port_probe_svc is None (default), no port probes appear in results."""
+    # port_probe omitted → defaults to None
+    svc = _doctor(
+        _FakeCore([ProbeResult(source="core", name="c", status=ProbeStatus.pass_)]),
+        _FakeWorkspace([]),
+        _FakeExtensions([]),
+        _FakeRepoFactory(),
+    )
+    reporter = _RecordingReporter()
+
+    summary = svc.run(reporter)  # type: ignore[arg-type]
+
+    assert all(r.source != "port" for r in reporter.results)
+    assert summary.total == 1

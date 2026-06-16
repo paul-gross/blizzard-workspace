@@ -728,8 +728,21 @@ def ws_prune(ctx: click.Context, dry_run: bool, force: bool, output_json: bool):
 def ws_index(ctx: click.Context, name: str, output_json: bool):
     """Print the port-offset index for a feature environment name.
 
-    Greek letters get fixed indices 1..24. Any other name is hashed
-    deterministically into 26..281 via SHA-1.
+    If NAME has already been created via `winter ws init`, the persisted
+    (registry-assigned) index is returned and is authoritative — it will not
+    change for the lifetime of the env.
+
+    If NAME has not yet been created, the suggested index is returned instead.
+    Configured aliases (e.g. alpha, beta, gamma) always land on their fixed
+    slot, so the suggestion is stable. Ad-hoc names (arbitrary feature-branch
+    names) hash into a dynamic slot that may shift on create if a collision is
+    detected and the allocator probes to the next free slot.
+
+    \b
+      winter ws index alpha           # persisted index for an existing env
+      winter ws index my-feature      # suggested index (may shift on create)
+      winter ws index alpha --json    # {"name","index","source":"registry"}
+      winter ws index new-env --json  # {"name","index","source":"suggested"}
     """
     container = cli_ctx(ctx).container
     handler = container.workspace_handler()
