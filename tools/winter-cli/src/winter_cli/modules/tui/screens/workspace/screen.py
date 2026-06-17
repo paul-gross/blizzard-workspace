@@ -313,7 +313,9 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
         env_worktrees = self._env_worktrees.get(wt_name)
         if env_worktrees is None:
             return
-        wt = next(wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name)
+        wt = next((wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name), None)
+        if wt is None:
+            return
         ctx = FeatureWorktreeContext(worktree=wt, suspend=self.app.suspend)
         for action in self._plugin_registry.actions_for_scope(ActionScope.feature_worktree):
             if action.name == action_name:

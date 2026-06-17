@@ -3,6 +3,7 @@ from __future__ import annotations
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.doctor.models import ProbeResult, ProbeStatus
+from winter_cli.modules.workspace.env_index import is_valid_env_index
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
 
 PORT_SOURCE = "port"
@@ -133,29 +134,28 @@ class PortProbeService:
                 )
 
         # (c) Out-of-range or reserved indices.
+        env_aliases = self._config.env_aliases
         for name, idx in assignments.items():
-            if idx == _RESERVED_INDEX:
-                results.append(
-                    ProbeResult(
-                        source=PORT_SOURCE,
-                        name=f"registry: {name}",
-                        status=ProbeStatus.warn,
-                        message=f"recorded index {idx} is reserved (index 0 must never be assigned)",
-                        remediation=(
-                            f"Run `winter ws destroy {name}` and re-init to get a valid index."
-                        ),
+            if not is_valid_env_index(idx, env_aliases, n_envs):
+                if idx == _RESERVED_INDEX:
+                    message = f"recorded index {idx} is reserved (index 0 must never be assigned)"
+                elif idx == len(env_aliases) + 1:
+                    message = (
+                        f"recorded index {idx} is the buffer slot (N+1={idx}) — "
+                        f"never assigned by the allocator"
                     )
-                )
-            elif idx < 1 or idx > n_envs:
+                else:
+                    message = (
+                        f"recorded index {idx} is outside the valid range "
+                        f"(alias slots 1..{len(env_aliases)}, "
+                        f"hash band {len(env_aliases) + 2}..{n_envs})"
+                    )
                 results.append(
                     ProbeResult(
                         source=PORT_SOURCE,
                         name=f"registry: {name}",
                         status=ProbeStatus.warn,
-                        message=(
-                            f"recorded index {idx} is outside the valid range "
-                            f"1..{n_envs} (envs_per_workspace)"
-                        ),
+                        message=message,
                         remediation=(
                             f"Run `winter ws destroy {name}` and re-init to get a valid index, "
                             f"or increase envs_per_workspace in .winter/config.toml."

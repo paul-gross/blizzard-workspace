@@ -225,7 +225,9 @@ class WorktreeDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
             project_repos = self._repo_factory.get_project_repos()
             env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
             env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-            wt = next(wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name)
+            wt = next((wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name), None)
+            if wt is None:
+                return
             detail = self._repo_repo.get_worktree_status(wt)
         except RepoError as exc:
             self._capture_error(
@@ -298,7 +300,9 @@ class WorktreeDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
         project_repos = self._repo_factory.get_project_repos()
         env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
         env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-        wt = next(wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name)
+        wt = next((wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name), None)
+        if wt is None:
+            return
         ctx = FeatureWorktreeContext(worktree=wt, suspend=self.app.suspend)
         for action in self._plugin_registry.actions_for_scope(ActionScope.feature_worktree):
             if action.name == action_name:

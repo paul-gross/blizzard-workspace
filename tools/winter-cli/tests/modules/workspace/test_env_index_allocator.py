@@ -12,13 +12,20 @@ Covers:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
+from tests.conftest import FakeFilesystem
+from winter_cli.config.models import WorkspaceConfig
+from winter_cli.core.filesystem import IFilesystemReader
+from winter_cli.modules.doctor.models import ProbeStatus
+from winter_cli.modules.doctor.port_probe_service import PortProbeService
 from winter_cli.modules.workspace.env_index import (
     GREEK_LETTERS,
     EnvIndexAllocator,
     _resolve_with_params,
+    is_valid_env_index,
     resolve_env_index,
 )
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
@@ -308,3 +315,118 @@ class TestIdempotentReallocation:
         reg2 = _registry(tmp_path)
         idx2 = _allocate("alpha", ["alpha"], 10, reg2)
         assert idx1 == idx2 == 1
+
+
+# ---------------------------------------------------------------------------
+# is_valid_env_index — shared range validator used by the doctor probe
+# ---------------------------------------------------------------------------
+
+
+_TWO_ALIASES = ["alpha", "beta"]  # N=2; buffer=3; hash band=4..10
+
+
+class TestIsValidEnvIndex:
+    """is_valid_env_index is the single source of truth for the doctor drift check.
+
+    It must:
+    - Accept alias slots (1..N) and hash-band slots (N+2..envs_per_workspace).
+    - Reject the reserved index 0 and the buffer slot N+1.
+    - Reject any index above envs_per_workspace.
+    """
+
+    def test_alias_indices_are_valid(self) -> None:
+        assert is_valid_env_index(1, _TWO_ALIASES, 10) is True
+        assert is_valid_env_index(2, _TWO_ALIASES, 10) is True
+
+    def test_hash_band_lower_boundary_is_valid(self) -> None:
+        """N+2 is the start of the hash band and must be valid."""
+        assert is_valid_env_index(4, _TWO_ALIASES, 10) is True
+
+    def test_hash_band_upper_boundary_is_valid(self) -> None:
+        """envs_per_workspace (inclusive) is the max hash-band index and must be valid."""
+        assert is_valid_env_index(10, _TWO_ALIASES, 10) is True
+
+    def test_reserved_zero_is_invalid(self) -> None:
+        assert is_valid_env_index(0, _TWO_ALIASES, 10) is False
+
+    def test_buffer_slot_is_invalid(self) -> None:
+        """The buffer slot N+1 is never allocated and must be rejected."""
+        assert is_valid_env_index(3, _TWO_ALIASES, 10) is False  # N+1 = 2+1 = 3
+
+    def test_above_envs_per_workspace_is_invalid(self) -> None:
+        assert is_valid_env_index(11, _TWO_ALIASES, 10) is False
+
+    def test_negative_index_is_invalid(self) -> None:
+        assert is_valid_env_index(-1, _TWO_ALIASES, 10) is False
+
+
+class TestDoctorDoesNotFlagHashBandBoundaryIndex:
+    """The doctor drift probe must not warn on a legitimate hash-band boundary index.
+
+    With envs_per_workspace=12 and 10 aliases (N=10), the only hash-band slot is
+    index 12 (N+2=12..12).  An env at index 12 is valid; flagging it is a false
+    positive that prevents the probe from running cleanly on a correct registry.
+    """
+
+    def test_max_hash_band_index_does_not_warn(self) -> None:
+        aliases = [
+            "alpha", "beta", "gamma", "delta", "epsilon",
+            "zeta", "eta", "theta", "iota", "kappa",
+        ]  # N=10; buffer=11; only hash slot=12
+        envs_per_workspace = 12
+
+        class _InMemRegistry:
+            def get_index(self, name: str) -> int | None:
+                return None
+            def all_assignments(self) -> dict:
+                return {"lambda": 12}  # hash-band boundary index
+            def assign(self, name: str, index: int) -> None: ...
+            def remove(self, name: str) -> None: ...
+
+        cfg = WorkspaceConfig(
+            workspace_root=Path("/ws"),
+            session_prefix="t",
+            main_branch="main",
+            env_aliases=aliases,
+            envs_per_workspace=envs_per_workspace,
+        )
+        files = {Path("/ws/lambda/.winter.env"): "WINTER_ENV=lambda\n"}
+        directories = {Path("/ws"), Path("/ws/lambda")}
+        fs = FakeFilesystem(files=files, directories=directories)
+
+        svc = PortProbeService(config=cfg, fs=cast(IFilesystemReader, fs), registry=_InMemRegistry())
+        results = svc._probe_registry_drift()
+
+        warns = [r for r in results if r.status == ProbeStatus.warn]
+        # Index 12 is the legitimate maximum hash-band slot; no warning should fire.
+        assert not any("outside the valid range" in r.message for r in warns)
+        assert not any("buffer slot" in r.message for r in warns)
+
+    def test_buffer_slot_does_warn(self) -> None:
+        """The buffer slot N+1 in the registry should produce a warning."""
+        aliases = ["alpha", "beta"]  # N=2; buffer slot = 3
+
+        class _InMemRegistry:
+            def get_index(self, name: str) -> int | None:
+                return None
+            def all_assignments(self) -> dict:
+                return {"gamma": 3}  # buffer slot N+1=3 — should warn
+            def assign(self, name: str, index: int) -> None: ...
+            def remove(self, name: str) -> None: ...
+
+        cfg = WorkspaceConfig(
+            workspace_root=Path("/ws"),
+            session_prefix="t",
+            main_branch="main",
+            env_aliases=aliases,
+            envs_per_workspace=10,
+        )
+        files = {Path("/ws/gamma/.winter.env"): "WINTER_ENV=gamma\n"}
+        directories = {Path("/ws"), Path("/ws/gamma")}
+        fs = FakeFilesystem(files=files, directories=directories)
+
+        svc = PortProbeService(config=cfg, fs=cast(IFilesystemReader, fs), registry=_InMemRegistry())
+        results = svc._probe_registry_drift()
+
+        warns = [r for r in results if r.status == ProbeStatus.warn]
+        assert any("buffer slot" in r.message for r in warns)

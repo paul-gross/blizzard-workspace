@@ -33,6 +33,7 @@ if sys.pycache_prefix is None:
 import click
 
 from winter_cli.cli_context import CliContext
+from winter_cli.core.config_file import ConfigError
 from winter_cli.modules.workspace.models import RepoError
 
 # Map each top-level command name to the "module:attribute" of its click
@@ -141,6 +142,9 @@ def cli() -> None:
     except click.ClickException as exc:
         exc.show()
         sys.exit(exc.exit_code)
+    except ConfigError as exc:
+        click.echo(f"error: {exc}", err=True)
+        sys.exit(1)
     except RepoError as exc:
         click.echo(f"error: {exc}", err=True)
         sys.exit(1)

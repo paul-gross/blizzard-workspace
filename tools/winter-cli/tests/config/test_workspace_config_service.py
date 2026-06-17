@@ -12,6 +12,7 @@ from winter_cli.config.workspace import (
     WINTER_DIR,
     WorkspaceConfigService,
 )
+from winter_cli.core.config_file import ConfigError
 
 WORKSPACE_ROOT = Path("/ws/demo")
 
@@ -181,7 +182,7 @@ def test_load_rejects_invalid_adopt_extensions() -> None:
     fs = FakeFilesystem(files={config_path: ""})
     svc = _service(fs, {config_path: {"adopt_extensions": "bogus"}})
 
-    with pytest.raises(RuntimeError, match="adopt_extensions"):
+    with pytest.raises(ConfigError, match="adopt_extensions"):
         svc.load()
 
 
@@ -418,7 +419,7 @@ def test_envs_per_workspace_validation_rejects_too_small() -> None:
         },
     )
 
-    with pytest.raises(RuntimeError, match="envs_per_workspace"):
+    with pytest.raises(ConfigError, match="envs_per_workspace"):
         svc.load()
 
 

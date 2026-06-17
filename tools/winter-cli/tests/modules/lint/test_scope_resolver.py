@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -12,7 +13,7 @@ from winter_cli.config.models import (
 )
 from winter_cli.core.subprocess_runner import SubprocessResult
 from winter_cli.modules.lint.models import LintScopeError, LintScopeKind, LintScopeRequest
-from winter_cli.modules.lint.scope_resolver import LintScopeResolver
+from winter_cli.modules.lint.scope_resolver import LintScopeResolver, parse_porcelain_z
 from winter_cli.modules.workspace.models import FeatureEnvironment, Workspace
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
@@ -165,3 +166,97 @@ def test_changed_outside_a_git_repo_raises() -> None:
     )
     with pytest.raises(LintScopeError, match="inside a git repository"):
         _resolver(runner=runner).resolve(LintScopeRequest(changed=True, cwd=REPO))
+
+
+# ── parse_porcelain_z unit tests ──────────────────────────────────────────────
+
+
+def test_parse_porcelain_z_modified_file() -> None:
+    """A plain modified entry produces a single path."""
+    assert parse_porcelain_z(" M src/foo.py\x00") == ["src/foo.py"]
+
+
+def test_parse_porcelain_z_untracked_file() -> None:
+    """An untracked entry (??) produces a single path."""
+    assert parse_porcelain_z("?? new file.txt\x00") == ["new file.txt"]
+
+
+def test_parse_porcelain_z_rename_keeps_new_path_skips_old() -> None:
+    """A rename entry (R) keeps the new path and skips the original."""
+    output = "R  renamed.py\x00old.py\x00"
+    assert parse_porcelain_z(output) == ["renamed.py"]
+
+
+def test_parse_porcelain_z_copy_keeps_new_path_skips_original() -> None:
+    """A copy entry (C) keeps the new path and skips the source."""
+    output = "C  copied.py\x00source.py\x00"
+    assert parse_porcelain_z(output) == ["copied.py"]
+
+
+def test_parse_porcelain_z_mixed_entries_in_order() -> None:
+    """Rename in the middle does not desync subsequent entries."""
+    output = " M src/a.py\x00R  renamed.py\x00old.py\x00?? new.txt\x00"
+    assert parse_porcelain_z(output) == ["src/a.py", "renamed.py", "new.txt"]
+
+
+def test_parse_porcelain_z_empty_output() -> None:
+    """Empty output returns an empty list."""
+    assert parse_porcelain_z("") == []
+
+
+# ── real-git rename test ──────────────────────────────────────────────────────
+
+
+def _git(cwd: Path, *args: str) -> str:
+    """Run a git command in *cwd* and return stdout."""
+    result = subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return result.stdout
+
+
+def test_parse_porcelain_z_with_real_git_staged_rename(tmp_path: Path) -> None:
+    """parse_porcelain_z correctly parses a staged rename from a real git repo.
+
+    This test exercises the actual ``git status --porcelain -z`` wire format so
+    format drift is caught rather than relying on a hand-crafted mock string.
+    The old index-walk logic (``i += 2`` on R entries) is what this test validates;
+    if the parse logic desynced, subsequent entries after the rename would be dropped.
+    """
+    # Init a repo with a user identity so git doesn't complain.
+    _git(tmp_path, "init")
+    _git(tmp_path, "config", "user.email", "test@example.com")
+    _git(tmp_path, "config", "user.name", "Test")
+
+    # Create two files: one we'll rename (original.py) and one that stays (keep.py).
+    original = tmp_path / "original.py"
+    keep = tmp_path / "keep.py"
+    original.write_text("# original\n")
+    keep.write_text("# keep\n")
+    _git(tmp_path, "add", "original.py", "keep.py")
+    _git(tmp_path, "commit", "-m", "initial")
+
+    # Stage a rename: original.py → renamed.py (also modify keep.py to verify
+    # that entries after the rename are not dropped by the index-walk).
+    renamed = tmp_path / "renamed.py"
+    original.rename(renamed)
+    keep.write_text("# modified\n")
+    _git(tmp_path, "add", "-A")
+
+    # Run the real git command and parse its output.
+    raw = subprocess.run(
+        ["git", "-C", str(tmp_path), "status", "--porcelain", "-z"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    paths = parse_porcelain_z(raw)
+
+    # The rename source (original.py) must not appear; the rename destination
+    # (renamed.py) and the modified file (keep.py) must both be present.
+    assert "original.py" not in paths
+    assert "renamed.py" in paths
+    assert "keep.py" in paths

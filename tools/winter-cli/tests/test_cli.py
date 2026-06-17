@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from textwrap import dedent
 
 import click
 import pytest
@@ -126,3 +127,69 @@ def test_dont_write_bytecode_is_not_forced_globally() -> None:
     # Importing the CLI redirects the cache rather than disabling it; the prefix
     # is set process-wide (here, or by a caller who pre-set it before import).
     assert sys.pycache_prefix is not None
+
+
+# ── Config-error boundary ────────────────────────────────────────────────────
+#
+# Config-domain errors (ConfigError and ConfigFileReadError) must surface as a
+# clean "error: ..." line on stderr with a non-zero exit code — not as a Python
+# traceback.  Each test runs in a subprocess so the real cli() entry path is
+# exercised end-to-end.
+
+
+def _run_cli_in_dir(cwd: Path, *extra_args: str, config_toml: str = "") -> subprocess.CompletedProcess:
+    """Run `python -m winter_cli.cli ws status` in *cwd*, returning the result."""
+    winter_dir = cwd / ".winter"
+    winter_dir.mkdir(exist_ok=True)
+    if config_toml:
+        (winter_dir / "config.toml").write_text(config_toml)
+    return subprocess.run(
+        [sys.executable, "-m", "winter_cli.cli", "ws", "status", *extra_args],
+        capture_output=True,
+        text=True,
+        cwd=str(cwd),
+    )
+
+
+class TestConfigErrorBoundary:
+    def test_outside_workspace_yields_clean_error(self, tmp_path: Path) -> None:
+        """Running outside a workspace root prints 'error:' on stderr and exits non-zero."""
+        # tmp_path has no .winter/ directory -> workspace locator raises ConfigError.
+        result = subprocess.run(
+            [sys.executable, "-m", "winter_cli.cli", "ws", "status"],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+        assert result.returncode != 0
+        assert "error:" in result.stderr
+        assert "Traceback" not in result.stderr
+
+    def test_invalid_toml_yields_clean_error(self, tmp_path: Path) -> None:
+        """A malformed config.toml prints 'error:' on stderr and exits non-zero."""
+        (tmp_path / ".winter").mkdir()
+        (tmp_path / ".winter" / "config.toml").write_text("not valid toml ][[\n")
+        result = subprocess.run(
+            [sys.executable, "-m", "winter_cli.cli", "ws", "status"],
+            capture_output=True,
+            text=True,
+            cwd=str(tmp_path),
+        )
+        assert result.returncode != 0
+        assert "error:" in result.stderr
+        assert "Traceback" not in result.stderr
+
+    def test_out_of_range_envs_per_workspace_yields_clean_error(self, tmp_path: Path) -> None:
+        """envs_per_workspace < len(env_aliases)+2 prints 'error:' and exits non-zero."""
+        bad_config = dedent(
+            """
+            main_branch = "main"
+            session_prefix = "t"
+            env_aliases = ["alpha", "beta", "gamma"]
+            envs_per_workspace = 4
+            """
+        ).strip()
+        result = _run_cli_in_dir(tmp_path, config_toml=bad_config)
+        assert result.returncode != 0
+        assert "error:" in result.stderr
+        assert "Traceback" not in result.stderr

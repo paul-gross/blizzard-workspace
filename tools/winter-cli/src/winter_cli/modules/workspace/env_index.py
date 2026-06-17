@@ -51,6 +51,30 @@ _DEFAULT_ALIASES = [
 _DEFAULT_ENVS_PER_WORKSPACE = 48
 
 
+def is_valid_env_index(idx: int, env_aliases: list[str], envs_per_workspace: int) -> bool:
+    """Return ``True`` when *idx* is a legitimately allocatable index.
+
+    Valid indices are those the allocator can assign:
+
+    * ``1..N`` — alias slots (one per entry in *env_aliases*).
+    * ``N+2..envs_per_workspace`` — the hash band (inclusive on both ends).
+
+    The reserved index ``0`` and the buffer slot ``N+1`` are **not** valid;
+    neither is anything above *envs_per_workspace*.  This is the single source
+    of truth for range validation — the doctor probe delegates here rather than
+    re-encoding the bounds itself.
+    """
+    n = len(env_aliases)
+    if idx == 0:
+        return False
+    if 1 <= idx <= n:
+        return True
+    if idx == n + 1:
+        # Buffer slot: reserved, never assigned by the allocator.
+        return False
+    return n + 2 <= idx <= envs_per_workspace
+
+
 def resolve_env_index(
     name: str,
     env_aliases: list[str] | None = None,

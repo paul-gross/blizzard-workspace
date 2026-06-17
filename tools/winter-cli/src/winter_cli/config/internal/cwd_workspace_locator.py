@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from winter_cli.config.workspace_locator import IWorkspaceLocator
+from winter_cli.core.config_file import ConfigError
 
 WINTER_DIR = ".winter"
 
@@ -19,7 +20,7 @@ class CwdWorkspaceLocator:
         for directory in [current, *current.parents]:
             if (directory / WINTER_DIR).is_dir():
                 return directory
-        raise RuntimeError(
+        raise ConfigError(
             f"Could not find workspace root from {current}. Expected to find a {WINTER_DIR}/ directory in a parent."
         )
 

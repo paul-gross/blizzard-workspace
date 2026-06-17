@@ -14,7 +14,7 @@ from winter_cli.config.models import (
     WorkspaceConfig,
 )
 from winter_cli.config.workspace_locator import IWorkspaceLocator
-from winter_cli.core.config_file import IConfigFileReader
+from winter_cli.core.config_file import ConfigError, IConfigFileReader
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.util import deep_merge
 
@@ -145,7 +145,7 @@ class WorkspaceConfigService:
         try:
             adopt_extensions = AdoptExtensions(adopt_value)
         except ValueError as exc:
-            raise RuntimeError(
+            raise ConfigError(
                 f"Invalid adopt_extensions value: {adopt_value!r}. Must be one of: 'none', 'winter', 'all'."
             ) from exc
 
@@ -157,7 +157,7 @@ class WorkspaceConfigService:
         envs_per_workspace = _coerce_int(merged.get("envs_per_workspace", 48), 48)
 
         if envs_per_workspace < len(env_aliases) + 2:
-            raise RuntimeError(
+            raise ConfigError(
                 f"Invalid config: envs_per_workspace ({envs_per_workspace}) must be >= "
                 f"len(env_aliases) + 2 ({len(env_aliases) + 2}). "
                 f"Either reduce env_aliases (currently {len(env_aliases)} entries) or increase envs_per_workspace."
@@ -215,7 +215,7 @@ class WorkspaceConfigService:
     def _validate_relative_path(value: str, label: str | None) -> None:
         candidate = Path(value)
         if candidate.is_absolute() or ".." in candidate.parts:
-            raise RuntimeError(
+            raise ConfigError(
                 f"Invalid path {value!r} for standalone repo {label!r}: "
                 f"must be a relative path under the workspace root with no `..` segments."
             )

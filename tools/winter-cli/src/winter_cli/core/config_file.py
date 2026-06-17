@@ -4,7 +4,15 @@ from pathlib import Path
 from typing import Protocol
 
 
-class ConfigFileReadError(Exception):
+class ConfigError(Exception):
+    """Base class for all configuration-domain errors.
+
+    Caught at the CLI boundary (`cli.py`) and rendered as a clean ``error:``
+    line rather than a traceback.  Subclass for specific error shapes.
+    """
+
+
+class ConfigFileReadError(ConfigError):
     """Raised when a config file cannot be parsed (decode error or read failure).
 
     Distinguished from "file not present" so callers can decide: a missing file

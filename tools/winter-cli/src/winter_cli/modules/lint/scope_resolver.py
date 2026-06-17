@@ -19,6 +19,33 @@ from winter_cli.modules.workspace.workspace_repository import IReadWorkspaceRepo
 logger = logging.getLogger(__name__)
 
 
+def parse_porcelain_z(output: str) -> list[str]:
+    """Parse the NUL-delimited output of ``git status --porcelain -z``.
+
+    ``-z`` emits raw, NUL-terminated, unquoted paths — so paths with spaces or
+    non-ASCII survive intact (plain ``--porcelain`` C-quotes them).  Each entry
+    starts with a two-character XY status code followed by a space and the path.
+    A rename or copy entry (``R`` or ``C`` anywhere in XY) spans **two** NUL
+    fields: ``XY new_path\\0orig_path``; we keep the new path and skip the
+    original.  All other entries are a single field.
+
+    Returns the new/current paths in order, one per status entry.
+    """
+    tokens = output.split("\0")
+    paths: list[str] = []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if len(token) < 4:
+            i += 1
+            continue
+        status, path = token[:2], token[3:]
+        paths.append(path)
+        # R/C entries carry the original path in the following NUL field.
+        i += 2 if ("R" in status or "C" in status) else 1
+    return paths
+
+
 class LintScopeResolver:
     """Turns a CLI scope request into the concrete content a lint run covers.
 
@@ -137,29 +164,11 @@ class LintScopeResolver:
         return Path(top) if top else None
 
     def _dirty_paths(self, root: Path) -> list[str]:
-        """Working-tree + staged + untracked paths via `git status --porcelain -z`.
-
-        `-z` emits raw, NUL-terminated, unquoted paths — so paths with spaces or
-        non-ASCII survive intact (plain `--porcelain` C-quotes them). A rename or
-        copy entry spans two NUL fields, new path then original; we keep the new
-        path and skip the original.
-        """
+        """Working-tree + staged + untracked paths via `git status --porcelain -z`."""
         result = self._git(root, "status", "--porcelain", "-z")
         if result is None or result.returncode != 0:
             return []
-        tokens = result.stdout.split("\0")
-        paths: list[str] = []
-        i = 0
-        while i < len(tokens):
-            token = tokens[i]
-            if len(token) < 4:
-                i += 1
-                continue
-            status, path = token[:2], token[3:]
-            paths.append(path)
-            # R/C entries carry the original path in the following field.
-            i += 2 if ("R" in status or "C" in status) else 1
-        return paths
+        return parse_porcelain_z(result.stdout)
 
     def _unpushed_paths(self, root: Path) -> list[str]:
         """Files changed in commits ahead of the upstream (or origin/<main>)."""

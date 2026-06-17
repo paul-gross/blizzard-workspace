@@ -7,6 +7,7 @@ import pytest
 
 from winter_cli.config.internal import cwd_workspace_locator
 from winter_cli.config.internal.cwd_workspace_locator import CwdWorkspaceLocator
+from winter_cli.core.config_file import ConfigError
 
 
 def test_find_workspace_root_returns_directory_containing_winter_dir(
@@ -48,5 +49,5 @@ def test_find_workspace_root_raises_when_no_winter_dir_found(
     FakePath.cwd.return_value = fake_cwd
     monkeypatch.setattr(cwd_workspace_locator, "Path", FakePath)
 
-    with pytest.raises(RuntimeError, match="Could not find workspace root"):
+    with pytest.raises(ConfigError, match="Could not find workspace root"):
         CwdWorkspaceLocator().find_workspace_root()
