@@ -264,7 +264,7 @@ Two keys connect the interface to an implementation:
 - **Workspace config** — `capabilities.service = "<extension-name>"` in the `[capabilities]` table in `.winter/config.toml` (or the `config.local.toml` overlay). The name must match a `[[standalone_repository]]` that ships a `winter-ext.toml`. If only one installed extension declares `provides.service`, the binding is implicit and the explicit config entry is optional.
 - **Extension manifest** — `provides.service = "<path>"` in the `[provides]` table in that extension's `winter-ext.toml`, an executable entrypoint relative to the extension's repo root.
 
-With both in place, `winter service <action> <env>` resolves through the capability registry and runs the entrypoint. If the binding is ambiguous (two+ providers, no explicit config entry), the command errors naming all candidates and the `capabilities.service` config key. For the full resolution model and deprecated key handling, see [## Capability registry](#capability-registry) above.
+With both in place, `winter service <action> …` resolves through the capability registry and runs the entrypoint. If the binding is ambiguous (two+ providers, no explicit config entry), the command errors naming all candidates and the `capabilities.service` config key. For the full resolution model and deprecated key handling, see [## Capability registry](#capability-registry) above.
 
 The legacy keys `service_orchestrator` (config) and `orchestrate_services` (manifest) are still accepted as deprecated aliases — see the Capability registry section for the fallback semantics.
 

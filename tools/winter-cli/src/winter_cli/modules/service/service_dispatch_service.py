@@ -10,11 +10,15 @@ from winter_cli.modules.service.orchestrator_resolver import ServiceOrchestrator
 class ServiceDispatchService:
     """Dispatches up/down/status/restart to the registered service orchestrator.
 
-    Each action is invoked as exactly `<entrypoint> <action> <env>` (argv),
+    The orchestrator is invoked as `<entrypoint> <action> [positional...]` (argv),
     with `cwd` at the workspace root. Every dispatch exports `WINTER_WORKSPACE_DIR`,
     `WINTER_EXT_DIR`, and `WINTER_EXT_PREFIX` (matching the doctor/lint/hook
-    dispatches). Action-specific context is conveyed via further env vars:
-      - restart: `WINTER_SERVICE_NAME=<service>` (required; the service to bounce)
+    dispatches).
+
+    For up/down the single positional is `<env>`. For status/restart the positionals
+    are the verbatim `<env>/<service>` selection PATTERNS forwarded unchanged on argv.
+    No per-action selection env vars are set here (logs is handled separately by
+    ServiceLogsService).
 
     The entrypoint's exit code is returned unmodified; stdout/stderr are
     inherited from the parent process (no capture).
@@ -30,13 +34,11 @@ class ServiceDispatchService:
         self._orchestrator_resolver = orchestrator_resolver
         self._workspace_root = workspace_root
 
-    def dispatch(self, action: str, env: str, extra_env: dict[str, str] | None = None) -> int:
+    def dispatch(self, action: str, positionals: list[str]) -> int:
         """Run the orchestrator's entrypoint and return its exit code unmodified."""
         resolved = self._orchestrator_resolver.resolve()
-        cmd = [str(resolved.entrypoint), action, env]
+        cmd = [str(resolved.entrypoint), action, *positionals]
         merged = os.environ.copy()
-        if extra_env:
-            merged.update(extra_env)
         merged["WINTER_WORKSPACE_DIR"] = str(self._workspace_root)
         merged["WINTER_EXT_DIR"] = str(resolved.ext_dir)
         merged["WINTER_EXT_PREFIX"] = resolved.prefix

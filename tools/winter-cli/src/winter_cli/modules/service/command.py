@@ -36,10 +36,11 @@ def _service_handler(ctx: click.Context):
 def service_group() -> None:
     """Control workspace services via the registered orchestrator extension.
 
-    Each action invokes the entrypoint registered in .winter/config.toml as
-    `<entrypoint> <action> <env>` (argv). Action-specific parameters are
-    conveyed via WINTER_* environment variables so the contract is stable
-    across orchestrator implementations.
+    Each action invokes the entrypoint registered in .winter/config.toml.
+    Selection PATTERNS for status/restart/logs are passed as positional argv
+    tokens to the entrypoint (`<entrypoint> <action> <pattern...>`). Only
+    `logs` render options (-f/-n/--since/--until/-t) use WINTER_LOG_* env vars.
+    `up`/`down` stay `<entrypoint> <action> <env>` (single env, whole-environment).
     """
 
 
@@ -61,26 +62,38 @@ def down_cmd(ctx: click.Context, env: str) -> None:
     handler.run(ServiceParams(action="down", env=env))
 
 
-@service_group.command("status", short_help="Report env service status.")
-@click.argument("env")
+@service_group.command("status", short_help="Report service status.")
+@click.argument("patterns", nargs=-1)
 @click.pass_context
-def status_cmd(ctx: click.Context, env: str) -> None:
-    """Report service status for ENV."""
-    handler = _service_handler(ctx)
-    handler.run(ServiceParams(action="status", env=env))
+def status_cmd(ctx: click.Context, patterns: tuple[str, ...]) -> None:
+    """Report status of services matching <env>/<service> PATTERNS.
 
-
-@service_group.command("restart", short_help="Bounce one service.")
-@click.argument("env")
-@click.argument("service")
-@click.pass_context
-def restart_cmd(ctx: click.Context, env: str, service: str) -> None:
-    """Restart SERVICE in ENV.
-
-    The service name is conveyed to the orchestrator via WINTER_SERVICE_NAME.
+    PATTERNS are zero or more <env>/<service> segment-glob strings. Omit to
+    report all services across all environments. Patterns are forwarded verbatim
+    as positional argv to the orchestrator entrypoint.
     """
     handler = _service_handler(ctx)
-    handler.run(ServiceParams(action="restart", env=env, service_name=service))
+    handler.run(ServiceParams(action="status", patterns=patterns))
+
+
+@service_group.command("restart", short_help="Restart matched services.")
+@click.argument("patterns", nargs=-1, required=True)
+@click.pass_context
+def restart_cmd(ctx: click.Context, patterns: tuple[str, ...]) -> None:
+    """Restart every service matching <env>/<service> PATTERNS.
+
+    PATTERNS are one or more <env>/<service> segment-glob strings (at least one
+    required). Patterns are forwarded verbatim as positional argv to the
+    orchestrator entrypoint; the orchestrator is responsible for expanding them
+    against its declared service catalog.
+
+    At least one pattern is required because action commands require an explicit
+    target — there is no implicit "everything", mirroring `winter ws merge`
+    requiring a source ref (unlike read-shaped commands such as `status` that
+    default to all).
+    """
+    handler = _service_handler(ctx)
+    handler.run(ServiceParams(action="restart", patterns=patterns))
 
 
 def _validate_tail(ctx: click.Context, param: click.Parameter, value: str) -> int | str:
@@ -97,8 +110,7 @@ def _validate_tail(ctx: click.Context, param: click.Parameter, value: str) -> in
 
 
 @service_group.command("logs", short_help="Stream service logs.")
-@click.argument("env")
-@click.argument("service", nargs=-1)
+@click.argument("patterns", nargs=-1, required=True)
 @click.option("-f", "--follow", is_flag=True, default=False, help="Stream until interrupted.")
 @click.option(
     "-n",
@@ -115,24 +127,26 @@ def _validate_tail(ctx: click.Context, param: click.Parameter, value: str) -> in
 @click.pass_context
 def logs_cmd(
     ctx: click.Context,
-    env: str,
-    service: tuple[str, ...],
+    patterns: tuple[str, ...],
     follow: bool,
     tail: int | str,
     since: str,
     until: str,
     timestamps: bool,
 ) -> None:
-    """Stream logs for ENV.
+    """Stream logs for services matching PATTERNS.
 
-    SERVICE filters to one or more named services; omit for all services.
+    PATTERNS are one or more <env>/<service> segment-glob strings (at least one
+    required — action commands require an explicit target, unlike `status` which
+    defaults to all). Selection is forwarded verbatim as positional argv to the
+    orchestrator entrypoint (`<entrypoint> logs <pattern...>`). Winter applies a
+    segment-aware backstop filter on the NDJSON stream: each line's env/svc is
+    matched against the patterns via matches_any_pattern; lines missing env or
+    svc are dropped. Render options travel via WINTER_LOG_* env vars.
 
     \b
     Duration format: <N>(s|m|h|d) — e.g. 90s, 5m, 2h, 3d.
     Timestamp format: RFC3339 — e.g. 2026-06-13T10:00:00Z.
-
-    Parameters are conveyed to the orchestrator via WINTER_LOG_* environment
-    variables. winter applies idempotent backstop filters on the NDJSON output.
 
     When --follow is set, winter relays lines live and does NOT re-apply tail
     (the orchestrator is expected to honour WINTER_LOG_TAIL). Interrupted with
@@ -155,7 +169,7 @@ def logs_cmd(
             raise click.BadParameter(str(exc), ctx=ctx, param_hint="'--until'") from exc
 
     options = LogOptions(
-        services=service,
+        patterns=patterns,
         follow=follow,
         tail=tail,
         since_rfc3339=since_rfc3339,
@@ -163,4 +177,4 @@ def logs_cmd(
         timestamps=timestamps,
     )
     handler = _service_handler(ctx)
-    handler.run_logs(env, options)
+    handler.run_logs(options)

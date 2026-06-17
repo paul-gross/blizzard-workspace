@@ -23,7 +23,7 @@ The surface is two command groups plus six standalone commands:
 - **`winter ws …`** — reconcile the workspace or a feature env against the config (`init`), inspect state (`status`, `list`, `worktrees`, `diff`, `index`), move commits between remotes and worktrees (`fetch`, `pull`, `push`, `merge`), and manage env lifecycle (`connect`, `disconnect`, `checkout`, `destroy`, `prune`).
 - **`winter repo …`** — add, remove, and list the repositories declared in the config.
 - **`winter dashboard`** — interactive TUI for workspace status, with remappable keybindings.
-- **`winter service <action> <env>`** — a stable `up`/`down`/`status`/`restart`/`logs` interface that dispatches to whichever orchestrator extension the workspace registers.
+- **`winter service <action> [<env>/<service>…]`** — a stable `up`/`down`/`status`/`restart`/`logs` interface that dispatches to whichever orchestrator extension the workspace registers. `up`/`down` take a single `<env>`; `status`/`restart`/`logs` take `<env>/<service>` PATTERNS (see [usage/service.md](./usage/service.md)).
 - **`winter doctor`** — preflight health checks.
 - **`winter lint`** — convention checks.
 - **`winter graph`** — the module dependency graph.

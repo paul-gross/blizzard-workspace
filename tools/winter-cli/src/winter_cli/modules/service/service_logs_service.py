@@ -13,13 +13,16 @@ from winter_cli.modules.service.orchestrator_resolver import ServiceOrchestrator
 class ServiceLogsService:
     """Streams logs from the registered orchestrator via the winter-defined contract.
 
-    Invokes the orchestrator entrypoint as `<entrypoint> logs <env>` with `cwd`
-    at the workspace root, conveying all log parameters via WINTER_LOG_*
-    environment variables. Like every dispatch it also exports
-    `WINTER_WORKSPACE_DIR`, `WINTER_EXT_DIR`, and `WINTER_EXT_PREFIX`. The
-    orchestrator's stdout is read as NDJSON; winter parses each line, applies
-    idempotent backstop filters (service, time, tail), and renders plain lines to
-    the caller's stdout.
+    Invokes the orchestrator entrypoint as `<entrypoint> logs <pattern...>` with
+    `cwd` at the workspace root. The `<env>/<service>` selection patterns are
+    forwarded verbatim as positional argv tokens. Render parameters are conveyed
+    via WINTER_LOG_* environment variables (WINTER_LOG_FOLLOW, WINTER_LOG_TAIL,
+    WINTER_LOG_SINCE, WINTER_LOG_UNTIL, WINTER_LOG_TIMESTAMPS). Like every
+    dispatch it also exports `WINTER_WORKSPACE_DIR`, `WINTER_EXT_DIR`, and
+    `WINTER_EXT_PREFIX`. The orchestrator's stdout is read as NDJSON; each line
+    must carry an `env` field in addition to `svc`/`msg`; winter applies a
+    segment-aware backstop filter matching `<env>/<svc>` against the requested
+    patterns, then applies time/tail filters and renders plain lines to stdout.
     The orchestrator's stderr inherits the parent's fd so diagnostics reach the
     terminal without corrupting the NDJSON stream.
 
@@ -38,10 +41,10 @@ class ServiceLogsService:
         self._click = click
         self._workspace_root = workspace_root
 
-    def stream(self, env: str, options: LogOptions) -> int:
+    def stream(self, options: LogOptions) -> int:
         """Run the orchestrator logs entrypoint and stream rendered output to stdout."""
         resolved = self._orchestrator_resolver.resolve()
-        cmd = [str(resolved.entrypoint), "logs", env]
+        cmd = [str(resolved.entrypoint), "logs", *options.patterns]
 
         # Parse since/until RFC3339 strings into datetime objects for the processor.
         since_dt = parse_rfc3339(options.since_rfc3339) if options.since_rfc3339 else None
@@ -49,7 +52,6 @@ class ServiceLogsService:
 
         # Build env vars for the orchestrator.
         extra_env = dict(os.environ)
-        extra_env["WINTER_LOG_SERVICES"] = " ".join(options.services)
         extra_env["WINTER_LOG_FOLLOW"] = "1" if options.follow else "0"
         extra_env["WINTER_LOG_TAIL"] = str(options.tail)
         extra_env["WINTER_LOG_SINCE"] = options.since_rfc3339

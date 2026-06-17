@@ -52,14 +52,16 @@ def parse_since_until(value: str, now: datetime) -> str:
 class LogOptions:
     """Parsed options for `winter service logs`.
 
-    `services` is a tuple of zero or more explicit service names — empty means all.
+    `patterns` is a tuple of one or more `<env>/<service>` segment-glob strings
+    forwarded verbatim on the orchestrator argv. Winter applies a backstop filter
+    on the NDJSON stream matching each line's `<env>/<svc>` against these patterns.
     `follow` streams until interrupted.
     `tail` is either an integer (last N lines) or the string 'all'.
     `since_rfc3339` / `until_rfc3339` are normalised RFC3339 strings or empty.
     `timestamps` enables per-line timestamp prefixing.
     """
 
-    services: tuple[str, ...]
+    patterns: tuple[str, ...]
     follow: bool
     tail: int | str  # int or "all"
     since_rfc3339: str  # empty string = unset

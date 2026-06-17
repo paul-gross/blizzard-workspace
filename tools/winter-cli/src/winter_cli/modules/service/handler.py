@@ -11,17 +11,20 @@ from winter_cli.modules.service.service_logs_service import ServiceLogsService
 @dataclasses.dataclass
 class ServiceParams:
     action: str
-    env: str
-    service_name: str | None = None  # restart only
+    # up/down: the target environment name; None for status/restart (pattern-selected).
+    env: str | None = None
+    # status/restart: verbatim <env>/<service> glob patterns forwarded on argv.
+    patterns: tuple[str, ...] = ()
 
 
 class ServiceHandler:
-    """Dispatches `winter service <action> <env>` and adopts the entrypoint's exit code.
+    """Dispatches `winter service <action>` and adopts the entrypoint's exit code.
 
-    The dispatch service invokes the orchestrator with a normalized argv
-    (`<entrypoint> <action> <env>`) and returns its exit code; the handler
-    makes that code the CLI's exit code so a failing implementation surfaces
-    as a non-zero `winter` exit.
+    For up/down the dispatch argv is `<entrypoint> <action> <env>`. For
+    status/restart the positionals are the verbatim `<env>/<service>` selection
+    PATTERNS forwarded unchanged on argv. The entrypoint's exit code is adopted
+    as the CLI's exit code so a failing implementation surfaces as a non-zero
+    `winter` exit.
     """
 
     def __init__(
@@ -34,15 +37,15 @@ class ServiceHandler:
 
     def run(self, params: ServiceParams) -> None:
         action = params.action
-        if action == "restart":
-            extra_env = {"WINTER_SERVICE_NAME": params.service_name or ""}
-            exit_code = self._dispatch_service.dispatch(action, params.env, extra_env)
+        if action in ("up", "down"):
+            positionals = [params.env] if params.env is not None else []
         else:
-            exit_code = self._dispatch_service.dispatch(action, params.env)
+            positionals = list(params.patterns)
+        exit_code = self._dispatch_service.dispatch(action, positionals)
         if exit_code != 0:
             sys.exit(exit_code)
 
-    def run_logs(self, env: str, options: LogOptions) -> None:
-        exit_code = self._logs_service.stream(env, options)
+    def run_logs(self, options: LogOptions) -> None:
+        exit_code = self._logs_service.stream(options)
         if exit_code != 0:
             sys.exit(exit_code)

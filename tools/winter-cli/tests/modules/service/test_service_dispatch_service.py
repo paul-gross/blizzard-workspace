@@ -74,50 +74,102 @@ def _service(runner: FakeSubprocessRunner | None = None) -> ServiceDispatchServi
 # ── happy path: dispatch, env var forwarding, exit-code passthrough ───────────
 
 
-def test_dispatch_executes_entrypoint_with_action_and_env() -> None:
+def test_dispatch_up_executes_entrypoint_with_action_and_env() -> None:
     runner = FakeSubprocessRunner()
-    code = _service(runner).dispatch("up", "alpha")
+    code = _service(runner).dispatch("up", ["alpha"])
     assert code == 0
     assert runner.call_calls == [([str(WS / "winter-service-tmux/workflow/service"), "up", "alpha"], WS)]
 
 
-def test_dispatch_passes_extra_env_to_call() -> None:
+def test_dispatch_down_executes_entrypoint_with_action_and_env() -> None:
     runner = FakeSubprocessRunner()
-    _service(runner).dispatch("restart", "alpha", {"WINTER_SERVICE_NAME": "backend"})
-    assert len(runner.call_envs) == 1
+    _service(runner).dispatch("down", ["beta"])
+    assert runner.call_calls == [([str(WS / "winter-service-tmux/workflow/service"), "down", "beta"], WS)]
+
+
+def test_dispatch_restart_with_patterns_passes_them_on_argv() -> None:
+    runner = FakeSubprocessRunner()
+    _service(runner).dispatch("restart", ["alpha/api", "*/backend"])
+    entrypoint = str(WS / "winter-service-tmux/workflow/service")
+    assert runner.call_calls == [([entrypoint, "restart", "alpha/api", "*/backend"], WS)]
     env = runner.call_envs[0]
-    assert env["WINTER_SERVICE_NAME"] == "backend"
-    assert "PATH" in env
+    assert "WINTER_SERVICE_NAME" not in env
+    assert "WINTER_SERVICE_PATTERNS" not in env
 
 
-def test_dispatch_restart_preserves_inherited_environment(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Regression: restart must not wipe the parent environment."""
+def test_dispatch_status_with_patterns_passes_them_on_argv() -> None:
+    runner = FakeSubprocessRunner()
+    _service(runner).dispatch("status", ["alpha/web", "alpha/api"])
+    entrypoint = str(WS / "winter-service-tmux/workflow/service")
+    assert runner.call_calls == [([entrypoint, "status", "alpha/web", "alpha/api"], WS)]
+
+
+def test_dispatch_status_with_no_positionals_omits_them() -> None:
+    runner = FakeSubprocessRunner()
+    _service(runner).dispatch("status", [])
+    entrypoint = str(WS / "winter-service-tmux/workflow/service")
+    assert runner.call_calls == [([entrypoint, "status"], WS)]
+
+
+def test_dispatch_preserves_inherited_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: dispatch must not wipe the parent environment."""
     monkeypatch.setenv("WINTER_TEST_SENTINEL", "canary-value")
     runner = FakeSubprocessRunner()
-    _service(runner).dispatch("restart", "alpha", {"WINTER_SERVICE_NAME": "worker"})
+    _service(runner).dispatch("restart", ["alpha/worker"])
     assert len(runner.call_envs) == 1
     env = runner.call_envs[0]
-    assert env["WINTER_SERVICE_NAME"] == "worker"
     assert env["WINTER_TEST_SENTINEL"] == "canary-value"
     assert env.items() >= os.environ.items()
 
 
 def test_dispatch_passes_exit_code_through_unmodified() -> None:
     entrypoint = str(WS / "winter-service-tmux/workflow/service")
-    runner = FakeSubprocessRunner(call_responses={f"{entrypoint} status alpha": 3})
-    assert _service(runner).dispatch("status", "alpha") == 3
+    runner = FakeSubprocessRunner(call_responses={f"{entrypoint} status": 3})
+    assert _service(runner).dispatch("status", []) == 3
 
 
 def test_dispatch_sets_workspace_context_env_vars() -> None:
     """Dispatch injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, and cwd."""
     runner = FakeSubprocessRunner()
-    _service(runner).dispatch("up", "alpha")
+    _service(runner).dispatch("up", ["alpha"])
     assert len(runner.call_envs) == 1
     env = runner.call_envs[0]
     assert env["WINTER_WORKSPACE_DIR"] == str(WS)
     assert env["WINTER_EXT_DIR"] == str(WS / "winter-service-tmux")
     assert env["WINTER_EXT_PREFIX"] == "winter-service-tmux"
     assert runner.call_calls[0][1] == WS
+
+
+def test_dispatch_no_selection_env_vars_for_up() -> None:
+    runner = FakeSubprocessRunner()
+    _service(runner).dispatch("up", ["alpha"])
+    env = runner.call_envs[0]
+    assert "WINTER_SERVICE_NAME" not in env
+    assert "WINTER_SERVICE_PATTERNS" not in env
+
+
+def test_dispatch_no_selection_env_vars_for_down() -> None:
+    runner = FakeSubprocessRunner()
+    _service(runner).dispatch("down", ["alpha"])
+    env = runner.call_envs[0]
+    assert "WINTER_SERVICE_NAME" not in env
+    assert "WINTER_SERVICE_PATTERNS" not in env
+
+
+# ── leading-dash pattern forwarding ──────────────────────────────────────────
+
+
+def test_dispatch_forwards_leading_dash_token_verbatim() -> None:
+    """A leading-`-` pattern token is forwarded verbatim on argv without mangling.
+
+    At the Click boundary a bare `-`-leading token is rejected as an unknown option
+    (exit 2); the caller must use `--` to pass it through. Winter then forwards the
+    token verbatim as a positional argv element — it never reinterprets it.
+    """
+    runner = FakeSubprocessRunner()
+    _service(runner).dispatch("restart", ["-weird"])
+    entrypoint = str(WS / "winter-service-tmux/workflow/service")
+    assert runner.call_calls == [([entrypoint, "restart", "-weird"], WS)]
 
 
 # ── misconfiguration errors (tested via the resolver) ────────────────────────
@@ -127,14 +179,14 @@ def test_no_orchestrator_registered_raises() -> None:
     res = _resolver(orchestrator=None, repos=[], manifests={}, files={})
     svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res, workspace_root=WS)
     with pytest.raises(RepoError, match="no extension provides"):
-        svc.dispatch("up", "alpha")
+        svc.dispatch("up", ["alpha"])
 
 
 def test_unknown_extension_name_raises() -> None:
     res = _resolver(orchestrator="winter-service-docker", repos=[_tmux_repo()], manifests={}, files={})
     svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res, workspace_root=WS)
     with pytest.raises(RepoError, match="no installed extension named"):
-        svc.dispatch("up", "alpha")
+        svc.dispatch("up", ["alpha"])
 
 
 def test_extension_missing_service_key_raises() -> None:
@@ -147,7 +199,7 @@ def test_extension_missing_service_key_raises() -> None:
     )
     svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res, workspace_root=WS)
     with pytest.raises(RepoError, match=r"declares no provides\.service"):
-        svc.dispatch("up", "alpha")
+        svc.dispatch("up", ["alpha"])
 
 
 def test_missing_entrypoint_file_raises() -> None:
@@ -160,4 +212,4 @@ def test_missing_entrypoint_file_raises() -> None:
     )
     svc = ServiceDispatchService(subprocess_runner=FakeSubprocessRunner(), orchestrator_resolver=res, workspace_root=WS)
     with pytest.raises(RepoError, match="entrypoint not found"):
-        svc.dispatch("up", "alpha")
+        svc.dispatch("up", ["alpha"])

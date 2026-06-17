@@ -77,29 +77,80 @@ def test_handler_down_invokes_correct_argv() -> None:
     assert runner.call_calls == [([ENTRYPOINT, "down", "beta"], WS)]
 
 
-def test_handler_status_exits_zero_without_raising() -> None:
+def test_handler_up_does_not_set_selection_env_vars() -> None:
     runner = FakeSubprocessRunner()
-    _handler(runner).run(ServiceParams(action="status", env="alpha"))
-
-
-def test_handler_restart_sets_service_name_env_var() -> None:
-    runner = FakeSubprocessRunner()
-    _handler(runner).run(ServiceParams(action="restart", env="alpha", service_name="api"))
-    assert runner.call_calls == [([ENTRYPOINT, "restart", "alpha"], WS)]
+    _handler(runner).run(ServiceParams(action="up", env="alpha"))
     assert len(runner.call_envs) == 1
     env = runner.call_envs[0]
-    assert env["WINTER_SERVICE_NAME"] == "api"
+    assert "WINTER_SERVICE_NAME" not in env
+    assert "WINTER_SERVICE_PATTERNS" not in env
+
+
+def test_handler_down_does_not_set_selection_env_vars() -> None:
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="down", env="alpha"))
+    assert len(runner.call_envs) == 1
+    env = runner.call_envs[0]
+    assert "WINTER_SERVICE_NAME" not in env
+    assert "WINTER_SERVICE_PATTERNS" not in env
+
+
+def test_handler_restart_with_patterns_forwards_them_on_argv() -> None:
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="restart", patterns=("alpha/api", "*/backend")))
+    assert runner.call_calls == [([ENTRYPOINT, "restart", "alpha/api", "*/backend"], WS)]
+    assert len(runner.call_envs) == 1
+    env = runner.call_envs[0]
+    assert "WINTER_SERVICE_NAME" not in env
+    assert "WINTER_SERVICE_PATTERNS" not in env
     assert "PATH" in env
     assert env["WINTER_WORKSPACE_DIR"] == str(WS)
     assert env["WINTER_EXT_DIR"] == str(WS / "winter-service-tmux")
     assert env["WINTER_EXT_PREFIX"] == "winter-service-tmux"
 
 
+def test_handler_status_with_patterns_forwards_them_on_argv() -> None:
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="status", patterns=("alpha/web", "alpha/api")))
+    assert runner.call_calls == [([ENTRYPOINT, "status", "alpha/web", "alpha/api"], WS)]
+    assert len(runner.call_envs) == 1
+    env = runner.call_envs[0]
+    assert "WINTER_SERVICE_NAME" not in env
+    assert "WINTER_SERVICE_PATTERNS" not in env
+
+
+def test_handler_status_with_no_patterns_sends_bare_action() -> None:
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="status"))
+    assert runner.call_calls == [([ENTRYPOINT, "status"], WS)]
+    assert len(runner.call_envs) == 1
+    env = runner.call_envs[0]
+    assert "WINTER_SERVICE_NAME" not in env
+    assert "WINTER_SERVICE_PATTERNS" not in env
+
+
 def test_handler_adopts_nonzero_exit_code() -> None:
-    runner = FakeSubprocessRunner(call_responses={f"{ENTRYPOINT} status alpha": 7})
+    runner = FakeSubprocessRunner(call_responses={f"{ENTRYPOINT} status": 7})
     with pytest.raises(SystemExit) as excinfo:
-        _handler(runner).run(ServiceParams(action="status", env="alpha"))
+        _handler(runner).run(ServiceParams(action="status"))
     assert excinfo.value.code == 7
+
+
+def test_handler_adopts_nonzero_exit_code_for_restart() -> None:
+    runner = FakeSubprocessRunner(call_responses={f"{ENTRYPOINT} restart alpha/api": 5})
+    with pytest.raises(SystemExit) as excinfo:
+        _handler(runner).run(ServiceParams(action="restart", patterns=("alpha/api",)))
+    assert excinfo.value.code == 5
+
+
+def test_handler_up_exits_zero_without_raising() -> None:
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="up", env="alpha"))
+
+
+def test_handler_status_exits_zero_without_raising() -> None:
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="status"))
 
 
 # ── logs via run_logs ─────────────────────────────────────────────────────────
@@ -107,7 +158,7 @@ def test_handler_adopts_nonzero_exit_code() -> None:
 
 def _default_log_options(**kwargs: Any) -> LogOptions:
     defaults: dict[str, Any] = {
-        "services": (),
+        "patterns": (),
         "follow": False,
         "tail": 200,
         "since_rfc3339": "",
@@ -120,28 +171,28 @@ def _default_log_options(**kwargs: Any) -> LogOptions:
 
 def test_handler_run_logs_streams_rendered_output() -> None:
     ndjson_lines = [
-        '{"ts":"2026-06-13T10:00:01Z","svc":"api","msg":"started"}',
-        '{"ts":"2026-06-13T10:00:02Z","svc":"api","msg":"ready"}',
+        '{"env":"alpha","ts":"2026-06-13T10:00:01Z","svc":"api","msg":"started"}',
+        '{"env":"alpha","ts":"2026-06-13T10:00:02Z","svc":"api","msg":"ready"}',
     ]
-    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha": (ndjson_lines, 0)})
+    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api": (ndjson_lines, 0)})
     recorder = ClickRecorder()
-    _handler(runner, recorder).run_logs("alpha", _default_log_options())
-    # Both lines rendered, plain msg only (single service in stream but no explicit filter).
+    _handler(runner, recorder).run_logs(_default_log_options(patterns=("alpha/api",)))
+    # Both lines rendered (single pattern → no prefix).
     assert any("started" in m for m, _ in recorder.calls)
     assert any("ready" in m for m, _ in recorder.calls)
 
 
 def test_handler_run_logs_exits_nonzero_on_orchestrator_error() -> None:
-    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha": ([], 2)})
+    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api": ([], 2)})
     with pytest.raises(SystemExit) as excinfo:
-        _handler(runner, ClickRecorder()).run_logs("alpha", _default_log_options())
+        _handler(runner, ClickRecorder()).run_logs(_default_log_options(patterns=("alpha/api",)))
     assert excinfo.value.code == 2
 
 
 def test_handler_run_logs_sets_workspace_context_env_vars() -> None:
     """Logs stream injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, and cwd."""
-    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha": ([], 0)})
-    _handler(runner, ClickRecorder()).run_logs("alpha", _default_log_options())
+    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api": ([], 0)})
+    _handler(runner, ClickRecorder()).run_logs(_default_log_options(patterns=("alpha/api",)))
     assert len(runner.popen_calls) == 1
     assert runner.popen_calls[0][1] == WS
     assert len(runner.popen_envs) == 1
@@ -149,3 +200,24 @@ def test_handler_run_logs_sets_workspace_context_env_vars() -> None:
     assert env["WINTER_WORKSPACE_DIR"] == str(WS)
     assert env["WINTER_EXT_DIR"] == str(WS / "winter-service-tmux")
     assert env["WINTER_EXT_PREFIX"] == "winter-service-tmux"
+
+
+def test_handler_run_logs_patterns_on_argv_not_env_var() -> None:
+    """Patterns appear as positional argv tokens; WINTER_LOG_SERVICES is absent."""
+    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api beta/worker-*": ([], 0)})
+    _handler(runner, ClickRecorder()).run_logs(_default_log_options(patterns=("alpha/api", "beta/worker-*")))
+    assert len(runner.popen_calls) == 1
+    cmd = runner.popen_calls[0][0]
+    assert cmd == [ENTRYPOINT, "logs", "alpha/api", "beta/worker-*"]
+    env = runner.popen_envs[0]
+    assert "WINTER_LOG_SERVICES" not in env
+
+
+def test_handler_run_logs_no_patterns_sends_bare_logs_action() -> None:
+    """Empty patterns → argv is just [entrypoint, 'logs']; no selection tokens."""
+    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs": ([], 0)})
+    _handler(runner, ClickRecorder()).run_logs(_default_log_options(patterns=()))
+    cmd = runner.popen_calls[0][0]
+    assert cmd == [ENTRYPOINT, "logs"]
+    env = runner.popen_envs[0]
+    assert "WINTER_LOG_SERVICES" not in env

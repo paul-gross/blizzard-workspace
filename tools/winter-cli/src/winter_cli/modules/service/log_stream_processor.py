@@ -6,6 +6,7 @@ from collections.abc import Iterable, Iterator
 from datetime import datetime
 
 from winter_cli.modules.service.models import LogOptions, parse_rfc3339
+from winter_cli.modules.workspace.pattern_match import is_single_literal_pattern, matches_any_pattern
 
 
 class LogStreamProcessor:
@@ -14,6 +15,11 @@ class LogStreamProcessor:
     Given a LogOptions and an iterable of raw stdout lines from the orchestrator,
     this class filters and renders each line according to the winter-defined
     contract and yields plain strings ready to write to the caller's stdout.
+
+    Each NDJSON line must carry an `env` field in addition to `svc`/`msg` (and
+    optional `ts`). The backstop filter matches `<env>/<svc>` against
+    `options.patterns` via matches_any_pattern; lines missing `env` or `svc` are
+    dropped when a filter is active (patterns non-empty).
 
     It also accumulates warnings (emitted once to stderr by the caller):
       - `timestamps_warning`: set if `-t` was requested but at least one line had no ts.
@@ -38,7 +44,7 @@ class LogStreamProcessor:
         self._options = options
         self._since_dt = since_dt
         self._until_dt = until_dt
-        self._multi_service = len(options.services) != 1
+        self._multi_service = not is_single_literal_pattern(options.patterns)
 
         # Ring buffer for tail backstop (non-follow mode only).
         tail = options.tail
@@ -59,11 +65,10 @@ class LogStreamProcessor:
         In non-follow mode, they are buffered; call `finalize()` after the
         iterable is exhausted to flush the ring buffer.
         """
-        options = self._options
-        services_set = set(options.services)
+        patterns: tuple[str, ...] = tuple(self._options.patterns)
         for raw in raw_lines:
             raw = raw.rstrip("\n")
-            rendered = self._process_one(raw, services_set)
+            rendered = self._process_one(raw, patterns)
             if rendered is None:
                 continue
             if self._buffer is not None:
@@ -80,10 +85,11 @@ class LogStreamProcessor:
         if self._buffer is not None:
             yield from self._buffer
 
-    def _process_one(self, raw: str, services_set: set[str]) -> str | None:
+    def _process_one(self, raw: str, patterns: tuple[str, ...]) -> str | None:
         """Parse, filter, and render one raw line. Returns None to drop."""
         # Parse the NDJSON line; treat non-JSON leniently as plain msg.
         ts_str: str | None = None
+        env: str | None = None
         svc: str | None = None
         msg: str = raw
 
@@ -91,13 +97,16 @@ class LogStreamProcessor:
             obj = json.loads(raw)
             if isinstance(obj, dict):
                 ts_str = obj.get("ts") if isinstance(obj.get("ts"), str) else None
+                env = obj.get("env") if isinstance(obj.get("env"), str) else None
                 svc = obj.get("svc") if isinstance(obj.get("svc"), str) else None
                 msg = str(obj.get("msg", raw))
         except (json.JSONDecodeError, ValueError):
             pass  # lenient: keep the whole raw line as msg
 
-        # Service filter: if services requested and this line's svc is not in set, drop.
-        if services_set and svc not in services_set:
+        # Backstop service filter: when patterns are active, keep the line only if
+        # both env and svc are present and match at least one pattern. Drop lines
+        # missing env or svc when a filter is active.
+        if patterns and (env is None or svc is None or not matches_any_pattern(env, svc, patterns)):
             return None
 
         # Time filters (only applied to lines that have a parseable ts).
@@ -125,8 +134,8 @@ class LogStreamProcessor:
                 # -t requested but no ts — note warning, omit the ts field.
                 self.timestamps_warning = True
 
-        if self._multi_service and svc is not None:
-            parts.append(f"{svc} |")
+        if self._multi_service and env is not None and svc is not None:
+            parts.append(f"{env}/{svc} |")
 
         parts.append(msg)
 

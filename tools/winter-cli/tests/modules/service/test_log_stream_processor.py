@@ -12,7 +12,7 @@ def _dt(s: str) -> datetime:
 
 def _opts(**kwargs: object) -> LogOptions:
     defaults: dict[str, object] = {
-        "services": (),
+        "patterns": (),
         "follow": False,
         "tail": 200,
         "since_rfc3339": "",
@@ -36,67 +36,194 @@ def _process(
     return result
 
 
-# ── basic rendering ───────────────────────────────────────────────────────────
+# ── segment glob — star wildcard ──────────────────────────────────────────────
 
 
-def test_renders_plain_msg_with_svc_prefix_for_all_services() -> None:
-    """Empty services (all) is multi-service scope — svc prefix is applied."""
-    lines = ['{"ts":"2026-06-13T10:00:01Z","svc":"api","msg":"started"}']
-    out = _process(_opts(services=()), lines)
-    assert out == ["api | started"]
-
-
-def test_multi_service_adds_svc_prefix() -> None:
-    """When ≥2 explicit services requested, each line gets `<svc> | ` prefix."""
+def test_segment_glob_star_keeps_matching_service_names() -> None:
+    """patterns=('alpha/worker-*',) keeps worker-a and worker-b, drops api."""
     lines = [
-        '{"ts":"2026-06-13T10:00:01Z","svc":"api","msg":"up"}',
-        '{"ts":"2026-06-13T10:00:02Z","svc":"db","msg":"ready"}',
+        '{"env":"alpha","svc":"worker-a","msg":"wa"}',
+        '{"env":"alpha","svc":"worker-b","msg":"wb"}',
+        '{"env":"alpha","svc":"api","msg":"api-msg"}',
     ]
-    # Two explicit services → multi-service scope → prefix.
-    out = _process(_opts(services=("api", "db")), lines)
-    assert "api | up" in out
-    assert "db | ready" in out
+    out = _process(_opts(patterns=("alpha/worker-*",)), lines)
+    assert any("wa" in line for line in out)
+    assert any("wb" in line for line in out)
+    assert not any("api-msg" in line for line in out)
 
 
-def test_single_explicit_service_no_prefix() -> None:
-    """Single explicit service → no svc prefix, per the spec."""
-    lines = ['{"ts":"2026-06-13T10:00:01Z","svc":"api","msg":"up"}']
-    out = _process(_opts(services=("api",)), lines)
-    assert out == ["up"]
+# ── segment glob — ? wildcard ─────────────────────────────────────────────────
 
 
-# ── service filter ────────────────────────────────────────────────────────────
-
-
-def test_service_filter_drops_non_matching_svc() -> None:
+def test_segment_glob_question_mark_matches_single_char() -> None:
+    """patterns=('alpha/worker-?',) keeps worker-a but drops worker-ab."""
     lines = [
-        '{"ts":"2026-06-13T10:00:01Z","svc":"api","msg":"api-msg"}',
-        '{"ts":"2026-06-13T10:00:02Z","svc":"db","msg":"db-msg"}',
+        '{"env":"alpha","svc":"worker-a","msg":"wa"}',
+        '{"env":"alpha","svc":"worker-ab","msg":"wab"}',
     ]
-    out = _process(_opts(services=("api",)), lines)
-    assert out == ["api-msg"]
+    out = _process(_opts(patterns=("alpha/worker-?",)), lines)
+    assert any("wa" in line for line in out)
+    assert not any("wab" in line for line in out)
 
 
-def test_service_filter_multi_keeps_both() -> None:
+# ── segment glob — [...] bracket class ───────────────────────────────────────
+
+
+def test_segment_glob_bracket_class_keeps_matching_members() -> None:
+    """patterns=('alpha/worker-[ab]',) keeps worker-a and worker-b, drops worker-c."""
     lines = [
-        '{"ts":"2026-06-13T10:00:01Z","svc":"api","msg":"api-msg"}',
-        '{"ts":"2026-06-13T10:00:02Z","svc":"db","msg":"db-msg"}',
-        '{"ts":"2026-06-13T10:00:03Z","svc":"worker","msg":"worker-msg"}',
+        '{"env":"alpha","svc":"worker-a","msg":"wa"}',
+        '{"env":"alpha","svc":"worker-b","msg":"wb"}',
+        '{"env":"alpha","svc":"worker-c","msg":"wc"}',
     ]
-    out = _process(_opts(services=("api", "db")), lines)
-    # Two explicit services → multi-service scope → svc prefixes in output.
-    assert any("api-msg" in line for line in out)
-    assert any("db-msg" in line for line in out)
-    assert not any("worker-msg" in line for line in out)
+    out = _process(_opts(patterns=("alpha/worker-[ab]",)), lines)
+    assert any("wa" in line for line in out)
+    assert any("wb" in line for line in out)
+    assert not any("wc" in line for line in out)
 
 
-def test_service_filter_empty_set_keeps_all() -> None:
+# ── segment non-crossing: * does not cross / ─────────────────────────────────
+
+
+def test_segment_star_does_not_cross_slash() -> None:
+    """alpha/* matches alpha/api but the env segment is matched separately."""
     lines = [
-        '{"ts":"2026-06-13T10:00:01Z","svc":"api","msg":"m1"}',
-        '{"ts":"2026-06-13T10:00:02Z","svc":"db","msg":"m2"}',
+        '{"env":"alpha","svc":"api","msg":"alpha-api"}',
+        '{"env":"beta","svc":"api","msg":"beta-api"}',
     ]
-    out = _process(_opts(services=()), lines)
-    assert len(out) == 2
+    out = _process(_opts(patterns=("alpha/*",)), lines)
+    assert any("alpha-api" in line for line in out)
+    assert not any("beta-api" in line for line in out)
+
+
+# ── cross-env: */backend ──────────────────────────────────────────────────────
+
+
+def test_cross_env_star_env_segment_keeps_matching_env_svc_pairs() -> None:
+    """patterns=('*/backend',) keeps alpha/backend and beta/backend, drops alpha/api."""
+    lines = [
+        '{"env":"alpha","svc":"backend","msg":"ab"}',
+        '{"env":"beta","svc":"backend","msg":"bb"}',
+        '{"env":"alpha","svc":"api","msg":"api-msg"}',
+    ]
+    out = _process(_opts(patterns=("*/backend",)), lines)
+    assert any("ab" in line for line in out)
+    assert any("bb" in line for line in out)
+    assert not any("api-msg" in line for line in out)
+
+
+# ── env scoping ───────────────────────────────────────────────────────────────
+
+
+def test_env_scoping_drops_same_svc_in_different_env() -> None:
+    """patterns=('alpha/api',) keeps alpha/api but drops beta/api."""
+    lines = [
+        '{"env":"alpha","svc":"api","msg":"alpha-api"}',
+        '{"env":"beta","svc":"api","msg":"beta-api"}',
+    ]
+    out = _process(_opts(patterns=("alpha/api",)), lines)
+    assert any("alpha-api" in line for line in out)
+    assert not any("beta-api" in line for line in out)
+
+
+# ── no match ─────────────────────────────────────────────────────────────────
+
+
+def test_no_match_yields_empty_result() -> None:
+    """A pattern matching nothing yields an empty result list."""
+    lines = [
+        '{"env":"alpha","svc":"api","msg":"m1"}',
+        '{"env":"alpha","svc":"db","msg":"m2"}',
+    ]
+    out = _process(_opts(patterns=("alpha/nonexistent-*",)), lines)
+    assert out == []
+
+
+# ── missing env or svc dropped when filter active ────────────────────────────
+
+
+def test_line_missing_env_is_dropped_when_filter_active() -> None:
+    """A line without an `env` field is dropped when a filter is active."""
+    lines = ['{"svc":"api","msg":"no-env-field"}']
+    out = _process(_opts(patterns=("alpha/api",)), lines)
+    assert out == []
+
+
+def test_line_missing_svc_is_dropped_when_filter_active() -> None:
+    """A line without a `svc` field is dropped when a filter is active."""
+    lines = ['{"env":"alpha","msg":"no-svc-field"}']
+    out = _process(_opts(patterns=("alpha/*",)), lines)
+    assert out == []
+
+
+def test_line_missing_both_env_and_svc_is_dropped_when_filter_active() -> None:
+    """A line without env or svc is dropped when a filter is active."""
+    lines = ['{"msg":"no-env-no-svc"}']
+    out = _process(_opts(patterns=("alpha/api",)), lines)
+    assert out == []
+
+
+# ── multi-pattern union ───────────────────────────────────────────────────────
+
+
+def test_multi_pattern_union_keeps_all_matching() -> None:
+    """patterns=('alpha/api','beta/worker-*') keeps both matches, drops others."""
+    lines = [
+        '{"env":"alpha","svc":"api","msg":"alpha-api"}',
+        '{"env":"beta","svc":"worker-a","msg":"beta-worker"}',
+        '{"env":"alpha","svc":"db","msg":"alpha-db"}',
+        '{"env":"beta","svc":"api","msg":"beta-api"}',
+    ]
+    out = _process(_opts(patterns=("alpha/api", "beta/worker-*")), lines)
+    assert any("alpha-api" in line for line in out)
+    assert any("beta-worker" in line for line in out)
+    assert not any("alpha-db" in line for line in out)
+    assert not any("beta-api" in line for line in out)
+
+
+# ── render prefix: <env>/<svc> | in multi-scope; none in single pattern ───────
+
+
+def test_multi_scope_prefix_is_env_slash_svc() -> None:
+    """Multi-scope (≥2 patterns or wildcard) prefixes with <env>/<svc> | ."""
+    lines = [
+        '{"env":"alpha","svc":"api","msg":"alpha-api-msg"}',
+        '{"env":"beta","svc":"backend","msg":"beta-backend-msg"}',
+    ]
+    out = _process(_opts(patterns=("alpha/api", "beta/backend")), lines)
+    assert any("alpha/api |" in line for line in out)
+    assert any("beta/backend |" in line for line in out)
+
+
+def test_single_pattern_no_prefix() -> None:
+    """Single pattern → no prefix."""
+    lines = ['{"env":"alpha","svc":"api","msg":"msg"}']
+    out = _process(_opts(patterns=("alpha/api",)), lines)
+    assert out == ["msg"]
+
+
+def test_wildcard_pattern_is_multi_scope_adds_prefix() -> None:
+    """A single wildcard pattern is multi-scope → prefix IS added.
+
+    A single literal `<env>/<svc>` (no metacharacters) is the only case that
+    suppresses the prefix. A wildcard like `alpha/*` may match multiple services,
+    so the prefix is required to keep merged output attributable.
+    """
+    lines = ['{"env":"alpha","svc":"api","msg":"msg"}']
+    out = _process(_opts(patterns=("alpha/*",)), lines)
+    # Single wildcard → multi-scope → prefix applied.
+    assert "alpha/api |" in out[0]
+    assert "msg" in out[0]
+
+
+def test_two_patterns_multi_scope_adds_env_svc_prefix() -> None:
+    """Two patterns → multi-scope → <env>/<svc> | prefix."""
+    lines = [
+        '{"env":"alpha","svc":"api","msg":"hi"}',
+    ]
+    out = _process(_opts(patterns=("alpha/api", "alpha/db")), lines)
+    assert "alpha/api |" in out[0]
+    assert "hi" in out[0]
 
 
 # ── since / until with ts ─────────────────────────────────────────────────────
@@ -104,49 +231,49 @@ def test_service_filter_empty_set_keeps_all() -> None:
 
 def test_since_drops_lines_before_threshold() -> None:
     lines = [
-        '{"ts":"2026-06-13T10:00:00Z","svc":"api","msg":"too-old"}',
-        '{"ts":"2026-06-13T10:00:05Z","svc":"api","msg":"fresh"}',
+        '{"env":"alpha","ts":"2026-06-13T10:00:00Z","svc":"api","msg":"too-old"}',
+        '{"env":"alpha","ts":"2026-06-13T10:00:05Z","svc":"api","msg":"fresh"}',
     ]
     since = _dt("2026-06-13T10:00:03Z")
-    out = _process(_opts(services=("api",)), lines, since_dt=since)
+    out = _process(_opts(patterns=("alpha/api",)), lines, since_dt=since)
     assert out == ["fresh"]
 
 
 def test_since_boundary_is_inclusive() -> None:
     """A line whose ts exactly equals the since threshold is kept (inclusive boundary)."""
     threshold = _dt("2026-06-13T10:00:03Z")
-    lines = ['{"ts":"2026-06-13T10:00:03Z","svc":"api","msg":"at-boundary"}']
-    out = _process(_opts(services=("api",)), lines, since_dt=threshold)
+    lines = ['{"env":"alpha","ts":"2026-06-13T10:00:03Z","svc":"api","msg":"at-boundary"}']
+    out = _process(_opts(patterns=("alpha/api",)), lines, since_dt=threshold)
     assert out == ["at-boundary"]
 
 
 def test_until_drops_lines_after_threshold() -> None:
     lines = [
-        '{"ts":"2026-06-13T09:59:58Z","svc":"api","msg":"old"}',
-        '{"ts":"2026-06-13T10:00:10Z","svc":"api","msg":"future"}',
+        '{"env":"alpha","ts":"2026-06-13T09:59:58Z","svc":"api","msg":"old"}',
+        '{"env":"alpha","ts":"2026-06-13T10:00:10Z","svc":"api","msg":"future"}',
     ]
     until = _dt("2026-06-13T10:00:00Z")
-    out = _process(_opts(services=("api",)), lines, until_dt=until)
+    out = _process(_opts(patterns=("alpha/api",)), lines, until_dt=until)
     assert out == ["old"]
 
 
 def test_until_boundary_is_inclusive() -> None:
     """A line whose ts exactly equals the until threshold is kept (inclusive boundary)."""
     threshold = _dt("2026-06-13T10:00:00Z")
-    lines = ['{"ts":"2026-06-13T10:00:00Z","svc":"api","msg":"at-boundary"}']
-    out = _process(_opts(services=("api",)), lines, until_dt=threshold)
+    lines = ['{"env":"alpha","ts":"2026-06-13T10:00:00Z","svc":"api","msg":"at-boundary"}']
+    out = _process(_opts(patterns=("alpha/api",)), lines, until_dt=threshold)
     assert out == ["at-boundary"]
 
 
 def test_since_until_combined() -> None:
     lines = [
-        '{"ts":"2026-06-13T09:00:00Z","svc":"api","msg":"before"}',
-        '{"ts":"2026-06-13T10:00:00Z","svc":"api","msg":"in-window"}',
-        '{"ts":"2026-06-13T11:00:00Z","svc":"api","msg":"after"}',
+        '{"env":"alpha","ts":"2026-06-13T09:00:00Z","svc":"api","msg":"before"}',
+        '{"env":"alpha","ts":"2026-06-13T10:00:00Z","svc":"api","msg":"in-window"}',
+        '{"env":"alpha","ts":"2026-06-13T11:00:00Z","svc":"api","msg":"after"}',
     ]
     since = _dt("2026-06-13T09:30:00Z")
     until = _dt("2026-06-13T10:30:00Z")
-    out = _process(_opts(services=("api",)), lines, since_dt=since, until_dt=until)
+    out = _process(_opts(patterns=("alpha/api",)), lines, since_dt=since, until_dt=until)
     assert out == ["in-window"]
 
 
@@ -155,11 +282,11 @@ def test_since_until_combined() -> None:
 
 def test_tsless_lines_kept_when_time_filter_active() -> None:
     lines = [
-        '{"svc":"api","msg":"no-timestamp"}',
-        '{"ts":"2026-06-13T10:00:00Z","svc":"api","msg":"in-window"}',
+        '{"env":"alpha","svc":"api","msg":"no-timestamp"}',
+        '{"env":"alpha","ts":"2026-06-13T10:00:00Z","svc":"api","msg":"in-window"}',
     ]
     since = _dt("2026-06-13T09:00:00Z")
-    proc = LogStreamProcessor(_opts(services=("api",)), since, None)
+    proc = LogStreamProcessor(_opts(patterns=("alpha/api",)), since, None)
     result = list(proc.process_lines(lines))
     result.extend(proc.finalize())
     # Both lines kept; tsless line cannot be time-filtered.
@@ -168,17 +295,17 @@ def test_tsless_lines_kept_when_time_filter_active() -> None:
 
 
 def test_tsless_line_sets_time_filter_warning() -> None:
-    lines = ['{"svc":"api","msg":"no-ts"}']
+    lines = ['{"env":"alpha","svc":"api","msg":"no-ts"}']
     since = _dt("2026-06-13T09:00:00Z")
-    proc = LogStreamProcessor(_opts(services=("api",)), since, None)
+    proc = LogStreamProcessor(_opts(patterns=("alpha/api",)), since, None)
     list(proc.process_lines(lines))
     assert proc.time_filter_warning is True
 
 
 def test_no_tsless_no_warning() -> None:
-    lines = ['{"ts":"2026-06-13T10:00:00Z","svc":"api","msg":"ok"}']
+    lines = ['{"env":"alpha","ts":"2026-06-13T10:00:00Z","svc":"api","msg":"ok"}']
     since = _dt("2026-06-13T09:00:00Z")
-    proc = LogStreamProcessor(_opts(services=("api",)), since, None)
+    proc = LogStreamProcessor(_opts(patterns=("alpha/api",)), since, None)
     list(proc.process_lines(lines))
     assert proc.time_filter_warning is False
 
@@ -187,9 +314,9 @@ def test_no_tsless_no_warning() -> None:
 
 
 def test_tail_limits_output_to_last_n_lines() -> None:
-    lines = [f'{{"svc":"api","msg":"line-{i}"}}' for i in range(10)]
-    out = _process(_opts(tail=3), lines)
-    # Empty services = multi-service scope, so svc prefix is applied.
+    lines = [f'{{"env":"alpha","svc":"api","msg":"line-{i}"}}' for i in range(10)]
+    # Two patterns → multi-scope prefix. Use single pattern to get bare msgs.
+    out = _process(_opts(patterns=("alpha/api",), tail=3), lines)
     assert len(out) == 3
     assert "line-7" in out[0]
     assert "line-8" in out[1]
@@ -197,17 +324,16 @@ def test_tail_limits_output_to_last_n_lines() -> None:
 
 
 def test_tail_all_returns_all_lines() -> None:
-    lines = [f'{{"svc":"api","msg":"line-{i}"}}' for i in range(5)]
-    out = _process(_opts(tail="all"), lines)
+    lines = [f'{{"env":"alpha","svc":"api","msg":"line-{i}"}}' for i in range(5)]
+    out = _process(_opts(patterns=("alpha/api",), tail="all"), lines)
     assert len(out) == 5
 
 
 def test_tail_zero_lines_returns_zero_in_non_follow() -> None:
-    lines = [f'{{"svc":"api","msg":"line-{i}"}}' for i in range(5)]
+    lines = [f'{{"env":"alpha","svc":"api","msg":"line-{i}"}}' for i in range(5)]
     # tail=0 would be invalid via CLI (positive int required), but
     # processor handles deque(maxlen=0) gracefully — no output.
-    # Use a single explicit service to avoid multi-service prefix complications.
-    proc = LogStreamProcessor(_opts(tail=0, follow=False, services=("api",)), None, None)
+    proc = LogStreamProcessor(_opts(tail=0, follow=False, patterns=("alpha/api",)), None, None)
     result = list(proc.process_lines(lines))
     result.extend(proc.finalize())
     assert result == []
@@ -218,8 +344,8 @@ def test_tail_zero_lines_returns_zero_in_non_follow() -> None:
 
 def test_follow_mode_emits_lines_immediately_without_tail() -> None:
     """In follow mode the ring buffer is None and lines are yielded in process_lines."""
-    lines = [f'{{"svc":"api","msg":"line-{i}"}}' for i in range(10)]
-    proc = LogStreamProcessor(_opts(follow=True, tail=3, services=("api",)), None, None)
+    lines = [f'{{"env":"alpha","svc":"api","msg":"line-{i}"}}' for i in range(10)]
+    proc = LogStreamProcessor(_opts(follow=True, tail=3, patterns=("alpha/api",)), None, None)
     from_process = list(proc.process_lines(lines))
     from_finalize = list(proc.finalize())
     # All 10 lines come out of process_lines; finalize is a no-op.
@@ -231,15 +357,15 @@ def test_follow_mode_emits_lines_immediately_without_tail() -> None:
 
 
 def test_timestamps_flag_prepends_ts() -> None:
-    lines = ['{"ts":"2026-06-13T10:00:01Z","svc":"api","msg":"hi"}']
-    out = _process(_opts(timestamps=True), lines)
+    lines = ['{"env":"alpha","ts":"2026-06-13T10:00:01Z","svc":"api","msg":"hi"}']
+    out = _process(_opts(patterns=("alpha/api",), timestamps=True), lines)
     assert out[0].startswith("2026-06-13T10:00:01Z")
     assert "hi" in out[0]
 
 
 def test_timestamps_with_tsless_line_sets_warning() -> None:
-    lines = ['{"svc":"api","msg":"no-ts"}']
-    proc = LogStreamProcessor(_opts(timestamps=True), None, None)
+    lines = ['{"env":"alpha","svc":"api","msg":"no-ts"}']
+    proc = LogStreamProcessor(_opts(patterns=("alpha/api",), timestamps=True), None, None)
     result = list(proc.process_lines(lines))
     result.extend(proc.finalize())
     # Message still rendered even without ts prefix.
@@ -248,8 +374,8 @@ def test_timestamps_with_tsless_line_sets_warning() -> None:
 
 
 def test_timestamps_flag_false_no_warning() -> None:
-    lines = ['{"svc":"api","msg":"no-ts"}']
-    proc = LogStreamProcessor(_opts(timestamps=False), None, None)
+    lines = ['{"env":"alpha","svc":"api","msg":"no-ts"}']
+    proc = LogStreamProcessor(_opts(patterns=("alpha/api",), timestamps=False), None, None)
     list(proc.process_lines(lines))
     assert proc.timestamps_warning is False
 
@@ -257,28 +383,43 @@ def test_timestamps_flag_false_no_warning() -> None:
 # ── malformed / non-JSON lines (lenient handling) ─────────────────────────────
 
 
-def test_malformed_json_treated_as_plain_msg() -> None:
+def test_malformed_json_not_dropped_by_empty_pattern_list() -> None:
+    """With empty patterns (no filter active), non-JSON line is kept as plain msg."""
     lines = ["not-json at all"]
-    out = _process(_opts(services=()), lines)
+    out = _process(_opts(patterns=()), lines)
     assert out == ["not-json at all"]
 
 
-def test_partial_json_no_svc_kept_when_no_service_filter() -> None:
+def test_malformed_json_dropped_when_filter_active() -> None:
+    """With a filter active, non-JSON line has no env/svc and is dropped."""
+    lines = ["not-json at all"]
+    out = _process(_opts(patterns=("alpha/api",)), lines)
+    assert out == []
+
+
+def test_partial_json_no_env_no_svc_kept_when_no_pattern_filter() -> None:
     lines = ['{"msg":"partial"}']
-    out = _process(_opts(services=()), lines)
+    out = _process(_opts(patterns=()), lines)
     assert "partial" in out[0]
 
 
-def test_partial_json_no_svc_dropped_by_service_filter() -> None:
-    """A line without a `svc` field is dropped when a service filter is active."""
-    lines = ['{"msg":"no-svc"}']
-    out = _process(_opts(services=("api",)), lines)
+def test_partial_json_no_env_dropped_when_filter_active() -> None:
+    """A line without an `env` field is dropped when a pattern filter is active."""
+    lines = ['{"svc":"api","msg":"no-env"}']
+    out = _process(_opts(patterns=("alpha/api",)), lines)
+    assert out == []
+
+
+def test_partial_json_no_svc_dropped_when_filter_active() -> None:
+    """A line without a `svc` field is dropped when a pattern filter is active."""
+    lines = ['{"env":"alpha","msg":"no-svc"}']
+    out = _process(_opts(patterns=("alpha/api",)), lines)
     assert out == []
 
 
 def test_empty_line_does_not_crash() -> None:
     lines = [""]
-    out = _process(_opts(services=()), lines)
+    out = _process(_opts(patterns=()), lines)
     # Empty line produces an empty-ish output or is lenient — no crash.
     assert isinstance(out, list)
 
@@ -286,17 +427,61 @@ def test_empty_line_does_not_crash() -> None:
 # ── multi-service prefix rule ─────────────────────────────────────────────────
 
 
-def test_svc_prefix_only_when_multiple_services_in_options() -> None:
-    """Single explicit service → no prefix. All/multi explicit → prefix."""
-    lines = ['{"ts":"2026-06-13T10:00:01Z","svc":"api","msg":"msg"}']
-    # Single explicit service → no svc prefix.
-    out_single = _process(_opts(services=("api",)), lines)
+def test_svc_prefix_only_when_multiple_patterns_in_options() -> None:
+    """Single literal pattern → no prefix. Multi patterns → <env>/<svc> | prefix."""
+    lines = ['{"env":"alpha","ts":"2026-06-13T10:00:01Z","svc":"api","msg":"msg"}']
+    # Single explicit pattern → no prefix.
+    out_single = _process(_opts(patterns=("alpha/api",)), lines)
     assert out_single == ["msg"]
 
-    # Empty (all) services request → multi-service scope → prefix applied.
-    out_all = _process(_opts(services=()), lines)
-    assert "api |" in out_all[0]
+    # Two patterns → multi-service scope → prefix applied.
+    out_multi = _process(_opts(patterns=("alpha/api", "alpha/db")), lines)
+    assert "alpha/api |" in out_multi[0]
 
-    # Two explicit services → multi-service scope → prefix applied.
-    out_multi = _process(_opts(services=("api", "db")), lines)
-    assert "api |" in out_multi[0]
+
+def test_empty_patterns_no_filter_multi_scope_prefix() -> None:
+    """Empty patterns = no filter, but multi-scope (not a single literal) → prefix applied."""
+    lines = ['{"env":"alpha","ts":"2026-06-13T10:00:01Z","svc":"api","msg":"msg"}']
+    out = _process(_opts(patterns=()), lines)
+    # zero patterns → not a single literal → multi-scope → prefix.
+    assert "alpha/api |" in out[0]
+
+
+# ── prefix matrix: locked to the correct heuristic ───────────────────────────
+
+
+def test_prefix_matrix_single_literal_no_prefix() -> None:
+    """Single literal `<env>/<svc>` → no prefix (the only suppression case)."""
+    lines = ['{"env":"alpha","svc":"api","msg":"msg"}']
+    out = _process(_opts(patterns=("alpha/api",)), lines)
+    assert out == ["msg"]
+
+
+def test_prefix_matrix_bare_env_gets_prefix() -> None:
+    """Bare `<env>` (no slash) expands to all services → multi-scope → prefix."""
+    lines = ['{"env":"alpha","svc":"api","msg":"msg"}']
+    out = _process(_opts(patterns=("alpha",)), lines)
+    assert "alpha/api |" in out[0]
+    assert "msg" in out[0]
+
+
+def test_prefix_matrix_single_wildcard_gets_prefix() -> None:
+    """Single wildcard pattern → may match multiple services → multi-scope → prefix."""
+    lines = [
+        '{"env":"alpha","svc":"worker-a","msg":"wa"}',
+        '{"env":"alpha","svc":"worker-b","msg":"wb"}',
+    ]
+    out = _process(_opts(patterns=("alpha/worker-*",)), lines)
+    assert any("alpha/worker-a |" in line for line in out)
+    assert any("alpha/worker-b |" in line for line in out)
+
+
+def test_prefix_matrix_two_patterns_get_prefix() -> None:
+    """Two patterns → multi-scope → prefix on every matching line."""
+    lines = [
+        '{"env":"alpha","svc":"api","msg":"alpha-msg"}',
+        '{"env":"beta","svc":"api","msg":"beta-msg"}',
+    ]
+    out = _process(_opts(patterns=("alpha/api", "beta/api")), lines)
+    assert any("alpha/api |" in line for line in out)
+    assert any("beta/api |" in line for line in out)
