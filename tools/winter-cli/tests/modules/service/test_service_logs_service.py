@@ -255,9 +255,7 @@ def test_stream_returns_130_on_keyboard_interrupt_at_popen() -> None:
 
 def test_stream_emits_timestamps_warning_when_ts_missing_and_timestamps_requested() -> None:
     """`-t` requested but lines carry no ts field → warning on stderr."""
-    runner = FakeSubprocessRunner(
-        popen_responses={CMD_KEY: (['{"env":"alpha","svc":"api","msg":"up"}'], 0)}
-    )
+    runner = FakeSubprocessRunner(popen_responses={CMD_KEY: (['{"env":"alpha","svc":"api","msg":"up"}'], 0)})
     click = ClickRecorder()
     _svc(runner, click).stream(_opts(timestamps=True))
 
@@ -267,9 +265,7 @@ def test_stream_emits_timestamps_warning_when_ts_missing_and_timestamps_requeste
 
 def test_stream_emits_time_filter_warning_when_ts_missing_and_since_set() -> None:
     """--since set but some lines carry no ts → partial filter warning on stderr."""
-    runner = FakeSubprocessRunner(
-        popen_responses={CMD_KEY: (['{"env":"alpha","svc":"api","msg":"up"}'], 0)}
-    )
+    runner = FakeSubprocessRunner(popen_responses={CMD_KEY: (['{"env":"alpha","svc":"api","msg":"up"}'], 0)})
     click = ClickRecorder()
     _svc(runner, click).stream(
         _opts(since_rfc3339="2026-06-13T10:00:00Z"),
@@ -284,3 +280,22 @@ def test_stream_popen_invoked_with_merge_stderr_false() -> None:
     runner = FakeSubprocessRunner(popen_responses={CMD_KEY: ([], 0)})
     _svc(runner).stream(_opts())
     assert runner.popen_merge_stderr == [False]
+
+
+# ── workspace scope forwarding ────────────────────────────────────────────────
+
+
+def test_stream_workspace_pattern_forwarded_verbatim_on_argv() -> None:
+    """'workspace' pattern is forwarded verbatim as a positional argv token."""
+    key = f"{ENTRYPOINT} logs workspace"
+    runner = FakeSubprocessRunner(popen_responses={key: ([], 0)})
+    _svc(runner).stream(_opts(patterns=("workspace",)))
+    assert runner.popen_calls[0][0] == [str(ENTRYPOINT), "logs", "workspace"]
+
+
+def test_stream_workspace_service_pattern_forwarded_verbatim_on_argv() -> None:
+    """'workspace/<svc>' pattern is forwarded verbatim as a positional argv token."""
+    key = f"{ENTRYPOINT} logs workspace/nginx"
+    runner = FakeSubprocessRunner(popen_responses={key: ([], 0)})
+    _svc(runner).stream(_opts(patterns=("workspace/nginx",)))
+    assert runner.popen_calls[0][0] == [str(ENTRYPOINT), "logs", "workspace/nginx"]

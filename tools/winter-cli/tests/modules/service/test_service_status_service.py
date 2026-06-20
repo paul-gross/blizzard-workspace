@@ -288,6 +288,24 @@ def test_orchestrator_argv_with_patterns() -> None:
     assert runner.popen_calls[0][0] == [str(ENTRYPOINT), "status", "alpha/api"]
 
 
+def test_orchestrator_argv_workspace_pattern_forwarded_verbatim() -> None:
+    """'workspace' pattern is forwarded verbatim as a positional argv token."""
+    doc = _make_doc([_alpha_env([_api_svc()])])
+    key = f"{ENTRYPOINT} status workspace"
+    runner = FakeSubprocessRunner(popen_responses={key: ([doc], 0)})
+    _svc(runner).report(_opts(patterns=("workspace",)))
+    assert runner.popen_calls[0][0] == [str(ENTRYPOINT), "status", "workspace"]
+
+
+def test_orchestrator_argv_workspace_service_pattern_forwarded_verbatim() -> None:
+    """'workspace/<svc>' pattern is forwarded verbatim as a positional argv token."""
+    doc = _make_doc([_alpha_env([_api_svc()])])
+    key = f"{ENTRYPOINT} status workspace/nginx"
+    runner = FakeSubprocessRunner(popen_responses={key: ([doc], 0)})
+    _svc(runner).report(_opts(patterns=("workspace/nginx",)))
+    assert runner.popen_calls[0][0] == [str(ENTRYPOINT), "status", "workspace/nginx"]
+
+
 # ── malformed / non-conformant output ─────────────────────────────────────────
 
 

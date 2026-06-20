@@ -107,7 +107,11 @@ def _handler(runner: FakeSubprocessRunner, click: Any = None) -> ServiceHandler:
 def test_handler_up_invokes_entrypoint_with_action_and_env() -> None:
     runner = FakeSubprocessRunner()
     _handler(runner).run(ServiceParams(action="up", env="alpha"))
-    assert runner.call_calls == [([ENTRYPOINT, "up", "alpha"], WS)]
+    # workspace-ensure dispatch precedes the env dispatch.
+    assert runner.call_calls == [
+        ([ENTRYPOINT, "up", "workspace"], WS),
+        ([ENTRYPOINT, "up", "alpha"], WS),
+    ]
 
 
 def test_handler_down_invokes_correct_argv() -> None:
@@ -119,10 +123,11 @@ def test_handler_down_invokes_correct_argv() -> None:
 def test_handler_up_does_not_set_selection_env_vars() -> None:
     runner = FakeSubprocessRunner()
     _handler(runner).run(ServiceParams(action="up", env="alpha"))
-    assert len(runner.call_envs) == 1
-    env = runner.call_envs[0]
-    assert "WINTER_SERVICE_NAME" not in env
-    assert "WINTER_SERVICE_PATTERNS" not in env
+    # Two dispatches (workspace-ensure + env); neither sets selection env vars.
+    assert len(runner.call_envs) == 2
+    for env in runner.call_envs:
+        assert "WINTER_SERVICE_NAME" not in env
+        assert "WINTER_SERVICE_PATTERNS" not in env
 
 
 def test_handler_down_does_not_set_selection_env_vars() -> None:
@@ -146,6 +151,20 @@ def test_handler_restart_with_patterns_forwards_them_on_argv() -> None:
     assert env["WINTER_WORKSPACE_DIR"] == str(WS)
     assert env["WINTER_EXT_DIR"] == str(WS / "winter-service-tmux")
     assert env["WINTER_EXT_PREFIX"] == "winter-service-tmux"
+
+
+def test_handler_restart_workspace_pattern_forwarded_verbatim() -> None:
+    """restart workspace → argv is [entrypoint, 'restart', 'workspace'] verbatim."""
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="restart", patterns=("workspace",)))
+    assert runner.call_calls == [([ENTRYPOINT, "restart", "workspace"], WS)]
+
+
+def test_handler_restart_workspace_service_pattern_forwarded_verbatim() -> None:
+    """restart workspace/<svc> → argv forwards the compound pattern unchanged."""
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="restart", patterns=("workspace/nginx",)))
+    assert runner.call_calls == [([ENTRYPOINT, "restart", "workspace/nginx"], WS)]
 
 
 def test_handler_status_with_patterns_forwards_them_on_argv() -> None:
@@ -266,3 +285,65 @@ def test_handler_run_logs_no_patterns_sends_bare_logs_action() -> None:
     assert cmd == [ENTRYPOINT, "logs"]
     env = runner.popen_envs[0]
     assert "WINTER_LOG_SERVICES" not in env
+
+
+# ── workspace-scope lifecycle ─────────────────────────────────────────────────
+
+
+def test_handler_up_workspace_target_single_dispatch() -> None:
+    """up workspace → exactly one dispatch: up workspace. No recursion."""
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="up", env="workspace"))
+    assert runner.call_calls == [([ENTRYPOINT, "up", "workspace"], WS)]
+
+
+def test_handler_down_workspace_target_single_dispatch() -> None:
+    """down workspace → exactly one dispatch: down workspace."""
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="down", env="workspace"))
+    assert runner.call_calls == [([ENTRYPOINT, "down", "workspace"], WS)]
+
+
+def test_handler_up_env_ensures_workspace_first() -> None:
+    """up alpha → dispatch workspace first, then alpha (workspace-ensure ordering)."""
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="up", env="alpha"))
+    assert runner.call_calls == [
+        ([ENTRYPOINT, "up", "workspace"], WS),
+        ([ENTRYPOINT, "up", "alpha"], WS),
+    ]
+
+
+def test_handler_down_env_leaves_workspace_running() -> None:
+    """down alpha → only down alpha; no down workspace call."""
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="down", env="alpha"))
+    assert runner.call_calls == [([ENTRYPOINT, "down", "alpha"], WS)]
+
+
+def test_handler_up_ensure_failure_is_best_effort() -> None:
+    """up workspace failure does NOT skip up alpha — both are dispatched (best-effort).
+
+    The overall exit code is the workspace failure code (first non-zero seen).
+    """
+    runner = FakeSubprocessRunner(call_responses={f"{ENTRYPOINT} up workspace": 4})
+    with pytest.raises(SystemExit) as excinfo:
+        _handler(runner).run(ServiceParams(action="up", env="alpha"))
+    # Both calls were made — workspace first, then env (best-effort: never skip).
+    assert runner.call_calls == [
+        ([ENTRYPOINT, "up", "workspace"], WS),
+        ([ENTRYPOINT, "up", "alpha"], WS),
+    ]
+    assert excinfo.value.code == 4
+
+
+def test_handler_up_env_failure_exits_with_env_code() -> None:
+    """If workspace up succeeds (0) but env up fails, exit with the env failure code."""
+    runner = FakeSubprocessRunner(call_responses={f"{ENTRYPOINT} up alpha": 5})
+    with pytest.raises(SystemExit) as excinfo:
+        _handler(runner).run(ServiceParams(action="up", env="alpha"))
+    assert runner.call_calls == [
+        ([ENTRYPOINT, "up", "workspace"], WS),
+        ([ENTRYPOINT, "up", "alpha"], WS),
+    ]
+    assert excinfo.value.code == 5

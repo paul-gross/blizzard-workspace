@@ -3,20 +3,26 @@
 For the hub and the rest of the command surface, see [../index.md](../index.md).
 
 ```bash
-winter service up alpha                               # start env alpha's services
-winter service down alpha                             # stop them
+winter service up alpha                               # start env alpha's services (also ensures workspace scope is up first)
+winter service up workspace                           # bring up only the workspace scope
+winter service down alpha                             # stop env alpha's services (leaves workspace scope running)
+winter service down workspace                         # tear down the workspace scope explicitly
 winter service status                                 # report all services in all envs (patterns optional)
 winter service status alpha                           # all services in alpha (expands to alpha/*)
 winter service status alpha/api                       # one specific service
 winter service status 'alpha/worker-*'                # services matching a glob within alpha
 winter service status '*/backend'                     # backend service across every env
+winter service status workspace                       # status of the workspace scope
+winter service status workspace/api                   # one service within the workspace scope
 winter service status --json                          # emit the structured status document as JSON
 winter service restart alpha/api beta/worker-main     # bounce specific services (≥1 pattern required)
 winter service restart 'alpha/worker-*'               # bounce all matched workers in alpha
+winter service restart workspace/api                  # bounce a workspace-scope service
 winter service logs alpha                             # stream all services' logs in alpha
 winter service logs alpha/api                         # logs for one service (no prefix)
 winter service logs 'alpha/worker-*'                  # aggregate logs across matched services
 winter service logs '*/backend'                       # backend logs across all envs
+winter service logs workspace                         # logs for the workspace scope
 winter service logs alpha -f                          # stream until Ctrl-C (exit 130)
 winter service logs alpha -n 50                       # last 50 lines (default: 200)
 winter service logs alpha --since=5m                  # since 5 minutes ago (normalized to RFC3339)
@@ -26,7 +32,30 @@ winter service logs alpha -t                          # prefix each line with it
 
 `winter service` owns a stable `up`/`down`/`status`/`restart`/`logs` interface and dispatches each invocation to whichever orchestrator the workspace registers. Consumers depend on `winter service …` and never on the orchestrator's implementation, so a workspace can swap tmux for containers or a supervising daemon without re-teaching agents, docs, or habits.
 
-`status`, `restart`, and `logs` use **segment-aware glob PATTERNS** over `<env>/<service>` — the same vocabulary `winter ws` uses for `<env>/<repo>` (see [ws/patterns.md](./ws/patterns.md)). Within each segment, `*`, `?`, and `[...]` match as usual; `*` does not cross `/`. A bare `<env>` (no slash) expands to `<env>/*`. Multiple patterns can be passed in one invocation. Cross-environment selection is supported: `'*/backend'` selects the `backend` service across every env. `up` and `down` always operate on a whole env (no pattern syntax). For `restart` and `logs`, at least one pattern is required (action commands require an explicit target — no implicit "everything", mirroring `winter ws merge` requiring a source ref). For `status`, omitting all patterns selects every service in every env (read-shaped, defaults to all like `winter ws status`).
+`status`, `restart`, and `logs` use **segment-aware glob PATTERNS** over `<env>/<service>` — the same vocabulary `winter ws` uses for `<env>/<repo>` (see [ws/patterns.md](./ws/patterns.md)). Within each segment, `*`, `?`, and `[...]` match as usual; `*` does not cross `/`. A bare `<env>` (no slash) expands to `<env>/*`. Multiple patterns can be passed in one invocation. Cross-environment selection is supported: `'*/backend'` selects the `backend` service across every env. `up` and `down` always operate on a whole env (no pattern syntax) — or on `workspace` (see below). For `restart` and `logs`, at least one pattern is required (action commands require an explicit target — no implicit "everything", mirroring `winter ws merge` requiring a source ref). For `status`, omitting all patterns selects every service in every env (read-shaped, defaults to all like `winter ws status`).
+
+## Workspace scope
+
+`workspace` is a **reserved, universal service target** accepted by all five actions: `up`, `down`, `status`, `restart`, `logs`. The orchestrator extension owns what the `workspace` scope means (services that should run once across the whole workspace, shared daemons, etc.).
+
+`workspace` slots into each action's existing grammar in the same place an env name does, so it follows that action's arity — there is no new syntax:
+
+- For `up`/`down` (whole-env arity, no patterns) `workspace` is the literal target argument: `up workspace`, `down workspace`. There is **no** `up workspace/<service>` form — `up`/`down` take no pattern.
+- For `status`/`restart`/`logs` (PATTERN arity) `workspace` is an env segment in the normal `<env>/<service>` grammar: bare `workspace` expands to `workspace/*` (per the bare-`<env>` rule above), and `workspace/<service>` selects one service within the scope.
+
+### Lifecycle policy
+
+`up <env>` (any named env) **ensures the workspace scope is up first**, then brings up the env. Both dispatches are attempted regardless of whether the workspace-up step succeeds — best-effort: each failure is surfaced as feedback and the command exits non-zero if either step failed, but the env-up is never skipped. No reference counting is involved: the workspace scope is treated as infrastructure that should be running.
+
+`down <env>` **leaves the workspace scope running**. Tearing down a feature environment does not affect services that are shared across the workspace.
+
+`down workspace` is the **only path that tears down the workspace scope** — it must be done explicitly.
+
+`up workspace` brings up only the workspace scope (no recursion into envs).
+
+For `status`/`restart`/`logs`, `workspace` patterns are forwarded verbatim to the orchestrator like any other `<env>/<service>` selection.
+
+`workspace` is also a **reserved feature-environment name**: `winter ws init workspace` is rejected with an error. See [ws/init.md](./ws/init.md).
 
 Registering an orchestrator uses the capability registry: `capabilities.service = "<name>"` in the `[capabilities]` table of `.winter/config.toml` names the extension, and `provides.service = "<path>"` in that extension's `[provides]` table in `winter-ext.toml` declares the entrypoint. When exactly one extension provides the slot, the `capabilities.service` binding is optional (implicit sole-provider). Two providers with no explicit binding is an ambiguity error. The legacy keys `service_orchestrator` (config) and `orchestrate_services` (manifest) are still accepted as **deprecated** aliases — config-load folds `service_orchestrator` into `capabilities.service`; `capability_entrypoint()` falls back to `orchestrate_services` when `provides.service` is absent. See [setup.md#capability-registry](../setup.md#capability-registry) for the full resolution model and [capabilities.md](./capabilities.md) to introspect the current binding.
 
@@ -89,7 +118,7 @@ winter invokes the entrypoint differently depending on the action:
 <entrypoint> <action> [<pattern>...]          # status, restart, logs
 ```
 
-`<action>` is one of `up`, `down`, `status`, `restart`, `logs`. For `up` and `down`, `<env>` is the feature-env name (`alpha`, `beta`, …). For `status`, `restart`, and `logs`, zero-or-more `<env>/<service>` glob patterns are passed as positional argv — **patterns are forwarded verbatim** from the user's command line; winter never expands them before dispatch. The orchestrator owns the catalog and is responsible for expanding them.
+`<action>` is one of `up`, `down`, `status`, `restart`, `logs`. For `up` and `down`, `<env>` is the feature-env name (`alpha`, `beta`, …) or the reserved scope `workspace`. For `status`, `restart`, and `logs`, zero-or-more `<env>/<service>` glob patterns are passed as positional argv (including `workspace` and `workspace/<service>` patterns) — **patterns are forwarded verbatim** from the user's command line; winter never expands them before dispatch. The orchestrator owns the catalog and is responsible for expanding them.
 
 **Patterns are raw user tokens on argv.** There is no `--` guard between the action and the patterns, so an orchestrator must tolerate a pattern that begins with `-`. (In practice, valid `<env>/<service>` patterns never start with `-`, but a robust implementation should not assume this.) Note: at the winter CLI boundary, Click rejects a bare `-`-leading token as an unknown option (exit 2); pass it after `--` (e.g. `winter service restart -- -weird`) so Click treats it as a positional. Winter then forwards the token verbatim to the orchestrator — without a `--` guard — so the orchestrator still receives the raw token and must tolerate it.
 

@@ -5,6 +5,7 @@ import sys
 
 import click
 
+from winter_cli.modules.service.scope import WORKSPACE_SCOPE
 from winter_cli.modules.workspace.init_service import InitService
 from winter_cli.modules.workspace.reporter_factory import ReporterFactory
 
@@ -30,6 +31,11 @@ class InitHandler:
     def run(self, params: InitParams) -> None:
         if params.all and params.target:
             raise click.ClickException("--all cannot be combined with a target name")
+
+        if params.target == WORKSPACE_SCOPE:
+            raise click.ClickException(
+                f"'{WORKSPACE_SCOPE}' is a reserved service scope and cannot be used as a feature environment name"
+            )
 
         reporter = self._reporter_factory.get_init_reporter(params.output_json)
 

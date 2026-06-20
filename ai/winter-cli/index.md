@@ -24,7 +24,7 @@ The surface is two command groups plus seven standalone commands:
 - **`winter repo …`** — add, remove, and list the repositories declared in the config.
 - **`winter ext …`** — extension contract management: `verify` checks that an extension conforms to the bundled capability spec; `new` scaffolds a new extension skeleton that passes verification out of the box (see [usage/ext.md](./usage/ext.md)).
 - **`winter dashboard`** — interactive TUI for workspace status, with remappable keybindings.
-- **`winter service <action> [<env>/<service>…]`** — a stable `up`/`down`/`status`/`restart`/`logs` interface that dispatches to whichever orchestrator extension the workspace registers. `up`/`down` take a single `<env>`; `status`/`restart`/`logs` take `<env>/<service>` PATTERNS (see [usage/service.md](./usage/service.md)).
+- **`winter service <action> [<env>/<service>…]`** — a stable `up`/`down`/`status`/`restart`/`logs` interface that dispatches to whichever orchestrator extension the workspace registers. `up`/`down` take a single `<env>`; `status`/`restart`/`logs` take `<env>/<service>` PATTERNS. All five also accept the reserved `workspace` scope (see [usage/service.md](./usage/service.md)).
 - **`winter doctor`** — preflight health checks.
 - **`winter lint`** — convention checks.
 - **`winter graph`** — the module dependency graph.

@@ -9,6 +9,7 @@ from typing import Any
 import click
 
 from winter_cli.core.cli_output_service import Cell, ICliOutputService
+from winter_cli.modules.service.scope import WORKSPACE_SCOPE
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
 from winter_cli.modules.workspace.env_index import resolve_env_index
@@ -146,7 +147,8 @@ class EnvWorktreesParams:
 # Sentinel label for the implicit workspace repo (the workspace root). It has no
 # `<env>/<repo>` location, so it renders under a stable, recognizable name in both
 # the `ws worktrees` table and `--json` output (and therefore the neovim picker).
-_WORKSPACE_LABEL = "<workspace>"
+# Derived from WORKSPACE_SCOPE so the canonical spelling is never duplicated.
+_WORKSPACE_LABEL = f"<{WORKSPACE_SCOPE}>"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -514,7 +516,6 @@ class WorkspaceHandler:
                 click.echo(suggested)
             else:
                 click.echo(f"{suggested} (suggested; may shift on create)")
-
 
     def worktrees(self, params: EnvWorktreesParams) -> None:
         project_repos = self._repo_factory.get_project_repos()
