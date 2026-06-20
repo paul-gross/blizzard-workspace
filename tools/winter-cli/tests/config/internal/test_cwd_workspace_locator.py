@@ -1,53 +1,54 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
 
 import pytest
 
-from winter_cli.config.internal import cwd_workspace_locator
 from winter_cli.config.internal.cwd_workspace_locator import CwdWorkspaceLocator
 from winter_cli.core.config_file import ConfigError
 
 
-def test_find_workspace_root_returns_directory_containing_winter_dir(
+def _make_root(path: Path) -> Path:
+    """Create a workspace root: a directory holding `.winter/config.toml`."""
+    config = path / ".winter" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("")
+    return path
+
+
+def test_find_workspace_root_returns_directory_containing_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    workspace_root = tmp_path / "workspace"
+    workspace_root = _make_root(tmp_path / "workspace")
     nested = workspace_root / "project" / "subdir"
+    nested.mkdir(parents=True)
+    monkeypatch.chdir(nested)
 
-    FakePath = MagicMock()
-    FakePath.cwd.return_value = nested
-
-    # Build a fake path hierarchy: nested -> project -> workspace_root (has .winter)
-    fake_subdir = MagicMock()
-    fake_subdir.__truediv__ = lambda self, name: MagicMock(is_dir=lambda: False)
-    fake_subdir.parents = [
-        MagicMock(__truediv__=lambda self, name: MagicMock(is_dir=lambda: False)),
-        MagicMock(__truediv__=lambda self, name: MagicMock(is_dir=lambda: True)),
-    ]
-    FakePath.cwd.return_value = fake_subdir
-    monkeypatch.setattr(cwd_workspace_locator, "Path", FakePath)
-
-    # The locator should walk up until it finds .winter dir
     result = CwdWorkspaceLocator().find_workspace_root()
 
-    assert result == fake_subdir.parents[1]
+    assert result == workspace_root
 
 
-def test_find_workspace_root_raises_when_no_winter_dir_found(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    FakePath = MagicMock()
-    fake_cwd = MagicMock()
-    fake_cwd.__truediv__ = lambda self, name: MagicMock(is_dir=lambda: False)
-    # No parents find .winter
-    fake_cwd.parents = [
-        MagicMock(__truediv__=lambda self, name: MagicMock(is_dir=lambda: False)),
-        MagicMock(__truediv__=lambda self, name: MagicMock(is_dir=lambda: False)),
-    ]
-    FakePath.cwd.return_value = fake_cwd
-    monkeypatch.setattr(cwd_workspace_locator, "Path", FakePath)
+def test_find_workspace_root_ignores_env_local_winter_logs_dir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # The env's per-service logs land in `<env>/.winter/logs/`, creating a bare
+    # `.winter/` with no config.toml. The locator must walk past it to the real root.
+    workspace_root = _make_root(tmp_path / "workspace")
+    env_dir = workspace_root / "alpha"
+    (env_dir / ".winter" / "logs").mkdir(parents=True)
+    repo_subdir = env_dir / "winter" / "tools"
+    repo_subdir.mkdir(parents=True)
+    monkeypatch.chdir(repo_subdir)
+
+    result = CwdWorkspaceLocator().find_workspace_root()
+
+    assert result == workspace_root
+
+
+def test_find_workspace_root_raises_when_no_config_found(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    # A bare `.winter/` directory (logs only, no config.toml) is not a root.
+    bare = tmp_path / "alpha"
+    (bare / ".winter" / "logs").mkdir(parents=True)
+    monkeypatch.chdir(bare)
 
     with pytest.raises(ConfigError, match="Could not find workspace root"):
         CwdWorkspaceLocator().find_workspace_root()

@@ -36,8 +36,11 @@ This workspace manages **multiple project repositories** as peers. All repos are
     ├── <repo-2>/               # Worktree of project repo (feature branch)
     ├── <repo-n>/               # Worktree of project repo (feature branch)
     ├── up / down / status      # Symlinks to the extension scripts above (running services from the env dir)
-    └── .winter.env             # Per-environment shell env file (WINTER_ENV, WINTER_PORT_BASE, project-specific vars)
+    ├── .winter.env             # Per-environment shell env file (WINTER_ENV, WINTER_PORT_BASE, project-specific vars)
+    └── .winter/                # Per-env service logs/state (e.g. logs/<svc>.log) — NOT a workspace root
 ```
+
+> **Workspace root identity.** The workspace root is the single directory holding **`.winter/config.toml`**. A feature env's `<env>/.winter/` (created by winter-service-tmux to hold `logs/<svc>.log` and per-env state) has no `config.toml` and is never a root — winter-cli's locator walks past it to the real root.
 
 ## Source Checkouts
 
