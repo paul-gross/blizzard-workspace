@@ -27,6 +27,7 @@ class ISpecLoader(Protocol):
         """Load and parse the spec for *slot* at *version*."""
         ...
 
+
 # Bundled specs directory — resolved relative to this file so the path works
 # from both source (editable install) and an installed wheel.
 _SPECS_DIR = Path(__file__).parent / "specs"

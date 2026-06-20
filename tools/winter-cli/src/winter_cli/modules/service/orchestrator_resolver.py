@@ -249,7 +249,7 @@ class ServiceOrchestratorResolver:
     def _verify_error_entrypoint_missing(value: str, entrypoint: Path, entrypoint_rel: str, manifest_path: Path) -> str:
         return (
             f"extension {value!r} entrypoint not found at {entrypoint} "
-            f'(declared as {entrypoint_rel!r} in {manifest_path})'
+            f"(declared as {entrypoint_rel!r} in {manifest_path})"
         )
 
     @staticmethod

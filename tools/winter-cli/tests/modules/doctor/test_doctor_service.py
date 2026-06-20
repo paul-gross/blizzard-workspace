@@ -188,9 +188,7 @@ def test_port_probe_results_land_in_summary() -> None:
 
 def test_port_probe_fail_increments_exit_code() -> None:
     """A port probe failure propagates to the summary exit code."""
-    port_probe = _FakePortProbe(
-        [ProbeResult(source="port", name="port config invariant", status=ProbeStatus.fail)]
-    )
+    port_probe = _FakePortProbe([ProbeResult(source="port", name="port config invariant", status=ProbeStatus.fail)])
     svc = _doctor(_FakeCore([]), _FakeWorkspace([]), _FakeExtensions([]), _FakeRepoFactory(), port_probe)
     reporter = _RecordingReporter()
 

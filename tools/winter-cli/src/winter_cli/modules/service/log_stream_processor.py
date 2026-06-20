@@ -44,11 +44,15 @@ class LogStreamProcessor:
         self._options = options
         # Accept pre-parsed datetimes when supplied; otherwise parse from the
         # options fields directly (avoids redundant parse at the call site).
-        self._since_dt = since_dt if since_dt is not None else (
-            parse_rfc3339(options.since_rfc3339) if options.since_rfc3339 else None
+        self._since_dt = (
+            since_dt
+            if since_dt is not None
+            else (parse_rfc3339(options.since_rfc3339) if options.since_rfc3339 else None)
         )
-        self._until_dt = until_dt if until_dt is not None else (
-            parse_rfc3339(options.until_rfc3339) if options.until_rfc3339 else None
+        self._until_dt = (
+            until_dt
+            if until_dt is not None
+            else (parse_rfc3339(options.until_rfc3339) if options.until_rfc3339 else None)
         )
         self._multi_service = not is_single_literal_pattern(options.patterns)
 

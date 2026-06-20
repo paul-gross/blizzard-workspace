@@ -43,7 +43,7 @@ def _contract_section(doc: str) -> str:
         pytest.fail("service.md has no '## Orchestrator contract' section")
     start = match.start()
     # Find the next ## heading after the contract section.
-    next_heading = re.search(r"^## ", doc[match.end():], re.MULTILINE)
+    next_heading = re.search(r"^## ", doc[match.end() :], re.MULTILINE)
     end = (match.end() + next_heading.start()) if next_heading else len(doc)
     return doc[start:end]
 

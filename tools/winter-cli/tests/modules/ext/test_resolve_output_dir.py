@@ -63,8 +63,7 @@ def _run_ext_new(
     """
     env = {**os.environ, "WINTER_INVOCATION_CWD": str(invocation_cwd)}
     return subprocess.run(
-        [sys.executable, "-m", "winter_cli.cli", "ext", "new", "test-ext",
-         "--capability", "service", *extra_args],
+        [sys.executable, "-m", "winter_cli.cli", "ext", "new", "test-ext", "--capability", "service", *extra_args],
         capture_output=True,
         text=True,
         cwd=str(workspace),
@@ -84,18 +83,13 @@ def test_ext_new_uses_winter_invocation_cwd(tmp_path: Path) -> None:
     invocation_cwd.mkdir()
 
     result = _run_ext_new(workspace, invocation_cwd, [])
-    assert result.returncode == 0, (
-        f"ext new failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"ext new failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}"
 
     # Extension must exist under invocation_cwd, not the workspace (process cwd).
     assert (invocation_cwd / "test-ext" / "winter-ext.toml").exists(), (
-        f"extension not found under invocation cwd {invocation_cwd}; "
-        f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        f"extension not found under invocation cwd {invocation_cwd}; stdout: {result.stdout}\nstderr: {result.stderr}"
     )
-    assert not (workspace / "test-ext").exists(), (
-        "extension was incorrectly created under process cwd (workspace root)"
-    )
+    assert not (workspace / "test-ext").exists(), "extension was incorrectly created under process cwd (workspace root)"
 
 
 def test_ext_new_relative_dir_resolves_against_invocation_cwd(tmp_path: Path) -> None:
@@ -105,16 +99,12 @@ def test_ext_new_relative_dir_resolves_against_invocation_cwd(tmp_path: Path) ->
     invocation_cwd.mkdir()
 
     result = _run_ext_new(workspace, invocation_cwd, ["--dir", "relative/output"])
-    assert result.returncode == 0, (
-        f"ext new failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"ext new failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}"
 
     assert (invocation_cwd / "relative" / "output" / "winter-ext.toml").exists(), (
         "relative --dir was not resolved against invocation cwd"
     )
-    assert not (workspace / "relative").exists(), (
-        "relative --dir was incorrectly resolved against process cwd"
-    )
+    assert not (workspace / "relative").exists(), "relative --dir was incorrectly resolved against process cwd"
 
 
 def test_ext_new_absolute_dir_used_as_is(tmp_path: Path) -> None:
@@ -125,10 +115,6 @@ def test_ext_new_absolute_dir_used_as_is(tmp_path: Path) -> None:
     absolute_out = tmp_path / "absolute_output"
 
     result = _run_ext_new(workspace, invocation_cwd, ["--dir", str(absolute_out)])
-    assert result.returncode == 0, (
-        f"ext new failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}"
-    )
+    assert result.returncode == 0, f"ext new failed (exit {result.returncode}):\n{result.stdout}\n{result.stderr}"
 
-    assert (absolute_out / "winter-ext.toml").exists(), (
-        "absolute --dir was not honoured as-is"
-    )
+    assert (absolute_out / "winter-ext.toml").exists(), "absolute --dir was not honoured as-is"

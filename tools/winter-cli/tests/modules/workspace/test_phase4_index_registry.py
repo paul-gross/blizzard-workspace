@@ -7,6 +7,7 @@ Tests cover:
       alias prints the bare index; unregistered ad-hoc name prints with caveat.
   (d) JSON output shape — "source" field distinguishes registry vs suggested.
 """
+
 from __future__ import annotations
 
 import json
@@ -82,9 +83,7 @@ def _make_index_handler(
 
 
 class TestIndexRegisteredEnv:
-    def test_json_returns_registry_source_for_registered_env(
-        self, capsys: pytest.CaptureFixture[Any]
-    ) -> None:
+    def test_json_returns_registry_source_for_registered_env(self, capsys: pytest.CaptureFixture[Any]) -> None:
         """JSON output has source="registry" when the env is in the registry."""
         registry = _InMemoryRegistry()
         registry.assign("alpha", 1)
@@ -120,9 +119,7 @@ class TestIndexRegisteredEnv:
         assert data["index"] == 15
         assert data["source"] == "registry"
 
-    def test_human_output_prints_bare_index_for_registered_env(
-        self, capsys: pytest.CaptureFixture[Any]
-    ) -> None:
+    def test_human_output_prints_bare_index_for_registered_env(self, capsys: pytest.CaptureFixture[Any]) -> None:
         """Human output for a registered env is just the index (no caveat)."""
         registry = _InMemoryRegistry()
         registry.assign("alpha", 1)
@@ -133,9 +130,7 @@ class TestIndexRegisteredEnv:
         out = capsys.readouterr().out.strip()
         assert out == "1"
 
-    def test_human_output_registered_adhoc_env_prints_bare_index(
-        self, capsys: pytest.CaptureFixture[Any]
-    ) -> None:
+    def test_human_output_registered_adhoc_env_prints_bare_index(self, capsys: pytest.CaptureFixture[Any]) -> None:
         """A registered ad-hoc env also prints just the index (no caveat)."""
         registry = _InMemoryRegistry()
         registry.assign("my-feature", 22)
@@ -157,9 +152,7 @@ class TestIndexRegisteredEnv:
 
 
 class TestIndexUnregisteredEnv:
-    def test_json_returns_suggested_source_for_unregistered_env(
-        self, capsys: pytest.CaptureFixture[Any]
-    ) -> None:
+    def test_json_returns_suggested_source_for_unregistered_env(self, capsys: pytest.CaptureFixture[Any]) -> None:
         """JSON output has source="suggested" when the env is not in the registry."""
         registry = _InMemoryRegistry()  # empty registry
 
@@ -176,9 +169,7 @@ class TestIndexUnregisteredEnv:
         # gamma is not in the alias list, so it hashes into the hash band
         assert isinstance(data["index"], int)
 
-    def test_json_unregistered_alias_still_returns_suggested(
-        self, capsys: pytest.CaptureFixture[Any]
-    ) -> None:
+    def test_json_unregistered_alias_still_returns_suggested(self, capsys: pytest.CaptureFixture[Any]) -> None:
         """An alias that has not been created yet is still source="suggested"."""
         registry = _InMemoryRegistry()
 
@@ -193,9 +184,7 @@ class TestIndexUnregisteredEnv:
         assert data["source"] == "suggested"
         assert data["index"] == 1  # alpha is alias[0] → index 1
 
-    def test_human_unregistered_alias_prints_bare_index(
-        self, capsys: pytest.CaptureFixture[Any]
-    ) -> None:
+    def test_human_unregistered_alias_prints_bare_index(self, capsys: pytest.CaptureFixture[Any]) -> None:
         """An unregistered alias prints just the index (fixed slot, no caveat needed)."""
         registry = _InMemoryRegistry()
 
@@ -209,9 +198,7 @@ class TestIndexUnregisteredEnv:
         out = capsys.readouterr().out.strip()
         assert out == "1"
 
-    def test_human_unregistered_adhoc_name_prints_caveat(
-        self, capsys: pytest.CaptureFixture[Any]
-    ) -> None:
+    def test_human_unregistered_adhoc_name_prints_caveat(self, capsys: pytest.CaptureFixture[Any]) -> None:
         """An unregistered ad-hoc name includes the 'may shift on create' caveat."""
         registry = _InMemoryRegistry()
 
@@ -229,9 +216,7 @@ class TestIndexUnregisteredEnv:
         parts = out.split()
         assert any(p.isdigit() for p in parts)
 
-    def test_no_registry_returns_suggested_index(
-        self, capsys: pytest.CaptureFixture[Any]
-    ) -> None:
+    def test_no_registry_returns_suggested_index(self, capsys: pytest.CaptureFixture[Any]) -> None:
         """When no registry is wired (None), the suggested index is always returned."""
         handler = _make_index_handler(
             env_aliases=["alpha", "beta"],

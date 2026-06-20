@@ -213,8 +213,18 @@ def test_scaffold_output_passes_verify(tmp_path: Path) -> None:
 
     # Run: python -m winter_cli.cli ext new my-test-ext --capability service --dir <out_dir>
     new_result = subprocess.run(
-        [sys.executable, "-m", "winter_cli.cli", "ext", "new", "my-test-ext",
-         "--capability", "service", "--dir", str(out_dir)],
+        [
+            sys.executable,
+            "-m",
+            "winter_cli.cli",
+            "ext",
+            "new",
+            "my-test-ext",
+            "--capability",
+            "service",
+            "--dir",
+            str(out_dir),
+        ],
         capture_output=True,
         text=True,
         cwd=str(workspace),
@@ -231,9 +241,7 @@ def test_scaffold_output_passes_verify(tmp_path: Path) -> None:
         cwd=str(workspace),
     )
     combined = verify_result.stdout + verify_result.stderr
-    assert verify_result.returncode == 0, (
-        f"ext verify failed (exit {verify_result.returncode}):\n{combined}"
-    )
+    assert verify_result.returncode == 0, f"ext verify failed (exit {verify_result.returncode}):\n{combined}"
     # All checks should show the pass glyph.
     assert "✓" in combined
     assert "✗" not in combined

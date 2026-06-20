@@ -9,6 +9,7 @@ Covers:
       temp dir, then a fresh adapter instance reads the same index back
   (e) idempotent re-allocation returns the recorded index
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -72,6 +73,7 @@ def _registry(tmp: Path) -> TomlEnvIndexRegistry:
 # (a) Alias-driven fixed indices
 # ---------------------------------------------------------------------------
 
+
 class TestAliasFixedIndices:
     def test_default_first_alias_is_index_1(self) -> None:
         """alpha (first in default 10-letter alias list) → 1."""
@@ -123,6 +125,7 @@ class TestAliasFixedIndices:
 # (b) Empty env_aliases ⇒ pure hash for every name
 # ---------------------------------------------------------------------------
 
+
 class TestEmptyAliases:
     def test_name_hashes_into_band_with_empty_aliases(self) -> None:
         """With 0 aliases and 10 envs-per-workspace, band is 2..10 (9 slots)."""
@@ -151,6 +154,7 @@ class TestEmptyAliases:
 # ---------------------------------------------------------------------------
 # (c) Probe-on-collision
 # ---------------------------------------------------------------------------
+
 
 class TestProbeOnCollision:
     def _find_collision_pair(self, aliases: list[str], envs: int) -> tuple[str, str, int]:
@@ -233,6 +237,7 @@ class TestProbeOnCollision:
 # (d) Persisted read-back via real TomlEnvIndexRegistry
 # ---------------------------------------------------------------------------
 
+
 class TestPersistedReadBack:
     def test_assign_then_read_back_with_fresh_instance(self, tmp_path: Path) -> None:
         """Assign via one registry instance; a new instance reading the same file returns it."""
@@ -290,6 +295,7 @@ class TestPersistedReadBack:
 # ---------------------------------------------------------------------------
 # (e) Idempotent re-allocation
 # ---------------------------------------------------------------------------
+
 
 class TestIdempotentReallocation:
     def test_second_allocate_returns_same_index_as_first(self) -> None:
@@ -370,16 +376,26 @@ class TestDoctorDoesNotFlagHashBandBoundaryIndex:
 
     def test_max_hash_band_index_does_not_warn(self) -> None:
         aliases = [
-            "alpha", "beta", "gamma", "delta", "epsilon",
-            "zeta", "eta", "theta", "iota", "kappa",
+            "alpha",
+            "beta",
+            "gamma",
+            "delta",
+            "epsilon",
+            "zeta",
+            "eta",
+            "theta",
+            "iota",
+            "kappa",
         ]  # N=10; buffer=11; only hash slot=12
         envs_per_workspace = 12
 
         class _InMemRegistry:
             def get_index(self, name: str) -> int | None:
                 return None
+
             def all_assignments(self) -> dict:
                 return {"lambda": 12}  # hash-band boundary index
+
             def assign(self, name: str, index: int) -> None: ...
             def remove(self, name: str) -> None: ...
 
@@ -409,8 +425,10 @@ class TestDoctorDoesNotFlagHashBandBoundaryIndex:
         class _InMemRegistry:
             def get_index(self, name: str) -> int | None:
                 return None
+
             def all_assignments(self) -> dict:
                 return {"gamma": 3}  # buffer slot N+1=3 — should warn
+
             def assign(self, name: str, index: int) -> None: ...
             def remove(self, name: str) -> None: ...
 

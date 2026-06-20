@@ -122,10 +122,7 @@ class ConformanceVerifyService:
                 if passed:
                     detail = "sentinel appears in output (argv forwarded)"
                 else:
-                    detail = (
-                        f"sentinel '{_SENTINEL}' not found in stdout/stderr — "
-                        "entrypoint may not echo argv"
-                    )
+                    detail = f"sentinel '{_SENTINEL}' not found in stdout/stderr — entrypoint may not echo argv"
                 results.append(
                     CheckResult(
                         check_id="forwards-params",

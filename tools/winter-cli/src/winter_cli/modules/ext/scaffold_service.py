@@ -39,8 +39,7 @@ class ExtScaffoldService:
             contents = self._fs.iterdir(out_dir)
             if contents and not params.force:
                 raise FileExistsError(
-                    f"output directory {out_dir} already exists and is not empty; "
-                    "pass --force to overwrite"
+                    f"output directory {out_dir} already exists and is not empty; pass --force to overwrite"
                 )
 
         # Pick the highest available version for the slot (same rule as verify_service).
@@ -77,15 +76,7 @@ class ExtScaffoldService:
     @staticmethod
     def _render_manifest(name: str, entrypoint_rel: str, version: str) -> str:
         """Render the winter-ext.toml content for a scaffolded extension."""
-        return (
-            f'name = "{name}"\n'
-            "\n"
-            "[provides]\n"
-            f'service = "{entrypoint_rel}"\n'
-            "\n"
-            "[implements]\n"
-            f'service = "{version}"\n'
-        )
+        return f'name = "{name}"\n\n[provides]\nservice = "{entrypoint_rel}"\n\n[implements]\nservice = "{version}"\n'
 
     @staticmethod
     def _render_index_md(name: str) -> str:

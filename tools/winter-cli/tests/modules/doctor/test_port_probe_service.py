@@ -10,6 +10,7 @@ Covers:
      (d) duplicate index — two envs sharing the same slot
      (e) clean state — all consistent → single PASS "registry drift" result
 """
+
 from __future__ import annotations
 
 from pathlib import Path

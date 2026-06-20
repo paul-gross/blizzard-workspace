@@ -229,9 +229,7 @@ def test_get_environment_status_excludes_pinned_from_distinct_count(
     # Only the single non-pinned repo is read (two config calls).
     r.git.config.side_effect = ["origin", "refs/heads/feature/auth"]
 
-    pinned = ProjectRepository(
-        name="pinned", main_path=_ROOT / "projects" / "pinned", main_branch="main", pinned=True
-    )
+    pinned = ProjectRepository(name="pinned", main_path=_ROOT / "projects" / "pinned", main_branch="main", pinned=True)
 
     env = repo.get_environment(workspace, "alpha")
     status = repo.get_environment_status(env, [_project("api"), pinned])

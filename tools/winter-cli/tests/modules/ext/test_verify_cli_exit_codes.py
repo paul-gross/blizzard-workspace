@@ -45,9 +45,7 @@ def _make_ext(
     Returns the ext_dir for convenience.
     """
     ext_dir.mkdir(parents=True, exist_ok=True)
-    (ext_dir / "winter-ext.toml").write_text(
-        'name = "test-ext"\n\n[provides]\nservice = "workflow/service"\n'
-    )
+    (ext_dir / "winter-ext.toml").write_text('name = "test-ext"\n\n[provides]\nservice = "workflow/service"\n')
     ep = ext_dir / "workflow" / "service"
     ep.parent.mkdir(parents=True, exist_ok=True)
     ep.write_text(entrypoint_script)
@@ -126,12 +124,7 @@ def test_verify_exits_nonzero_on_unknown_action_accepted(tmp_path: Path) -> None
     workspace = _make_workspace(tmp_path / "ws")
     # Entrypoint always exits 0 — accepts everything including unknown actions.
     # Also echoes argv to stderr so forwards-params passes.
-    accepts_all = (
-        "#!/usr/bin/env python3\n"
-        "import sys\n"
-        "print(' '.join(sys.argv), file=sys.stderr)\n"
-        "sys.exit(0)\n"
-    )
+    accepts_all = "#!/usr/bin/env python3\nimport sys\nprint(' '.join(sys.argv), file=sys.stderr)\nsys.exit(0)\n"
     ext_dir = _make_ext(tmp_path / "ext", accepts_all)
 
     result = _verify(workspace, ext_dir)
@@ -141,9 +134,7 @@ def test_verify_exits_nonzero_on_unknown_action_accepted(tmp_path: Path) -> None
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     combined = result.stdout + result.stderr
-    assert "refuses-unknown" in combined or "✗" in combined, (
-        "expected 'refuses-unknown' failure in output"
-    )
+    assert "refuses-unknown" in combined or "✗" in combined, "expected 'refuses-unknown' failure in output"
 
 
 # ── failure class C: params dropped (sentinel not echoed back) ───────────────
@@ -177,9 +168,7 @@ def test_verify_exits_nonzero_on_params_dropped(tmp_path: Path) -> None:
         f"stdout: {result.stdout}\nstderr: {result.stderr}"
     )
     combined = result.stdout + result.stderr
-    assert "forwards-params" in combined or "✗" in combined, (
-        "expected 'forwards-params' failure in output"
-    )
+    assert "forwards-params" in combined or "✗" in combined, "expected 'forwards-params' failure in output"
 
 
 # ── --json flag: exit codes are the same regardless of output format ──────────
@@ -191,8 +180,7 @@ def test_verify_json_flag_also_exits_nonzero_on_failure(tmp_path: Path) -> None:
     missing_dir = tmp_path / "nonexistent-ext"
 
     result = subprocess.run(
-        [sys.executable, "-m", "winter_cli.cli", "ext", "verify",
-         "--json", str(missing_dir)],
+        [sys.executable, "-m", "winter_cli.cli", "ext", "verify", "--json", str(missing_dir)],
         capture_output=True,
         text=True,
         cwd=str(workspace),

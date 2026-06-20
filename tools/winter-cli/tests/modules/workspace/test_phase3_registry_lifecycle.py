@@ -10,6 +10,7 @@ Tests prove:
       index when present, and falls back to resolve_env_index when absent
       (pre-registry env).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -374,9 +375,7 @@ class TestReadPathRegistryLookup:
         env = repo.get_environment(workspace, "alpha")
         assert env.index == 7
 
-    def test_read_falls_back_to_resolve_when_not_in_registry(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_read_falls_back_to_resolve_when_not_in_registry(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When the registry has no entry (pre-registry env), resolve_env_index is used."""
         registry = _InMemoryRegistry()
         # No entry for "alpha" — fall back to resolve.
@@ -410,9 +409,7 @@ class TestReadPathRegistryLookup:
         env = repo.get_environment(workspace, "alpha")
         assert env.index == resolve_env_index("alpha", ["alpha", "beta"], 20)
 
-    def test_read_registry_index_overrides_hash_suggestion(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_read_registry_index_overrides_hash_suggestion(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An ad-hoc env whose registry index differs from its hash suggestion uses the registry."""
         registry = _InMemoryRegistry()
         # Assign "feature-x" a specific index (simulating probed-away from its hash suggestion).

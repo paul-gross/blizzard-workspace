@@ -62,9 +62,7 @@ class PortProbeService:
                 source=PORT_SOURCE,
                 name="port config invariant",
                 status=ProbeStatus.pass_,
-                message=(
-                    f"envs_per_workspace={n_envs} >= len(env_aliases)+2={required}"
-                ),
+                message=(f"envs_per_workspace={n_envs} >= len(env_aliases)+2={required}"),
             )
         return ProbeResult(
             source=PORT_SOURCE,
@@ -75,8 +73,7 @@ class PortProbeService:
                 f"— not enough slots for all alias envs plus the hash band"
             ),
             remediation=(
-                f"Increase envs_per_workspace to at least {required} "
-                f"or reduce env_aliases in .winter/config.toml."
+                f"Increase envs_per_workspace to at least {required} or reduce env_aliases in .winter/config.toml."
             ),
         )
 
@@ -103,10 +100,7 @@ class PortProbeService:
                         source=PORT_SOURCE,
                         name=f"registry: {name}",
                         status=ProbeStatus.warn,
-                        message=(
-                            f"registry entry (index={idx}) has no env directory "
-                            f"({env_path}) — stale entry"
-                        ),
+                        message=(f"registry entry (index={idx}) has no env directory ({env_path}) — stale entry"),
                         remediation=(
                             f"Run `winter ws destroy {name}` to remove the stale registry entry, "
                             f"or re-run `winter ws init {name}` to recreate the env."
@@ -124,12 +118,9 @@ class PortProbeService:
                         name=f"registry: {env_name}",
                         status=ProbeStatus.warn,
                         message=(
-                            "env directory exists but has no registry entry "
-                            "— created before the registry or manually"
+                            "env directory exists but has no registry entry — created before the registry or manually"
                         ),
-                        remediation=(
-                            f"Run `winter ws init {env_name}` to record it in the registry."
-                        ),
+                        remediation=(f"Run `winter ws init {env_name}` to record it in the registry."),
                     )
                 )
 
@@ -140,10 +131,7 @@ class PortProbeService:
                 if idx == _RESERVED_INDEX:
                     message = f"recorded index {idx} is reserved (index 0 must never be assigned)"
                 elif idx == len(env_aliases) + 1:
-                    message = (
-                        f"recorded index {idx} is the buffer slot (N+1={idx}) — "
-                        f"never assigned by the allocator"
-                    )
+                    message = f"recorded index {idx} is the buffer slot (N+1={idx}) — never assigned by the allocator"
                 else:
                     message = (
                         f"recorded index {idx} is outside the valid range "
@@ -173,13 +161,8 @@ class PortProbeService:
                         source=PORT_SOURCE,
                         name=f"registry: {name}",
                         status=ProbeStatus.warn,
-                        message=(
-                            f"index {idx} is shared with env '{first}' "
-                            f"— duplicate assignment detected"
-                        ),
-                        remediation=(
-                            f"Run `winter ws destroy {name}` and re-init to get a unique index."
-                        ),
+                        message=(f"index {idx} is shared with env '{first}' — duplicate assignment detected"),
+                        remediation=(f"Run `winter ws destroy {name}` and re-init to get a unique index."),
                     )
                 )
             else:
