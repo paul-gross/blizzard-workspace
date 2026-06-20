@@ -92,4 +92,65 @@ def test_json_repo_synced_full_envelope_carries_commits() -> None:
         "commits": 3,
         "ahead": 0,
         "behind": 0,
+        "pin_ref": "",
+    }
+
+
+def test_stream_repo_synced_held_pin_shows_ref() -> None:
+    """held_pin reports the ref that was held (e.g. a tag name)."""
+    click = _CapturingClick()
+    reporter = StreamPullReporter(click)
+
+    reporter.repo_synced("standalone", "my-lib", SyncResult.held_pin, commits=0, ahead=0, behind=0, pin_ref="v1.4.2")
+
+    assert click.lines == [("[standalone/my-lib] held @ v1.4.2", False)]
+
+
+def test_stream_repo_synced_re_pinned_shows_short_sha() -> None:
+    """re_pinned reports the short SHA the branch pin advanced to."""
+    click = _CapturingClick()
+    reporter = StreamPullReporter(click)
+
+    reporter.repo_synced("standalone", "my-lib", SyncResult.re_pinned, commits=0, ahead=0, behind=0, pin_ref="abc12345")
+
+    assert click.lines == [("[standalone/my-lib] re-pinned → abc12345", False)]
+
+
+def test_json_repo_synced_held_pin_envelope() -> None:
+    """JSON envelope for held_pin carries pin_ref and result=held_pin."""
+    click = _CapturingClick()
+    reporter = JsonPullReporter(click)
+
+    reporter.repo_synced("standalone", "my-lib", SyncResult.held_pin, commits=0, ahead=0, behind=0, pin_ref="v1.4.2")
+
+    payload = json.loads(click.lines[0][0])
+    assert payload == {
+        "type": "repo_synced",
+        "scope": "standalone",
+        "repo": "my-lib",
+        "result": "held_pin",
+        "commits": 0,
+        "ahead": 0,
+        "behind": 0,
+        "pin_ref": "v1.4.2",
+    }
+
+
+def test_json_repo_synced_re_pinned_envelope() -> None:
+    """JSON envelope for re_pinned carries pin_ref with the new short SHA."""
+    click = _CapturingClick()
+    reporter = JsonPullReporter(click)
+
+    reporter.repo_synced("standalone", "my-lib", SyncResult.re_pinned, commits=0, ahead=0, behind=0, pin_ref="abc12345")
+
+    payload = json.loads(click.lines[0][0])
+    assert payload == {
+        "type": "repo_synced",
+        "scope": "standalone",
+        "repo": "my-lib",
+        "result": "re_pinned",
+        "commits": 0,
+        "ahead": 0,
+        "behind": 0,
+        "pin_ref": "abc12345",
     }

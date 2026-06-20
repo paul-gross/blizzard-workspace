@@ -17,6 +17,8 @@ from winter_cli.config.models import (
 )
 from winter_cli.container import Container
 from winter_cli.core.subprocess_runner import SubprocessResult
+from winter_cli.modules.workspace.models import RepoError
+from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
 
 
 @pytest.fixture
@@ -436,6 +438,11 @@ class FakeGitRepository:
     Defaults match the most common happy-path: branch="alpha", worktree is
     clean, no upstream set. Tests override per-path state by mutating the
     public dicts directly before constructing the service.
+
+    Phase-3 additions:
+      ``resolved_refs``   — canned (RefKind, sha) per (path, ref); resolve_ref raises RepoError on miss.
+      ``head_commits``    — canned HEAD SHA per path; get_head_commit raises RepoError on miss.
+      ``detached_checkouts`` / ``branch_checkouts`` — mutation logs for checkout_detached / checkout_branch.
     """
 
     def __init__(self) -> None:
@@ -446,6 +453,10 @@ class FakeGitRepository:
         self.push_defaults: dict[Path, str | None] = {}
         self.clean_worktrees: set[Path] = set()  # paths considered clean
 
+        # Phase-3 read state.
+        self.resolved_refs: dict[tuple[Path, str], tuple[RefKind, str]] = {}
+        self.head_commits: dict[Path, str] = {}
+
         # Mutation log — assertion targets.
         self.clones: list[tuple[str, Path]] = []
         self.added_worktrees: list[tuple[Path, Path, str, str | None]] = []
@@ -453,6 +464,14 @@ class FakeGitRepository:
         self.identities: list[tuple[Path, str, str]] = []
         self.upstreams_set: list[tuple[Path, str]] = []
         self.push_default_set: list[Path] = []
+
+        # Phase-3 mutation logs.
+        self.detached_checkouts: list[tuple[Path, str]] = []
+        self.branch_checkouts: list[tuple[Path, str]] = []
+
+        # Phase-6 stash mutation logs.
+        self.stash_pushes: list[Path] = []
+        self.stash_pops: list[Path] = []
 
     # ── Reads ────────────────────────────────────────────────────────────
     def get_local_branches(self, path: Path) -> list[str]:
@@ -469,6 +488,21 @@ class FakeGitRepository:
 
     def is_worktree_clean(self, path: Path) -> bool:
         return path in self.clean_worktrees
+
+    # Phase-3 reads.
+    def resolve_ref(self, path: Path, ref: str) -> tuple[RefKind, str]:
+        key = (path, ref)
+        if key not in self.resolved_refs:
+            raise RepoError(
+                f"unresolvable ref {ref!r} at {path}: not a branch, tag, or commit SHA",
+                cwd=str(path),
+            )
+        return self.resolved_refs[key]
+
+    def get_head_commit(self, path: Path) -> str:
+        if path not in self.head_commits:
+            raise RepoError(f"rev-parse HEAD failed at {path}", cwd=str(path))
+        return self.head_commits[path]
 
     # ── Writes ───────────────────────────────────────────────────────────
     def clone(self, url: str, dest: Path) -> None:
@@ -488,3 +522,46 @@ class FakeGitRepository:
 
     def set_push_default_upstream(self, path: Path) -> None:
         self.push_default_set.append(path)
+
+    # Phase-3 writes.
+    def checkout_detached(self, path: Path, commit: str) -> None:
+        self.detached_checkouts.append((path, commit))
+
+    def checkout_branch(self, path: Path, branch: str) -> None:
+        self.branch_checkouts.append((path, branch))
+
+    # Phase-6 stash writes.
+    def stash_push(self, path: Path) -> None:
+        self.stash_pushes.append(path)
+
+    def stash_pop(self, path: Path) -> None:
+        self.stash_pops.append(path)
+
+
+class FakeConfigLockRepository:
+    """IConfigLockRepository fake — in-memory lock store for unit tests.
+
+    Pre-seed ``entries`` before constructing the service under test; assert on
+    ``entries`` and ``write_calls`` after the service runs.
+    ``write_calls`` records every ``write(entries)`` invocation as a snapshot
+    dict so tests can assert the exact state written without coupling to call
+    ordering within the service.
+    """
+
+    def __init__(self, entries: dict[str, LockEntry] | None = None) -> None:
+        self.entries: dict[str, LockEntry] = dict(entries or {})
+        self.write_calls: list[dict[str, LockEntry]] = []
+
+    def read(self) -> dict[str, LockEntry]:
+        return dict(self.entries)
+
+    def write(self, entries: Iterable[LockEntry]) -> None:
+        snapshot = {e.name: e for e in entries}
+        self.entries = snapshot
+        self.write_calls.append(dict(snapshot))
+
+    def upsert(self, entry: LockEntry) -> None:
+        # Mirror the real adapter: read-merge-write, preserving other entries.
+        merged = dict(self.entries)
+        merged[entry.name] = entry
+        self.write(merged.values())

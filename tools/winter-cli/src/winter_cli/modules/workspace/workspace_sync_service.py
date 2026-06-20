@@ -6,8 +6,10 @@ import logging
 
 import click
 
+from winter_cli.modules.workspace.config_lock_repository import IConfigLockRepository
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
 from winter_cli.modules.workspace.fetch_reporter import IFetchReporter
+from winter_cli.modules.workspace.git_repository import IGitRepository
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.models import (
     EnvSkipped,
@@ -27,6 +29,7 @@ from winter_cli.modules.workspace.models import (
     SyncResult,
     Workspace,
 )
+from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
 from winter_cli.modules.workspace.pattern_match import matches_any_pattern
 from winter_cli.modules.workspace.pull_reporter import IPullReporter
 from winter_cli.modules.workspace.repo_repository import IWriteRepoRepository
@@ -71,6 +74,8 @@ class WorkspaceSyncService:
         repo_factory: RepositoryFactory,
         workspace: Workspace,
         git_ops: GitOpsService,
+        git_repo: IGitRepository | None = None,
+        config_lock_repo: IConfigLockRepository | None = None,
     ) -> None:
         self._env_status_svc = env_status_svc
         self._worktree_repo = worktree_repo
@@ -78,6 +83,8 @@ class WorkspaceSyncService:
         self._repo_factory = repo_factory
         self._workspace = workspace
         self._git_ops = git_ops
+        self._git_repo = git_repo
+        self._config_lock_repo = config_lock_repo
 
     def fetch_all(
         self,
@@ -267,6 +274,7 @@ class WorkspaceSyncService:
                         outcome.commits,
                         outcome.ahead,
                         outcome.behind,
+                        outcome.pin_ref,
                     )
                     standalone_outcomes.append(outcome)
 
@@ -385,6 +393,7 @@ class WorkspaceSyncService:
                 outcome.commits,
                 outcome.ahead,
                 outcome.behind,
+                outcome.pin_ref,
             )
             results.append((t.env_name, outcome))
         return results
@@ -417,7 +426,266 @@ class WorkspaceSyncService:
             self._repo_repo.fetch_standalone(repo)
         except RepoError as exc:
             logger.warning("Fetch failed for standalone %s: %s", repo.name, exc)
-        return self._repo_repo.integrate_standalone(repo, mode, autostash)
+
+        if repo.ref is None:
+            # No pin — integrate from the tracked upstream branch as before.
+            return self._repo_repo.integrate_standalone(repo, mode, autostash)
+
+        # Resolve ref AFTER fetch so origin refs are current.
+        if self._git_repo is None:
+            # Degraded: no git_repo injected — fall back to unpinned behavior.
+            return self._repo_repo.integrate_standalone(repo, mode, autostash)
+
+        # Only the kind matters here: a branch pin ff's to origin/<ref> (new HEAD
+        # is read post-ff), a tag/commit pin is held. The resolved commit is unused.
+        kind, _commit = self._git_repo.resolve_ref(repo.path, repo.ref)
+
+        if kind is RefKind.branch:
+            # Moving pin — ff-only advance to origin/<ref>.
+            #
+            # Dirty guard: refuse if tree is dirty and autostash not set. This
+            # mirrors the guard in init's _apply_standalone_pin and update_pins.
+            is_clean = self._git_repo.is_worktree_clean(repo.path)
+            if not is_clean and not autostash:
+                msg = f"branch pin {repo.name!r} has uncommitted changes; commit/stash or pass --autostash"
+                return RepoSyncOutcome(
+                    repo_name=repo.name,
+                    sync_result=SyncResult.pin_error,
+                    pin_ref=msg,
+                )
+
+            # Stash if dirty + autostash, then integrate ff-only against
+            # origin/<ref> — the same machinery the unpinned path uses, just
+            # aimed at a specific remote-tracking ref.  This refuses (diverged)
+            # when origin/<ref> is not a descendant of HEAD, which is exactly
+            # the ff-only safety guarantee: no local commits are lost.
+            if not is_clean:
+                try:
+                    self._git_repo.stash_push(repo.path)
+                except RepoError as exc:
+                    return RepoSyncOutcome(
+                        repo_name=repo.name,
+                        sync_result=SyncResult.pin_error,
+                        pin_ref=str(exc),
+                    )
+
+            target_ref = f"origin/{repo.ref}"
+            outcome = self._repo_repo.integrate_standalone_to_ref(repo, target_ref, mode, autostash)
+
+            if not is_clean:
+                try:
+                    self._git_repo.stash_pop(repo.path)
+                except RepoError as pop_exc:
+                    logger.warning(
+                        "stash pop failed for %s after branch-pin ff; stash '%s' needs manual resolution: %s",
+                        repo.name,
+                        repo.path,
+                        pop_exc,
+                    )
+
+            # If the ff succeeded and HEAD moved, rewrite the lock.
+            if outcome.sync_result == SyncResult.fast_forwarded:
+                new_head = self._git_repo.get_head_commit(repo.path)
+                return self._rewrite_lock_and_report(repo, kind, new_head)
+            return outcome
+        else:
+            # Frozen pin (tag or commit) — never advance; report held.
+            return RepoSyncOutcome(
+                repo_name=repo.name,
+                sync_result=SyncResult.held_pin,
+                pin_ref=repo.ref,
+            )
+
+    def update_pins(
+        self,
+        repo_name: str | None,
+        autostash: bool,
+        reporter: IPullReporter,
+    ) -> PullReport:
+        """Re-resolve `ref` pins for standalone repos and rewrite the lock.
+
+        Bare call (``repo_name=None``) → re-pins ALL pinned standalones.
+        Named call (``repo_name=<name>``) → re-pins only that standalone; raises
+        ``RepoError`` (surfaces via reporter) if the name doesn't match a pinned
+        standalone.
+
+        For each in-scope repo:
+          1. FETCH (refresh origin refs).
+          2. Dirty guard: if worktree is not clean and ``autostash`` is False,
+             emit ``pin_error`` and continue the fan-out.
+             With ``autostash=True``, stash → checkout → pop (via try/finally).
+          3. ``resolve_ref`` → (kind, commit).
+          4. If resolved commit equals current HEAD and the lock already records the
+             same commit, emit ``up_to_date`` (no checkout, no lock churn).
+          5. Otherwise checkout (``checkout_detached`` for tag/commit,
+             ``checkout_branch`` for branch) and rewrite the lock via
+             ``_rewrite_lock_and_report``.
+          6. Unresolvable ref or checkout error → emit ``pin_error``; continue fan-out.
+
+        Error taxonomy:
+          - ``diverged``: genuine ff divergence (branch-pin pull path only; not used here).
+          - ``pin_error``: the re-pin operation itself could not run or failed (dirty guard,
+            unresolvable ref, checkout error, stash failure). Distinct from upstream divergence.
+        """
+        if self._git_repo is None:
+            raise RepoError("update_pins requires IGitRepository to be injected", cwd="")
+
+        all_standalones = self._repo_factory.get_standalone_repos()
+        pinned = [r for r in all_standalones if r.ref is not None]
+
+        if repo_name is not None:
+            targeted = [r for r in pinned if r.name == repo_name]
+            if not targeted:
+                # Also check if the name exists at all (unpinned or unknown).
+                all_names = [r.name for r in all_standalones]
+                if repo_name in all_names:
+                    raise RepoError(
+                        f"standalone repo {repo_name!r} has no `ref` configured — nothing to update",
+                        cwd="",
+                    )
+                raise RepoError(
+                    f"no pinned standalone repo named {repo_name!r}",
+                    cwd="",
+                )
+            in_scope = targeted
+        else:
+            in_scope = pinned
+
+        # Filter out repos not on disk.
+        in_scope = self._drop_missing_standalones(in_scope)
+
+        if not in_scope:
+            reporter.pull_started()
+            reporter.pull_completed(True)
+            return PullReport(envs=[], standalone=[], skipped=[])
+
+        reporter.pull_started()
+        outcomes: list[RepoSyncOutcome] = []
+
+        for repo in in_scope:
+            assert repo.ref is not None  # invariant: only pinned repos are in_scope
+            outcome = self._update_one_pin(repo, autostash, reporter)
+            outcomes.append(outcome)
+
+        _error_results = (SyncResult.diverged, SyncResult.pin_error)
+        success = all(o.sync_result not in _error_results for o in outcomes)
+        report = PullReport(envs=[], standalone=outcomes, skipped=[])
+        reporter.pull_completed(success)
+        return report
+
+    def _update_one_pin(
+        self,
+        repo: StandaloneRepository,
+        autostash: bool,
+        reporter: IPullReporter,
+    ) -> RepoSyncOutcome:
+        """Re-pin a single standalone repo. Reports the event and returns the outcome.
+
+        The stash invariant is maintained via try/finally: if a stash was pushed,
+        the pop ALWAYS runs even on error paths. A pop conflict is surfaced in the
+        warning log with the repo path so the user can resolve it manually.
+        """
+        assert repo.ref is not None
+        assert self._git_repo is not None
+
+        def _report(result: SyncResult, msg: str = "", commits: int = 0) -> RepoSyncOutcome:
+            reporter.repo_synced("standalone", repo.name, result, commits, 0, 0, msg)
+            return RepoSyncOutcome(repo_name=repo.name, sync_result=result, pin_ref=msg)
+
+        # Step 1: fetch so resolve_ref sees current origin refs.
+        try:
+            self._repo_repo.fetch_standalone(repo)
+        except RepoError as exc:
+            logger.warning("Fetch failed for standalone %s: %s", repo.name, exc)
+
+        # Step 2: dirty guard.
+        is_clean = self._git_repo.is_worktree_clean(repo.path)
+        if not is_clean and not autostash:
+            return _report(
+                SyncResult.pin_error,
+                f"refusing to re-pin {repo.name!r}: uncommitted changes; commit/stash or pass --autostash",
+            )
+
+        stashed = False
+        if not is_clean and autostash:
+            try:
+                self._git_repo.stash_push(repo.path)
+                stashed = True
+            except RepoError as exc:
+                return _report(SyncResult.pin_error, str(exc))
+
+        try:
+            # Step 3: resolve ref.
+            try:
+                kind, commit = self._git_repo.resolve_ref(repo.path, repo.ref)
+            except RepoError as exc:
+                logger.warning("resolve_ref failed for standalone %s: %s", repo.name, exc)
+                return _report(SyncResult.pin_error, str(exc))
+
+            # Step 4: up-to-date check (no checkout, no lock churn).
+            current_head = self._git_repo.get_head_commit(repo.path)
+            existing_lock = self._config_lock_repo.read() if self._config_lock_repo else {}
+            existing_entry = existing_lock.get(repo.name)
+            if commit == current_head and existing_entry is not None and existing_entry.commit == commit:
+                reporter.repo_synced("standalone", repo.name, SyncResult.up_to_date, 0, 0, 0)
+                return RepoSyncOutcome(repo_name=repo.name, sync_result=SyncResult.up_to_date)
+
+            # Step 5: checkout and rewrite lock.
+            try:
+                if kind is RefKind.branch:
+                    self._git_repo.checkout_branch(repo.path, repo.ref)
+                else:
+                    self._git_repo.checkout_detached(repo.path, commit)
+            except RepoError as exc:
+                return _report(SyncResult.pin_error, str(exc))
+
+            outcome = self._rewrite_lock_and_report(repo, kind, commit)
+            reporter.repo_synced(
+                "standalone",
+                repo.name,
+                outcome.sync_result,
+                outcome.commits,
+                outcome.ahead,
+                outcome.behind,
+                outcome.pin_ref,
+            )
+            return outcome
+
+        finally:
+            if stashed:
+                try:
+                    self._git_repo.stash_pop(repo.path)
+                except RepoError as pop_exc:
+                    logger.warning(
+                        "stash pop failed for %s; leftover stash at '%s' needs manual resolution: %s",
+                        repo.name,
+                        repo.path,
+                        pop_exc,
+                    )
+
+    def _rewrite_lock_and_report(
+        self,
+        repo: StandaloneRepository,
+        kind: RefKind,
+        new_commit: str,
+    ) -> RepoSyncOutcome:
+        """Rewrite the lock entry for `repo` to `new_commit` and return a `re_pinned` outcome.
+
+        Atomic upsert: replaces this repo's entry while preserving the rest.
+        pull/update fan standalone repos out across a thread pool, so a plain
+        read-then-write would race and drop concurrently-written entries.
+        When `_config_lock_repo` is not injected, skip the write (degraded mode)
+        and still report `re_pinned` with the new SHA.
+        """
+        assert repo.ref is not None  # caller guarantees this
+        new_entry = LockEntry(name=repo.name, ref=repo.ref, kind=kind, commit=new_commit)
+        if self._config_lock_repo is not None:
+            self._config_lock_repo.upsert(new_entry)
+        return RepoSyncOutcome(
+            repo_name=repo.name,
+            sync_result=SyncResult.re_pinned,
+            pin_ref=new_commit[:8],
+        )
 
     @staticmethod
     def _sort_outcomes(outcomes: list[RepoSyncOutcome], repo_order: list[str]) -> list[RepoSyncOutcome]:

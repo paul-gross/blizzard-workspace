@@ -30,6 +30,7 @@ class RepoAddParams:
     standalone: bool
     name: str | None
     main_branch: str | None
+    ref: str | None
     git_excludes: list[str]
     cmd: list[str]
     pinned: bool
@@ -108,6 +109,8 @@ class RepoHandler:
                 raise click.ClickException("--path is only valid with --standalone")
             if params.prefix is not None:
                 raise click.ClickException("--prefix is only valid with --standalone")
+            if params.ref is not None:
+                raise click.ClickException("--ref is only valid with --standalone")
 
         if params.path is not None:
             candidate = Path(params.path)
@@ -139,6 +142,7 @@ class RepoHandler:
                     url=params.url,
                     name=params.name,
                     main_branch=params.main_branch,
+                    ref=params.ref,
                     path=params.path,
                     prefix=params.prefix,
                     git_excludes=params.git_excludes,

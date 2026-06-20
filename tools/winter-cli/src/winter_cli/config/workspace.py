@@ -114,6 +114,7 @@ class WorkspaceConfigService:
                     name=name,
                     url=url,
                     main_branch=entry.get("main_branch"),
+                    ref=entry.get("ref"),
                     path=path_value,
                     prefix=entry.get("prefix"),
                     git_excludes=list(entry.get("git_excludes", []) or []),

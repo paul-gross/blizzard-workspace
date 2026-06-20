@@ -73,7 +73,53 @@ name = "winter-backlog"
 url = "git@github.com:user/winter-backlog.git"
 prefix = "wsb"                     # optional symlink-prefix override; see "Extensions" below
 path = "extensions/winter-backlog" # optional; relative to the workspace root, defaults to `name`
+ref = "v1.4.2"                     # optional; pin this repo to a branch, tag, or commit SHA
 ```
+
+#### `ref` — standalone repo pins
+
+The optional `ref` field pins a standalone repo to a branch, tag, or commit SHA. Winter resolves `ref` against the fetched remote refs in this order: `refs/remotes/origin/<ref>` (branch) → `refs/tags/<ref>` (tag) → `<ref>^{commit}` (raw SHA). First match wins; no match → unresolvable-ref error (run `winter ws fetch <name>` to refresh refs).
+
+| `ref` value | Behavior | Lock behavior |
+|-------------|----------|---------------|
+| absent | Today's behavior: clone tracks the default branch; `pull` integrates the tracked upstream | No lock entry written |
+| branch name | Checkout on that tracking branch (`main_branch` effectively set to `<ref>`); `pull` fast-forwards to `origin/<ref>` | Lock written; rewritten on each `pull` advance |
+| tag or commit SHA | Detached checkout held exactly at the resolved commit; `pull` **never** advances it | Lock written; only updated by `winter ws update` |
+
+**`ref` vs `pinned` vs `main_branch`** — three distinct concepts that are easy to conflate:
+
+- **`pinned`** (`[[project_repository]]` only, UNRELATED) — means "exclude this *project* repo from feature branching entirely." The term is not reused on standalone repos; standalone repos have no `pinned` field.
+- **`main_branch`** — the standalone repo's integration target / tracking branch when `ref` is absent or is a branch name.
+- **`ref`** (new, `[[standalone_repository]]` only) — the pin intent: which branch, tag, or commit to lock the checkout to.
+
+#### Lock file (`.winter/config.lock`)
+
+When any standalone repo has a `ref`, winter maintains `.winter/config.lock` at the workspace root. This file records the resolved commit per pinned repo and is **intentionally committed** to the workspace repo — committing it makes the pin reproducible across machines and surfaces pin updates as reviewable `git diff`.
+
+```toml
+# .winter/config.lock — managed by winter; commit this file.
+version = 1
+
+[[standalone]]
+name   = "winter-backlog"   # matches [[standalone_repository]].name
+ref    = "v1.4.2"           # intent string copied from config (mismatch = stale lock)
+kind   = "tag"              # "branch" | "tag" | "commit"
+commit = "9f3c1ab2e4d5c6f7089a1b2c3d4e5f60718293a4"  # full 40-char SHA
+```
+
+- Repos without a `ref` get **no entry**. Entries are sorted by `name` for stable diffs.
+- A mismatch between the lock's `ref` and the config's `ref` marks the lock as stale; `winter ws init` or `winter ws update` re-resolves and rewrites it.
+- The lock is **not** added to `.gitignore` or `.git/info/exclude` by any winter command — it is committed alongside the config.
+
+**What rewrites the lock:**
+
+| Command | Condition | Action |
+|---------|-----------|--------|
+| `winter ws init` | Lock absent or stale | Resolves `ref`, checks out, writes lock |
+| `winter ws init` | Lock present and fresh | Checks out locked commit; no rewrite |
+| `winter ws pull` | Branch `ref` fast-forwards | Checks out new tip, rewrites lock |
+| `winter ws pull` | Tag / commit `ref` | Held; lock unchanged |
+| `winter ws update` | Always (explicit re-pin) | Fetches, re-resolves, checks out, rewrites |
 
 ### Local overlay (`.winter/config.local.toml`)
 

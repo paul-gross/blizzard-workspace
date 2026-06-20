@@ -20,6 +20,7 @@ class IPullReporter(Protocol):
         commits: int,
         ahead: int,
         behind: int,
+        pin_ref: str = "",
     ) -> None: ...
     def env_skipped(self, env: str, reason: str) -> None: ...
 
@@ -56,10 +57,14 @@ class StreamPullReporter:
         commits: int,
         ahead: int,
         behind: int,
+        pin_ref: str = "",
     ) -> None:
         prefix = f"[{scope_label}/{repo_name}]"
         if result == SyncResult.diverged:
             self._echo(f"{prefix} diverged: +{ahead}/-{behind}", err=True)
+        elif result == SyncResult.pin_error:
+            msg = pin_ref if pin_ref else "pin operation failed"
+            self._echo(f"{prefix} pin error: {msg}", err=True)
         elif result == SyncResult.no_upstream:
             self._echo(f"{prefix} no upstream", err=True)
         elif result == SyncResult.up_to_date:
@@ -68,6 +73,10 @@ class StreamPullReporter:
             self._echo(f"{prefix} merged (+{commits})")
         elif result == SyncResult.rebased:
             self._echo(f"{prefix} rebased (+{commits})")
+        elif result == SyncResult.held_pin:
+            self._echo(f"{prefix} held @ {pin_ref}")
+        elif result == SyncResult.re_pinned:
+            self._echo(f"{prefix} re-pinned → {pin_ref}")
         else:
             self._echo(f"{prefix} fast-forwarded (+{commits})")
 
@@ -104,6 +113,7 @@ class JsonPullReporter:
         commits: int,
         ahead: int,
         behind: int,
+        pin_ref: str = "",
     ) -> None:
         self._emit(
             {
@@ -114,6 +124,7 @@ class JsonPullReporter:
                 "commits": commits,
                 "ahead": ahead,
                 "behind": behind,
+                "pin_ref": pin_ref,
             }
         )
 

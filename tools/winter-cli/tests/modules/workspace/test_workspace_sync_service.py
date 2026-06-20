@@ -6,9 +6,11 @@ from typing import Any
 
 import pytest
 
+from tests.conftest import FakeConfigLockRepository, FakeGitRepository
 from winter_cli.config.models import (
     AdoptExtensions,
     ProjectRepositoryConfig,
+    StandaloneRepositoryConfig,
     WorkspaceConfig,
 )
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
@@ -25,9 +27,11 @@ from winter_cli.modules.workspace.models import (
     RepoError,
     RepoScope,
     RepoSyncOutcome,
+    StandaloneRepository,
     SyncResult,
     Workspace,
 )
+from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
 from winter_cli.modules.workspace.pull_reporter import IPullReporter
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_sync_service import WorkspaceSyncService
@@ -87,7 +91,7 @@ class _NullFetchReporter:
     def fetch_started(self) -> None:
         return None
 
-    def repo_fetched(self, scope: str, repo: str, success: bool, commits: int, error: str | None) -> None:
+    def repo_fetched(self, scope_label: str, repo_name: str, success: bool, commits: int, error: str | None) -> None:
         return None
 
     def fetch_completed(self, success: bool) -> None:
@@ -101,7 +105,9 @@ class _NullPullReporter:
     def env_skipped(self, env: str, reason: str) -> None:
         return None
 
-    def repo_synced(self, scope: str, repo: str, result: Any, commits: int, ahead: int, behind: int) -> None:
+    def repo_synced(
+        self, scope: str, repo: str, result: Any, commits: int, ahead: int, behind: int, pin_ref: str = ""
+    ) -> None:
         return None
 
     def pull_completed(self, success: bool) -> None:
@@ -384,7 +390,9 @@ class _RecordingPullReporter:
     def env_skipped(self, env: str, reason: str) -> None:
         return None
 
-    def repo_synced(self, scope: str, repo: str, result: Any, commits: int, ahead: int, behind: int) -> None:
+    def repo_synced(
+        self, scope: str, repo: str, result: Any, commits: int, ahead: int, behind: int, pin_ref: str = ""
+    ) -> None:
         self.synced.append((scope, repo, result))
 
     def pull_completed(self, success: bool) -> None:
@@ -484,3 +492,364 @@ def test_pull_all_resolves_upstream_per_worktree_regardless_of_repo_order(
     outcomes = {o.repo_name: o.sync_result for o in report.envs[0].repos}
     assert outcomes == {"repo-a": SyncResult.no_upstream, "repo-b": SyncResult.fast_forwarded}
     assert report.success is True
+
+
+# ── Phase 5: pin-aware standalone pull ────────────────────────────────────────
+
+SHA_OLD = "a" * 40
+SHA_NEW = "b" * 40
+
+
+class _StandaloneSpyWriteRepoRepository:
+    """Minimal fake for standalone pull tests.
+
+    Records ``fetch_standalone``, ``integrate_standalone``, and
+    ``integrate_standalone_to_ref`` calls. Tests that exercise the pinned
+    branch-ff path should see no ``integrate_standalone`` call — the service
+    calls ``integrate_standalone_to_ref`` instead for branch pins.
+    """
+
+    def __init__(
+        self,
+        integrate_result: SyncResult = SyncResult.up_to_date,
+        integrate_to_ref_result: SyncResult = SyncResult.fast_forwarded,
+    ) -> None:
+        self.fetched_standalones: list[str] = []
+        self.integrated_standalones: list[str] = []
+        self.integrated_to_ref: list[tuple[str, str]] = []
+        self._integrate_result = integrate_result
+        self._integrate_to_ref_result = integrate_to_ref_result
+
+    def fetch_standalone(self, repo: StandaloneRepository) -> None:
+        self.fetched_standalones.append(repo.name)
+
+    def integrate_standalone(
+        self,
+        repo: StandaloneRepository,
+        mode: PullMode,
+        autostash: bool,
+    ) -> RepoSyncOutcome:
+        self.integrated_standalones.append(repo.name)
+        return RepoSyncOutcome(repo_name=repo.name, sync_result=self._integrate_result)
+
+    def integrate_standalone_to_ref(
+        self,
+        repo: StandaloneRepository,
+        target_ref: str,
+        mode: PullMode,
+        autostash: bool,
+    ) -> RepoSyncOutcome:
+        self.integrated_to_ref.append((repo.name, target_ref))
+        return RepoSyncOutcome(repo_name=repo.name, sync_result=self._integrate_to_ref_result)
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"_StandaloneSpyWriteRepoRepository.{name} called unexpectedly")
+
+
+def _make_standalone_workspace_config(
+    workspace_root: Path,
+    standalone_name: str,
+    ref: str | None,
+) -> WorkspaceConfig:
+    """Build a WorkspaceConfig with a single standalone repo (no project repos)."""
+    return WorkspaceConfig(
+        workspace_root=workspace_root,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        standalone_repos=[
+            StandaloneRepositoryConfig(name=standalone_name, ref=ref),
+        ],
+    )
+
+
+def _make_standalone_service(
+    workspace: Workspace,
+    workspace_config: WorkspaceConfig,
+    repo_repo: _StandaloneSpyWriteRepoRepository,
+    git_repo: FakeGitRepository | None = None,
+    config_lock_repo: FakeConfigLockRepository | None = None,
+) -> WorkspaceSyncService:
+    fake_worktree_repo = FakeReadWorkspaceRepository()
+    env_status_svc = EnvStatusService(
+        worktree_repo=fake_worktree_repo,  # type: ignore[arg-type]
+        repo_repo=repo_repo,  # type: ignore[arg-type]
+    )
+    git_ops = GitOpsService(RepoErrorFactory(), sleep=lambda _: None, jitter=lambda: 0.0)
+    return WorkspaceSyncService(
+        env_status_svc=env_status_svc,
+        worktree_repo=fake_worktree_repo,  # type: ignore[arg-type]
+        repo_repo=repo_repo,  # type: ignore[arg-type]
+        repo_factory=RepositoryFactory(workspace_config),
+        workspace=workspace,
+        git_ops=git_ops,
+        git_repo=git_repo,  # type: ignore[arg-type]
+        config_lock_repo=config_lock_repo,  # type: ignore[arg-type]
+    )
+
+
+def test_standalone_branch_ref_advances_working_tree_and_rewrites_lock(tmp_path: Path) -> None:
+    """branch ref + origin advanced → working tree fast-forwards via ff-only, lock rewritten.
+
+    Moving-pin path: after fetch, resolve_ref classifies repo.ref as a branch;
+    the service calls integrate_standalone_to_ref (ff-only, refuses on divergence)
+    rather than checkout_branch (which would force-reset). When the integration
+    returns fast_forwarded, get_head_commit reads the new SHA, the lock is rewritten,
+    and the outcome is re_pinned with the short SHA as pin_ref.
+    """
+    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    repo_path = tmp_path / "my-lib"
+    repo_path.mkdir()
+    config = _make_standalone_workspace_config(tmp_path, "my-lib", ref="main")
+
+    git_repo = FakeGitRepository()
+    git_repo.resolved_refs[(repo_path, "main")] = (RefKind.branch, SHA_NEW)
+    # Mark as clean so the dirty guard passes.
+    git_repo.clean_worktrees.add(repo_path)
+    # After ff integrate, HEAD is the new SHA.
+    git_repo.head_commits[repo_path] = SHA_NEW
+
+    lock_repo = FakeConfigLockRepository()
+    # Spy: integrate_standalone_to_ref returns fast_forwarded (default).
+    repo_repo = _StandaloneSpyWriteRepoRepository(integrate_to_ref_result=SyncResult.fast_forwarded)
+    svc = _make_standalone_service(workspace, config, repo_repo, git_repo=git_repo, config_lock_repo=lock_repo)
+
+    reporter = _RecordingPullReporter()
+    report = svc.pull_all(
+        scope=RepoScope.standalone,
+        patterns=None,
+        mode=PullMode.ff_only,
+        autostash=False,
+        reporter=reporter,  # type: ignore[arg-type]
+    )
+
+    # integrate_standalone must NOT have been called — pin-aware path bypasses it.
+    assert repo_repo.integrated_standalones == []
+    # integrate_standalone_to_ref was called with origin/<ref>.
+    assert ("my-lib", "origin/main") in repo_repo.integrated_to_ref
+    # checkout_branch must NOT have been called (ff-only refuses divergence; no force-reset).
+    assert git_repo.branch_checkouts == []
+    # Lock was rewritten with the new SHA.
+    assert len(lock_repo.write_calls) == 1
+    written = lock_repo.write_calls[0]
+    assert "my-lib" in written
+    assert written["my-lib"].commit == SHA_NEW
+    assert written["my-lib"].kind is RefKind.branch
+    # Outcome is re_pinned with short SHA as pin_ref.
+    assert report.standalone[0].sync_result == SyncResult.re_pinned
+    assert report.standalone[0].pin_ref == SHA_NEW[:8]
+    assert ("standalone", "my-lib", SyncResult.re_pinned) in reporter.synced
+
+
+def test_standalone_branch_ref_up_to_date_does_not_rewrite_lock(tmp_path: Path) -> None:
+    """branch ref already up to date → integrate_standalone_to_ref returns up_to_date, no lock rewrite."""
+    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    repo_path = tmp_path / "my-lib"
+    repo_path.mkdir()
+    config = _make_standalone_workspace_config(tmp_path, "my-lib", ref="main")
+
+    git_repo = FakeGitRepository()
+    git_repo.resolved_refs[(repo_path, "main")] = (RefKind.branch, SHA_OLD)
+    git_repo.clean_worktrees.add(repo_path)
+    git_repo.head_commits[repo_path] = SHA_OLD
+
+    lock_repo = FakeConfigLockRepository()
+    # Spy: integrate_standalone_to_ref returns up_to_date (HEAD already at origin tip).
+    repo_repo = _StandaloneSpyWriteRepoRepository(integrate_to_ref_result=SyncResult.up_to_date)
+    svc = _make_standalone_service(workspace, config, repo_repo, git_repo=git_repo, config_lock_repo=lock_repo)
+
+    reporter = _RecordingPullReporter()
+    report = svc.pull_all(
+        scope=RepoScope.standalone,
+        patterns=None,
+        mode=PullMode.ff_only,
+        autostash=False,
+        reporter=reporter,  # type: ignore[arg-type]
+    )
+
+    # integrate_standalone_to_ref was called.
+    assert ("my-lib", "origin/main") in repo_repo.integrated_to_ref
+    # Lock must NOT have been rewritten — no fast_forwarded outcome.
+    assert lock_repo.write_calls == []
+    assert report.standalone[0].sync_result == SyncResult.up_to_date
+    assert ("standalone", "my-lib", SyncResult.up_to_date) in reporter.synced
+
+
+def test_standalone_tag_ref_held_no_integrate_no_lock_change(tmp_path: Path) -> None:
+    """tag ref → HELD: no checkout, no lock rewrite, outcome held_pin with the tag as pin_ref."""
+    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    repo_path = tmp_path / "my-lib"
+    repo_path.mkdir()
+    config = _make_standalone_workspace_config(tmp_path, "my-lib", ref="v1.4.2")
+
+    existing_entry = LockEntry(name="my-lib", ref="v1.4.2", kind=RefKind.tag, commit=SHA_OLD)
+    lock_repo = FakeConfigLockRepository(entries={"my-lib": existing_entry})
+
+    git_repo = FakeGitRepository()
+    git_repo.resolved_refs[(repo_path, "v1.4.2")] = (RefKind.tag, SHA_OLD)
+    git_repo.head_commits[repo_path] = SHA_OLD
+
+    repo_repo = _StandaloneSpyWriteRepoRepository()
+    svc = _make_standalone_service(workspace, config, repo_repo, git_repo=git_repo, config_lock_repo=lock_repo)
+
+    reporter = _RecordingPullReporter()
+    report = svc.pull_all(
+        scope=RepoScope.standalone,
+        patterns=None,
+        mode=PullMode.ff_only,
+        autostash=False,
+        reporter=reporter,  # type: ignore[arg-type]
+    )
+
+    # No checkout called at all.
+    assert git_repo.detached_checkouts == []
+    assert git_repo.branch_checkouts == []
+    # No integrate_standalone called.
+    assert repo_repo.integrated_standalones == []
+    # Lock unchanged.
+    assert lock_repo.write_calls == []
+    # Outcome is held_pin with the tag ref as pin_ref.
+    assert report.standalone[0].sync_result == SyncResult.held_pin
+    assert report.standalone[0].pin_ref == "v1.4.2"
+    assert ("standalone", "my-lib", SyncResult.held_pin) in reporter.synced
+
+
+def test_standalone_commit_ref_held_no_integrate_no_lock_change(tmp_path: Path) -> None:
+    """commit SHA ref → HELD likewise: no checkout, no lock rewrite, outcome held_pin."""
+    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    repo_path = tmp_path / "my-lib"
+    repo_path.mkdir()
+    config = _make_standalone_workspace_config(tmp_path, "my-lib", ref=SHA_OLD)
+
+    git_repo = FakeGitRepository()
+    git_repo.resolved_refs[(repo_path, SHA_OLD)] = (RefKind.commit, SHA_OLD)
+    git_repo.head_commits[repo_path] = SHA_OLD
+
+    lock_repo = FakeConfigLockRepository()
+    repo_repo = _StandaloneSpyWriteRepoRepository()
+    svc = _make_standalone_service(workspace, config, repo_repo, git_repo=git_repo, config_lock_repo=lock_repo)
+
+    reporter = _RecordingPullReporter()
+    report = svc.pull_all(
+        scope=RepoScope.standalone,
+        patterns=None,
+        mode=PullMode.ff_only,
+        autostash=False,
+        reporter=reporter,  # type: ignore[arg-type]
+    )
+
+    assert git_repo.detached_checkouts == []
+    assert git_repo.branch_checkouts == []
+    assert repo_repo.integrated_standalones == []
+    assert lock_repo.write_calls == []
+    assert report.standalone[0].sync_result == SyncResult.held_pin
+    assert report.standalone[0].pin_ref == SHA_OLD
+
+
+def test_standalone_no_ref_uses_existing_integrate_path(tmp_path: Path) -> None:
+    """ref is None → existing integrate_standalone behavior, no pin logic invoked."""
+    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    repo_path = tmp_path / "my-lib"
+    repo_path.mkdir()
+    config = _make_standalone_workspace_config(tmp_path, "my-lib", ref=None)
+
+    git_repo = FakeGitRepository()
+    lock_repo = FakeConfigLockRepository()
+    repo_repo = _StandaloneSpyWriteRepoRepository(integrate_result=SyncResult.fast_forwarded)
+    svc = _make_standalone_service(workspace, config, repo_repo, git_repo=git_repo, config_lock_repo=lock_repo)
+
+    reporter = _RecordingPullReporter()
+    report = svc.pull_all(
+        scope=RepoScope.standalone,
+        patterns=None,
+        mode=PullMode.ff_only,
+        autostash=False,
+        reporter=reporter,  # type: ignore[arg-type]
+    )
+
+    # integrate_standalone must have been called (unpinned path).
+    assert repo_repo.integrated_standalones == ["my-lib"]
+    # No resolve_ref, no checkout, no lock write.
+    assert git_repo.branch_checkouts == []
+    assert git_repo.detached_checkouts == []
+    assert lock_repo.write_calls == []
+    assert report.standalone[0].sync_result == SyncResult.fast_forwarded
+
+
+def test_fetch_standalone_tag_pin_does_not_change_head_or_lock(tmp_path: Path) -> None:
+    """Regression: fetch_all with a tag-pinned standalone NEVER touches HEAD or the lock.
+
+    fetch_standalone only refreshes remote refs; it must NOT advance the working
+    tree even if origin has moved. This test confirms the service calls
+    fetch_standalone (network I/O) but does NOT call checkout or lock write.
+    """
+    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    repo_path = tmp_path / "my-lib"
+    repo_path.mkdir()
+    config = _make_standalone_workspace_config(tmp_path, "my-lib", ref="v1.4.2")
+
+    existing_entry = LockEntry(name="my-lib", ref="v1.4.2", kind=RefKind.tag, commit=SHA_OLD)
+    lock_repo = FakeConfigLockRepository(entries={"my-lib": existing_entry})
+    git_repo = FakeGitRepository()
+    git_repo.head_commits[repo_path] = SHA_OLD
+
+    repo_repo = _StandaloneSpyWriteRepoRepository()
+    svc = _make_standalone_service(workspace, config, repo_repo, git_repo=git_repo, config_lock_repo=lock_repo)
+
+    reporter_null: IFetchReporter = _NullFetchReporter()  # type: ignore[assignment]
+    svc.fetch_all(
+        scope=RepoScope.standalone,
+        patterns=None,
+        reporter=reporter_null,
+    )
+
+    # fetch_standalone was called (refreshes remote refs).
+    assert repo_repo.fetched_standalones == ["my-lib"]
+    # No checkouts.
+    assert git_repo.detached_checkouts == []
+    assert git_repo.branch_checkouts == []
+    # Lock completely untouched.
+    assert lock_repo.write_calls == []
+    assert lock_repo.entries["my-lib"].commit == SHA_OLD
+
+
+def test_branch_repin_preserves_other_repos_lock_entries(tmp_path: Path) -> None:
+    """Other repos' lock entries are preserved across a branch re-pin rewrite.
+
+    Read-modify-write: only this repo's entry changes; the other-repo entry
+    must appear unchanged in the written snapshot.
+    """
+    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    repo_path = tmp_path / "my-lib"
+    repo_path.mkdir()
+    config = _make_standalone_workspace_config(tmp_path, "my-lib", ref="main")
+
+    other_entry = LockEntry(name="other-repo", ref="v2.0", kind=RefKind.tag, commit="c" * 40)
+    lock_repo = FakeConfigLockRepository(entries={"other-repo": other_entry})
+
+    git_repo = FakeGitRepository()
+    git_repo.resolved_refs[(repo_path, "main")] = (RefKind.branch, SHA_NEW)
+    git_repo.clean_worktrees.add(repo_path)
+    # HEAD is at SHA_NEW after the ff integration.
+    git_repo.head_commits[repo_path] = SHA_NEW
+
+    # Spy: integrate_standalone_to_ref returns fast_forwarded → lock will be rewritten.
+    repo_repo = _StandaloneSpyWriteRepoRepository(integrate_to_ref_result=SyncResult.fast_forwarded)
+    svc = _make_standalone_service(workspace, config, repo_repo, git_repo=git_repo, config_lock_repo=lock_repo)
+
+    reporter = _RecordingPullReporter()
+    svc.pull_all(
+        scope=RepoScope.standalone,
+        patterns=None,
+        mode=PullMode.ff_only,
+        autostash=False,
+        reporter=reporter,  # type: ignore[arg-type]
+    )
+
+    assert ("my-lib", "origin/main") in repo_repo.integrated_to_ref
+    assert len(lock_repo.write_calls) == 1
+    written = lock_repo.write_calls[0]
+    # my-lib updated to new SHA.
+    assert written["my-lib"].commit == SHA_NEW
+    # other-repo entry preserved unchanged.
+    assert written["other-repo"] == other_entry

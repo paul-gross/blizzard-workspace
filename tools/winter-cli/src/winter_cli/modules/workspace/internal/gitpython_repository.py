@@ -6,6 +6,8 @@ import git
 
 from winter_cli.modules.workspace.git_repository import IGitRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
+from winter_cli.modules.workspace.models import RepoError
+from winter_cli.modules.workspace.models.domain_model import RefKind
 
 
 class GitPythonRepository:
@@ -137,6 +139,94 @@ class GitPythonRepository:
         except (git.InvalidGitRepositoryError, git.NoSuchPathError, git.GitCommandError):
             return False
         return not output.strip()
+
+    # ── Ref resolution + checkout ─────────────────────────────────────────
+
+    def resolve_ref(self, path: Path, ref: str) -> tuple[RefKind, str]:
+        """Classify `ref` against on-disk refs and return its kind + full 40-char SHA.
+
+        Tries candidates in order via ``git rev-parse --verify``; first match wins.
+        Raises ``RepoError`` if none resolve.
+        """
+        candidates: list[tuple[str, RefKind]] = [
+            (f"refs/remotes/origin/{ref}", RefKind.branch),
+            (f"refs/tags/{ref}", RefKind.tag),
+            (f"{ref}^{{commit}}", RefKind.commit),
+        ]
+        with git.Repo(str(path)) as r:
+            for candidate, kind in candidates:
+                try:
+                    sha = r.git.rev_parse("--verify", candidate).strip()
+                    return kind, sha
+                except git.GitCommandError:
+                    continue
+        raise RepoError(
+            f"unresolvable ref {ref!r} at {path}: not a branch, tag, or commit SHA",
+            cwd=str(path),
+        )
+
+    def checkout_detached(self, path: Path, commit: str) -> None:
+        """Check out `commit` in detached-HEAD mode."""
+        try:
+            with git.Repo(str(path)) as r:
+                r.git.checkout("--detach", commit)
+        except git.GitCommandError as exc:
+            raise self._error_factory.from_git(
+                exc,
+                message=f"checkout --detach {commit} failed at {path}",
+                cwd=path,
+            ) from exc
+
+    def checkout_branch(self, path: Path, branch: str) -> None:
+        """Land the working tree on the local branch tracking ``origin/<branch>``.
+
+        Creates the local branch with upstream set if it does not yet exist.
+        """
+        try:
+            with git.Repo(str(path)) as r:
+                r.git.checkout("-B", branch, "--track", f"origin/{branch}")
+        except git.GitCommandError as exc:
+            raise self._error_factory.from_git(
+                exc,
+                message=f"checkout -B {branch} --track origin/{branch} failed at {path}",
+                cwd=path,
+            ) from exc
+
+    def get_head_commit(self, path: Path) -> str:
+        """Return the full 40-character SHA of HEAD."""
+        try:
+            with git.Repo(str(path)) as r:
+                return r.git.rev_parse("HEAD").strip()
+        except git.GitCommandError as exc:
+            raise self._error_factory.from_git(
+                exc,
+                message=f"rev-parse HEAD failed at {path}",
+                cwd=path,
+            ) from exc
+
+    def stash_push(self, path: Path) -> None:
+        """Stash the working tree at `path`."""
+        try:
+            with git.Repo(str(path)) as r:
+                r.git.stash("push")
+        except git.GitCommandError as exc:
+            raise self._error_factory.from_git(
+                exc,
+                message=f"git stash push failed at {path}",
+                cwd=path,
+            ) from exc
+
+    def stash_pop(self, path: Path) -> None:
+        """Pop the most recent stash at `path`."""
+        try:
+            with git.Repo(str(path)) as r:
+                r.git.stash("pop")
+        except git.GitCommandError as exc:
+            raise self._error_factory.from_git(
+                exc,
+                message=f"git stash pop failed at {path}",
+                cwd=path,
+            ) from exc
 
 
 def _conforms_gitpython_repository(x: GitPythonRepository) -> IGitRepository:

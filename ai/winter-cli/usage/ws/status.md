@@ -109,3 +109,18 @@ Shell reminder: quote patterns containing `*` or `?` to prevent shell glob expan
 | `orphans` | `array` | `OrphanSnapshot` objects for filesystem entries with no declared owner. Each has: `kind` (short label, e.g. `"worktree_dir"`), `path` (absolute), `safe_to_remove` (`bool`), `notes` (`string`). |
 | `drift_missing` | `array[string]` | Repo names declared in config but absent on disk (run `winter ws init` to fix). |
 | `drift_undeclared` | `array[string]` | Directory names present under `projects/` but not in config. |
+| `standalone_pins` | `array` | One `StandalonePinSnapshot` per declared standalone repo that has a `ref` configured. Empty array when no standalone repos have a pin. See below. |
+
+**`workspace.standalone_pins[]` — `StandalonePinSnapshot`:**
+
+Each entry represents the pin/lock state of one standalone repo pinned via `ref` in the config. Agents can use this to check whether a standalone is drifted from its pinned commit without running a mutating command.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | `string` | Matches `[[standalone_repository]].name` in the config. |
+| `ref` | `string` | The `ref` string currently declared in the config (branch name, tag, or commit SHA). |
+| `kind` | `string \| null` | How the ref was classified at the last `ws update` or `ws init`: `"branch"`, `"tag"`, or `"commit"`. `null` when no lock entry exists yet (the repo has never been pinned/updated). |
+| `locked_commit` | `string \| null` | Full 40-char SHA recorded in `.winter/config.lock` at the last pin operation. `null` when no lock entry exists. |
+| `config_ref_drift` | `bool` | `true` when the config's `ref` differs from the `ref` recorded in the lock file — the lock is stale and `ws update` is needed. `false` when they match or when no lock entry exists. |
+| `head_drift` | `bool` | `true` when the standalone's current HEAD commit does not match `locked_commit` — the checkout has drifted from the recorded pin. `false` when they match or when no lock entry exists. |
+| `head_commit` | `string \| null` | Current HEAD commit of the standalone repo (full 40-char SHA), or `null` when the repo is absent on disk or the HEAD probe fails. |

@@ -73,6 +73,8 @@ class StreamReporter:
             self._echo(f"[{repo}] would remove env directory at {location}")
         elif action == "would_remove_workspace_exclude":
             self._echo(f"[{repo}] would strip workspace exclude block: {detail}")
+        elif action == "pinned":
+            self._echo(f"[{repo}] pinned at {detail}")
         elif action == "hook_ran":
             self._echo(f"[{repo}] {detail} ran")
         else:

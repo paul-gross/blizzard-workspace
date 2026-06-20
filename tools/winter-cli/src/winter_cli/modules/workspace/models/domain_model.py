@@ -69,8 +69,20 @@ class StandaloneRepository:
     user-declared standalone repos (e.g. winter extensions). Singletons are
     discovered from the filesystem and only carry `name`/`path`; user-declared
     standalones come from `[[standalone_repository]]` in the workspace config
-    and additionally carry `url`, `main_branch`, `git_excludes`, `cmd`, and an
-    optional `prefix` that overrides the extension symlink prefix.
+    and additionally carry `url`, `main_branch`, `git_excludes`, `cmd`, an
+    optional `prefix` that overrides the extension symlink prefix, and an
+    optional `ref` (branch, tag, or commit) that pins the checkout.
+
+    ``ref`` semantics:
+    - absent → clone tracks the default branch; pull integrates tracked upstream.
+    - branch ref → checkout on that tracking branch; pull fast-forwards it
+      (moving pin).
+    - tag / commit ref → detached checkout held exactly at the resolved commit;
+      pull never advances it (frozen pin).
+
+    ``ref`` is distinct from ``main_branch`` (the integration tracking target)
+    and entirely unrelated to ``ProjectRepository.pinned`` (which means "exclude
+    from feature branching" — a project-repo-only concept).
     """
 
     name: str
@@ -80,6 +92,36 @@ class StandaloneRepository:
     git_excludes: list[str] = dataclasses.field(default_factory=list)
     cmd: list[str] = dataclasses.field(default_factory=list)
     prefix: str | None = None
+    ref: str | None = None
+
+
+class RefKind(enum.StrEnum):
+    """How a standalone repo's ``ref`` field should be interpreted.
+
+    Matches the ``kind`` field recorded in ``.winter/config.lock`` entries.
+    """
+
+    branch = "branch"
+    tag = "tag"
+    commit = "commit"
+
+
+@dataclasses.dataclass(frozen=True)
+class LockEntry:
+    """A resolved pin for one standalone repo, persisted in ``.winter/config.lock``.
+
+    ``name`` matches the ``[[standalone_repository]].name`` in the config.
+    ``ref`` is the intent string copied verbatim from the config (used for
+    drift detection: a mismatch between config ref and lock ref means the
+    lock is stale).
+    ``kind`` classifies the ref as a branch, tag, or raw commit SHA.
+    ``commit`` is the full 40-character SHA that was resolved at lock time.
+    """
+
+    name: str
+    ref: str
+    kind: RefKind
+    commit: str
 
 
 class DiffMode(enum.Enum):

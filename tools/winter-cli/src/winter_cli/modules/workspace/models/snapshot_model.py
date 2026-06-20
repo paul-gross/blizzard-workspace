@@ -4,6 +4,45 @@ import dataclasses
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class StandalonePinSnapshot:
+    """Read-only pin/lock state for one standalone repo that has a configured ``ref``.
+
+    Fields
+    ------
+    name:
+        Matches ``[[standalone_repository]].name`` in the config.
+    ref:
+        The ``ref`` string from the config (branch name, tag, or commit SHA).
+    kind:
+        How the ref is classified: ``"branch"``, ``"tag"``, or ``"commit"``.
+        ``None`` when the lock entry is absent (never been pinned/updated).
+    locked_commit:
+        The full 40-character SHA recorded in ``.winter/config.lock`` at
+        the last ``ws update`` or ``ws init``. ``None`` when no lock entry
+        exists yet.
+    config_ref_drift:
+        True when the lock file records a *different* ref than what the config
+        currently declares (lock is stale — a ``ws update`` is needed).
+        False when they match or when no lock entry exists.
+    head_drift:
+        True when the repo's HEAD commit does not match ``locked_commit``
+        (the checkout has drifted from the recorded pin). False when they
+        match or when no lock entry exists.
+    head_commit:
+        The current HEAD commit of the standalone repo (full 40-char SHA), or
+        ``None`` when the repo is absent on disk or the probe fails.
+    """
+
+    name: str
+    ref: str
+    kind: str | None
+    locked_commit: str | None
+    config_ref_drift: bool
+    head_drift: bool
+    head_commit: str | None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class OrphanSnapshot:
     """An orphaned filesystem entry — a directory or file with no declared owner.
 
@@ -22,12 +61,14 @@ class OrphanSnapshot:
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class WorkspaceLevelSnapshot:
-    """Workspace-wide metadata — extensions, orphans, and drift findings.
+    """Workspace-wide metadata — extensions, orphans, drift findings, and pin state.
 
     `extensions` lists the names of installed standalone repos (extensions),
     e.g. ``["winter-github", "winter-harness"]``. `drift_missing` names repo
     directories declared in config but absent on disk; `drift_undeclared` names
     directories present under the projects root but not declared in config.
+    `standalone_pins` carries per-standalone pin/lock state for every declared
+    standalone that has a ``ref`` configured — empty list when no pins exist.
     """
 
     root_path: str
@@ -35,6 +76,7 @@ class WorkspaceLevelSnapshot:
     orphans: list[OrphanSnapshot]
     drift_missing: list[str]
     drift_undeclared: list[str]
+    standalone_pins: list[StandalonePinSnapshot] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

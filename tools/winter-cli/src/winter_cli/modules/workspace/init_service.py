@@ -8,6 +8,7 @@ from pathlib import Path
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.core.subprocess_runner import ISubprocessRunner
+from winter_cli.modules.workspace.config_lock_repository import IConfigLockRepository
 from winter_cli.modules.workspace.env_index import EnvIndexAllocator
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
 from winter_cli.modules.workspace.extension_claudemd_service import ExtensionClaudemdService
@@ -28,6 +29,7 @@ from winter_cli.modules.workspace.models import (
     RepoError,
     StandaloneRepository,
 )
+from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
 logger = logging.getLogger(__name__)
@@ -78,6 +80,7 @@ class InitService:
         git_repo: IGitRepository,
         git_ops: GitOpsService,
         registry: IEnvIndexRegistry | None = None,
+        config_lock_repo: IConfigLockRepository | None = None,
     ) -> None:
         self._config = config
         self._repo_factory = repo_factory
@@ -90,6 +93,7 @@ class InitService:
         self._git_repo = git_repo
         self._git_ops = git_ops
         self._registry = registry
+        self._config_lock_repo = config_lock_repo
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -295,11 +299,92 @@ class InitService:
             self._apply_identity(repo_path)
             self._write_excludes(repo_path, repo, reporter, str(repo_path))
             self._run_cmds(repo_path, repo, reporter)
+            self._apply_standalone_pin(repo, repo_path, reporter)
         except (RepoError, OSError) as exc:
             reporter.repo_error(label, str(exc))
             return False
 
         return self._extension_symlink_svc.process(repo, reporter)
+
+    # ── Standalone pin ────────────────────────────────────────────────────
+
+    def _apply_standalone_pin(
+        self,
+        repo: StandaloneRepository,
+        repo_path: Path,
+        reporter: IInitReporter,
+    ) -> None:
+        """Check out a pinned standalone repo at the correct commit, updating the lock as needed.
+
+        Only runs when ``repo.ref`` is set. Two paths:
+
+        - **Lock present and fresh** (``entry.ref == repo.ref``): check out the
+          locked commit without re-resolving or touching the lock. This is the
+          reproducible-install path — the locked commit wins even if the remote
+          branch or tag has since moved.
+        - **Lock absent or stale** (``entry.ref != repo.ref`` or no entry):
+          resolve ``repo.ref`` against the on-disk refs, check out the result,
+          then rewrite the lock for this repo. Preserves other repos' entries
+          (read → replace/add → write full sorted set).
+
+          Before re-resolving on an existing checkout, guard with
+          ``is_worktree_clean``; if dirty, raise a clear ``RepoError`` so the
+          user can commit/stash first. On a fresh clone the tree is always clean.
+
+        Raises ``RepoError`` on resolution failure or dirty-tree refusal; both
+        surface through ``_reconcile_standalone``'s existing ``(RepoError,
+        OSError)`` catch.
+        """
+        if repo.ref is None:
+            return
+        if self._config_lock_repo is None:
+            return
+
+        label = repo.name
+        lock_entries = self._config_lock_repo.read()
+        existing_entry = lock_entries.get(repo.name)
+
+        if existing_entry is not None and existing_entry.ref == repo.ref:
+            # Fresh lock — check out at the locked commit, no network/resolve needed.
+            entry = existing_entry
+            if entry.kind is RefKind.branch:
+                self._git_repo.checkout_branch(repo_path, entry.ref)
+            else:
+                self._git_repo.checkout_detached(repo_path, entry.commit)
+            reporter.repo_action(
+                label,
+                str(repo_path),
+                "pinned",
+                f"{entry.kind.value} {entry.commit[:8]}",
+            )
+        else:
+            # Lock absent or stale — need to re-resolve.
+            # Guard: refuse if the working tree has uncommitted changes.
+            if not self._git_repo.is_worktree_clean(repo_path):
+                raise RepoError(
+                    f"refusing to re-pin {repo.name!r}: working tree has uncommitted changes; "
+                    f"commit or stash first (or run `winter ws fetch {repo.name}` to sync refs)"
+                )
+
+            kind, commit = self._git_repo.resolve_ref(repo_path, repo.ref)
+
+            if kind is RefKind.branch:
+                self._git_repo.checkout_branch(repo_path, repo.ref)
+            else:
+                self._git_repo.checkout_detached(repo_path, commit)
+
+            new_entry = LockEntry(name=repo.name, ref=repo.ref, kind=kind, commit=commit)
+            # Atomic upsert: preserves other repos' entries even under the
+            # parallel standalone fan-out (a plain read-then-write would race
+            # and drop concurrently-written entries via last-writer-wins).
+            self._config_lock_repo.upsert(new_entry)
+
+            reporter.repo_action(
+                label,
+                str(repo_path),
+                "pinned",
+                f"{kind.value} {commit[:8]}",
+            )
 
     # ── Feature worktree ──────────────────────────────────────────────────
 

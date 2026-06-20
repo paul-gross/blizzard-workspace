@@ -10,6 +10,7 @@ from winter_cli.modules.workspace.internal import gitpython_repository
 from winter_cli.modules.workspace.internal.gitpython_repository import GitPythonRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.models import RepoError
+from winter_cli.modules.workspace.models.domain_model import RefKind
 
 _REPO_PATH = Path("/fake/repo")
 _SOURCE_PATH = Path("/fake/source")
@@ -369,3 +370,169 @@ def test_is_worktree_clean_returns_false_on_git_command_error(
     result = adapter.is_worktree_clean(_REPO_PATH)
 
     assert result is False
+
+
+# ── resolve_ref ────────────────────────────────────────────────────────────
+
+
+_FULL_SHA = "9f3c1ab2e4d5c6f7089a1b2c3d4e5f60718293a4"
+
+
+def test_resolve_ref_branch_matches_remote_tracking_ref(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    # First candidate (refs/remotes/origin/<ref>) succeeds → branch.
+    git_mock.Repo.return_value.git.rev_parse.return_value = _FULL_SHA
+
+    kind, sha = adapter.resolve_ref(_REPO_PATH, "main")
+
+    assert kind is RefKind.branch
+    assert sha == _FULL_SHA
+    git_mock.Repo.return_value.git.rev_parse.assert_called_once_with("--verify", "refs/remotes/origin/main")
+
+
+def test_resolve_ref_tag_matches_on_second_candidate(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    # First candidate fails (not a remote branch), second (tag) succeeds.
+    git_mock.Repo.return_value.git.rev_parse.side_effect = [
+        git.GitCommandError(("git", "rev-parse", "--verify"), 128),
+        _FULL_SHA,
+    ]
+
+    kind, sha = adapter.resolve_ref(_REPO_PATH, "v1.4.2")
+
+    assert kind is RefKind.tag
+    assert sha == _FULL_SHA
+    assert git_mock.Repo.return_value.git.rev_parse.call_count == 2
+    git_mock.Repo.return_value.git.rev_parse.assert_called_with("--verify", "refs/tags/v1.4.2")
+
+
+def test_resolve_ref_commit_matches_on_third_candidate(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    # First two candidates fail; third (raw SHA) succeeds.
+    git_mock.Repo.return_value.git.rev_parse.side_effect = [
+        git.GitCommandError(("git", "rev-parse", "--verify"), 128),
+        git.GitCommandError(("git", "rev-parse", "--verify"), 128),
+        _FULL_SHA,
+    ]
+
+    kind, sha = adapter.resolve_ref(_REPO_PATH, _FULL_SHA[:8])
+
+    assert kind is RefKind.commit
+    assert sha == _FULL_SHA
+    assert git_mock.Repo.return_value.git.rev_parse.call_count == 3
+    git_mock.Repo.return_value.git.rev_parse.assert_called_with("--verify", f"{_FULL_SHA[:8]}^{{commit}}")
+
+
+def test_resolve_ref_raises_repo_error_when_all_candidates_fail(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    git_mock.Repo.return_value.git.rev_parse.side_effect = git.GitCommandError(("git", "rev-parse", "--verify"), 128)
+
+    with pytest.raises(RepoError) as ei:
+        adapter.resolve_ref(_REPO_PATH, "nonexistent-ref")
+
+    assert "unresolvable ref" in ei.value.message
+    assert "nonexistent-ref" in ei.value.message
+    assert git_mock.Repo.return_value.git.rev_parse.call_count == 3
+
+
+# ── checkout_detached ──────────────────────────────────────────────────────
+
+
+def test_checkout_detached_calls_checkout_with_detach_flag(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+
+    adapter.checkout_detached(_REPO_PATH, _FULL_SHA)
+
+    git_mock.Repo.return_value.git.checkout.assert_called_once_with("--detach", _FULL_SHA)
+
+
+def test_checkout_detached_raises_repo_error_on_git_command_error(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    git_mock.Repo.return_value.git.checkout.side_effect = git.GitCommandError(
+        ("git", "checkout", "--detach"), 128, stderr=b"no such commit"
+    )
+
+    with pytest.raises(RepoError) as ei:
+        adapter.checkout_detached(_REPO_PATH, "deadbeef")
+
+    assert "checkout --detach" in ei.value.message
+    assert ei.value.subcommand == "checkout"
+
+
+# ── checkout_branch ────────────────────────────────────────────────────────
+
+
+def test_checkout_branch_calls_checkout_with_track_flag(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+
+    adapter.checkout_branch(_REPO_PATH, "feature")
+
+    git_mock.Repo.return_value.git.checkout.assert_called_once_with("-B", "feature", "--track", "origin/feature")
+
+
+def test_checkout_branch_raises_repo_error_on_git_command_error(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    git_mock.Repo.return_value.git.checkout.side_effect = git.GitCommandError(
+        ("git", "checkout", "-B"), 128, stderr=b"no such remote branch"
+    )
+
+    with pytest.raises(RepoError) as ei:
+        adapter.checkout_branch(_REPO_PATH, "no-such-branch")
+
+    assert "checkout -B" in ei.value.message
+    assert ei.value.subcommand == "checkout"
+
+
+# ── get_head_commit ────────────────────────────────────────────────────────
+
+
+def test_get_head_commit_returns_full_sha(monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    git_mock.Repo.return_value.git.rev_parse.return_value = _FULL_SHA
+
+    result = adapter.get_head_commit(_REPO_PATH)
+
+    assert result == _FULL_SHA
+    git_mock.Repo.return_value.git.rev_parse.assert_called_once_with("HEAD")
+
+
+def test_get_head_commit_strips_trailing_whitespace(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    git_mock.Repo.return_value.git.rev_parse.return_value = _FULL_SHA + "\n"
+
+    result = adapter.get_head_commit(_REPO_PATH)
+
+    assert result == _FULL_SHA
+
+
+def test_get_head_commit_raises_repo_error_on_git_command_error(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    git_mock.Repo.return_value.git.rev_parse.side_effect = git.GitCommandError(
+        ("git", "rev-parse", "HEAD"), 128, stderr=b"not a git repo"
+    )
+
+    with pytest.raises(RepoError) as ei:
+        adapter.get_head_commit(_REPO_PATH)
+
+    assert "rev-parse HEAD" in ei.value.message
+    assert ei.value.subcommand == "rev-parse"

@@ -128,6 +128,32 @@ class StandaloneRepositoryConfig(BaseModel):
     When set, takes precedence over `name` from winter-ext.toml. Lets the workspace
     disambiguate between two extensions that would otherwise share a prefix."""
 
+    ref: str | None = None
+    """Optional pin — a branch, tag, or commit that winter checks out for this repo.
+
+    Semantics differ from two related fields:
+
+    - ``pinned`` (``ProjectRepositoryConfig`` only, UNRELATED) — means "exclude
+      this *project* repo from feature branching entirely."  The term is not
+      reused here; standalone repos have no ``pinned`` field.
+
+    - ``main_branch`` — the standalone repo's integration target / tracking
+      branch when ``ref`` is absent or is itself a branch name.
+
+    When ``ref`` is set, winter resolves it against the fetched remote refs in
+    this order: ``refs/remotes/origin/<ref>`` (branch) → ``refs/tags/<ref>``
+    (tag) → ``<ref>^{commit}`` (raw SHA).  First match wins; no match →
+    unresolvable-ref error.
+
+    - **absent** — today's behavior: clone tracks the default branch; pull
+      integrates the tracked upstream.  No lock entry written.
+    - **branch ref** — checkout on that tracking branch; ``main_branch`` is
+      effectively set to ``<ref>``; pull fast-forwards to ``origin/<ref>`` and
+      rewrites the lock.  A *moving* pin.
+    - **tag / commit ref** — detached checkout held exactly at the resolved
+      commit; pull never advances it; tracking overridden.  A *frozen* pin.
+    """
+
     git_excludes: list[str] = Field(default_factory=list)
     """Per-repo entries added to .git/info/exclude after clone."""
 

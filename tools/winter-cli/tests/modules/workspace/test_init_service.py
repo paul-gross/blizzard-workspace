@@ -7,6 +7,7 @@ import pytest
 
 from tests.conftest import (
     FakeConfigFileReader,
+    FakeConfigLockRepository,
     FakeFilesystem,
     FakeGitRepository,
     FakeInitReporter,
@@ -29,6 +30,7 @@ from winter_cli.modules.workspace.init_service import InitService
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.models import RepoError
+from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
 WORKSPACE_ROOT = Path("/ws")
@@ -54,6 +56,7 @@ def _service(
     subprocess: FakeSubprocessRunner,
     git: FakeGitRepository,
     git_ops: GitOpsService | None = None,
+    config_lock_repo: FakeConfigLockRepository | None = None,
 ) -> InitService:
     manifest_loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader({}))
     return InitService(
@@ -83,6 +86,7 @@ def _service(
         subprocess_runner=subprocess,
         git_repo=git,
         git_ops=git_ops or GitOpsService(RepoErrorFactory()),
+        config_lock_repo=config_lock_repo,
     )
 
 
@@ -505,3 +509,246 @@ def test_workspace_reconcile_hook_does_not_fire_on_reconcile_env(
     assert ok is True
     # No subprocess calls at all — the workspace reconcile hook must not fire.
     assert not subprocess.popen_calls, "on_workspace_reconcile must NOT fire inside reconcile_env"
+
+
+# ── Phase 4: standalone pin tests ────────────────────────────────────────────
+
+STANDALONE_SHA = "a" * 40  # full 40-char fake SHA
+
+
+def _standalone_config(ref: str | None = None) -> WorkspaceConfig:
+    """WorkspaceConfig with one standalone repo, optionally pinned to `ref`."""
+    return WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=None,
+        standalone_repos=[
+            StandaloneRepositoryConfig(
+                name="my-ext",
+                url="git@example.com:org/my-ext.git",
+                ref=ref,
+            )
+        ],
+    )
+
+
+def _standalone_fs() -> FakeFilesystem:
+    """Filesystem with the standalone repo already cloned (exists on disk)."""
+    ext_path = WORKSPACE_ROOT / "my-ext"
+    fs = FakeFilesystem(directories=[ext_path])
+    return fs
+
+
+def test_pin_lock_fresh_tag_uses_locked_commit_no_resolve(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """lock present + fresh + tag → checkout_detached at locked commit; resolve_ref NOT called; lock NOT rewritten."""
+    cfg = _standalone_config(ref="v1.0.0")
+    ext_path = WORKSPACE_ROOT / "my-ext"
+
+    locked_sha = STANDALONE_SHA
+    lock_repo = FakeConfigLockRepository(
+        entries={"my-ext": LockEntry(name="my-ext", ref="v1.0.0", kind=RefKind.tag, commit=locked_sha)}
+    )
+    git = FakeGitRepository()
+    # Mark the worktree clean (would be needed for stale path, not used here but safe to set).
+    git.clean_worktrees.add(ext_path)
+
+    svc = _service(cfg, FakeFilesystem(directories=[ext_path]), FakeSubprocessRunner(), git, config_lock_repo=lock_repo)
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    # checkout_detached called with the locked commit.
+    assert git.detached_checkouts == [(ext_path, locked_sha)]
+    # checkout_branch NOT called.
+    assert git.branch_checkouts == []
+    # resolve_ref NOT called — no entry in resolved_refs means calling it would raise.
+    # (FakeGitRepository.resolve_ref raises RepoError on miss; if it had been called
+    #  the test would have failed with a RepoError surfaced as ok=False.)
+    # Lock NOT rewritten.
+    assert lock_repo.write_calls == []
+    # Reporter received a "pinned" action.
+    pinned_actions = [a for a in init_reporter.actions if a[2] == "pinned"]
+    assert len(pinned_actions) == 1
+    assert "tag" in pinned_actions[0][3]
+    assert locked_sha[:8] in pinned_actions[0][3]
+
+
+def test_pin_lock_fresh_branch_uses_checkout_branch_no_resolve(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """lock present + fresh + branch → checkout_branch called; resolve_ref NOT called; lock NOT rewritten."""
+    cfg = _standalone_config(ref="stable")
+    ext_path = WORKSPACE_ROOT / "my-ext"
+    fs = _standalone_fs()
+
+    locked_sha = "b" * 40
+    lock_repo = FakeConfigLockRepository(
+        entries={"my-ext": LockEntry(name="my-ext", ref="stable", kind=RefKind.branch, commit=locked_sha)}
+    )
+    git = FakeGitRepository()
+    git.clean_worktrees.add(ext_path)
+
+    svc = _service(cfg, fs, FakeSubprocessRunner(), git, config_lock_repo=lock_repo)
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    # checkout_branch called with the ref (branch name).
+    assert git.branch_checkouts == [(ext_path, "stable")]
+    assert git.detached_checkouts == []
+    assert lock_repo.write_calls == []
+    pinned_actions = [a for a in init_reporter.actions if a[2] == "pinned"]
+    assert len(pinned_actions) == 1
+    assert "branch" in pinned_actions[0][3]
+
+
+def test_pin_no_lock_branch_resolves_and_writes_lock(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """no lock + branch ref → resolve_ref → checkout_branch + lock written with resolved entry."""
+    cfg = _standalone_config(ref="develop")
+    ext_path = WORKSPACE_ROOT / "my-ext"
+    fs = _standalone_fs()
+
+    resolved_sha = "c" * 40
+    lock_repo = FakeConfigLockRepository()  # empty lock
+    git = FakeGitRepository()
+    git.clean_worktrees.add(ext_path)
+    git.resolved_refs[(ext_path, "develop")] = (RefKind.branch, resolved_sha)
+
+    svc = _service(cfg, fs, FakeSubprocessRunner(), git, config_lock_repo=lock_repo)
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    # checkout_branch called with the ref.
+    assert git.branch_checkouts == [(ext_path, "develop")]
+    assert git.detached_checkouts == []
+    # Lock written exactly once, with the resolved entry.
+    assert len(lock_repo.write_calls) == 1
+    written = lock_repo.write_calls[0]
+    assert "my-ext" in written
+    entry = written["my-ext"]
+    assert entry.ref == "develop"
+    assert entry.kind is RefKind.branch
+    assert entry.commit == resolved_sha
+    # Reporter saw pinned action.
+    pinned_actions = [a for a in init_reporter.actions if a[2] == "pinned"]
+    assert len(pinned_actions) == 1
+
+
+def test_pin_no_lock_tag_resolves_and_writes_lock(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """no lock + tag ref → resolve_ref → checkout_detached + lock written with kind=tag."""
+    cfg = _standalone_config(ref="v2.3.0")
+    ext_path = WORKSPACE_ROOT / "my-ext"
+    fs = _standalone_fs()
+
+    resolved_sha = "d" * 40
+    lock_repo = FakeConfigLockRepository()
+    git = FakeGitRepository()
+    git.clean_worktrees.add(ext_path)
+    git.resolved_refs[(ext_path, "v2.3.0")] = (RefKind.tag, resolved_sha)
+
+    svc = _service(cfg, fs, FakeSubprocessRunner(), git, config_lock_repo=lock_repo)
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    assert git.detached_checkouts == [(ext_path, resolved_sha)]
+    assert git.branch_checkouts == []
+    assert len(lock_repo.write_calls) == 1
+    entry = lock_repo.write_calls[0]["my-ext"]
+    assert entry.kind is RefKind.tag
+    assert entry.commit == resolved_sha
+    assert entry.ref == "v2.3.0"
+
+
+def test_pin_stale_lock_re_resolves_preserves_other_entries(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """stale lock (config ref changed) → re-resolves + rewrites; other repos' lock entries preserved."""
+    cfg = _standalone_config(ref="v2.0.0")
+    ext_path = WORKSPACE_ROOT / "my-ext"
+    fs = _standalone_fs()
+
+    old_sha = "e" * 40
+    new_sha = "f" * 40
+    other_entry = LockEntry(name="other-ext", ref="v1.0.0", kind=RefKind.tag, commit="0" * 40)
+
+    lock_repo = FakeConfigLockRepository(
+        entries={
+            # Stale: config ref is "v2.0.0" but lock ref is "v1.0.0".
+            "my-ext": LockEntry(name="my-ext", ref="v1.0.0", kind=RefKind.tag, commit=old_sha),
+            "other-ext": other_entry,
+        }
+    )
+    git = FakeGitRepository()
+    git.clean_worktrees.add(ext_path)
+    git.resolved_refs[(ext_path, "v2.0.0")] = (RefKind.tag, new_sha)
+
+    svc = _service(cfg, fs, FakeSubprocessRunner(), git, config_lock_repo=lock_repo)
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    # Resolved and checked out at the new commit.
+    assert git.detached_checkouts == [(ext_path, new_sha)]
+    # Lock rewritten once.
+    assert len(lock_repo.write_calls) == 1
+    written = lock_repo.write_calls[0]
+    # my-ext entry updated.
+    assert written["my-ext"].ref == "v2.0.0"
+    assert written["my-ext"].commit == new_sha
+    # other-ext entry preserved.
+    assert "other-ext" in written
+    assert written["other-ext"].commit == other_entry.commit
+
+
+def test_pin_ref_none_skips_all_pin_machinery(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """ref is None → checkout_detached, checkout_branch, resolve_ref, and lock read/write all skipped."""
+    cfg = _standalone_config(ref=None)
+    fs = _standalone_fs()
+
+    lock_repo = FakeConfigLockRepository()
+    git = FakeGitRepository()
+
+    svc = _service(cfg, fs, FakeSubprocessRunner(), git, config_lock_repo=lock_repo)
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    # No pin machinery ran.
+    assert git.detached_checkouts == []
+    assert git.branch_checkouts == []
+    assert lock_repo.write_calls == []
+    # No "pinned" action reported.
+    pinned_actions = [a for a in init_reporter.actions if a[2] == "pinned"]
+    assert pinned_actions == []
+
+
+def test_pin_dirty_stale_lock_refuses_re_resolve(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """Stale lock + dirty working tree → error reported, no checkout, no lock rewrite."""
+    cfg = _standalone_config(ref="v2.0.0")
+    fs = _standalone_fs()
+
+    lock_repo = FakeConfigLockRepository(
+        entries={
+            "my-ext": LockEntry(name="my-ext", ref="v1.0.0", kind=RefKind.tag, commit="e" * 40),
+        }
+    )
+    git = FakeGitRepository()
+    # NOT in clean_worktrees → is_worktree_clean returns False.
+
+    svc = _service(cfg, fs, FakeSubprocessRunner(), git, config_lock_repo=lock_repo)
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is False
+    errors = [msg for _, msg in init_reporter.errors]
+    assert any("uncommitted changes" in msg for msg in errors)
+    assert git.detached_checkouts == []
+    assert git.branch_checkouts == []
+    assert lock_repo.write_calls == []

@@ -20,7 +20,7 @@ The `winter` command is a workspace-level tool for managing worktrees and reposi
 
 The surface is two command groups plus seven standalone commands:
 
-- **`winter ws …`** — reconcile the workspace or a feature env against the config (`init`), inspect state (`status`, `list`, `worktrees`, `diff`, `index`), move commits between remotes and worktrees (`fetch`, `pull`, `push`, `merge`), and manage env lifecycle (`connect`, `disconnect`, `checkout`, `destroy`, `prune`).
+- **`winter ws …`** — reconcile the workspace or a feature env against the config (`init`), inspect state (`status`, `list`, `worktrees`, `diff`, `index`), move commits between remotes and worktrees (`fetch`, `pull`, `push`, `merge`), manage standalone repo pins (`update`), and manage env lifecycle (`connect`, `disconnect`, `checkout`, `destroy`, `prune`).
 - **`winter repo …`** — add, remove, and list the repositories declared in the config.
 - **`winter ext …`** — extension contract management: `verify` checks that an extension conforms to the bundled capability spec; `new` scaffolds a new extension skeleton that passes verification out of the box (see [usage/ext.md](./usage/ext.md)).
 - **`winter dashboard`** — interactive TUI for workspace status, with remappable keybindings.

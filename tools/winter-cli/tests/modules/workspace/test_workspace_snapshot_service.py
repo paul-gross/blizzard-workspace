@@ -27,6 +27,7 @@ from winter_cli.modules.workspace.models import (
     StandaloneRepoStatus,
     Workspace,
 )
+from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
 from winter_cli.modules.workspace.prune_service import PruneOrphan
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_snapshot_service import WorkspaceSnapshotService
@@ -158,6 +159,35 @@ class FakePruneService:
         raise AssertionError(f"FakePruneService.{name} called unexpectedly")
 
 
+class FakeConfigLockRepository:
+    """Stub for `IConfigLockRepository` — returns canned lock entries."""
+
+    def __init__(self, entries: dict[str, LockEntry] | None = None) -> None:
+        self._entries: dict[str, LockEntry] = entries or {}
+
+    def read(self) -> dict[str, LockEntry]:
+        return dict(self._entries)
+
+    def write(self, entries: Any) -> None:
+        pass
+
+
+class FakeGitRepositoryForSnapshot:
+    """Stub for `IGitRepository` — returns canned HEAD commits."""
+
+    def __init__(self, head_commits: dict[str, str] | None = None) -> None:
+        self._head_commits: dict[str, str] = head_commits or {}
+
+    def get_head_commit(self, path: Path) -> str:
+        name = path.name
+        if name in self._head_commits:
+            return self._head_commits[name]
+        raise RuntimeError(f"no head_commit configured for {path}")
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"FakeGitRepositoryForSnapshot.{name} called unexpectedly")
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -239,6 +269,8 @@ def _service(
     standalone_statuses: dict[str, StandaloneRepoStatus] | None = None,
     projects_on_disk: list[str] | None = None,
     orphans: list[PruneOrphan] | None = None,
+    lock_entries: dict[str, LockEntry] | None = None,
+    head_commits: dict[str, str] | None = None,
 ) -> WorkspaceSnapshotService:
     """Construct a `WorkspaceSnapshotService` with all fakes wired."""
     from tests.conftest import ClickRecorder, FakeFilesystem
@@ -267,6 +299,8 @@ def _service(
         click=click_rec,
     )
     prune_svc = FakePruneService(orphans=orphans)  # type: ignore[arg-type]
+    config_lock_repo = FakeConfigLockRepository(entries=lock_entries)
+    git_repo = FakeGitRepositoryForSnapshot(head_commits=head_commits)
 
     env_status_svc = EnvStatusService(
         worktree_repo=worktree_repo,  # type: ignore[arg-type]
@@ -281,6 +315,8 @@ def _service(
         repo_factory=repo_factory,
         drift_warning_svc=drift_svc,
         prune_svc=prune_svc,  # type: ignore[arg-type]
+        config_lock_repo=config_lock_repo,  # type: ignore[arg-type]
+        git_repo=git_repo,  # type: ignore[arg-type]
     )
 
 
@@ -894,3 +930,134 @@ def test_collect_for_dashboard_populates_main_branch_statuses(
     assert data.main_statuses["repo-a"].behind == 2
     # repo-b is clean (default project status) → omitted from main_statuses.
     assert "repo-b" not in data.main_statuses
+
+
+# ── C4: standalone_pins in ws status --json ───────────────────────────────────
+
+
+def _config_with_standalones(
+    refs: dict[str, str | None],
+) -> WorkspaceConfig:
+    """Build a WorkspaceConfig with named standalone repos, optionally pinned."""
+    standalone_repos = [
+        StandaloneRepositoryConfig(name=name, url=f"git@example.com:org/{name}.git", ref=ref)
+        for name, ref in refs.items()
+    ]
+    return WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        project_repos=[
+            ProjectRepositoryConfig(name="repo-a", url="git@example.com:org/repo-a.git"),
+        ],
+        standalone_repos=standalone_repos,
+    )
+
+
+def test_collect_standalone_pins_empty_when_no_ref(workspace: Workspace) -> None:
+    """Standalones without a ref produce no pin snapshot entries."""
+    config = _config_with_standalones({"ext-a": None})
+    svc = _service(workspace, config)
+
+    snapshot = svc.collect()
+
+    assert snapshot.workspace.standalone_pins == []
+
+
+def test_collect_standalone_pins_present_when_ref_configured(workspace: Workspace) -> None:
+    """A standalone with a ref but no lock entry appears with kind/locked_commit=None."""
+    config = _config_with_standalones({"ext-a": "v1.2.3"})
+    # No lock entries, no HEAD commit configured → probes fail gracefully.
+    svc = _service(workspace, config, lock_entries={})
+
+    snapshot = svc.collect()
+
+    pins = snapshot.workspace.standalone_pins
+    assert len(pins) == 1
+    pin = pins[0]
+    assert pin.name == "ext-a"
+    assert pin.ref == "v1.2.3"
+    assert pin.kind is None
+    assert pin.locked_commit is None
+    assert pin.config_ref_drift is False
+    assert pin.head_drift is False
+    assert pin.head_commit is None
+
+
+def test_collect_standalone_pins_no_drift_when_locked_and_head_matches(workspace: Workspace) -> None:
+    """When the locked commit matches HEAD and config ref matches lock ref → no drift."""
+    sha = "a" * 40
+    config = _config_with_standalones({"ext-a": "main"})
+    lock_entries = {
+        "ext-a": LockEntry(name="ext-a", ref="main", kind=RefKind.branch, commit=sha),
+    }
+    head_commits = {"ext-a": sha}
+    svc = _service(workspace, config, lock_entries=lock_entries, head_commits=head_commits)
+
+    snapshot = svc.collect()
+
+    pin = snapshot.workspace.standalone_pins[0]
+    assert pin.name == "ext-a"
+    assert pin.ref == "main"
+    assert pin.kind == "branch"
+    assert pin.locked_commit == sha
+    assert pin.head_commit == sha
+    assert pin.config_ref_drift is False
+    assert pin.head_drift is False
+
+
+def test_collect_standalone_pins_head_drift_when_head_differs_from_lock(workspace: Workspace) -> None:
+    """When HEAD differs from the locked commit → head_drift=True."""
+    locked_sha = "a" * 40
+    current_sha = "b" * 40
+    config = _config_with_standalones({"ext-a": "main"})
+    lock_entries = {
+        "ext-a": LockEntry(name="ext-a", ref="main", kind=RefKind.branch, commit=locked_sha),
+    }
+    head_commits = {"ext-a": current_sha}
+    svc = _service(workspace, config, lock_entries=lock_entries, head_commits=head_commits)
+
+    snapshot = svc.collect()
+
+    pin = snapshot.workspace.standalone_pins[0]
+    assert pin.head_drift is True
+    assert pin.locked_commit == locked_sha
+    assert pin.head_commit == current_sha
+    assert pin.config_ref_drift is False
+
+
+def test_collect_standalone_pins_config_ref_drift_when_lock_ref_differs(workspace: Workspace) -> None:
+    """When the config ref changed since the lock was written → config_ref_drift=True."""
+    sha = "c" * 40
+    config = _config_with_standalones({"ext-a": "v2.0.0"})  # config now says v2.0.0
+    lock_entries = {
+        "ext-a": LockEntry(name="ext-a", ref="v1.0.0", kind=RefKind.tag, commit=sha),
+    }
+    head_commits = {"ext-a": sha}
+    svc = _service(workspace, config, lock_entries=lock_entries, head_commits=head_commits)
+
+    snapshot = svc.collect()
+
+    pin = snapshot.workspace.standalone_pins[0]
+    assert pin.config_ref_drift is True
+    assert pin.ref == "v2.0.0"
+    assert pin.locked_commit == sha
+    assert pin.head_drift is False
+
+
+def test_collect_standalone_pins_only_includes_repos_with_ref(workspace: Workspace) -> None:
+    """Mixed standalones: only those with a ref appear in standalone_pins."""
+    sha = "d" * 40
+    config = _config_with_standalones({"pinned-ext": "main", "unpinned-ext": None})
+    lock_entries = {
+        "pinned-ext": LockEntry(name="pinned-ext", ref="main", kind=RefKind.branch, commit=sha),
+    }
+    head_commits = {"pinned-ext": sha}
+    svc = _service(workspace, config, lock_entries=lock_entries, head_commits=head_commits)
+
+    snapshot = svc.collect()
+
+    pins = snapshot.workspace.standalone_pins
+    assert len(pins) == 1
+    assert pins[0].name == "pinned-ext"

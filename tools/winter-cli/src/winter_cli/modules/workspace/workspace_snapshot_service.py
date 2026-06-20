@@ -6,8 +6,10 @@ from collections.abc import Callable
 
 import click
 
+from winter_cli.modules.workspace.config_lock_repository import IConfigLockRepository
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
+from winter_cli.modules.workspace.git_repository import IGitRepository
 from winter_cli.modules.workspace.models import (
     EnvSnapshot,
     FeatureEnvironment,
@@ -17,6 +19,7 @@ from winter_cli.modules.workspace.models import (
     ProjectRepository,
     RepoError,
     SourceCheckoutSnapshot,
+    StandalonePinSnapshot,
     StandaloneRepository,
     StandaloneRepoStatus,
     Workspace,
@@ -54,6 +57,8 @@ class WorkspaceSnapshotService:
         repo_factory: RepositoryFactory,
         drift_warning_svc: DriftWarningService,
         prune_svc: PruneService,
+        config_lock_repo: IConfigLockRepository,
+        git_repo: IGitRepository,
     ) -> None:
         self._workspace = workspace
         self._env_status_svc = env_status_svc
@@ -62,6 +67,8 @@ class WorkspaceSnapshotService:
         self._repo_factory = repo_factory
         self._drift_warning_svc = drift_warning_svc
         self._prune_svc = prune_svc
+        self._config_lock_repo = config_lock_repo
+        self._git_repo = git_repo
 
     def collect(
         self,
@@ -252,7 +259,13 @@ class WorkspaceSnapshotService:
         # not fail on a broken extension repo just to list its name. The
         # dashboard, which needs each standalone's health, probes them separately
         # via `_collect_standalone_statuses`.
-        extension_names = [repo.name for repo in self._repo_factory.get_standalone_repos()]
+        standalone_repos = self._repo_factory.get_standalone_repos()
+        extension_names = [repo.name for repo in standalone_repos]
+
+        # Populate standalone_pins for every declared standalone with a ref.
+        # We read the lock file once and do a best-effort HEAD probe per repo —
+        # a failed probe yields head_commit=None rather than aborting status.
+        standalone_pins = self._collect_standalone_pins(standalone_repos)
 
         workspace_level = WorkspaceLevelSnapshot(
             root_path=str(self._workspace.root_path),
@@ -260,6 +273,7 @@ class WorkspaceSnapshotService:
             orphans=orphan_snapshots,
             drift_missing=[r.name for r in drift_report.missing],
             drift_undeclared=list(drift_report.undeclared),
+            standalone_pins=standalone_pins,
         )
 
         return WorkspaceSnapshot(
@@ -428,6 +442,53 @@ class WorkspaceSnapshotService:
                     raise
                 logger.warning("standalone probe failed for %s: %s", repo.name, exc)
         return statuses
+
+    def _collect_standalone_pins(
+        self,
+        repos: list[StandaloneRepository],
+    ) -> list[StandalonePinSnapshot]:
+        """Build pin/lock snapshots for every declared standalone that has a ``ref``.
+
+        Reads the lock file once, then for each pinned standalone does a
+        best-effort HEAD commit probe (logs and continues on failure rather than
+        aborting the whole status command).
+        """
+        pinned = [r for r in repos if r.ref is not None]
+        if not pinned:
+            return []
+
+        try:
+            lock_entries = self._config_lock_repo.read()
+        except Exception as exc:
+            logger.warning("could not read config.lock for status: %s", exc)
+            lock_entries = {}
+
+        snapshots: list[StandalonePinSnapshot] = []
+        for repo in pinned:
+            assert repo.ref is not None  # narrowed above
+            lock = lock_entries.get(repo.name)
+
+            head_commit: str | None = None
+            try:
+                head_commit = self._git_repo.get_head_commit(repo.path)
+            except Exception as exc:
+                logger.debug("HEAD probe failed for %s: %s", repo.name, exc)
+
+            config_ref_drift = lock is not None and lock.ref != repo.ref
+            head_drift = lock is not None and head_commit is not None and head_commit != lock.commit
+
+            snapshots.append(
+                StandalonePinSnapshot(
+                    name=repo.name,
+                    ref=repo.ref,
+                    kind=lock.kind.value if lock is not None else None,
+                    locked_commit=lock.commit if lock is not None else None,
+                    config_ref_drift=config_ref_drift,
+                    head_drift=head_drift,
+                    head_commit=head_commit,
+                )
+            )
+        return snapshots
 
 
 @dataclasses.dataclass

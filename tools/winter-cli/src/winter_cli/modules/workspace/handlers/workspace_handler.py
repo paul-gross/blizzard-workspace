@@ -117,6 +117,13 @@ class EnvMergeParams:
 
 
 @dataclasses.dataclass
+class EnvUpdateParams:
+    repo: str | None
+    autostash: bool
+    output_json: bool
+
+
+@dataclasses.dataclass
 class EnvDiffParams:
     env: str
     mode: DiffMode
@@ -433,6 +440,30 @@ class WorkspaceHandler:
         if not report.envs and not report.standalone and not report.skipped:
             click.echo(out.style("Nothing to pull", "dim"))
             return
+
+    def update(self, params: EnvUpdateParams) -> None:
+        self._drift_warning_svc.raise_warning()
+        reporter = self._reporter_factory.get_pull_reporter(params.output_json)
+        try:
+            report = self._workspace_sync_svc.update_pins(
+                repo_name=params.repo,
+                autostash=params.autostash,
+                reporter=reporter,
+            )
+        except RepoError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+        if params.output_json:
+            if not report.success:
+                sys.exit(1)
+            return
+
+        out = self._cli_output_svc
+        if not report.standalone and not report.skipped:
+            click.echo(out.style("Nothing to update", "dim"))
+            return
+        if not report.success:
+            sys.exit(1)
 
     def merge(self, params: EnvMergeParams) -> None:
         self._drift_warning_svc.raise_warning()
@@ -1039,6 +1070,18 @@ def _workspace_level_to_dict(ws: WorkspaceLevelSnapshot) -> dict[str, Any]:
         ],
         "drift_missing": list(ws.drift_missing),
         "drift_undeclared": list(ws.drift_undeclared),
+        "standalone_pins": [
+            {
+                "name": p.name,
+                "ref": p.ref,
+                "kind": p.kind,
+                "locked_commit": p.locked_commit,
+                "config_ref_drift": p.config_ref_drift,
+                "head_drift": p.head_drift,
+                "head_commit": p.head_commit,
+            }
+            for p in ws.standalone_pins
+        ],
     }
 
 

@@ -139,6 +139,18 @@ class SyncResult(enum.Enum):
     rebased = "rebased"
     diverged = "diverged"
     no_upstream = "no_upstream"
+    held_pin = "held_pin"
+    re_pinned = "re_pinned"
+    pin_error = "pin_error"
+    """A re-pin or branch-pin advance failed (dirty-tree refusal, unresolvable ref,
+    or checkout error) — distinct from a genuine upstream divergence (``diverged``).
+
+    A true branch-pin ff-refusal-on-divergence uses ``diverged`` because HEAD has
+    genuinely diverged from ``origin/<ref>`` — that is the correct semantic. All
+    other pin operation failures (dirty guard, resolve error, stash/pop failure) use
+    ``pin_error`` so callers can distinguish "git divergence" from "pin operation
+    could not run at all".
+    """
 
 
 @dataclasses.dataclass
@@ -148,8 +160,10 @@ class RepoSyncOutcome:
     `commits` is the number of upstream commits integrated on a successful
     fast-forward / merge / rebase (0 when already up to date). `ahead` /
     `behind` carry the divergence span and are populated only for the
-    `diverged` outcome. `commits` is the shared field name used across the
-    fetch / pull / push outcome models.
+    `diverged` outcome. `pin_ref` carries pin metadata for `held_pin`
+    (the held ref string, e.g. ``v1.4.2``) and `re_pinned` (the new
+    short SHA the lock was advanced to). `commits` is the shared field
+    name used across the fetch / pull / push outcome models.
     """
 
     repo_name: str
@@ -157,6 +171,7 @@ class RepoSyncOutcome:
     commits: int = 0
     ahead: int = 0
     behind: int = 0
+    pin_ref: str = ""
 
 
 @dataclasses.dataclass
@@ -315,7 +330,10 @@ class PullReport:
     def success(self) -> bool:
         if any(not e.success for e in self.envs):
             return False
-        if any(o.sync_result in (SyncResult.diverged, SyncResult.no_upstream) for o in self.standalone):
+        if any(
+            o.sync_result in (SyncResult.diverged, SyncResult.no_upstream, SyncResult.pin_error)
+            for o in self.standalone
+        ):
             return False
         return not self.skipped
 

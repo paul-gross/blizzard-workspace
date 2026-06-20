@@ -14,7 +14,8 @@ Command names below link to a per-command file where one exists; the lighter com
 | `list` | `winter ws list [--json]` | List all feature environments |
 | [`status`](./status.md) | `winter ws status [PATTERNS]... [--json] [--fetch]` | Machine-readable + human-readable workspace state snapshot |
 | [`fetch`](./fetch.md) | `winter ws fetch [PATTERNS]... [--standalone\|--all] [--json]` | Fetch refs from `origin` for matched project worktrees, and fast-forward each matched source checkout's local main |
-| [`pull`](./pull.md) | `winter ws pull [PATTERNS]... [--standalone\|--all] [--ff-only\|--merge\|--rebase] [--autostash] [--json]` | Fetch + ff-only integrate (default) matched project worktrees |
+| [`pull`](./pull.md) | `winter ws pull [PATTERNS]... [--standalone\|--all] [--ff-only\|--merge\|--rebase] [--autostash] [--json]` | Fetch + ff-only integrate (default) matched project worktrees; for pinned standalones, advances a branch pin and holds a tag/commit pin |
+| [`update`](./update.md) | `winter ws update [REPO] [--autostash] [--json]` | Explicitly re-resolve `ref` pins for pinned standalone repos and rewrite `.winter/config.lock` — the only path that moves a tag/commit pin |
 | [`merge`](./merge.md) | `winter ws merge SOURCE_REF [PATTERNS]... [--standalone\|--all] [--ff-only\|--merge\|--no-ff] [--autostash] [--exclude-pinned\|--only-pinned] [--json]` | Merge an arbitrary SOURCE_REF (env name, branch, `origin/...`) into matched project worktrees |
 | [`push`](./push.md) | `winter ws push [PATTERNS]... [--standalone\|--all] [--include-pinned\|--only-pinned] [--json]` | Push matched project worktrees to their tracked upstream |
 | `connect` | `winter ws connect PATTERNS... FEATURE_BRANCH [--json]` | Connect matched non-pinned worktrees to `origin/FEATURE_BRANCH`. Each `PATTERN` is a segment-aware `<env>/<repo>` glob (a bare `<env>` connects the whole env); the trailing arg is the branch, so per-repo names can differ across an env |

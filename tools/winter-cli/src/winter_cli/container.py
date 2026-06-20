@@ -41,6 +41,7 @@ from winter_cli.modules.workspace.handlers.repo_handler import RepoHandler
 from winter_cli.modules.workspace.handlers.workspace_handler import WorkspaceHandler
 from winter_cli.modules.workspace.init_reporter import JsonReporter, StreamReporter
 from winter_cli.modules.workspace.init_service import InitService
+from winter_cli.modules.workspace.internal.config_lock_repository import WriteConfigLockRepository
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.gitpython_repository import GitPythonRepository
 from winter_cli.modules.workspace.internal.read_workspace_repository import ReadWorkspaceRepository
@@ -111,6 +112,12 @@ class Container(containers.DeclarativeContainer):
     write_winter_config_repo = providers.Factory(
         WriteWinterConfigurationRepository,
         workspace_config=workspace_config,
+        fs=fs,
+    )
+
+    config_lock_repo = providers.Factory(
+        WriteConfigLockRepository,
+        workspace_root=workspace_config.provided.workspace_root,
         fs=fs,
     )
 
@@ -201,6 +208,8 @@ class Container(containers.DeclarativeContainer):
         repo_factory=repo_factory,
         workspace=workspace,
         git_ops=git_ops_svc,
+        git_repo=git_repo,
+        config_lock_repo=config_lock_repo,
     )
 
     workspace_push_svc = providers.Factory(
@@ -279,6 +288,8 @@ class Container(containers.DeclarativeContainer):
         repo_factory=repo_factory,
         drift_warning_svc=drift_warning_svc,
         prune_svc=prune_svc,
+        config_lock_repo=config_lock_repo,
+        git_repo=git_repo,
     )
 
     init_svc = providers.Factory(
@@ -294,6 +305,7 @@ class Container(containers.DeclarativeContainer):
         git_repo=git_repo,
         git_ops=git_ops_svc,
         registry=env_index_registry,
+        config_lock_repo=config_lock_repo,
     )
 
     destroy_svc = providers.Factory(

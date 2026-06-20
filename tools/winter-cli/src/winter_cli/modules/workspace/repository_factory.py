@@ -97,6 +97,7 @@ class RepositoryFactory:
                     git_excludes=list(r.git_excludes),
                     cmd=list(r.cmd),
                     prefix=r.prefix,
+                    ref=r.ref,
                 )
             )
         return result

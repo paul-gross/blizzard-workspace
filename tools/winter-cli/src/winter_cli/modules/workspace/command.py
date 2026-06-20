@@ -16,6 +16,7 @@ from winter_cli.modules.workspace.handlers import (
     EnvPullParams,
     EnvPushParams,
     EnvStatusParams,
+    EnvUpdateParams,
     EnvWorktreesParams,
     InitParams,
     RepoAddParams,
@@ -471,6 +472,34 @@ def ws_pull(
     )
 
 
+@ws_group.command("update")
+@click.argument("repo", required=False)
+@click.option(
+    "--autostash",
+    is_flag=True,
+    default=False,
+    help="Stash dirty working tree before re-pinning, restore after.",
+)
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def ws_update(ctx: click.Context, repo: str | None, autostash: bool, output_json: bool):
+    """Re-resolve `ref` pins for standalone repos and rewrite the lock.
+
+    Fetches the latest origin refs, re-resolves each pinned standalone's `ref`,
+    checks out the resolved commit, and rewrites `.winter/config.lock`. This is
+    the only path that moves a tag/commit pin or snaps a branch pin to the
+    latest origin tip on demand, surfacing the change as a reviewable lock diff.
+
+    \b
+      winter ws update              # re-pin all pinned standalones
+      winter ws update my-lib       # re-pin only my-lib
+      winter ws update --autostash  # allow re-pin of a dirty working tree
+    """
+    container = cli_ctx(ctx).container
+    handler = container.workspace_handler()
+    handler.update(EnvUpdateParams(repo=repo, autostash=autostash, output_json=output_json))
+
+
 @ws_group.command("merge")
 @click.argument("source_ref")
 @click.argument("patterns", nargs=-1)
@@ -816,6 +845,11 @@ def repo_list(ctx: click.Context, output_json: bool):
 @click.option("--name", default=None, help="Override URL-derived name.")
 @click.option("--main-branch", default=None, help="Per-repo main branch (overrides workspace default).")
 @click.option(
+    "--ref",
+    default=None,
+    help="Pin the standalone repo to a branch, tag, or commit (standalone only).",
+)
+@click.option(
     "--git-exclude",
     "git_excludes",
     multiple=True,
@@ -843,6 +877,7 @@ def repo_add(
     standalone: bool,
     name: str | None,
     main_branch: str | None,
+    ref: str | None,
     git_excludes: tuple[str, ...],
     cmds: tuple[str, ...],
     pinned: bool,
@@ -866,6 +901,7 @@ def repo_add(
             standalone=standalone,
             name=name,
             main_branch=main_branch,
+            ref=ref,
             git_excludes=list(git_excludes),
             cmd=list(cmds),
             pinned=pinned,

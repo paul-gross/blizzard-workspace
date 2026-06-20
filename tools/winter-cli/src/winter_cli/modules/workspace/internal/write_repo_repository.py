@@ -316,6 +316,23 @@ class WriteRepoRepository(ReadRepoRepository):
                 return RepoSyncOutcome(repo_name=repo.name, sync_result=SyncResult.no_upstream)
             return self._integrate(r, repo.name, tb, mode, autostash)
 
+    def integrate_standalone_to_ref(
+        self,
+        repo: StandaloneRepository,
+        target_ref: str,
+        mode: PullMode,
+        autostash: bool,
+    ) -> RepoSyncOutcome:
+        """Integrate a standalone repo against an explicit ref (e.g. ``origin/<branch>``).
+
+        Used by the branch-pin pull path to ff-only advance a standalone to the
+        current origin tip. Reuses the same ``_integrate`` machinery as
+        ``integrate_standalone`` so divergence is refused (not force-reset) and
+        ``autostash`` is honoured identically.
+        """
+        with git.Repo(str(repo.path)) as r:
+            return self._integrate(r, repo.name, target_ref, mode, autostash)
+
     def push_standalone(self, repo: StandaloneRepository) -> int:
         with git.Repo(str(repo.path)) as r:
             if self._tracking_branch_name(r) is None:

@@ -54,6 +54,7 @@ def _add_params(**overrides) -> RepoAddParams:
         "standalone": False,
         "name": None,
         "main_branch": None,
+        "ref": None,
         "git_excludes": [],
         "cmd": [],
         "pinned": False,
@@ -189,3 +190,36 @@ def test_remove_standalone_calls_config_repo() -> None:
     handler, config_repo = _make_handler()
     handler.remove(_remove_params(kind="standalone", name="ext"))
     config_repo.remove_standalone_repository.assert_called_once_with("ext", local=False)
+
+
+# ── add --ref: validation and write ──────────────────────────────────────────
+
+
+def test_add_ref_without_standalone_is_rejected() -> None:
+    handler, _ = _make_handler()
+    with pytest.raises(click.ClickException, match="--ref is only valid with --standalone"):
+        handler.add(_add_params(ref="v1.0.0"))
+
+
+def test_add_standalone_with_ref_writes_ref_to_config() -> None:
+    """repo add --standalone --ref v1.2.0 passes ref through to StandaloneRepositoryConfig."""
+    from winter_cli.config.models import StandaloneRepositoryConfig
+
+    handler, config_repo = _make_handler()
+    handler.add(_add_params(standalone=True, ref="v1.2.0"))
+
+    config_repo.append_standalone_repository.assert_called_once()
+    written_config: StandaloneRepositoryConfig = config_repo.append_standalone_repository.call_args[0][0]
+    assert written_config.ref == "v1.2.0"
+
+
+def test_add_standalone_without_ref_writes_none_ref() -> None:
+    """repo add --standalone without --ref leaves ref as None in StandaloneRepositoryConfig."""
+    from winter_cli.config.models import StandaloneRepositoryConfig
+
+    handler, config_repo = _make_handler()
+    handler.add(_add_params(standalone=True))
+
+    config_repo.append_standalone_repository.assert_called_once()
+    written_config: StandaloneRepositoryConfig = config_repo.append_standalone_repository.call_args[0][0]
+    assert written_config.ref is None

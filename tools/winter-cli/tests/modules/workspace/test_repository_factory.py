@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from winter_cli.config.models import SingletonRepository, SingletonType, WorkspaceConfig
+from winter_cli.config.models import SingletonRepository, SingletonType, StandaloneRepositoryConfig, WorkspaceConfig
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
 
@@ -31,3 +31,51 @@ def test_get_workspace_repo_none_without_workspace_singleton(
     factory = RepositoryFactory(config)
 
     assert factory.get_workspace_repo() is None
+
+
+# ── ref threading from config → domain ──────────────────────────────────────
+
+
+def test_get_standalone_repos_threads_ref_from_config(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """get_standalone_repos() populates StandaloneRepository.ref from StandaloneRepositoryConfig.ref."""
+    config = workspace_config.model_copy(
+        update={
+            "standalone_repos": [
+                StandaloneRepositoryConfig(
+                    name="pinned-ext",
+                    url="git@example.com:org/pinned-ext.git",
+                    ref="v1.2.0",
+                ),
+            ],
+        },
+    )
+    factory = RepositoryFactory(config)
+
+    repos = factory.get_standalone_repos()
+
+    assert len(repos) == 1
+    assert repos[0].ref == "v1.2.0"
+
+
+def test_get_standalone_repos_ref_is_none_when_not_configured(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """get_standalone_repos() leaves StandaloneRepository.ref as None when config omits ref."""
+    config = workspace_config.model_copy(
+        update={
+            "standalone_repos": [
+                StandaloneRepositoryConfig(
+                    name="unpinned-ext",
+                    url="git@example.com:org/unpinned-ext.git",
+                ),
+            ],
+        },
+    )
+    factory = RepositoryFactory(config)
+
+    repos = factory.get_standalone_repos()
+
+    assert len(repos) == 1
+    assert repos[0].ref is None

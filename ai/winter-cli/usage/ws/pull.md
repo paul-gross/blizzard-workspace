@@ -15,3 +15,14 @@ Fetches, then integrates each matched worktree's tracked upstream (ff-only by de
 | `--rebase` | Replay local commits onto the upstream tip when ff-only fails |
 
 `--autostash` (orthogonal) passes through to `git merge` / `git rebase`, which stash a dirty working tree before integrating and restore it after. If autostash fails, git aborts and the repo is reported as diverged.
+
+**Standalone repo pin behavior.** When a standalone repo has a `ref` configured (see [setup.md — ref](../../setup.md#ref--standalone-repo-pins)), `pull` applies the pin semantics instead of a plain upstream integrate:
+
+- **branch ref** — fetches origin, then fast-forwards the working tree to `origin/<ref>` using `git merge --ff-only` (the same safe machinery as non-pinned pulls, which refuses on divergence rather than force-resetting). Rewrites `.winter/config.lock` with the new HEAD commit when HEAD moved. Outcomes:
+  - `re-pinned → <sha>` — HEAD advanced; lock rewritten.
+  - `up to date` — already at origin tip; no lock churn.
+  - `diverged` — origin and local have diverged; refused (no commits lost). Run `winter ws update` to force a checkout.
+  - `pin error: <detail>` — dirty working tree without `--autostash`, or stash failure; refused without mutation. Pass `--autostash` to stash → ff → pop.
+- **tag / commit ref** — the checkout is held exactly at the locked commit; no integration happens. Reports `held @ <ref>`.
+
+To move a held pin (tag or commit) or snap a branch pin to the latest origin tip without waiting for the next `pull`, use [`winter ws update`](./update.md).

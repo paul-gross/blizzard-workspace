@@ -632,3 +632,48 @@ def test_capabilities_service_list_explicit_wins_over_legacy_key() -> None:
 
     config = svc.load()
     assert config.capabilities["service"] == ["A", "B"]
+
+
+# ── standalone_repository ref field ──────────────────────────────────────────
+
+
+def test_standalone_repository_ref_is_parsed() -> None:
+    """A [[standalone_repository]] entry with ref = "v1.2.0" populates StandaloneRepositoryConfig.ref."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "standalone_repository": [
+                    {"name": "pinned-ext", "url": "git@example.com:org/pinned-ext.git", "ref": "v1.2.0"},
+                ],
+            },
+        },
+    )
+
+    config = svc.load()
+
+    assert len(config.standalone_repos) == 1
+    assert config.standalone_repos[0].ref == "v1.2.0"
+
+
+def test_standalone_repository_without_ref_yields_none() -> None:
+    """A [[standalone_repository]] entry without ref leaves StandaloneRepositoryConfig.ref as None."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "standalone_repository": [
+                    {"name": "unpinned-ext", "url": "git@example.com:org/unpinned-ext.git"},
+                ],
+            },
+        },
+    )
+
+    config = svc.load()
+
+    assert len(config.standalone_repos) == 1
+    assert config.standalone_repos[0].ref is None
