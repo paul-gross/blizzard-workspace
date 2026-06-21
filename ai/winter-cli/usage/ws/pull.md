@@ -1,6 +1,6 @@
 # `winter ws pull` — integrate the tracked upstream
 
-Fetches, then integrates each matched worktree's tracked upstream (ff-only by default). Shares the [pattern and scope vocabulary](./patterns.md) with `fetch` / `push` / `merge`; this file covers only pull-specific behavior. For the family, see the [`winter ws` hub](./index.md).
+Fetches, then integrates each matched worktree's tracked upstream (ff-only by default). For project repos, the first step also fast-forwards the source checkout's local main (like `winter ws fetch`) — best-effort: a non-ff-able source checkout logs a warning and does not fail the pull. Shares the [pattern and scope vocabulary](./patterns.md) with `fetch` / `push` / `merge`; this file covers only pull-specific behavior. For the family, see the [`winter ws` hub](./index.md).
 
 **Per-repo target ref.** Each worktree resolves its integration ref independently from its *own* tracking branch — there is no single env-wide feature branch. A non-pinned project worktree pulls from whatever it tracks (e.g. `origin/<feature-branch>`, set by `winter ws connect`); a non-pinned worktree with **no** upstream is reported `no upstream` and skipped. Pinned project worktrees always pull from `origin/<main-branch>` because they don't participate in feature branching. Standalone repos pull from whatever their local branch tracks.
 

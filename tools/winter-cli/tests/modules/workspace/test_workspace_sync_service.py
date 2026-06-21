@@ -342,23 +342,30 @@ class _PullSpyWriteRepoRepository:
     is only meant to be reached for worktrees that resolved a ref; it records
     `(repo_name, target_ref)` so a test can pin *which* ref each worktree pulled
     from — proving per-worktree resolution rather than one env-wide ref.
+    `raise_sync_ff_only` names a repo whose `sync_ff_only` raises, modelling a
+    diverged or non-ff-able source checkout.
     """
 
     def __init__(
         self,
         upstreams: dict[str, str | None],
         integrate_results: dict[str, SyncResult] | None = None,
+        raise_sync_ff_only: str | None = None,
     ) -> None:
         self._upstreams = upstreams
         self._integrate_results = integrate_results or {}
-        self.fetched: list[str] = []
+        self._raise_sync_ff_only = raise_sync_ff_only
+        self.synced_ff: list[str] = []
         self.integrated: list[tuple[str, str]] = []
         self.upstream_queries: list[str] = []
         self._lock = threading.Lock()
 
-    def fetch(self, worktree: FeatureWorktree) -> None:
+    def sync_ff_only(self, repo: ProjectRepository) -> int:
         with self._lock:
-            self.fetched.append(worktree.repository.name)
+            self.synced_ff.append(repo.name)
+        if repo.name == self._raise_sync_ff_only:
+            raise RepoError(f"sync_ff_only failed for {repo.name}", cwd=str(repo.main_path))
+        return 0
 
     def get_worktree_upstream(self, worktree: FeatureWorktree) -> str | None:
         with self._lock:
@@ -457,6 +464,8 @@ def test_pull_all_mixed_env_skips_no_upstream_worktree_and_ffs_connected_one(
         reporter=reporter,  # type: ignore[arg-type]
     )
 
+    # source checkout sync ran for both groups (each repo is its own group).
+    assert set(repo_repo.synced_ff) == {"repo-a", "repo-b"}
     # repo-a pulled from its own upstream; repo-b never integrated.
     assert repo_repo.integrated == [("repo-a", "origin/featbranch")]
     outcomes = {o.repo_name: o.sync_result for o in report.envs[0].repos}
@@ -487,10 +496,45 @@ def test_pull_all_resolves_upstream_per_worktree_regardless_of_repo_order(
         reporter=reporter,  # type: ignore[arg-type]
     )
 
+    # source checkout sync ran for both groups (each repo is its own group).
+    assert set(repo_repo.synced_ff) == {"repo-a", "repo-b"}
     # repo-b pulled from ITS OWN ref, not origin/main and not repo-a's (absent) ref.
     assert repo_repo.integrated == [("repo-b", "origin/other-feat")]
     outcomes = {o.repo_name: o.sync_result for o in report.envs[0].repos}
     assert outcomes == {"repo-a": SyncResult.no_upstream, "repo-b": SyncResult.fast_forwarded}
+    assert report.success is True
+
+
+def test_pull_all_source_checkout_sync_failure_is_best_effort(
+    workspace_config: WorkspaceConfig, tmp_path: Path
+) -> None:
+    """A RepoError from sync_ff_only (e.g. diverged source main) does not fail the pull.
+
+    The worktree integrates still run and succeed; the overall report is success.
+    The source-checkout sync is best-effort: a non-ff-able checkout logs a warning
+    and pull continues.
+    """
+    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    env_worktrees = _make_env_with_named_worktrees(workspace, tmp_path, ["repo-a"])
+    repo_repo = _PullSpyWriteRepoRepository(
+        upstreams={"repo-a": "origin/featbranch"},
+        raise_sync_ff_only="repo-a",
+    )
+    svc = _make_pull_service(workspace, workspace_config, env_worktrees, repo_repo)
+    reporter = _RecordingPullReporter()
+
+    report = svc.pull_all(
+        scope=RepoScope.project,
+        patterns=None,
+        mode=PullMode.ff_only,
+        autostash=False,
+        reporter=reporter,  # type: ignore[arg-type]
+    )
+
+    # sync_ff_only was attempted (and raised), but integrate still ran.
+    assert repo_repo.synced_ff == ["repo-a"]
+    assert repo_repo.integrated == [("repo-a", "origin/featbranch")]
+    assert report.envs[0].success is True
     assert report.success is True
 
 

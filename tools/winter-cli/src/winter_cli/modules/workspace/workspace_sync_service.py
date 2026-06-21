@@ -366,23 +366,27 @@ class WorkspaceSyncService:
         autostash: bool,
         reporter: IPullReporter,
     ) -> list[tuple[str, RepoSyncOutcome]]:
-        """Fetch a project repo once, then integrate each of its worktrees.
+        """Fetch and fast-forward a project repo's source checkout, then integrate each worktree.
 
         Worktrees of a project repo share a `.git`, so a single
-        `git fetch origin` from any of them updates remote refs for every
-        worktree — we fetch from the first and run integrate sequentially
-        for the rest. A non-pinned target carries no explicit ref: we read
-        its own tracking branch here (post-fetch, on a worktree known to
-        exist) and integrate from that, or emit a `no_upstream` skip when
-        it has none — mirroring the standalone path. Per-worktree events
-        are emitted on `reporter` from inside this task so the user sees
-        them as soon as each integrate lands, even within the same group.
+        `sync_ff_only` from the source checkout fetches `origin` AND
+        fast-forwards the local main for every worktree — we do this first,
+        then run integrate sequentially for each target worktree. A
+        non-pinned target carries no explicit ref: we read its own tracking
+        branch here (post-fetch, on a worktree known to exist) and integrate
+        from that, or emit a `no_upstream` skip when it has none — mirroring
+        the standalone path. Per-worktree events are emitted on `reporter`
+        from inside this task so the user sees them as soon as each integrate
+        lands, even within the same group. Source-checkout sync is
+        best-effort: a failed fetch or a non-ff-able / diverged source
+        checkout logs a warning and does not fail the pull — the worktree
+        integrates still run against whatever refs the fetch left in place.
         """
         first_wt = targets[0].worktree
         try:
-            self._repo_repo.fetch(first_wt)
+            self._repo_repo.sync_ff_only(first_wt.repository)
         except RepoError as exc:
-            logger.warning("Fetch failed for %s: %s", first_wt.repository.name, exc)
+            logger.warning("Source checkout sync failed for %s: %s", first_wt.repository.name, exc)
         results: list[tuple[str, RepoSyncOutcome]] = []
         for t in targets:
             outcome = self._integrate_target(t, mode, autostash)
