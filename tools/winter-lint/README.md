@@ -95,8 +95,8 @@ collaborators at construction time:
   `module_name`, `module_requires`, and `owning_module` (walks ancestor dirs to
   find the nearest manifest).
 - **`ReferenceScanner`** — scans markdown content. Exposes `references_in_line`
-  (path-notation refs), `import_target_module` (@import resolution), and
-  `collect_md_files` (directory walker).
+  (path-notation refs), `import_target_modules` (@import resolution, one per
+  reference on a line), and `collect_md_files` (directory walker).
 - **`ExtractabilityLint`** — orchestrates the full check. Constructed with the
   three collaborators above; exposes `check_paths` (validates a list of paths
   against a graph) and `cycle_findings` (detects `requires` cycles in the graph).

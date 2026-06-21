@@ -3,9 +3,9 @@
 
 A winter module (an extension shipping a `winter-ext.toml`) is developed inside
 this multi-repo workspace but installed standalone elsewhere. So every outbound
-reference it makes — a `<context>:/path` path-notation reference, a Claude
-`@import`, or its rewritten plain-path read instruction (`always read ./path`,
-the cross-harness form from issue #84) — must resolve to something the module is guaranteed to have when it
+reference it makes — a `<context>:/path` path-notation reference or a Claude
+`@import` (line-leading or inline within prose) — must resolve to something the
+module is guaranteed to have when it
 ships alone: itself, core (`winter` / `winter-cli` / `workspace`), or a module
 it explicitly declares in its `winter-ext.toml` `requires`. A reference to an
 undeclared sibling is a dead pointer at the consumption edge; a core module
@@ -64,15 +64,17 @@ PRUNE_DIRS = frozenset({".git", ".venv", "node_modules", "__pycache__", ".mypy_c
 # matches like `apphttps:/`.
 _REF_RE = re.compile(r"(?<![A-Za-z0-9_./-])([a-z][a-z0-9-]*):/")
 
-# Claude `@import` at the start of a line. Guarded later to a path-shaped target
-# so `@param`-style mentions don't register.
-_IMPORT_RE = re.compile(r"^\s*@(\S+)")
+# Claude `@import` — anywhere in a line and more than once per line, since Claude
+# resolves @path imports both line-leading (`@ai/x.md`) and inline within prose
+# (`...declared in @ai/x.md that...`). The lookbehind keeps us off `user@host`-
+# style mid-token matches; the path-shaped guard in `import_target_modules` drops
+# `@param`-style mentions.
+_IMPORT_RE = re.compile(r"(?<![A-Za-z0-9_])@([^\s`]+)")
 
-# Rewritten `@import` (issue #84): a high-emphasis plain-path read instruction
-# emitted for non-Claude harnesses, e.g. `IMPORTANT: always read ./ai/x.md`. The
-# `@` is dropped, so this form is matched by the `read` verb plus a relative
-# (`./` or `../`) path. Optional surrounding backticks are tolerated.
-_READ_REF_RE = re.compile(r"\bread\s+`?(\.{1,2}/[^\s`]+)")
+# Trailing prose/markdown punctuation to strip off a captured @import path —
+# sentence punctuation and closing brackets/quotes that abut a path inline
+# (`(@x.md)`, `[t](@x.md)`, `see @x.md.`). A real path never ends in these.
+_IMPORT_TRIM = ".,;:!?)]}>\"'"
 
 # Same-line illustrative-example exemption marker.
 _MARKER_RE = re.compile(r"<!--\s*winter-lint:\s*example\s*-->", re.IGNORECASE)
@@ -182,49 +184,46 @@ class ReferenceScanner:
         """Winter `<context>:` reference contexts on a line (may repeat)."""
         return [m.group(1) for m in _REF_RE.finditer(line) if self._is_winter_context(m.group(1))]
 
-    def import_raw_path(self, line: str) -> str | None:
-        """Relative path referenced by a line's `@import` or rewritten read instruction.
+    def import_raw_paths(self, line: str) -> list[str]:
+        """Relative paths referenced by a line's Claude `@import`s (may repeat).
 
-        Accepts both reference forms as equivalent: a line-leading Claude
-        `@import` (`@ai/x.md`) and the rewritten plain-path read instruction
-        (`IMPORTANT: always read ./ai/x.md`). Returns the raw path string, or
-        None when the line carries neither.
+        Matches every `@import` on the line — line-leading (`@ai/x.md`) or inline
+        within prose (`...declared in @ai/x.md that...`), including more than one
+        per line, mirroring how Claude resolves @path imports anywhere in
+        CLAUDE.md. Trailing prose/markdown punctuation (`_IMPORT_TRIM`) is
+        trimmed; the path-shaped guard in `import_target_modules` drops
+        `@param`-style mentions. Returns one raw path per match (possibly empty).
         """
-        m = _IMPORT_RE.match(line)
-        if m:
-            return m.group(1)
-        m = _READ_REF_RE.search(line)
-        if m:
-            return m.group(1).rstrip(".,;:")
-        return None
+        return [m.group(1).rstrip(_IMPORT_TRIM) for m in _IMPORT_RE.finditer(line)]
 
-    def import_target_module(
+    def import_target_modules(
         self,
         line: str,
         file: Path,
         owner_root: Path,
         workspace_root: Path,
         manifest_reader: ManifestReader,
-    ) -> str | None:
-        """Module a line's `@import` (or rewritten read instruction) points at, if it escapes the owner module.
+    ) -> list[str]:
+        """Modules a line's `@import`s point at, for each that escapes the owner.
 
-        Returns the target module name when the reference resolves outside the
-        owning module's root (a cross-module dependency), else None (internal
-        reference, or not a reference-shaped line).
+        Returns one module name per `@import` whose target resolves outside the
+        owning module's root (a cross-module dependency). Internal references and
+        `@param`-style non-paths are dropped, so the result may be empty.
         """
-        raw = self.import_raw_path(line)
-        if raw is None:
-            return None
-        if "/" not in raw and "." not in raw:  # `@param`-style, not a path import
-            return None
-        target = (file.parent / raw).resolve()
-        try:
-            target.relative_to(owner_root.resolve())
-            return None  # internal to the module
-        except ValueError:
-            pass
-        name, _ = manifest_reader.owning_module(target, workspace_root)
-        return name
+        out: list[str] = []
+        for raw in self.import_raw_paths(line):
+            if "/" not in raw and "." not in raw:  # `@param`-style, not a path import
+                continue
+            target = (file.parent / raw).resolve()
+            try:
+                target.relative_to(owner_root.resolve())
+                continue  # internal to the module
+            except ValueError:
+                pass
+            name, _ = manifest_reader.owning_module(target, workspace_root)
+            if name is not None:
+                out.append(name)
+        return out
 
     def collect_md_files(self, paths: list[Path]) -> list[Path]:
         out: list[Path] = []
@@ -302,11 +301,11 @@ class ExtractabilityLint:
                 if _MARKER_RE.search(line):
                     continue
                 targets = self._scanner.references_in_line(line)
-                imp = self._scanner.import_target_module(
-                    line, file, owner_root, workspace_root, self._manifest_reader
+                targets.extend(
+                    self._scanner.import_target_modules(
+                        line, file, owner_root, workspace_root, self._manifest_reader
+                    )
                 )
-                if imp is not None:
-                    targets.append(imp)
                 for target in targets:
                     verdict = self._classify(owner, owner_requires, target, known)
                     if verdict is not None:

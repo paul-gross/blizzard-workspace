@@ -186,33 +186,52 @@ class ImportTests(unittest.TestCase):
             (root / "modA" / "winter-ext.toml").write_text('name = "winter-a"\n')
             file = root / "modA" / "CLAUDE.md"
             file.write_text("@sub/thing.md\n")
-            self.assertIsNone(
-                self.scanner.import_target_module(
+            self.assertEqual(
+                self.scanner.import_target_modules(
                     "@sub/thing.md", file, root / "modA", root, self.manifest_reader
-                )
+                ),
+                [],
             )
 
     def test_non_path_mention_ignored(self) -> None:
-        self.assertIsNone(
-            self.scanner.import_target_module(
+        self.assertEqual(
+            self.scanner.import_target_modules(
                 "@param foo", Path("/x/CLAUDE.md"), Path("/x"), Path("/x"), self.manifest_reader
-            )
+            ),
+            [],
         )
 
-    def test_import_raw_path_accepts_both_forms(self) -> None:
-        # Claude @import.
-        self.assertEqual(self.scanner.import_raw_path("@ai/x.md"), "ai/x.md")
-        # Rewritten cross-harness read instruction (issue #84).
+    def test_import_raw_paths_line_leading_and_inline(self) -> None:
+        # Line-leading Claude @import.
+        self.assertEqual(self.scanner.import_raw_paths("@ai/x.md"), ["ai/x.md"])
+        # Inline within prose (the cross-harness form from issue #84).
         self.assertEqual(
-            self.scanner.import_raw_path("IMPORTANT: always read ./ai/x.md"), "./ai/x.md"
+            self.scanner.import_raw_paths(
+                "IMPORTANT: this workspace declares pieces in @ai/x.md that matter."
+            ),
+            ["ai/x.md"],
         )
-        self.assertEqual(
-            self.scanner.import_raw_path("IMPORTANT: always read `../sib/y.md`"), "../sib/y.md"
-        )
-        # Neither form.
-        self.assertIsNone(self.scanner.import_raw_path("just some prose"))
+        # Inline relative path with a trailing sentence period.
+        self.assertEqual(self.scanner.import_raw_paths("see @../sib/y.md."), ["../sib/y.md"])
+        # No @import on the line.
+        self.assertEqual(self.scanner.import_raw_paths("just some prose"), [])
+        # `user@host`-style mid-token mentions are not imports.
+        self.assertEqual(self.scanner.import_raw_paths("ping user@example.com for help"), [])
 
-    def test_rewritten_read_ref_resolves_cross_module(self) -> None:
+    def test_import_raw_paths_trims_brackets_and_quotes(self) -> None:
+        # Parenthesized and markdown-link inline references.
+        self.assertEqual(self.scanner.import_raw_paths("see (@ai/x.md)"), ["ai/x.md"])
+        self.assertEqual(self.scanner.import_raw_paths("[link](@ai/x.md)"), ["ai/x.md"])
+        # Quoted reference with trailing period.
+        self.assertEqual(self.scanner.import_raw_paths('read "@ai/x.md".'), ["ai/x.md"])
+
+    def test_import_raw_paths_multiple_per_line(self) -> None:
+        self.assertEqual(
+            self.scanner.import_raw_paths("read @a/b.md and also @c/d.md please"),
+            ["a/b.md", "c/d.md"],
+        )
+
+    def test_inline_imports_resolve_cross_module(self) -> None:
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmp:
@@ -222,16 +241,27 @@ class ImportTests(unittest.TestCase):
             (root / "modB").mkdir()
             (root / "modB" / "winter-ext.toml").write_text('name = "winter-b"\n')
             file = root / "modA" / "CLAUDE.md"
-            # A rewritten read instruction pointing into a sibling module.
+            # An inline @import pointing into a sibling module.
             self.assertEqual(
-                self.scanner.import_target_module(
-                    "IMPORTANT: always read ../modB/thing.md",
+                self.scanner.import_target_modules(
+                    "IMPORTANT: this declares pieces in @../modB/thing.md that matter.",
                     file,
                     root / "modA",
                     root,
                     self.manifest_reader,
                 ),
-                "winter-b",
+                ["winter-b"],
+            )
+            # Two @imports on one line — both must be detected.
+            self.assertEqual(
+                self.scanner.import_target_modules(
+                    "see @../modB/a.md and @../modB/b.md",
+                    file,
+                    root / "modA",
+                    root,
+                    self.manifest_reader,
+                ),
+                ["winter-b", "winter-b"],
             )
 
 
