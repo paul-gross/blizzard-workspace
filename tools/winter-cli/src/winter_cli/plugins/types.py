@@ -19,6 +19,7 @@ import click
 
 from winter_cli.modules.workspace.models import (
     FeatureEnvironment,
+    FeatureEnvironmentWorktrees,
     FeatureWorktree,
     StandaloneRepository,
     Workspace,
@@ -110,12 +111,28 @@ class WorkspaceContext:
 @dataclasses.dataclass
 class FeatureEnvironmentContext:
     environment: FeatureEnvironment
+    worktrees: list[FeatureWorktree] = dataclasses.field(default_factory=list)
+    """Every project-repo worktree in the environment (each worktree's `path`,
+    repository `name`, and branch via `environment.name`). Lets an env-scoped
+    handler act across the whole feature env without re-deriving the repo set.
+    The workspace is reachable via `environment.workspace`."""
+
     suspend: SuspendFn | None = None
 
 
 @dataclasses.dataclass
 class FeatureWorktreeContext:
     worktree: FeatureWorktree
+    environment_worktrees: FeatureEnvironmentWorktrees | None = None
+    """The worktree's sibling worktrees (`.environment` + `.worktrees`), so a
+    worktree-scoped handler can also act env-wide. `None` only when a context is
+    constructed without it (e.g. a test); the dashboard always populates it."""
+
+    workspace: Workspace | None = None
+    """Explicit workspace handle (`root_path`, `main_branch`). Also reachable via
+    `worktree.workspace`; surfaced here for discoverability and parity with the
+    env context."""
+
     suspend: SuspendFn | None = None
 
 

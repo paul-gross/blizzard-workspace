@@ -303,8 +303,14 @@ class WorktreeDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
 
     @work(thread=True)
     def _execute_environment_action(self, action_name: str, originating_scope: ActionScope) -> None:
+        project_repos = self._repo_factory.get_project_repos()
         env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
-        ctx = FeatureEnvironmentContext(environment=env, suspend=self.app.suspend)
+        env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
+        ctx = FeatureEnvironmentContext(
+            environment=env,
+            worktrees=env_worktrees.worktrees,
+            suspend=self.app.suspend,
+        )
         inv = ActionInvocation(scope=originating_scope, context=ctx)
         for action in self._plugin_registry.actions_for_scope(originating_scope):
             if action.name == action_name:
@@ -319,7 +325,12 @@ class WorktreeDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
         wt = next((wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name), None)
         if wt is None:
             return
-        ctx = FeatureWorktreeContext(worktree=wt, suspend=self.app.suspend)
+        ctx = FeatureWorktreeContext(
+            worktree=wt,
+            environment_worktrees=env_worktrees,
+            workspace=self._workspace,
+            suspend=self.app.suspend,
+        )
         inv = ActionInvocation(scope=originating_scope, context=ctx)
         for action in self._plugin_registry.actions_for_scope(originating_scope):
             if action.name == action_name:

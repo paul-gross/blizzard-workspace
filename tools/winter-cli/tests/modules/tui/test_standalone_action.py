@@ -35,6 +35,7 @@ from winter_cli.modules.workspace.models.service_model import (
 from winter_cli.plugins.types import (
     ActionInvocation,
     ActionScope,
+    FeatureEnvironmentContext,
     FeatureWorktreeContext,
     StandaloneRepoContext,
     TuiAction,
@@ -339,3 +340,97 @@ async def test_multiscope_action_fires_worktree_scope_when_grid_focused():
     assert inv.scope == ActionScope.feature_worktree
     assert isinstance(inv.context, FeatureWorktreeContext)
     assert inv.worktree.repository.name == "winter-cli"
+
+
+# --- enriched action contexts (issue/82) -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_environment_action_context_carries_env_worktrees():
+    """A feature_environment action receives the full per-env worktree set —
+    each worktree's path, repository name, and branch (via environment.name) —
+    populated from data already loaded at dispatch (no filesystem scan or config
+    parsing). The workspace is reachable via `environment.workspace`."""
+    captured: list[ActionInvocation] = []
+    action = TuiAction(
+        name="probe",
+        scope=ActionScope.feature_environment,
+        key="P",
+        description="probe",
+        handler=captured.append,
+    )
+    overview = _overview("alpha", 1, ["winter-cli", "winter-docs"])
+    screen = _make_screen_with_env([action], overview)
+    app = _ScreenApp(screen)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        grid = screen.query_one("#grid", FeatureWorktreesGrid)
+        grid.move_cursor(row=0, column=1)
+        grid.focus()
+        await pilot.pause()
+        assert grid.get_selected_worktree() == "alpha"
+
+        screen._run_plugin_action("probe")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    assert len(captured) == 1
+    inv = captured[0]
+    assert inv.scope == ActionScope.feature_environment
+    assert isinstance(inv.context, FeatureEnvironmentContext)
+    # Every project-repo worktree in the env is enumerable from the context.
+    names = sorted(wt.repository.name for wt in inv.worktrees)
+    assert names == ["winter-cli", "winter-docs"]
+    cli_wt = next(wt for wt in inv.worktrees if wt.repository.name == "winter-cli")
+    assert cli_wt.path == Path("/tmp/ws/alpha/winter-cli")
+    assert cli_wt.environment.name == "alpha"
+    # Workspace (root_path, main_branch) is reachable via the environment.
+    assert inv.context.environment.workspace.root_path == Path("/tmp/ws")
+    assert inv.context.environment.workspace.main_branch == "main"
+
+
+@pytest.mark.asyncio
+async def test_worktree_action_context_carries_siblings_and_workspace():
+    """A feature_worktree action can reach the env's sibling worktrees (for
+    env-wide actions triggered from a worktree cell) plus an explicit workspace
+    handle, both populated from data already in hand at dispatch."""
+    captured: list[ActionInvocation] = []
+    action = TuiAction(
+        name="probe",
+        scope=ActionScope.feature_worktree,
+        key="P",
+        description="probe",
+        handler=captured.append,
+    )
+    overview = _overview("alpha", 1, ["winter-cli", "winter-docs"])
+    screen = _make_screen_with_env([action], overview)
+    app = _ScreenApp(screen)
+    async with app.run_test(size=(120, 40)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        grid = screen.query_one("#grid", FeatureWorktreesGrid)
+        grid.move_cursor(row=0, column=1)
+        grid.focus()
+        await pilot.pause()
+        assert grid.get_selected_worktree() == "alpha"
+        assert grid.get_selected_repo() == "winter-cli"
+
+        screen._run_plugin_action("probe")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    assert len(captured) == 1
+    inv = captured[0]
+    assert isinstance(inv.context, FeatureWorktreeContext)
+    assert inv.worktree.repository.name == "winter-cli"
+    # Sibling worktrees are reachable for an env-wide action from a worktree cell.
+    assert inv.context.environment_worktrees is not None
+    sibling_names = sorted(wt.repository.name for wt in inv.context.environment_worktrees.worktrees)
+    assert sibling_names == ["winter-cli", "winter-docs"]
+    assert inv.context.environment_worktrees.environment.name == "alpha"
+    # Explicit workspace handle (root_path, main_branch).
+    assert inv.context.workspace is _WORKSPACE
+    assert inv.context.workspace.main_branch == "main"
