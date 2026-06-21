@@ -56,9 +56,9 @@ Every built-in action listed below has a stable **action id**. A `[keybindings]`
 | `standalone.refresh` | `r` | Re-read the standalone repo's status |
 | `standalone.open_log` | `L` | Open the Log tab |
 | `standalone.back` | `q` | Back to the workspace screen |
-| `plugin.<name>` | the plugin's `TuiAction.key` | Run a plugin-contributed action (see `winter-harness:/architecture/plugin-author.md`) |
+| `plugin.<name>` | the plugin's `TuiAction.key` | Run a plugin-contributed action |
 
-A `plugin.<name>` action can declare **several areas** (e.g. the standalone-repos panel and a feature-worktree) and fire under one key in each — the dashboard routes to whichever area is focused. Because two plugin actions on the same key conflict only when their areas overlap, disjoint-area actions may share a key; see `winter-harness:/architecture/plugin-author.md`.
+A `plugin.<name>` action can declare **several areas** (e.g. the standalone-repos panel and a feature-worktree) and fire under one key in each — the dashboard routes to whichever area is focused. Because two plugin actions on the same key conflict only when their areas overlap, disjoint-area actions may share a key.
 
 **Key-spec grammar** (Neovim-inspired):
 

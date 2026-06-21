@@ -11,7 +11,7 @@ inversion. This check catches both.
 
 ## What counts as a reference
 
-- A path-notation reference `<context>:/path` (e.g. `winter-product:/ai/todos.md`).
+- A path-notation reference `<context>:/path` (e.g. `winter-product:/ai/todos.md`). <!-- winter-lint:example -->
 - A Claude `@import` whose target escapes the module's own directory.
 
 ## Rules
@@ -108,7 +108,7 @@ later move into a dedicated `winter-lint` extension intact.
 
 **Testing-standard carve-out:** `test_extractability.py` uses `unittest.TestCase`
 rather than plain pytest functions. This is a documented exception to the
-`winter-harness:/standards/testing.md` pytest-only rule. The rationale: this tool
+`winter-harness:/standards/testing.md` pytest-only rule. The rationale: this tool <!-- winter-lint:example -->
 directory is intentionally stdlib-only so it can ship standalone without `pytest`
 as an install dependency. If the tool ever gains a proper `pyproject.toml`, the
 tests should be migrated to pytest at that point.

@@ -23,15 +23,15 @@ Follow the **Branch resolution** pattern defined in the root CLAUDE.md. Use the 
 
 ## Step 1: Read the work item
 
-When the `winter-product` extension is installed, work items live under `winter-product:/`:
+When a work-item extension such as `winter-product` is installed, work items live under that extension's directory:
 
-1. **Promoted work item** → read `winter-product:/work/<name>/00-overview.md` (and any `.tech.md` siblings under that directory).
-2. **Open backlog item** (still being refined) → check `winter-product:/backlog/**/<name>.{idea,todo,work}.md`. If found, tell the user the item is in `backlog/` and ask whether to promote it via `/wp-refine <name>` first, or proceed with the open description.
+1. **Promoted work item** → read its `work/<name>/00-overview.md` (and any `.tech.md` siblings under that directory).
+2. **Open backlog item** (still being refined) → check its `backlog/**/<name>.{idea,todo,work}.md`. If found, tell the user the item is in `backlog/` and ask whether to promote it via `/wp-refine <name>` first, or proceed with the open description.
 3. **Workspace-relative plan files** (legacy) → fall back to a glob over the workspace for a file whose name or content matches `<name>`. Ask the user to confirm the match before proceeding.
 
 Summarize for the user (1–2 sentences from the overview).
 
-The earlier `winter-product:/plans/` and `winter-product:/todos/` layout has been replaced by the single `backlog/` + `work/` model.
+The earlier `plans/` and `todos/` layout has been replaced by the single `backlog/` + `work/` model.
 
 ## Step 2: Determine scope
 

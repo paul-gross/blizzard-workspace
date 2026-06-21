@@ -57,8 +57,6 @@ Many files at the workspace root — most `ai/` docs, `CLAUDE.md`, and others �
 
 How to tell: run `git show winter/master:<path>` — if the file exists there, it is inherited. The customization commit's own diff (`git show HEAD`) lists every file the workspace owns independently; anything not in that diff is inherited.
 
-The dual-remote layout and the sync mechanics that carry a source fix downstream are in `winter-harness:/workflows/upstream-tracking.md`.
-
 ## Feature Worktree Structure
 
 Each Greek letter directory (e.g., `alpha/`) contains a git worktree for **every** repository in `projects/`. All worktrees within a feature directory share the same branch name (the Greek letter).
