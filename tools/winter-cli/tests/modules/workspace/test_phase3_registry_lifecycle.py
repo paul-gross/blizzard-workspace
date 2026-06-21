@@ -97,7 +97,7 @@ def _init_service(
     fs: FakeFilesystem,
     subprocess: FakeSubprocessRunner,
     git: FakeGitRepository,
-    registry: IEnvIndexRegistry | None = None,
+    registry: IEnvIndexRegistry,
 ) -> InitService:
     manifest_loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader({}))
     return InitService(
@@ -135,7 +135,7 @@ def _destroy_service(
     workspace_config: WorkspaceConfig,
     fs: FakeFilesystem,
     git: FakeGitRepository,
-    registry: IEnvIndexRegistry | None = None,
+    registry: IEnvIndexRegistry,
 ) -> DestroyService:
     hook_svc = ExtensionHookService(
         config=workspace_config,
@@ -253,23 +253,6 @@ class TestInitRecordsRegistry:
 
         assert first_index == second_index == 1
 
-    def test_init_without_registry_still_works(self) -> None:
-        """reconcile_env with no registry falls back to resolve_env_index (backward compat)."""
-        demo_path = WORKSPACE_ROOT / "projects" / "demo"
-        fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", demo_path])
-        fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
-        fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
-        git = FakeGitRepository()
-        git.local_branches[demo_path] = ["main"]
-
-        cfg = _default_config()
-        svc = _init_service(cfg, fs, FakeSubprocessRunner(), git, registry=None)
-        ok = svc.reconcile_env("alpha", FakeInitReporter())
-
-        assert ok is True
-        env_file = WORKSPACE_ROOT / "alpha" / ".winter.env"
-        assert "WINTER_ENV_INDEX=1" in fs.files[env_file]
-
 
 # ---------------------------------------------------------------------------
 # (b) destroy removes registry entry; dry-run does not
@@ -320,18 +303,6 @@ class TestDestroyRemovesRegistry:
         assert ok is True
         # Registry entry preserved on dry-run.
         assert registry.get_index("alpha") == 1
-
-    def test_destroy_without_registry_is_a_noop(self) -> None:
-        """Destroy with no registry (registry=None) still succeeds without error."""
-        fs = self._setup_env_fs()
-        git = FakeGitRepository()
-        git.clean_worktrees.add(WORKSPACE_ROOT / "alpha" / "demo")
-
-        cfg = _default_config()
-        svc = _destroy_service(cfg, fs, git, registry=None)
-        ok = svc.destroy_env("alpha", force=False, strict=False, dry_run=False, reporter=FakeInitReporter())
-
-        assert ok is True
 
     def test_destroy_remove_is_noop_when_name_not_registered(self) -> None:
         """If the env was never recorded, remove is a no-op (registry.remove is idempotent)."""

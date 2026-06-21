@@ -79,7 +79,7 @@ class InitService:
         subprocess_runner: ISubprocessRunner,
         git_repo: IGitRepository,
         git_ops: GitOpsService,
-        registry: IEnvIndexRegistry | None = None,
+        registry: IEnvIndexRegistry,
         config_lock_repo: IConfigLockRepository | None = None,
     ) -> None:
         self._config = config
@@ -519,16 +519,11 @@ class InitService:
         and are preserved across re-runs. The block itself is rewritten in full
         each time, so changing the worktree's index updates the file cleanly.
         """
-        if self._registry is not None:
-            index = EnvIndexAllocator(self._registry).allocate(
-                env_name,
-                self._config.env_aliases,
-                self._config.envs_per_workspace,
-            )
-        else:
-            from winter_cli.modules.workspace.env_index import resolve_env_index
-
-            index = resolve_env_index(env_name, self._config.env_aliases, self._config.envs_per_workspace)
+        index = EnvIndexAllocator(self._registry).allocate(
+            env_name,
+            self._config.env_aliases,
+            self._config.envs_per_workspace,
+        )
         port_base = self._config.port_base_for_index(index)
 
         block_lines = [

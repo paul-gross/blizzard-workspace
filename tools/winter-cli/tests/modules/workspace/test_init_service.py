@@ -8,6 +8,7 @@ import pytest
 from tests.conftest import (
     FakeConfigFileReader,
     FakeConfigLockRepository,
+    FakeEnvIndexRegistry,
     FakeFilesystem,
     FakeGitRepository,
     FakeInitReporter,
@@ -57,6 +58,7 @@ def _service(
     git: FakeGitRepository,
     git_ops: GitOpsService | None = None,
     config_lock_repo: FakeConfigLockRepository | None = None,
+    registry: FakeEnvIndexRegistry | None = None,
 ) -> InitService:
     manifest_loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader({}))
     return InitService(
@@ -86,6 +88,7 @@ def _service(
         subprocess_runner=subprocess,
         git_repo=git,
         git_ops=git_ops or GitOpsService(RepoErrorFactory()),
+        registry=registry or FakeEnvIndexRegistry(),
         config_lock_repo=config_lock_repo,
     )
 
@@ -165,6 +168,47 @@ def test_reconcile_env_creates_worktree_and_seeds_env_file(
     assert "WINTER_PORT_BASE=4020" in content
     # Identity applied to the worktree.
     assert (WORKSPACE_ROOT / "alpha" / "demo", "Bot", "bot@example.com") in git.identities
+
+
+def test_reconcile_env_uses_persisted_registry_index(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """_seed_winter_env calls EnvIndexAllocator.allocate, which returns the persisted
+    slot for a known env rather than recomputing the suggested slot.
+
+    A non-alias env name that is already in the registry (e.g. from a prior
+    collision-probe run) must get back the same persisted index on every
+    subsequent reconcile — not a freshly-suggested one that could differ.
+    """
+    demo_path = WORKSPACE_ROOT / "projects" / "demo"
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", demo_path])
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+
+    subprocess = FakeSubprocessRunner()
+    git = FakeGitRepository()
+    git.local_branches[demo_path] = ["main"]
+
+    # "myenv" is not in env_aliases so the allocator falls through to the
+    # idempotent-existing-registration path. Pre-seed an out-of-band index
+    # to prove the persisted value is returned, not the hash suggestion.
+    # (Alias envs like "alpha" are always forced to their fixed slot by the
+    # allocator — use a non-alias name here.)
+    env_name = "myenv"
+    persisted_index = 15  # arbitrary; not the hash suggestion for "myenv"
+    registry = FakeEnvIndexRegistry(assignments={env_name: persisted_index})
+
+    svc = _service(workspace_config, fs, subprocess, git, registry=registry)
+    ok = svc.reconcile_env(env_name, init_reporter)
+
+    assert ok is True
+    env_file = WORKSPACE_ROOT / env_name / ".winter.env"
+    content = fs.files[env_file]
+    assert f"WINTER_ENV_INDEX={persisted_index}" in content
+    # Port base = base_port + index * ports_per_env = 4000 + 15 * 20 = 4300
+    assert "WINTER_PORT_BASE=4300" in content
+    # Registry entry unchanged — allocate is idempotent for known entries.
+    assert registry.assignments[env_name] == persisted_index
 
 
 def test_reconcile_env_fails_when_source_checkout_missing(
@@ -387,6 +431,7 @@ def _service_with_ext(
         subprocess_runner=subprocess,
         git_repo=git,
         git_ops=GitOpsService(RepoErrorFactory()),
+        registry=FakeEnvIndexRegistry(),
     )
 
 

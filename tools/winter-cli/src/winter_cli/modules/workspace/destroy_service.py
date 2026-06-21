@@ -42,7 +42,7 @@ class DestroyService:
         extension_hook_svc: ExtensionHookService,
         fs: IFilesystemWriter,
         git_repo: IGitRepository,
-        registry: IEnvIndexRegistry | None = None,
+        registry: IEnvIndexRegistry,
     ) -> None:
         self._config = config
         self._repo_factory = repo_factory
@@ -150,8 +150,7 @@ class DestroyService:
 
         # Phase 6: remove the env-index registry entry so the index can be
         # reused by a future env with the same name.
-        if self._registry is not None:
-            self._registry.remove(name)
+        self._registry.remove(name)
 
         reporter.target_completed(name, success)
         return success

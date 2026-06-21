@@ -6,6 +6,7 @@ import pytest
 
 from tests.conftest import (
     FakeConfigFileReader,
+    FakeEnvIndexRegistry,
     FakeFilesystem,
     FakeGitRepository,
     FakeInitReporter,
@@ -43,6 +44,7 @@ def _service(
     workspace_config: WorkspaceConfig,
     fs: FakeFilesystem,
     git: FakeGitRepository,
+    registry: FakeEnvIndexRegistry | None = None,
 ) -> DestroyService:
     hook_svc = ExtensionHookService(
         config=workspace_config,
@@ -56,6 +58,7 @@ def _service(
         extension_hook_svc=hook_svc,
         fs=fs,
         git_repo=git,
+        registry=registry or FakeEnvIndexRegistry(),
     )
 
 
@@ -181,6 +184,30 @@ def test_destroy_env_with_missing_source_checkout_falls_back_to_rmtree(
     assert not fs.exists(env_root)
     actions = [(a[0], a[2], a[3]) for a in init_reporter.actions]
     assert ("demo", "worktree_removed", "no source checkout") in actions
+
+
+def test_destroy_env_removes_registry_entry(workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter) -> None:
+    """Phase 6: destroy_env always removes the env's registry entry so the index can be reused."""
+    env_root = WORKSPACE_ROOT / "alpha"
+    worktree_path = env_root / "demo"
+    fs = FakeFilesystem(
+        directories=[WORKSPACE_ROOT / "projects", DEMO_MAIN, env_root, worktree_path],
+        files={
+            env_root / ".winter.env": "WINTER_ENV=alpha\n",
+            WORKSPACE_ROOT / ".git" / "info" / "exclude": "",
+        },
+    )
+    git = FakeGitRepository()
+    git.clean_worktrees.add(worktree_path)
+
+    registry = FakeEnvIndexRegistry(assignments={"alpha": 1})
+    svc = _service(workspace_config, fs, git, registry=registry)
+    ok = svc.destroy_env("alpha", force=False, strict=False, dry_run=False, reporter=init_reporter)
+
+    assert ok is True
+    # Registry entry removed so the index can be reassigned.
+    assert "alpha" not in registry.assignments
+    assert "alpha" in registry.removed
 
 
 class _ExplodingRemoveGit(FakeGitRepository):

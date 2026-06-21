@@ -538,6 +538,31 @@ class FakeGitRepository:
         self.stash_pops.append(path)
 
 
+class FakeEnvIndexRegistry:
+    """IEnvIndexRegistry fake — in-memory index store for unit tests.
+
+    Pre-seed ``assignments`` before constructing the service under test; assert on
+    ``assignments`` and ``removed`` after the service runs.
+    """
+
+    def __init__(self, assignments: dict[str, int] | None = None) -> None:
+        self.assignments: dict[str, int] = dict(assignments or {})
+        self.removed: list[str] = []
+
+    def get_index(self, name: str) -> int | None:
+        return self.assignments.get(name)
+
+    def all_assignments(self) -> dict[str, int]:
+        return dict(self.assignments)
+
+    def assign(self, name: str, index: int) -> None:
+        self.assignments[name] = index
+
+    def remove(self, name: str) -> None:
+        self.assignments.pop(name, None)
+        self.removed.append(name)
+
+
 class FakeConfigLockRepository:
     """IConfigLockRepository fake — in-memory lock store for unit tests.
 
