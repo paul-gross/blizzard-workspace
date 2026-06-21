@@ -31,6 +31,7 @@ class CapabilityCandidate:
     `entrypoint_path` is the fully resolved absolute path (`ext_dir / entrypoint_rel`).
     `ext_dir` is the extension's on-disk root directory.
     `prefix` is the resolved symlink prefix for this extension.
+    `config_dir` is the resolved absolute path to this extension's writable config/asset directory.
     `entrypoint_valid` is True when `entrypoint_path` names an existing file on disk.
     `implemented_version` is the spec version declared in `[implements]` for this slot,
         or None when the extension predates the `implements` field (treated as compatible).
@@ -41,6 +42,7 @@ class CapabilityCandidate:
     entrypoint_path: Path
     ext_dir: Path
     prefix: str
+    config_dir: Path
     entrypoint_valid: bool
     implemented_version: str | None = None
 
@@ -104,6 +106,7 @@ class ResolvedCapability:
     `entrypoint` is the absolute path to the entrypoint script.
     `ext_dir` is the extension's on-disk root directory.
     `prefix` is the resolved symlink prefix for the extension.
+    `config_dir` is the resolved absolute path to this extension's writable config/asset directory.
     """
 
     slot: CapabilitySlot
@@ -111,6 +114,7 @@ class ResolvedCapability:
     entrypoint: Path
     ext_dir: Path
     prefix: str
+    config_dir: Path
 
 
 class CapabilityBindingError(RepoError):

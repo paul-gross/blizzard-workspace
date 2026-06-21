@@ -176,15 +176,16 @@ The `describe` action takes no positionals and is called by winter internally wh
 
 ### Always-present environment variables
 
-Every dispatch — regardless of action — sets these three variables and runs the entrypoint with **cwd at the workspace root**:
+Every dispatch — regardless of action — sets these four variables and runs the entrypoint with **cwd at the workspace root**:
 
 | Var | Meaning |
 |-----|---------|
 | `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root. |
 | `WINTER_EXT_DIR` | Absolute path to this orchestrator extension's clone (the dir containing `winter-ext.toml`). |
 | `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension. |
+| `WINTER_EXT_CONFIG_DIR` | Absolute path to this extension's writable config/asset directory (default `.winter/config/<repo-name>/`); the writable counterpart to the read-only `WINTER_EXT_DIR`. Set via `config_dir` in `[[standalone_repository]]`, or defaults to the workspace-relative `.winter/config/<name>/` path. |
 
-These three are winter's shared extension-subprocess context, defined for the hook/doctor/lint dispatches in [setup.md](../setup.md#hook-env-var-contract); `winter service` provides them identically. Working directory varies by surface: `winter service`, `doctor`, `lint`, and the `on_workspace_reconcile` hook run at the workspace root, while the `on_env_*` hooks run at the env root.
+These four form the winter base extension contract, set uniformly by `core/extension_invocation.py::build_extension_env`. They are defined for the hook/doctor/lint dispatches in [setup.md](../setup.md#hook-env-var-contract); `winter service` provides them identically. Working directory varies by surface: `winter service`, `doctor`, `lint`, and the `on_workspace_reconcile` hook run at the workspace root, while the `on_env_*` hooks run at the env root.
 
 ### Per-action environment variables
 

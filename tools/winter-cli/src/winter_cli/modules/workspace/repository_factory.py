@@ -88,6 +88,7 @@ class RepositoryFactory:
         for r in self._config.standalone_repos:
             name = self._resolve_standalone_name(r)
             relative_path = r.path or name
+            config_dir = (self._config.workspace_root / (r.config_dir or f".winter/config/{name}")).resolve()
             result.append(
                 StandaloneRepository(
                     name=name,
@@ -98,6 +99,7 @@ class RepositoryFactory:
                     cmd=list(r.cmd),
                     prefix=r.prefix,
                     ref=r.ref,
+                    config_dir=config_dir,
                 )
             )
         return result

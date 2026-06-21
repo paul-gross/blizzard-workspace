@@ -185,13 +185,19 @@ class ConformanceVerifyService:
         drives verification, so a v2 spec that adds or renames an always-present var
         automatically updates what the verifier probes.
         """
-        # Map the three known env var names to their values.  Any name declared in
+        # Map the four known env var names to their values.  Any name declared in
         # the spec that has no mapping here is silently skipped — the verifier only
         # asserts on what it can observe (argv sentinel), not the env vars themselves.
+        config_dir = (
+            self._workspace_root / ".winter" / "config" / ext_dir.name
+            if self._workspace_root is not None
+            else ext_dir
+        )
         known_values: dict[str, str] = {
             "WINTER_WORKSPACE_DIR": str(self._workspace_root),
             "WINTER_EXT_DIR": str(ext_dir),
             "WINTER_EXT_PREFIX": prefix,
+            "WINTER_EXT_CONFIG_DIR": str(config_dir),
         }
         merged = os.environ.copy()
         for ev in spec_env_vars:

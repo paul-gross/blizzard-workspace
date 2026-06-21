@@ -3,7 +3,9 @@ version = "v1"
 title   = "Service orchestration"
 
 # Always-present environment variables set by winter on every dispatch,
-# regardless of action. Source of truth: service_dispatch_service.py.
+# regardless of action. These four form the winter base extension contract:
+# workspace context, extension identity, and writable config location.
+# Source of truth: core/extension_invocation.py::build_extension_env.
 [[env_var]]
 name        = "WINTER_WORKSPACE_DIR"
 description = "Absolute path to the workspace root."
@@ -15,6 +17,10 @@ description = "Absolute path to this orchestrator extension's clone (the dir con
 [[env_var]]
 name        = "WINTER_EXT_PREFIX"
 description = "The resolved symlink prefix for this extension."
+
+[[env_var]]
+name        = "WINTER_EXT_CONFIG_DIR"
+description = "Absolute path to this extension's writable config/asset directory (default `.winter/config/<repo-name>/`); the writable counterpart to the read-only `WINTER_EXT_DIR`."
 
 # Exit-code conventions for the service capability.
 [[exit_code]]

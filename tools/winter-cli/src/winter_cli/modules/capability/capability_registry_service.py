@@ -83,6 +83,7 @@ class CapabilityRegistryService:
                     entrypoint_path=entrypoint_path,
                     ext_dir=repo.path,
                     prefix=manifest.prefix,
+                    config_dir=repo.config_dir if repo.config_dir is not None else repo.path / ".winter" / "config" / repo.name,
                     entrypoint_valid=self._fs.is_file(entrypoint_path),
                     implemented_version=manifest.implemented_version(slot.value),
                 )
@@ -255,6 +256,7 @@ class CapabilityRegistryService:
                         entrypoint=candidate.entrypoint_path,
                         ext_dir=candidate.ext_dir,
                         prefix=candidate.prefix,
+                        config_dir=candidate.config_dir,
                     )
                 )
             return result
@@ -300,6 +302,7 @@ class CapabilityRegistryService:
                 entrypoint=candidate.entrypoint_path,
                 ext_dir=candidate.ext_dir,
                 prefix=candidate.prefix,
+                config_dir=candidate.config_dir,
             )
 
         if resolution.binding_kind == "implicit":
@@ -327,6 +330,7 @@ class CapabilityRegistryService:
                 entrypoint=candidate.entrypoint_path,
                 ext_dir=candidate.ext_dir,
                 prefix=candidate.prefix,
+                config_dir=candidate.config_dir,
             )
 
         # binding_kind == "unbound" → zero providers.

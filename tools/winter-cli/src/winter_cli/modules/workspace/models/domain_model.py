@@ -93,6 +93,7 @@ class StandaloneRepository:
     cmd: list[str] = dataclasses.field(default_factory=list)
     prefix: str | None = None
     ref: str | None = None
+    config_dir: Path | None = None
 
 
 class RefKind(enum.StrEnum):

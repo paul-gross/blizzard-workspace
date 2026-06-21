@@ -1,8 +1,8 @@
 """Shared helpers for provider invocation: env-dict construction and pattern matching.
 
 ``build_provider_env`` builds the WINTER_* environment dict for any provider
-subprocess call, merging the current process environment with the three
-workspace context variables.
+subprocess call, merging the current process environment with the four
+base extension context variables (including ``WINTER_EXT_CONFIG_DIR``).
 
 ``service_matches_pattern`` is the segment-aware fnmatch check used by
 ``restart`` and ``logs`` routing to decide whether a known service name
@@ -12,22 +12,25 @@ matches a user-supplied selection pattern.
 from __future__ import annotations
 
 import fnmatch
-import os
 from pathlib import Path
 from typing import Any
 
+from winter_cli.core.extension_invocation import build_extension_env
+
 
 def build_provider_env(provider: Any, workspace_root: Path) -> dict[str, str]:
-    """Return a copy of os.environ with WINTER_WORKSPACE_DIR/EXT_DIR/EXT_PREFIX set.
+    """Return a copy of os.environ with WINTER_WORKSPACE_DIR/EXT_DIR/EXT_PREFIX/EXT_CONFIG_DIR set.
 
-    ``provider`` must expose ``ext_dir: Path`` and ``prefix: str``; compatible
-    with both ``ResolvedCapability`` and ``ResolvedOrchestrator``.
+    ``provider`` must expose ``ext_dir: Path``, ``prefix: str``, and
+    ``config_dir: Path``; compatible with both ``ResolvedCapability`` and
+    ``ResolvedOrchestrator``.
     """
-    merged = os.environ.copy()
-    merged["WINTER_WORKSPACE_DIR"] = str(workspace_root)
-    merged["WINTER_EXT_DIR"] = str(provider.ext_dir)
-    merged["WINTER_EXT_PREFIX"] = provider.prefix
-    return merged
+    return build_extension_env(
+        workspace_root=workspace_root,
+        ext_dir=provider.ext_dir,
+        prefix=provider.prefix,
+        config_dir=provider.config_dir,
+    )
 
 
 def service_matches_pattern(svc_name: str, pattern: str) -> bool:

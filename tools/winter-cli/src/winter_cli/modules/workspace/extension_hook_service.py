@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
 from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
+from winter_cli.core.extension_invocation import build_extension_env
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.core.subprocess_runner import ISubprocessRunner
 from winter_cli.modules.workspace.env_index import resolve_env_index
@@ -218,13 +218,14 @@ class ExtensionHookService:
         if not self._fs.access_x_ok(script_path):
             raise RepoError(f"hook `{hook}` is not executable")
 
-        env = os.environ.copy()
-        env.update(
-            {
-                "WINTER_WORKSPACE_DIR": str(self._config.workspace_root),
-                "WINTER_EXT_DIR": str(repo.path),
-                "WINTER_EXT_PREFIX": manifest.prefix,
-            }
+        config_dir = repo.config_dir if repo.config_dir is not None else (
+            self._config.workspace_root / ".winter" / "config" / repo.name
+        )
+        env = build_extension_env(
+            workspace_root=self._config.workspace_root,
+            ext_dir=repo.path,
+            prefix=manifest.prefix,
+            config_dir=config_dir,
         )
         if env_name is not None:
             # Resolve registry-first so WINTER_ENV_INDEX/WINTER_PORT_BASE agree

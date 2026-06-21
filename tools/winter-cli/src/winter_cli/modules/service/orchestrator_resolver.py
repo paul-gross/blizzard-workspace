@@ -17,6 +17,7 @@ class ResolvedOrchestrator:
     entrypoint: Path
     ext_dir: Path
     prefix: str
+    config_dir: Path
 
 
 class ServiceOrchestratorResolver:
@@ -68,7 +69,12 @@ class ServiceOrchestratorResolver:
             return self._resolve_name(self._override)
 
         resolved = self._registry.resolve(CapabilitySlot.service)
-        return ResolvedOrchestrator(entrypoint=resolved.entrypoint, ext_dir=resolved.ext_dir, prefix=resolved.prefix)
+        return ResolvedOrchestrator(
+            entrypoint=resolved.entrypoint,
+            ext_dir=resolved.ext_dir,
+            prefix=resolved.prefix,
+            config_dir=resolved.config_dir,
+        )
 
     def resolve_all(self) -> list[ResolvedCapability]:
         """Return the ordered list of providers, collapsing to one when an override is active.
@@ -87,6 +93,7 @@ class ServiceOrchestratorResolver:
                 entrypoint=resolved.entrypoint,
                 ext_dir=resolved.ext_dir,
                 prefix=resolved.prefix,
+                config_dir=resolved.config_dir,
             )
             return [cap]
         return self._registry.resolve_all(CapabilitySlot.service)
@@ -135,7 +142,8 @@ class ServiceOrchestratorResolver:
         if not self._fs.is_file(entrypoint):
             return self._verify_error_entrypoint_missing(value, entrypoint, entrypoint_rel, manifest_path)
 
-        return ResolvedOrchestrator(entrypoint=entrypoint, ext_dir=ext_dir, prefix=manifest.prefix)
+        config_dir = self._synthetic_config_dir(ext_dir)
+        return ResolvedOrchestrator(entrypoint=entrypoint, ext_dir=ext_dir, prefix=manifest.prefix, config_dir=config_dir)
 
     def _try_resolve_name(self, name: str) -> ResolvedOrchestrator | str:
         """Name mode: look up a registered installed extension, returning errors as strings."""
@@ -157,7 +165,8 @@ class ServiceOrchestratorResolver:
         if not self._fs.is_file(entrypoint):
             return self._verify_error_entrypoint_missing(name, entrypoint, entrypoint_rel, manifest_path)
 
-        return ResolvedOrchestrator(entrypoint=entrypoint, ext_dir=repo.path, prefix=manifest.prefix)
+        config_dir = repo.config_dir if repo.config_dir is not None else self._synthetic_config_dir(repo.path)
+        return ResolvedOrchestrator(entrypoint=entrypoint, ext_dir=repo.path, prefix=manifest.prefix, config_dir=config_dir)
 
     def _is_path(self, value: str) -> bool:
         """Return True when `value` should be treated as a local extension path.
@@ -213,7 +222,8 @@ class ServiceOrchestratorResolver:
                 f'(declared as `orchestrate_services = "{entrypoint_rel}"` in {manifest_path}).'
             )
 
-        return ResolvedOrchestrator(entrypoint=entrypoint, ext_dir=ext_dir, prefix=manifest.prefix)
+        config_dir = self._synthetic_config_dir(ext_dir)
+        return ResolvedOrchestrator(entrypoint=entrypoint, ext_dir=ext_dir, prefix=manifest.prefix, config_dir=config_dir)
 
     def _resolve_name(self, name: str) -> ResolvedOrchestrator:
         """Name mode: look up a registered installed extension — the original behavior."""
@@ -240,13 +250,25 @@ class ServiceOrchestratorResolver:
                 f"service orchestrator {name!r} entrypoint not found at {entrypoint} "
                 f'(declared as `orchestrate_services = "{entrypoint_rel}"` in {manifest_path}).'
             )
-        return ResolvedOrchestrator(entrypoint=entrypoint, ext_dir=repo.path, prefix=manifest.prefix)
+        config_dir = repo.config_dir if repo.config_dir is not None else self._synthetic_config_dir(repo.path)
+        return ResolvedOrchestrator(entrypoint=entrypoint, ext_dir=repo.path, prefix=manifest.prefix, config_dir=config_dir)
 
     def _find_extension(self, name: str) -> StandaloneRepository | None:
         for repo in self._repo_factory.get_standalone_repos():
             if repo.name == name:
                 return repo
         return None
+
+    def _synthetic_config_dir(self, ext_dir: Path) -> Path:
+        """Return the default config dir for a synthetic (path-override) repo.
+
+        Decision R4: default to ``<workspace_root>/.winter/config/<ext_dir.name>``
+        when workspace_root is known, or ``ext_dir`` itself as a last-resort
+        fallback for standalone callers with no workspace context.
+        """
+        if self._workspace_root is not None:
+            return (self._workspace_root / ".winter" / "config" / ext_dir.name).resolve()
+        return ext_dir
 
     # Verify-mode error message templates — used by `try_resolve_extension` to
     # surface setup failures with user-readable messages that match the messages

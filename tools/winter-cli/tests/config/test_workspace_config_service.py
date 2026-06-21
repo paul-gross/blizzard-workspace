@@ -677,3 +677,72 @@ def test_standalone_repository_without_ref_yields_none() -> None:
 
     assert len(config.standalone_repos) == 1
     assert config.standalone_repos[0].ref is None
+
+
+# ── standalone_repository name uniqueness ────────────────────────────────────
+
+
+def test_duplicate_standalone_name_raises_config_error() -> None:
+    """Two [[standalone_repository]] entries resolving to the same name raise ConfigError."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "standalone_repository": [
+                    {"name": "my-ext", "url": "git@example.com:org/my-ext.git"},
+                    {"name": "my-ext", "url": "git@example.com:org/other.git"},
+                ],
+            },
+        },
+    )
+
+    with pytest.raises(ConfigError, match="my-ext"):
+        svc.load()
+
+
+def test_duplicate_standalone_name_via_url_derivation_raises_config_error() -> None:
+    """Two [[standalone_repository]] entries that derive the same name from their URLs raise ConfigError."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "standalone_repository": [
+                    {"url": "git@github.com:org/shared-ext.git"},
+                    {"url": "https://example.com/other/shared-ext.git"},
+                ],
+            },
+        },
+    )
+
+    with pytest.raises(ConfigError, match="shared-ext"):
+        svc.load()
+
+
+def test_project_and_standalone_same_name_is_valid() -> None:
+    """A project_repository and standalone_repository sharing a name (e.g. winter-github) must load cleanly."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "project_repository": [
+                    {"name": "winter-github", "url": "git@example.com:org/winter-github.git"},
+                ],
+                "standalone_repository": [
+                    {"name": "winter-github", "url": "git@example.com:org/winter-github.git"},
+                ],
+            },
+        },
+    )
+
+    config = svc.load()
+
+    assert len(config.project_repos) == 1
+    assert config.project_repos[0].name == "winter-github"
+    assert len(config.standalone_repos) == 1
+    assert config.standalone_repos[0].name == "winter-github"

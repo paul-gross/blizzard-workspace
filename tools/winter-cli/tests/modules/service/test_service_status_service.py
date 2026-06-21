@@ -30,8 +30,11 @@ PREFIX = "winter-service-tmux"
 CMD_KEY_BARE = f"{ENTRYPOINT} status"
 
 
+CONFIG_DIR = WS / ".winter" / "config" / "winter-service-tmux"
+
+
 def _resolved() -> ResolvedOrchestrator:
-    return ResolvedOrchestrator(entrypoint=ENTRYPOINT, ext_dir=EXT, prefix=PREFIX)
+    return ResolvedOrchestrator(entrypoint=ENTRYPOINT, ext_dir=EXT, prefix=PREFIX, config_dir=CONFIG_DIR)
 
 
 def _resolver() -> Any:

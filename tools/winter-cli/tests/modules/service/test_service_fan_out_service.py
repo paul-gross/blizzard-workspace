@@ -47,6 +47,7 @@ def _provider(name: str, entrypoint: Path, ext_dir: Path) -> ResolvedCapability:
         entrypoint=entrypoint,
         ext_dir=ext_dir,
         prefix=name,
+        config_dir=WS / ".winter" / "config" / name,
     )
 
 

@@ -154,6 +154,15 @@ class StandaloneRepositoryConfig(BaseModel):
       commit; pull never advances it; tracking overridden.  A *frozen* pin.
     """
 
+    config_dir: str | None = None
+    """Optional override for the per-extension config/asset directory.
+
+    When unset, winter defaults to `.winter/config/<name>/` relative to the
+    workspace root.  When set, must be a relative path under the workspace root
+    with no ``..`` segments (same guard as ``path``).  This directory is
+    exported as ``WINTER_EXT_CONFIG_DIR`` on every extension dispatch so the
+    extension can read and write its writable config/asset files there."""
+
     git_excludes: list[str] = Field(default_factory=list)
     """Per-repo entries added to .git/info/exclude after clone."""
 

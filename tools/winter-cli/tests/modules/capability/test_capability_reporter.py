@@ -35,6 +35,7 @@ def _candidate(
         entrypoint_path=ext_dir / entrypoint_rel,
         ext_dir=ext_dir,
         prefix=name,
+        config_dir=_WS / ".winter" / "config" / name,
         entrypoint_valid=valid,
     )
 

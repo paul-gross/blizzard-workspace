@@ -71,10 +71,19 @@ pinned = true
 [[standalone_repository]]
 name = "winter-backlog"
 url = "git@github.com:user/winter-backlog.git"
-prefix = "wsb"                     # optional symlink-prefix override; see "Extensions" below
-path = "extensions/winter-backlog" # optional; relative to the workspace root, defaults to `name`
-ref = "v1.4.2"                     # optional; pin this repo to a branch, tag, or commit SHA
+prefix = "wsb"                                # optional symlink-prefix override; see "Extensions" below
+path = "extensions/winter-backlog"            # optional; relative to the workspace root, defaults to `name`
+ref = "v1.4.2"                                # optional; pin this repo to a branch, tag, or commit SHA
+config_dir = ".winter/config/winter-backlog"  # optional; override where WINTER_EXT_CONFIG_DIR points
 ```
+
+#### `config_dir` — per-extension writable config/asset directory
+
+The optional `config_dir` field overrides where winter stores and exports this extension's writable config/asset directory. When omitted, winter defaults to `.winter/config/<name>/` relative to the workspace root.
+
+The resolved absolute path is exported as `WINTER_EXT_CONFIG_DIR` on every dispatch to this extension (service, doctor, lint, and hooks). Extensions use this directory to read their workspace-level config files (e.g. `config.toml`), write generated assets, or store per-workspace state that should be git-tracked alongside the workspace config.
+
+`config_dir` must be a relative path under the workspace root with no `..` segments (the same guard applied to `path`). Absolute paths are rejected. An optional `config.local.toml` overlay convention within this directory is typically git-excluded by the workspace's blanket exclude for `*.local.*` files.
 
 #### `ref` — standalone repo pins
 
@@ -260,6 +269,7 @@ Hook scripts must be **relative paths inside the extension directory** (so the e
 | `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root. |
 | `WINTER_EXT_DIR` | Absolute path to this extension's clone (the dir containing `winter-ext.toml`). |
 | `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension (`wf`, `wst`, …). |
+| `WINTER_EXT_CONFIG_DIR` | Absolute path to this extension's writable config/asset directory (default `.winter/config/<name>/`). |
 | `WINTER_ENV` | The env name (`alpha`, `beta`, …). |
 | `WINTER_ENV_INDEX` | The persisted port-offset index for this env (alias envs get fixed slots `1..N`; ad-hoc names hash into the remainder band). |
 | `WINTER_PORT_BASE` | `base_port + ports_per_env * WINTER_ENV_INDEX` (defaults: `4000 + 20 * index`). |
@@ -273,6 +283,7 @@ The hook's **cwd is the env root** (`<workspace>/<env>/`). Hooks should read the
 | `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root. |
 | `WINTER_EXT_DIR` | Absolute path to this extension's clone. |
 | `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension. |
+| `WINTER_EXT_CONFIG_DIR` | Absolute path to this extension's writable config/asset directory. |
 
 The hook's **cwd is the workspace root**.
 

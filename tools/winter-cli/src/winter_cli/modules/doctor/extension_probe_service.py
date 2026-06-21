@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import os
-
 from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
+from winter_cli.core.extension_invocation import build_extension_env
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.core.subprocess_runner import ISubprocessRunner
 from winter_cli.modules.doctor.models import ProbeResult, ProbeStatus
@@ -100,13 +99,14 @@ class ExtensionProbeService:
                 )
             ]
 
-        env = os.environ.copy()
-        env.update(
-            {
-                "WINTER_WORKSPACE_DIR": str(self._config.workspace_root),
-                "WINTER_EXT_DIR": str(repo.path),
-                "WINTER_EXT_PREFIX": manifest.prefix,
-            }
+        config_dir = repo.config_dir if repo.config_dir is not None else (
+            self._config.workspace_root / ".winter" / "config" / repo.name
+        )
+        env = build_extension_env(
+            workspace_root=self._config.workspace_root,
+            ext_dir=repo.path,
+            prefix=manifest.prefix,
+            config_dir=config_dir,
         )
         try:
             result = self._subprocess.run(

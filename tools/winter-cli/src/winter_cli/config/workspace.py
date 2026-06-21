@@ -99,6 +99,7 @@ class WorkspaceConfigService:
             )
 
         standalone_repos: list[StandaloneRepositoryConfig] = []
+        _seen_standalone_names: dict[str, str] = {}  # resolved_name -> "name=X" or "url=Y" label
         for entry in merged.get("standalone_repository", []) or []:
             if not isinstance(entry, dict):
                 continue
@@ -106,9 +107,22 @@ class WorkspaceConfigService:
             url = entry.get("url")
             if not name and not url:
                 continue
+            resolved_name = name if name else self._name_from_url(str(url))
+            label = f"name={name!r}" if name else f"url={url!r}"
+            if resolved_name in _seen_standalone_names:
+                first_label = _seen_standalone_names[resolved_name]
+                raise ConfigError(
+                    f"Duplicate standalone_repository name {resolved_name!r}: "
+                    f"entries {first_label} and {label} resolve to the same name. "
+                    f"Each [[standalone_repository]] must have a unique name."
+                )
+            _seen_standalone_names[resolved_name] = label
             path_value = entry.get("path")
             if path_value is not None:
                 self._validate_relative_path(path_value, name or url)
+            config_dir_value = entry.get("config_dir")
+            if config_dir_value is not None:
+                self._validate_relative_path(config_dir_value, name or url)
             standalone_repos.append(
                 StandaloneRepositoryConfig(
                     name=name,
@@ -117,6 +131,7 @@ class WorkspaceConfigService:
                     ref=entry.get("ref"),
                     path=path_value,
                     prefix=entry.get("prefix"),
+                    config_dir=config_dir_value,
                     git_excludes=list(entry.get("git_excludes", []) or []),
                     cmd=list(entry.get("cmd", []) or []),
                 )
@@ -254,6 +269,18 @@ class WorkspaceConfigService:
         if not self._fs.is_file(path):
             return {}
         return self._config_file_reader.load(path)
+
+    @staticmethod
+    def _name_from_url(url: str) -> str:
+        """Derive a standalone repo name from a clone URL.
+
+        Mirrors ``RepositoryFactory.name_from_url`` so the collision check uses
+        the same resolved name that the factory will later materialise on disk.
+        """
+        stripped = url.rstrip("/")
+        cut = max(stripped.rfind("/"), stripped.rfind(":"))
+        candidate = stripped[cut + 1 :] if cut != -1 else stripped
+        return candidate.removesuffix(".git")
 
     @staticmethod
     def _validate_relative_path(value: str, label: str | None) -> None:

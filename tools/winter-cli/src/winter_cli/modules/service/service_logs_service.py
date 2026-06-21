@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
+from winter_cli.core.extension_invocation import build_extension_env
 from winter_cli.core.subprocess_runner import ISubprocessRunner
 from winter_cli.modules.capability.models import ResolvedCapability
 from winter_cli.modules.service.log_stream_processor import LogStreamProcessor
@@ -150,15 +150,17 @@ class ServiceLogsService:
         """
         cmd = [str(provider.entrypoint), "logs", *patterns]
 
-        extra_env = dict(os.environ)
+        extra_env = build_extension_env(
+            workspace_root=self._workspace_root,
+            ext_dir=provider.ext_dir,
+            prefix=provider.prefix,
+            config_dir=provider.config_dir,
+        )
         extra_env["WINTER_LOG_FOLLOW"] = "1" if options.follow else "0"
         extra_env["WINTER_LOG_TAIL"] = str(options.tail)
         extra_env["WINTER_LOG_SINCE"] = options.since_rfc3339
         extra_env["WINTER_LOG_UNTIL"] = options.until_rfc3339
         extra_env["WINTER_LOG_TIMESTAMPS"] = "1" if options.timestamps else "0"
-        extra_env["WINTER_WORKSPACE_DIR"] = str(self._workspace_root)
-        extra_env["WINTER_EXT_DIR"] = str(provider.ext_dir)
-        extra_env["WINTER_EXT_PREFIX"] = provider.prefix
 
         own_processor = processor is None
         if own_processor:

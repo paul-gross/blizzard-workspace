@@ -41,6 +41,9 @@ class ExtensionExcludeService:
         self._fs = fs
         self._manifest_loader = manifest_loader
 
+    # Fixed block name for the workspace-wide .winter/config local-overlay excludes.
+    WINTER_CONFIG_BLOCK = "winter-config"
+
     def finalize_excludes(
         self,
         repos: list[StandaloneRepository],
@@ -53,13 +56,36 @@ class ExtensionExcludeService:
         repo path plus the symlink globs under `.claude/skills/` and `.claude/agents/`.
         Orphan blocks for extensions no longer present are stripped automatically;
         if no extensions are eligible, every winter-managed block is removed.
+
+        The `winter-config` block is always written unconditionally (even when
+        adopt_extensions=none) so that local overlay files named `*.local.*`
+        inside `.winter/config/` are never tracked by the workspace repo.
         """
         logger.info("finalize_excludes start: %d repo(s)", len(repos))
-        if self._config.adopt_extensions == AdoptExtensions.none:
-            logger.info("finalize_excludes: adopt_extensions=none, skipping")
-            return True
 
         exclude_path = self._config.workspace_root / ".git" / "info" / "exclude"
+
+        # Always write the workspace-wide config local-overlay exclude block,
+        # regardless of adopt_extensions mode.
+        try:
+            existing_for_config = self._fs.read_text(exclude_path) if self._fs.exists(exclude_path) else ""
+            config_begin = GITIGNORE_BEGIN.format(name=self.WINTER_CONFIG_BLOCK)
+            config_end = GITIGNORE_END.format(name=self.WINTER_CONFIG_BLOCK)
+            config_lines = [config_begin, ".winter/config/**/*.local.*", config_end]
+            new_content_for_config = replace_or_append_block(
+                existing_for_config, config_begin, config_end, config_lines
+            )
+            if new_content_for_config != existing_for_config:
+                self._fs.mkdir(exclude_path.parent, parents=True, exist_ok=True)
+                self._fs.write_text(exclude_path, new_content_for_config)
+        except OSError as exc:
+            logger.warning("finalize_excludes: write failed at %s — %s", exclude_path, exc)
+            reporter.repo_error(CLAUDEMD_BLOCK_NAME, f".git/info/exclude — {exc}")
+            return False
+
+        if self._config.adopt_extensions == AdoptExtensions.none:
+            logger.info("finalize_excludes: adopt_extensions=none, skipping extension blocks")
+            return True
 
         eligible: list[tuple[str, list[str]]] = []
         for repo in repos:
@@ -156,14 +182,20 @@ class ExtensionExcludeService:
         The regex deliberately rejects names containing `/` so that namespaced
         blocks owned by other subsystems (e.g. `winter-dir/projects` written by
         InitService) are not treated as orphans of the extension flow.
+
+        The `winter-config` block is always kept regardless of `eligible_names`
+        because it is written unconditionally by `finalize_excludes` and is not
+        tied to any extension repo.
         """
+        # Names that are managed unconditionally and must never be treated as orphans.
+        permanent_names = {ExtensionExcludeService.WINTER_CONFIG_BLOCK}
         pattern = re.compile(r"^# >>> ([^/]+?) \(managed by winter\)$")
         orphan_names: set[str] = set()
         for line in content.split("\n") if content else []:
             m = pattern.match(line)
             if m:
                 name = m.group(1)
-                if name not in eligible_names:
+                if name not in eligible_names and name not in permanent_names:
                     orphan_names.add(name)
         result = content
         for name in orphan_names:

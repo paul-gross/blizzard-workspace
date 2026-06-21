@@ -25,6 +25,7 @@ def _candidate(
         entrypoint_path=Path(f"/ext/{extension_name}/{entrypoint_rel}"),
         ext_dir=Path(f"/ext/{extension_name}"),
         prefix="wf",
+        config_dir=Path(f"/ws/.winter/config/{extension_name}"),
         entrypoint_valid=entrypoint_valid,
     )
 
