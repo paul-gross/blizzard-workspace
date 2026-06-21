@@ -62,12 +62,26 @@ def _resolver(
     )
 
 
-def test_default_and_all_resolve_to_workspace_root() -> None:
-    resolver = _resolver()
-    for request in (LintScopeRequest(), LintScopeRequest(all=True)):
-        scope = resolver.resolve(request)
-        assert scope.kind == LintScopeKind.all
-        assert scope.paths == [WS]
+def test_all_resolves_to_every_env_project_worktree() -> None:
+    resolver = _resolver(env_names=["alpha", "beta"])
+    scope = resolver.resolve(LintScopeRequest(all=True))
+    assert scope.kind == LintScopeKind.all
+    assert scope.paths == [WS / "alpha" / "app", WS / "beta" / "app"]
+
+
+def test_default_inside_an_env_resolves_to_that_env() -> None:
+    resolver = _resolver(env_names=["alpha", "beta"])
+    scope = resolver.resolve(LintScopeRequest(cwd=WS / "beta" / "app" / "src"))
+    assert scope.kind == LintScopeKind.env
+    assert scope.paths == [WS / "beta" / "app"]
+
+
+def test_default_outside_any_env_resolves_to_all_envs() -> None:
+    resolver = _resolver(env_names=["alpha", "beta"])
+    # Run from the workspace root / a source checkout — not inside an env dir.
+    scope = resolver.resolve(LintScopeRequest(cwd=WS / "projects" / "app"))
+    assert scope.kind == LintScopeKind.all
+    assert scope.paths == [WS / "alpha" / "app", WS / "beta" / "app"]
 
 
 def test_mutually_exclusive_sources_raise() -> None:
@@ -82,10 +96,11 @@ def test_project_repo_name_resolves_to_main_path() -> None:
     assert scope.paths == [WS / "projects" / "app"]
 
 
-def test_standalone_repo_name_resolves_to_its_path() -> None:
-    scope = _resolver().resolve(LintScopeRequest(name="ext"))
-    assert scope.kind == LintScopeKind.repo
-    assert scope.paths == [WS / "ext"]
+def test_standalone_only_repo_name_is_rejected() -> None:
+    # Standalone clones are released products — out of lint scope, so a
+    # standalone-only name no longer resolves.
+    with pytest.raises(LintScopeError, match="unknown scope"):
+        _resolver().resolve(LintScopeRequest(name="ext"))
 
 
 def test_env_name_resolves_to_each_worktree_path() -> None:

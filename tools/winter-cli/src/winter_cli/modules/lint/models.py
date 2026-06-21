@@ -55,7 +55,13 @@ class LintCheckOutcome:
 
 
 class LintScopeKind(enum.Enum):
-    """Which slice of workspace content a lint run targets."""
+    """Which slice of workspace content a lint run targets.
+
+    `all` is every feature env's project worktrees; `env` is one env's project
+    worktrees (named, or the one containing the invocation dir by default);
+    `repo` is one project repo's source checkout; `changed` is the dirty /
+    un-pushed file set of the repo at the invocation dir.
+    """
 
     all = "all"
     repo = "repo"
@@ -67,9 +73,11 @@ class LintScopeKind(enum.Enum):
 class LintScopeRequest:
     """The raw scope selection parsed from the CLI, before resolution.
 
-    Exactly one of `name` / `all` / `changed` is honored; the resolver rejects
-    combinations. `cwd` is the directory `winter lint` was invoked from — used
-    only to locate the git repo for the `--changed` set.
+    At most one of `name` / `all` / `changed` is honored; the resolver rejects
+    combinations and, when none is set, resolves the default scope (the env
+    containing `cwd`, or every env). `cwd` is the caller's real invocation
+    directory (from `WINTER_INVOCATION_CWD`) — used to detect the current env
+    for the default scope and to locate the git repo for the `--changed` set.
     """
 
     name: str | None = None

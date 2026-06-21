@@ -11,7 +11,7 @@ from winter_cli.modules.lint.models import (
     LintScopeKind,
     LintScopeRequest,
 )
-from winter_cli.modules.workspace.models import RepoError
+from winter_cli.modules.workspace.models import FeatureEnvironment, RepoError
 from winter_cli.modules.workspace.repo_repository import IWriteRepoRepository
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_repository import IReadWorkspaceRepository
@@ -50,12 +50,19 @@ class LintScopeResolver:
     """Turns a CLI scope request into the concrete content a lint run covers.
 
     Owns scope selection only — it resolves names and the changed set to a list
-    of paths, never inspecting *what* those paths contain. The four scopes:
+    of paths, never inspecting *what* those paths contain. Lint targets the
+    **project repos we develop in feature environments** — never the workspace
+    root itself (the governance layer, which references everything by design)
+    nor the standalone extension clones (released products that linted clean
+    before they shipped). The scopes:
 
-      - `--all` (the default): the whole workspace tree, rooted at the
-        workspace root.
-      - a repo name: that project / standalone / singleton repo's directory.
-      - an env name: every project worktree directory inside the env.
+      - default (no argument): the feature environment containing the invocation
+        directory — every project worktree inside it. Outside any env (e.g. run
+        from the workspace root), falls back to every env's project worktrees.
+      - `--all`: every feature environment's project worktrees.
+      - an env name: every project worktree directory inside that env.
+      - a project-repo name: that repo's source checkout. (Standalone-only
+        names are rejected — standalone clones are out of scope.)
       - `--changed`: files that are dirty or in un-pushed commits in the git
         repository containing the invocation directory.
     """
@@ -88,16 +95,36 @@ class LintScopeResolver:
             return self._resolve_changed(request.cwd or self._config.workspace_root)
         if request.name is not None:
             return self._resolve_name(request.name)
+        if request.all:
+            return self._resolve_all()
+        return self._resolve_default(request.cwd or self._config.workspace_root)
+
+    # ── default (current env) and --all (every env) ──────────────────────────
+
+    def _resolve_default(self, cwd: Path) -> LintScope:
+        """Lint the env the caller is standing in, or every env when outside one."""
+        env_name = self._env_for_cwd(cwd)
+        if env_name is not None:
+            paths = self._env_worktree_paths(env_name)
+            if paths is not None:
+                return LintScope(kind=LintScopeKind.env, label=f"env: {env_name}", paths=paths)
         return self._resolve_all()
 
-    # ── --all ──────────────────────────────────────────────────────────────
-
     def _resolve_all(self) -> LintScope:
-        return LintScope(
-            kind=LintScopeKind.all,
-            label="all",
-            paths=[self._config.workspace_root],
-        )
+        project_repos = self._repo_factory.get_project_repos()
+        paths = [env.path / repo.name for env in self._environments() for repo in project_repos]
+        return LintScope(kind=LintScopeKind.all, label="all envs", paths=paths)
+
+    def _env_for_cwd(self, cwd: Path) -> str | None:
+        """The feature env whose directory contains `cwd`, or None if outside any env."""
+        try:
+            rel = cwd.resolve().relative_to(self._config.workspace_root.resolve())
+        except ValueError:
+            return None
+        if not rel.parts:
+            return None
+        candidate = rel.parts[0]
+        return candidate if any(env.name == candidate for env in self._environments()) else None
 
     # ── named repo or env ────────────────────────────────────────────────────
 
@@ -110,17 +137,25 @@ class LintScopeResolver:
             return LintScope(kind=LintScopeKind.repo, label=f"repo: {name}", paths=[repo_path])
         if env_paths is not None:
             return LintScope(kind=LintScopeKind.env, label=f"env: {name}", paths=env_paths)
-        raise LintScopeError(f"unknown scope `{name}` — expected a repo name, an env name, --all, or --changed")
+        raise LintScopeError(f"unknown scope `{name}` — expected a project-repo name, an env name, --all, or --changed")
 
     def _repo_path(self, name: str) -> Path | None:
+        # Project repos only — standalone clones are released products, out of
+        # lint scope. (Repos that are both project and standalone resolve here.)
         for repo in self._repo_factory.get_project_repos():
             if repo.name == name:
                 return repo.main_path
-        standalone = self._repo_factory.find_standalone(name)
-        return standalone.path if standalone is not None else None
+        return None
 
     def _env_worktree_paths(self, name: str) -> list[Path] | None:
         """Resolve an env name to its per-repo worktree directories, or None if no such env."""
+        project_repos = self._repo_factory.get_project_repos()
+        match = next((env for env in self._environments() if env.name == name), None)
+        if match is None:
+            return None
+        return [match.path / repo.name for repo in project_repos]
+
+    def _environments(self) -> list[FeatureEnvironment]:
         project_repos = self._repo_factory.get_project_repos()
         try:
             workspace = self._repo_repo.get_workspace(
@@ -128,13 +163,9 @@ class LintScopeResolver:
                 self._config.session_prefix,
                 self._config.main_branch,
             )
-            envs = self._worktree_repo.get_environments(workspace, project_repos)
+            return self._worktree_repo.get_environments(workspace, project_repos)
         except RepoError as exc:
             raise LintScopeError(f"failed to enumerate envs: {exc}") from exc
-        match = next((env for env in envs if env.name == name), None)
-        if match is None:
-            return None
-        return [match.path / repo.name for repo in project_repos]
 
     # ── --changed ────────────────────────────────────────────────────────────
 
