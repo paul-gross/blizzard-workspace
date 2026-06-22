@@ -160,6 +160,7 @@ class FakeServiceReporter:
         self.timestamps_warning_called: int = 0
         self.time_filter_warning_called: int = 0
         self.no_match_diagnostic_calls: list[str] = []
+        self.readiness_timeout_calls: list[tuple[str, float, tuple[str, ...]]] = []
 
     def status_document(self, doc: Any, parser: Any) -> None:
         self.status_documents.append((doc, parser))
@@ -187,6 +188,9 @@ class FakeServiceReporter:
 
     def no_match_diagnostic(self, token_list: str) -> None:
         self.no_match_diagnostic_calls.append(token_list)
+
+    def readiness_timeout(self, env: str, timeout_s: float, unhealthy: tuple[str, ...]) -> None:
+        self.readiness_timeout_calls.append((env, timeout_s, unhealthy))
 
 
 class FakeFilesystem:

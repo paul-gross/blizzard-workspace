@@ -618,11 +618,17 @@ class Container(containers.DeclarativeContainer):
         workspace_root=workspace_config.provided.workspace_root,
     )
 
+    service_readiness_svc = providers.Factory(
+        _lazy("winter_cli.modules.service.service_readiness_service:ServiceReadinessService"),
+        status_service=service_status_svc,
+    )
+
     service_handler = providers.Factory(
         _lazy("winter_cli.modules.service.handler:ServiceHandler"),
         dispatch_service=service_dispatch_svc,
         logs_service=service_logs_svc,
         status_service=service_status_svc,
+        readiness_service=service_readiness_svc,
         stream_reporter=stream_service_reporter,
         json_reporter=json_service_reporter,
     )

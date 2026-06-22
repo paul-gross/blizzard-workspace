@@ -23,6 +23,7 @@ from winter_cli.modules.service.service_dispatch_service import ServiceDispatchS
 from winter_cli.modules.service.service_fan_out_service import ServiceFanOutService
 from winter_cli.modules.service.service_logs_service import ServiceLogsService
 from winter_cli.modules.service.service_provider_index import ServiceDescribeService
+from winter_cli.modules.service.service_readiness_service import ServiceReadinessService
 from winter_cli.modules.service.service_reporter import JsonServiceReporter, StreamServiceReporter
 from winter_cli.modules.service.service_status_service import ServiceStatusService
 from winter_cli.modules.service.status_models import StatusOptions
@@ -124,9 +125,31 @@ def _handler(runner: FakeSubprocessRunner, click: Any = None) -> ServiceHandler:
         status_parser=StatusDocumentParser(),
         workspace_root=WS,
     )
+    readiness = ServiceReadinessService(
+        status_service=status,
+        sleep=lambda _s: None,
+        monotonic=_counting_clock(),
+    )
     stream_reporter = StreamServiceReporter(click=click_obj, cli_output=cli_output)
     json_reporter = JsonServiceReporter(click=click_obj, cli_output=cli_output)
-    return ServiceHandler(dispatch, logs, status, stream_reporter=stream_reporter, json_reporter=json_reporter)
+    return ServiceHandler(
+        dispatch,
+        logs,
+        status,
+        readiness_service=readiness,
+        stream_reporter=stream_reporter,
+        json_reporter=json_reporter,
+    )
+
+
+def _counting_clock(step: float = 1.0):
+    """Return a monotonic() stub that advances by *step* on each call."""
+    ticks = iter(range(0, 10**9))
+
+    def _clock() -> float:
+        return next(ticks) * step
+
+    return _clock
 
 
 # ── dispatch actions ──────────────────────────────────────────────────────────
@@ -375,3 +398,88 @@ def test_handler_up_env_failure_exits_with_env_code() -> None:
         ([ENTRYPOINT, "up", "alpha"], WS),
     ]
     assert excinfo.value.code == 5
+
+
+# ── up --wait readiness gate ────────────────────────────────────────────────
+
+
+def _status_doc(env: str, services: list[tuple[str, str]]) -> str:
+    """Serialise a minimal status document: services is a list of (name, health)."""
+    return json.dumps(
+        {
+            "envs": [
+                {
+                    "env": env,
+                    "session": f"mp-{env}",
+                    "port_base": 4020,
+                    "services": [
+                        {
+                            "name": name,
+                            "state": "running",
+                            "health": health,
+                            "ports": [],
+                            "handle": None,
+                            "log_path": None,
+                            "since": None,
+                        }
+                        for name, health in services
+                    ],
+                }
+            ]
+        }
+    )
+
+
+def test_handler_up_wait_exits_zero_when_healthy() -> None:
+    runner = FakeSubprocessRunner(
+        popen_responses={f"{STATUS_ENTRYPOINT} status alpha": ([_status_doc("alpha", [("api", "healthy")])], 0)},
+    )
+    # No SystemExit: ready before timeout → success.
+    _handler(runner).run(ServiceParams(action="up", env="alpha", wait=True, timeout_s=30.0))
+    # up was dispatched (workspace + env), then status was polled once.
+    assert runner.call_calls == [
+        ([ENTRYPOINT, "up", "workspace"], WS),
+        ([ENTRYPOINT, "up", "alpha"], WS),
+    ]
+    assert runner.popen_calls == [([STATUS_ENTRYPOINT, "status", "alpha"], WS)]
+
+
+def test_handler_up_wait_returns_promptly_with_no_declared_probes() -> None:
+    # Every service reports "unknown" (no probe) → no blocking, exit 0 on first poll.
+    runner = FakeSubprocessRunner(
+        popen_responses={
+            f"{STATUS_ENTRYPOINT} status alpha": (
+                [_status_doc("alpha", [("api", "unknown"), ("web", "unknown")])],
+                0,
+            )
+        },
+    )
+    _handler(runner).run(ServiceParams(action="up", env="alpha", wait=True, timeout_s=30.0))
+    assert runner.popen_calls == [([STATUS_ENTRYPOINT, "status", "alpha"], WS)]
+
+
+def test_handler_up_wait_times_out_and_names_unhealthy_services() -> None:
+    click = ClickRecorder()
+    runner = FakeSubprocessRunner(
+        popen_responses={
+            f"{STATUS_ENTRYPOINT} status alpha": (
+                [_status_doc("alpha", [("api", "unhealthy"), ("web", "healthy")])],
+                0,
+            )
+        },
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        # Small timeout: the counting clock crosses the deadline after the first poll.
+        _handler(runner, click=click).run(ServiceParams(action="up", env="alpha", wait=True, timeout_s=0.5))
+    assert excinfo.value.code == 1
+    # The still-unhealthy service is named on stderr.
+    stderr = [msg for msg, err in click.calls if err]
+    assert any("alpha/api" in msg for msg in stderr)
+    assert any("unhealthy" in msg for msg in stderr)
+
+
+def test_handler_up_without_wait_does_not_poll_status() -> None:
+    runner = FakeSubprocessRunner()
+    _handler(runner).run(ServiceParams(action="up", env="alpha"))
+    # No --wait → up behaves exactly as before: no status poll.
+    assert runner.popen_calls == []

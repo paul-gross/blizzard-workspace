@@ -9,6 +9,7 @@ from dependency_injector import providers
 from winter_cli.cli_context import cli_ctx
 from winter_cli.modules.service.handler import ServiceParams
 from winter_cli.modules.service.models import LogOptions, parse_since_until
+from winter_cli.modules.service.service_readiness_service import DEFAULT_WAIT_TIMEOUT_S
 from winter_cli.modules.service.status_models import StatusOptions
 
 
@@ -92,11 +93,35 @@ def service_group() -> None:
 
 @service_group.command("up", short_help=_HELP_UP)
 @click.argument("env")
+@click.option(
+    "--wait",
+    is_flag=True,
+    default=False,
+    help="After starting, poll status until no service is unhealthy (every service healthy or unknown).",
+)
+@click.option(
+    "--timeout",
+    "timeout_s",
+    type=float,
+    default=DEFAULT_WAIT_TIMEOUT_S,
+    metavar="SECONDS",
+    show_default=True,
+    help="Max seconds to wait for readiness; only meaningful with --wait.",
+)
 @click.pass_context
-def up_cmd(ctx: click.Context, env: str) -> None:
-    """Start services for ENV."""
+def up_cmd(ctx: click.Context, env: str, wait: bool, timeout_s: float) -> None:
+    """Start services for ENV.
+
+    With ``--wait``, after dispatching ``up`` winter polls the orchestrator's
+    ``status`` action and blocks until no in-scope service reports
+    ``health: unhealthy`` (services reporting ``unknown`` — no declared probe —
+    do not block), or ``--timeout`` SECONDS elapses. On timeout the command
+    exits non-zero and names the still-unhealthy services on stderr. Without
+    ``--wait``, ``up`` returns as soon as the orchestrator has launched the
+    services, exactly as before.
+    """
     handler = _service_handler(ctx)
-    handler.run(ServiceParams(action="up", env=env))
+    handler.run(ServiceParams(action="up", env=env, wait=wait, timeout_s=timeout_s))
 
 
 @service_group.command("down", short_help=_HELP_DOWN)

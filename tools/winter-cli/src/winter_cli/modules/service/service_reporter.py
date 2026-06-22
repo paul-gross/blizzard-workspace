@@ -36,6 +36,7 @@ class IServiceReporter(Protocol):
     def timestamps_warning(self) -> None: ...
     def time_filter_warning(self) -> None: ...
     def no_match_diagnostic(self, token_list: str) -> None: ...
+    def readiness_timeout(self, env: str, timeout_s: float, unhealthy: tuple[str, ...]) -> None: ...
 
 
 class StreamServiceReporter:
@@ -128,6 +129,14 @@ class StreamServiceReporter:
     def no_match_diagnostic(self, token_list: str) -> None:
         self._click.echo(f"no service matched {token_list}", err=True)
 
+    def readiness_timeout(self, env: str, timeout_s: float, unhealthy: tuple[str, ...]) -> None:
+        names = ", ".join(unhealthy)
+        self._click.echo(
+            f"error: timed out after {timeout_s:g}s waiting for {env} services to become healthy; "
+            f"still unhealthy: {names}",
+            err=True,
+        )
+
 
 class JsonServiceReporter:
     """Emits service status as JSON; other events go to stderr."""
@@ -145,6 +154,14 @@ class JsonServiceReporter:
     def no_services(self) -> None:
         # In JSON mode, status_document handles the empty-envs case
         pass
+
+    def readiness_timeout(self, env: str, timeout_s: float, unhealthy: tuple[str, ...]) -> None:
+        names = ", ".join(unhealthy)
+        self._click.echo(
+            f"error: timed out after {timeout_s:g}s waiting for {env} services to become healthy; "
+            f"still unhealthy: {names}",
+            err=True,
+        )
 
     def no_service_matched(self, token_list: str) -> None:
         self._click.echo(f"no service matched {token_list}", err=True)

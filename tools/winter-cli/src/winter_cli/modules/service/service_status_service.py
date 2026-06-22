@@ -91,6 +91,53 @@ class ServiceStatusService:
         reporter.status_document(merged, self._status_parser)
         return worst_exit
 
+    def collect(self, patterns: tuple[str, ...]) -> StatusDocument | None:
+        """Fan out the `status` action across providers and return a merged, filtered document.
+
+        This is the non-rendering counterpart of ``report`` — it reuses the same
+        per-provider invocation, parse, merge, and filter path but returns the
+        ``StatusDocument`` to the caller instead of handing it to a reporter.
+        It is used by the readiness gate on ``up --wait`` to poll health.
+
+        A provider whose stdout cannot be parsed contributes no document (silently,
+        since this runs in a poll loop). Returns ``None`` only when no provider
+        produced a parseable document at all. ``KeyboardInterrupt`` propagates to
+        the caller. Patterns scope the result exactly as for ``status`` (a bare
+        ``<env>`` expands to ``<env>/*``).
+        """
+        providers = self._orchestrator_resolver.resolve_all()
+
+        docs: list[StatusDocument] = []
+        for provider in providers:
+            raw, _exit_code = self._capture_status(provider, patterns)
+            try:
+                docs.append(self._status_parser.parse(raw))
+            except StatusParseError:
+                continue
+
+        if not docs:
+            return None
+
+        merged = merge_status_documents(docs)
+        return filter_status(merged, patterns)
+
+    def _capture_status(self, provider: ResolvedCapability, patterns: tuple[str, ...]) -> tuple[str, int]:
+        """Run ``<entrypoint> status [pattern...]`` and return ``(raw_stdout, exit_code)``.
+
+        ``KeyboardInterrupt`` propagates to the caller rather than being mapped to a
+        sentinel exit code — the polling caller owns interrupt handling.
+        """
+        cmd = [str(provider.entrypoint), "status", *patterns]
+        env = build_provider_env(provider, self._workspace_root)
+
+        lines: list[str] = []
+        with self._subprocess_runner.popen(cmd, cwd=self._workspace_root, env=env, merge_stderr=False) as proc:
+            for line in proc.stdout_lines:
+                lines.append(line)
+            exit_code = proc.wait()
+
+        return "\n".join(lines), exit_code
+
     def _fetch_provider_status(
         self,
         provider: ResolvedCapability,

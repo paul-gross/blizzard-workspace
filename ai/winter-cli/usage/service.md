@@ -4,6 +4,7 @@ For the hub and the rest of the command surface, see [../index.md](../index.md).
 
 ```bash
 winter service up alpha                               # start env alpha's services (also ensures workspace scope is up first)
+winter service up alpha --wait                        # start, then block until no service reports unhealthy (or --timeout)
 winter service up workspace                           # bring up only the workspace scope
 winter service down alpha                             # stop env alpha's services (leaves workspace scope running)
 winter service down workspace                         # tear down the workspace scope explicitly
@@ -56,6 +57,23 @@ winter service logs alpha -t                          # prefix each line with it
 For `status`/`restart`/`logs`, `workspace` patterns are forwarded verbatim to the orchestrator like any other `<env>/<service>` selection.
 
 `workspace` is also a **reserved feature-environment name**: `winter ws init workspace` is rejected with an error. See [ws/init.md](./ws/init.md).
+
+### Readiness gate (`up --wait`)
+
+By default `up` returns as soon as the orchestrator has **launched** the services — it does not wait for them to be ready to serve. An agent that runs `up` and immediately verifies (curling an endpoint, pointing a browser at the app) is racing service boot.
+
+`winter service up <env> --wait [--timeout SECONDS]` closes that race:
+
+- After dispatching `up`, winter **polls the `status` action** (the same parse/merge path `winter service status` uses) and blocks until **no in-scope service reports `health: "unhealthy"`** — i.e. every service is `"healthy"` or `"unknown"`.
+- A service with **no declared probe reports `"unknown"`** and does **not** block the wait (so an env whose services declare no probes returns promptly).
+- On readiness the command exits **0**. If `--timeout` elapses with one or more services still `"unhealthy"`, it exits **non-zero** and names the still-unhealthy `<env>/<service>` identifiers on stderr.
+- `--timeout` defaults to **120 seconds** and is only meaningful alongside `--wait`.
+
+`--wait` is **entirely winter-side**: it adds no orchestrator action, env var, or argv token — it reuses the `status` dispatch already in place, and with multiple bound providers it polls and merges status across them exactly like `winter service status`. It depends on the orchestrator populating the `health` field (see the [status wire contract](#status-wire-contract)); against an orchestrator that reports every service `"unknown"`, `--wait` always returns promptly.
+
+> **The gate is only as strong as the orchestrator's probes.** An orchestrator that never reports `"unhealthy"` makes `--wait` a no-op that returns on the first poll. The bundled tmux orchestrator currently reports `health: "unknown"` for every service (`winter-service-tmux:/index.md` — probe support is future work), so in a stock workspace `--wait` does **not** yet block on real readiness. Until the orchestrator grows probes, gate verification on the app's own signal (a health endpoint, a startup log line) rather than relying on `--wait` alone.
+
+The readiness gate lives only on `winter service up` — the canonical readiness door. There is no `--wait` on the env-root `./up` symlink, and no readiness gating for `down` or `restart`.
 
 ### Registering orchestrator(s)
 

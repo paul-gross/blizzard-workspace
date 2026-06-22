@@ -7,6 +7,7 @@ from winter_cli.modules.service.models import LogOptions
 from winter_cli.modules.service.scope import WORKSPACE_SCOPE
 from winter_cli.modules.service.service_dispatch_service import ServiceDispatchService
 from winter_cli.modules.service.service_logs_service import ServiceLogsService
+from winter_cli.modules.service.service_readiness_service import DEFAULT_WAIT_TIMEOUT_S, ServiceReadinessService
 from winter_cli.modules.service.service_reporter import IServiceReporter, JsonServiceReporter, StreamServiceReporter
 from winter_cli.modules.service.service_status_service import ServiceStatusService
 from winter_cli.modules.service.status_models import StatusOptions
@@ -19,6 +20,11 @@ class ServiceParams:
     env: str | None = None
     # restart: verbatim <env>/<service> glob patterns forwarded on argv.
     patterns: tuple[str, ...] = ()
+    # up only: after dispatching, block until no in-scope service reports
+    # `health: unhealthy` (gating on the `status` action) or `timeout_s` elapses.
+    # `timeout_s` is only consulted when `wait` is set.
+    wait: bool = False
+    timeout_s: float = DEFAULT_WAIT_TIMEOUT_S
 
 
 class ServiceHandler:
@@ -37,12 +43,14 @@ class ServiceHandler:
         dispatch_service: ServiceDispatchService,
         logs_service: ServiceLogsService,
         status_service: ServiceStatusService,
+        readiness_service: ServiceReadinessService,
         stream_reporter: StreamServiceReporter,
         json_reporter: JsonServiceReporter,
     ) -> None:
         self._dispatch_service = dispatch_service
         self._logs_service = logs_service
         self._status_service = status_service
+        self._readiness_service = readiness_service
         self._stream_reporter = stream_reporter
         self._json_reporter = json_reporter
 
@@ -65,6 +73,10 @@ class ServiceHandler:
                 first_failure = ws_code if ws_code != 0 else env_code
                 if first_failure != 0:
                     sys.exit(first_failure)
+            # Readiness gate (--wait): only reached once the up dispatch(es)
+            # succeeded. Scoped to the env argument (a bare env / `workspace`).
+            if params.wait and env is not None:
+                self._wait_for_readiness(env, params.timeout_s)
         elif action == "down":
             # Single dispatch for any target; workspace scope is left running on env-down.
             positionals = [params.env] if params.env is not None else []
@@ -76,6 +88,17 @@ class ServiceHandler:
             exit_code = self._dispatch_service.dispatch(action, positionals)
             if exit_code != 0:
                 sys.exit(exit_code)
+
+    def _wait_for_readiness(self, env: str, timeout_s: float) -> None:
+        """Poll status until services are healthy; exit non-zero on timeout.
+
+        Names the still-unhealthy services on stderr and adopts exit code 1 when
+        the timeout elapses with one or more services still ``unhealthy``.
+        """
+        result = self._readiness_service.wait(env, timeout_s)
+        if not result.ready:
+            self._stream_reporter.readiness_timeout(env, timeout_s, result.unhealthy)
+            sys.exit(1)
 
     def run_logs(self, options: LogOptions) -> None:
         reporter: IServiceReporter = self._stream_reporter
