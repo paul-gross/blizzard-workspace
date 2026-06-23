@@ -276,3 +276,110 @@ def test_load_raises_repo_error_on_broken_manifest() -> None:
 
     with pytest.raises(RepoError, match=r"winter-ext\.toml"):
         loader.load(repo, manifest_path=manifest_path)
+
+
+def test_load_parses_provision_handlers_with_correct_source() -> None:
+    """Valid [[provision.*]] entries are parsed into ExtensionManifest.provision with
+    the extension prefix as the source label on each handler."""
+    from winter_cli.modules.provision.manifest import ProvisionScope
+
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    config_files = {
+        manifest_path: {
+            "prefix": "my-ext",
+            "provision": {
+                "dependency": [
+                    {"scope": "feature-environment", "apply": "scripts/install.sh"},
+                ],
+                "resource": [
+                    {
+                        "scope": "workspace",
+                        "apply": "scripts/create-db.sh",
+                        "destroy": "scripts/drop-db.sh",
+                        "required_services": ["postgres"],
+                    },
+                ],
+            },
+        }
+    }
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    manifest = loader.load(repo, manifest_path=manifest_path)
+
+    assert len(manifest.provision) == 2
+
+    dep = manifest.provision[0]
+    assert dep.subtarget == "dependency"
+    assert dep.scope == ProvisionScope.feature_environment
+    assert dep.apply == "scripts/install.sh"
+    assert dep.source == "my-ext"
+    assert dep.destroy is None
+    assert dep.required_services == ()
+
+    res = manifest.provision[1]
+    assert res.subtarget == "resource"
+    assert res.scope == ProvisionScope.workspace
+    assert res.apply == "scripts/create-db.sh"
+    assert res.destroy == "scripts/drop-db.sh"
+    assert res.source == "my-ext"
+    assert res.required_services == ("postgres",)
+
+
+def test_load_provision_defaults_to_empty_tuple_when_absent() -> None:
+    """A manifest without a [provision] table yields an empty provision tuple."""
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    config_files = {manifest_path: {}}
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    manifest = loader.load(repo, manifest_path=manifest_path)
+    assert manifest.provision == ()
+
+
+def test_load_raises_repo_error_on_malformed_provision_entry() -> None:
+    """A malformed [[provision.*]] entry raises RepoError so callers can skip the
+    extension without breaking unrelated commands."""
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    config_files = {
+        manifest_path: {
+            "provision": {
+                "dependency": [
+                    {"scope": "bad-scope", "apply": "scripts/install.sh"},
+                ],
+            },
+        }
+    }
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    with pytest.raises(RepoError, match=r"winter-ext\.toml"):
+        loader.load(repo, manifest_path=manifest_path)
+
+
+def test_load_provision_source_uses_resolved_prefix() -> None:
+    """The source label on each ProvisionHandler is the resolved prefix
+    (workspace override > manifest prefix > manifest name > repo dir name)."""
+    from winter_cli.modules.provision.manifest import ProvisionScope
+
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    config_files = {
+        manifest_path: {
+            "name": "manifest-name",
+            "provision": {
+                "data": [
+                    {"scope": "feature-worktree", "apply": "scripts/seed.sh"},
+                ],
+            },
+        }
+    }
+    # repo.prefix is None so resolution falls through to the manifest `name` field.
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    manifest = loader.load(repo, manifest_path=manifest_path)
+
+    assert manifest.prefix == "manifest-name"
+    assert len(manifest.provision) == 1
+    assert manifest.provision[0].source == "manifest-name"
+    assert manifest.provision[0].scope == ProvisionScope.feature_worktree

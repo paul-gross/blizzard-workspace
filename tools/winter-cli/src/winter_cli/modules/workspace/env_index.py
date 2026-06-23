@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import hashlib
+from typing import TYPE_CHECKING
 
 from winter_cli.config.models import _DEFAULT_ENV_ALIASES
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
+
+if TYPE_CHECKING:
+    from winter_cli.config.models import WorkspaceConfig
 
 GREEK_LETTERS = [
     "alpha",
@@ -120,6 +124,32 @@ def _resolve_with_params(name: str, env_aliases: list[str], envs_per_workspace: 
     digest = hashlib.sha1(name.encode()).digest()
     offset = int.from_bytes(digest[:2], "big") % hash_bucket
     return (n + 2) + offset
+
+
+def build_env_trio(
+    env_name: str,
+    config: "WorkspaceConfig",
+    registry: IEnvIndexRegistry | None,
+) -> dict[str, str]:
+    """Return ``WINTER_ENV``/``WINTER_ENV_INDEX``/``WINTER_PORT_BASE`` for *env_name*.
+
+    Resolves the index registry-first (so the value agrees with the
+    ``.winter.env`` that ``init_service`` already wrote), falling back to the
+    config-aware formula for envs not yet recorded (pre-init hooks or
+    pre-registry environments).
+    """
+    index = registry.get_index(env_name) if registry is not None else None
+    if index is None:
+        index = resolve_env_index(
+            env_name,
+            config.env_aliases,
+            config.envs_per_workspace,
+        )
+    return {
+        "WINTER_ENV": env_name,
+        "WINTER_ENV_INDEX": str(index),
+        "WINTER_PORT_BASE": str(config.port_base_for_index(index)),
+    }
 
 
 class EnvIndexAllocator:

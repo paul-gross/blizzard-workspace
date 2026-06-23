@@ -162,7 +162,12 @@ class ProjectRepositoryConfig(BaseModel):
     """Per-repo entries added to .git/info/exclude in every clone/worktree."""
 
     cmd: list[str] = Field(default_factory=list)
-    """Shell commands run idempotently after clone and in every worktree."""
+    """Shell commands run idempotently after clone and in every worktree.
+
+    This is a lightweight trust/bootstrap step (e.g. the `mise trust` equivalent),
+    NOT dependency installation. `winter ws init` stays purely structural; declare
+    dependency installs, resource creation, and data loading as `[[provision.*]]`
+    handlers run by `winter provision <env>` instead."""
 
 
 class StandaloneRepositoryConfig(BaseModel):
@@ -236,7 +241,11 @@ class StandaloneRepositoryConfig(BaseModel):
     """Per-repo entries added to .git/info/exclude after clone."""
 
     cmd: list[str] = Field(default_factory=list)
-    """Shell commands run idempotently after clone."""
+    """Shell commands run idempotently after clone.
+
+    A lightweight trust/bootstrap step (e.g. the `mise trust` equivalent), NOT
+    dependency installation — declare those as `[[provision.*]]` handlers run by
+    `winter provision` instead."""
 
 
 class DashboardConfig(BaseModel):
@@ -374,6 +383,14 @@ class WorkspaceConfig(BaseModel):
 
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     """Dashboard layout configuration from the `[tui.dashboard]` table."""
+
+    provision_raw: dict = Field(default_factory=dict)
+    """Raw ``[provision]`` table from the merged config.
+
+    Stored without strict parsing so a malformed ``[[provision.*]]`` entry does
+    not break unrelated commands (e.g. ``winter ws status``).  Call
+    ``parse_provision`` to run the strict ``ProvisionManifestParser`` on demand.
+    """
 
     def port_base_for_index(self, index: int) -> int:
         """Return the per-env port base for the given env index.

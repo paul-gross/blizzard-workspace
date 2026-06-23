@@ -471,6 +471,14 @@ class Container(containers.DeclarativeContainer):
         registry=env_index_registry,
     )
 
+    provision_manifest_probe_svc = providers.Factory(
+        _lazy("winter_cli.modules.provision.manifest_probe_service:ProvisionManifestProbeService"),
+        config=workspace_config,
+        fs=fs,
+        manifest_loader=extension_manifest_loader,
+        config_file_reader=config_file_reader,
+    )
+
     doctor_svc = providers.Factory(
         _lazy("winter_cli.modules.doctor.doctor_service:DoctorService"),
         core_probe_svc=core_probe_svc,
@@ -479,6 +487,7 @@ class Container(containers.DeclarativeContainer):
         repo_factory=repo_factory,
         capability_probe_svc=capability_probe_svc,
         port_probe_svc=port_probe_svc,
+        provision_manifest_probe_svc=provision_manifest_probe_svc,
     )
 
     stream_doctor_reporter = providers.Factory(
@@ -631,6 +640,51 @@ class Container(containers.DeclarativeContainer):
         readiness_service=service_readiness_svc,
         stream_reporter=stream_service_reporter,
         json_reporter=json_service_reporter,
+    )
+
+    # ── provision: re-runnable env readiness (dependency/resource/data) ────
+
+    provision_execution_svc = providers.Factory(
+        _lazy("winter_cli.modules.provision.execution_service:ProvisionExecutionService"),
+        config=workspace_config,
+        fs=fs,
+        subprocess_runner=subprocess_runner,
+        manifest_loader=extension_manifest_loader,
+        repo_factory=repo_factory,
+        registry=env_index_registry,
+    )
+
+    provision_service_check = providers.Factory(
+        _lazy("winter_cli.modules.provision.service_check_service:ProvisionServiceCheck"),
+        status_svc=service_status_svc,
+        dispatch_svc=service_dispatch_svc,
+    )
+
+    provision_svc = providers.Factory(
+        _lazy("winter_cli.modules.provision.provision_service:ProvisionService"),
+        config=workspace_config,
+        execution_svc=provision_execution_svc,
+        manifest_loader=extension_manifest_loader,
+        repo_factory=repo_factory,
+        service_check=provision_service_check,
+        fs=fs,
+    )
+
+    stream_provision_reporter = providers.Factory(
+        _lazy("winter_cli.modules.provision.provision_reporter:StreamProvisionReporter"),
+        click=providers.Object(click),
+    )
+
+    json_provision_reporter = providers.Factory(
+        _lazy("winter_cli.modules.provision.provision_reporter:JsonProvisionReporter"),
+        click=providers.Object(click),
+    )
+
+    provision_command_handler = providers.Factory(
+        _lazy("winter_cli.modules.provision.handler:ProvisionCommandHandler"),
+        provision_service=provision_svc,
+        stream_reporter=stream_provision_reporter,
+        json_reporter=json_provision_reporter,
     )
 
     # ── lint: dispatcher to extension-contributed convention checks ─────────

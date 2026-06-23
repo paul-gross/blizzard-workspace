@@ -49,6 +49,7 @@ ALLOWED_FILES = frozenset(
         "container.py",
         # Translation / loader services.
         "config/internal/write_winter_configuration_repository.py",  # writes config back
+        "config/workspace.py",  # defines WorkspaceConfigService + parse_provision (on-demand strict parse of provision_raw)
         "modules/workspace/repository_factory.py",  # builds ProjectRepository from [[project_repository]]
         # Workspace-lifecycle services — reconcile every declared repo.
         "modules/workspace/init_service.py",
@@ -63,10 +64,21 @@ ALLOWED_FILES = frozenset(
         "modules/doctor/workspace_probe_service.py",
         "modules/doctor/extension_probe_service.py",
         "modules/doctor/port_probe_service.py",  # doctor probe service — validates port-config invariant and registry drift (lifecycle carve-out: walks every declared env)
+        # Provision manifest probe service — doctor probe that reads provision_raw
+        # and walks every extension's winter-ext.toml for [[provision.*]] validation.
+        "modules/provision/manifest_probe_service.py",
         # Lint dispatcher services — walk every declared repo / extension / env.
         "modules/lint/workspace_lint_service.py",
         "modules/lint/extension_lint_service.py",
         "modules/lint/scope_resolver.py",
+        # Provision execution service — workspace-lifecycle carve-out: reads env_aliases,
+        # envs_per_workspace, base_port, ports_per_env, workspace_root, and project_repos
+        # to fan out across all project worktrees and compute env-trio vars.
+        "modules/provision/execution_service.py",
+        # Provision service — workspace-lifecycle carve-out: collects handlers from
+        # workspace config (parse_provision) and walks every standalone repo to gather
+        # extension provision manifests; needs workspace_root to locate manifests.
+        "modules/provision/provision_service.py",
     }
 )
 

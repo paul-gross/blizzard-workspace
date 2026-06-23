@@ -7,7 +7,7 @@ from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
 from winter_cli.core.extension_invocation import build_extension_env
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.core.subprocess_runner import ISubprocessRunner
-from winter_cli.modules.workspace.env_index import resolve_env_index
+from winter_cli.modules.workspace.env_index import build_env_trio
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
 from winter_cli.modules.workspace.extension_manifest import (
     EXT_MANIFEST,
@@ -238,24 +238,7 @@ class ExtensionHookService:
         # env-destroy, and workspace-reconcile) regardless of env scope.
         env["WINTER_WORKSPACE_PORT_BASE"] = str(self._config.port_base_for_index(0))
         if env_name is not None:
-            # Resolve registry-first so WINTER_ENV_INDEX/WINTER_PORT_BASE agree
-            # with the .winter.env that init_service already wrote.  Fall back
-            # to the config-aware formula for envs not yet recorded (pre-init
-            # hooks or pre-registry environments).
-            index = self._registry.get_index(env_name) if self._registry is not None else None
-            if index is None:
-                index = resolve_env_index(
-                    env_name,
-                    self._config.env_aliases,
-                    self._config.envs_per_workspace,
-                )
-            env.update(
-                {
-                    "WINTER_ENV": env_name,
-                    "WINTER_ENV_INDEX": str(index),
-                    "WINTER_PORT_BASE": str(self._config.port_base_for_index(index)),
-                }
-            )
+            env.update(build_env_trio(env_name, self._config, self._registry))
 
         label = f"hook {hook_name}"
         reporter.cmd_started(repo.name, label)

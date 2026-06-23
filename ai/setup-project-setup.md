@@ -8,23 +8,32 @@
 
 Each feature environment is independent — its own checkout, its own dependencies, its own ports and databases — intended to run in parallel with other feature environments on the same machine. Each environment gets a port window from its index (workspace base seeds `WINTER_PORT_BASE` in the per-environment `.winter.env`); a service orchestration extension like `winter-service-tmux` runs services that consume those vars. This is what allows multiple agents to work on different features simultaneously without interfering with each other. Without setup instructions, agents have to guess how to get things running — or ask the user every time. This file makes environment initialization fast, repeatable, and autonomous.
 
-## Division of responsibility: config vs. project-setup.md
+## Division of responsibility: config, provision handlers, and project-setup.md
 
-`winter ws init <letter>` already handles the parts that are uniform across environments:
+`winter ws init <letter>` handles the **structural** parts that are uniform across environments:
 
 - Cloning each repo from `[[project_repository]].url`
 - Cloning standalone repos declared in `[[standalone_repository]]` and processing winter extensions
 - Creating per-repo `git worktree`s on a branch matching the worktree name
 - Stamping git identity from `.winter/config.local.toml`
 - Writing `git_excludes` (workspace-wide and per-repo) into each repo's `.git/info/exclude`
-- Running each repo's `cmd` list (`npm install`, `dotnet restore`, etc.)
+- Running each repo's `cmd` list — a lightweight trust/bootstrap step (e.g. `mise trust`, `direnv allow`), **not** full dependency installation
 - Running every installed extension's `on_env_init` hook
 
-The goal here is **not** to replace `project-setup.md`. It's to offload the boring, standard pieces — single-line installs, a handful of file patterns to git-ignore — into `.winter/config.toml` so the cli can run them automatically. Anything that's conditional, multi-step, depends on the environment's ports/db/env, or needs branching logic stays in `project-setup.md` where it can be expressed clearly.
+`winter provision <letter>` handles **readiness** via `[[provision.*]]` handlers declared in `.winter/config.toml` and installed extension `winter-ext.toml` files. The three sub-targets map naturally to the setup categories below:
+
+- `dependency` — install language dependencies (`npm install`, `pip install`, `dotnet restore`, etc.)
+- `resource` — provision per-env resources (create databases, message-queue vhosts, S3 buckets)
+- `data` — load baseline state (run migrations, seed fixtures, create admin users)
+
+Migrating existing `project-setup.md` steps into `[[provision.*]]` handlers is **opt-in** — the handler model is a better long-term home for these steps (re-runnable, machine-parseable, orchestrated by winter), but rewriting working prose is out of scope for any individual feature. Migrate a step when it makes sense to do so; leave the rest in `project-setup.md`.
+
+The goal here is **not** to replace `project-setup.md` entirely. It's to give a cleaner home for steps that can be expressed as simple scripts, while `project-setup.md` remains the right place for conditional, multi-step, or environment-specific logic that doesn't fit the handler model.
 
 Rule of thumb:
-- **Goes in config:** would fit on one line in a README's "Getting Started" section.
-- **Stays in project-setup.md:** anything you'd describe with "first do X, then if Y…" or that references `<letter>`/`<index>`.
+- **Goes in `[[provision.*]]` handler:** a single script that can be run idempotently with no branching logic; install, create, or seed steps.
+- **Goes in config (`cmd` list):** a one-line trust/bootstrap step that must run before anything else (e.g. `mise trust`).
+- **Stays in project-setup.md:** anything conditional, multi-step, or that references dynamic `<letter>`/`<index>` values in ways a handler script can't easily parameterise.
 
 ## How to create it with the user
 
@@ -36,20 +45,28 @@ Offer the user two approaches: *"I can research your codebase and figure out the
 
 Either way, synthesize the answers — some go into `.winter/config.toml`, some go into `ai/project/project-setup.md`.
 
-### 1. Dependencies → `[[project_repository]].cmd` in `.winter/config.toml`
+### 1. Dependencies → `[[provision.dependency]]` or `[[project_repository]].cmd` in `.winter/config.toml`
 
 Ask: *"How are dependencies installed for each repo? (e.g., `npm install`, `pip install -r requirements.txt`, `cargo build`)"*
 
-If the answer is a single, unconditional command, write it to that repo's `cmd` list:
+If the install is a single, unconditional command that can be run idempotently, it belongs in a `[[provision.dependency]]` handler — run by `winter provision <env> dependency` (or the full `winter provision <env>` chain):
+
+```toml
+[[provision.dependency]]
+scope = "feature-worktree"
+apply = "scripts/install-deps.sh"
+```
+
+The repo's `cmd` list in `.winter/config.toml` is reserved for lightweight trust/bootstrap steps that must run before anything else (e.g. `mise trust`, `direnv allow`):
 
 ```toml
 [[project_repository]]
 name = "my-app"
 url = "..."
-cmd = ["pnpm install"]
+cmd = ["mise trust"]
 ```
 
-If the install needs branching, env-dependent decisions, or post-install steps that read environment state, **leave `cmd` empty** and document the install in `project-setup.md` instead. The cli is a shortcut for the easy 90%, not a workflow engine.
+If the install needs branching, env-dependent decisions, or post-install steps that read environment state, document it in `project-setup.md` instead.
 
 ### 2. Environment files → mostly `project-setup.md`, generated artifacts → `git_excludes`
 
@@ -113,7 +130,7 @@ name = "frontend"
 git_excludes = [".env.development.local"]   # only this repo
 ```
 
-### 3. Databases → `project-setup.md`
+### 3. Databases → `[[provision.resource]]` / `[[provision.data]]` or `project-setup.md`
 
 Ask: *"Does the project use databases? How are they created and migrated?"*
 
@@ -123,7 +140,7 @@ Probe for:
 - Migration commands
 - Whether the database server is shared or per-environment
 
-These steps belong in `project-setup.md` — they're per-environment orchestration, not declarative repo config.
+Database creation and migration are natural candidates for `[[provision.resource]]` and `[[provision.data]]` handlers — idempotent scripts that create the per-env database and run migrations. If you haven't migrated to handlers yet, document these steps in `project-setup.md` as per-environment orchestration.
 
 ### 4. Build steps → usually `project-setup.md`
 
@@ -131,11 +148,11 @@ Ask: *"Are there any build or codegen steps needed before the project can run? (
 
 Default to `project-setup.md`. Only append a build step to a repo's `cmd` list if it's a single command with no dependencies on env files, ports, or the environment's database — same rule as section 1.
 
-### 5. Seed data → `project-setup.md`
+### 5. Seed data → `[[provision.data]]` or `project-setup.md`
 
 Ask: *"Does the project need seed data or initial state to be useful? (e.g., fixtures, migrations with default data, creating admin users)"*
 
-Always per-environment — goes in `project-setup.md`.
+Seed data is a natural candidate for a `[[provision.data]]` handler — a re-runnable, wipe-and-reload script. If you haven't migrated to handlers yet, document these steps in `project-setup.md` as per-environment orchestration.
 
 ### 6. Verification → `project-setup.md`
 
@@ -151,9 +168,10 @@ For each one, set `pinned = true` on its `[[project_repository]]` entry. `winter
 
 ### Output
 
-Two artifacts:
+Two or three artifacts:
 
-1. **`.winter/config.toml`** — enriched with simple, unconditional `cmd` entries, plain-pattern `git_excludes`, and `pinned` flags on the `[[project_repository]]` entries that ws-setup created. Keep it boring; if in doubt, leave it out.
-2. **`workspace:/ai/project/project-setup.md`** — numbered steps for everything else: complex installs, env file generation with port offsets, database creation/migration, seed data, post-init build steps, verification. Use variables like `<letter>` and `<index>` where environment-specific values are needed, and explain how to derive them. This file is still where the real setup lives.
+1. **`.winter/config.toml`** — enriched with trust/bootstrap `cmd` entries, `[[provision.*]]` handlers for dependency/resource/data steps that fit the handler model, plain-pattern `git_excludes`, and `pinned` flags. Keep it boring; if in doubt, leave it out.
+2. **`workspace:/ai/project/project-setup.md`** — numbered steps for everything else: conditional installs, env file generation with port offsets, database creation/migration, seed data, post-init build steps, and verification steps not yet migrated to handlers. Use variables like `<letter>` and `<index>` where environment-specific values are needed, and explain how to derive them.
+3. *(optional)* **Handler scripts** under an agreed path (e.g. `scripts/`) — the scripts referenced by `[[provision.*]]` `apply`/`destroy`/`reset` fields.
 
 This guide stops at writing the artifacts. Applying the changes to existing environments and running the setup against an environment is the caller's responsibility (see the ws-setup skill).

@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from winter_cli.core.config_file import ConfigFileReadError, IConfigFileReader
+from winter_cli.core.config_file import ConfigError, ConfigFileReadError, IConfigFileReader
+from winter_cli.modules.provision.manifest import ProvisionHandler, ProvisionManifestParser
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
 
 EXT_MANIFEST = "winter-ext.toml"
@@ -85,6 +86,11 @@ class ExtensionManifest:
     in `winter-ext.toml`. Absent or empty means the extension predates the field
     and is treated as compatible (opt-in / lenient-when-absent). Use
     `implemented_version(slot)` to look up the version for a specific slot.
+
+    `provision` is the tuple of `ProvisionHandler` objects parsed from the
+    `[provision]` table in `winter-ext.toml`. The source label on each handler
+    is the extension prefix. Empty by default; raises `RepoError` on malformed
+    entries (caught and reported at each call site like other manifest errors).
     """
 
     prefix: str
@@ -97,6 +103,7 @@ class ExtensionManifest:
     requires: tuple[str, ...] = ()
     provides: dict[str, str] = field(default_factory=dict)
     implements: dict[str, str] = field(default_factory=dict)
+    provision: tuple[ProvisionHandler, ...] = ()
 
     def capability_entrypoint(self, slot: str) -> str | None:
         """Resolve the entrypoint for a capability slot.
@@ -184,6 +191,11 @@ class ExtensionManifestLoader:
             else {}
         )
 
+        try:
+            provision = tuple(ProvisionManifestParser().parse(data.get("provision"), source=prefix))
+        except ConfigError as exc:
+            raise RepoError(f"reading {EXT_MANIFEST} — {exc}") from exc
+
         return ExtensionManifest(
             prefix=prefix,
             skills_dirs=skills_dirs,
@@ -195,4 +207,5 @@ class ExtensionManifestLoader:
             requires=requires,
             provides=provides,
             implements=implements,
+            provision=provision,
         )

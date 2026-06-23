@@ -48,7 +48,15 @@ This command:
 
 Greek letters (`alpha`, `beta`, …) are the convention. The first 10 (`alpha`…`kappa`) are the default `env_aliases` and receive fixed port-offset indices; other names hash into a higher band. Any valid directory name is accepted.
 
-After this runs, follow `workspace:/ai/project/project-setup.md` for project-specific orchestration (appending project-specific vars to `.winter.env`, provisioning per-environment resources, generating other env files, anything else the project needs).
+After this runs, `winter ws init` is structural — it creates the worktrees, seeds `.winter.env`, and runs each repo's `cmd` list as a lightweight trust/bootstrap step (e.g. `mise trust`, `direnv allow`), not full dependency installation.
+
+To bring the environment to a working state, run:
+
+```bash
+winter provision <name>
+```
+
+This installs dependencies, provisions resources (databases, queues, buckets), and loads seed data using `[[provision.*]]` handlers declared in `.winter/config.toml` and installed extension `winter-ext.toml` files. See [usage/provision.md](./winter-cli/usage/provision.md) for the full command reference. For any project-specific readiness steps not yet migrated to `[[provision.*]]` handlers, also follow `workspace:/ai/project/project-setup.md`.
 
 Raw equivalent, per repo:
 

@@ -18,6 +18,7 @@ from winter_cli.config.models import (
 from winter_cli.config.workspace_locator import IWorkspaceLocator
 from winter_cli.core.config_file import ConfigError, IConfigFileReader
 from winter_cli.core.filesystem import IFilesystemReader
+from winter_cli.modules.provision.manifest import ProvisionHandler, ProvisionManifestParser
 from winter_cli.util import deep_merge
 
 WINTER_DIR = ".winter"
@@ -45,6 +46,21 @@ def _coerce_int(value: object, default: int) -> int:
     ``base_port = true`` does not silently become ``1``.
     """
     return int(value) if isinstance(value, int) and not isinstance(value, bool) else default
+
+
+_PROVISION_PARSER = ProvisionManifestParser()
+
+
+def parse_provision(config: WorkspaceConfig, source: str = "project") -> list[ProvisionHandler]:
+    """Strictly parse the ``[provision]`` table stored on *config*.
+
+    Runs the ``ProvisionManifestParser`` on the raw table that was stored
+    during config load.  Raises ``ConfigError`` on any structural or semantic
+    violation.  Call this on demand (e.g. from the provision command or a
+    doctor probe) — not at config-load time — so a malformed manifest does
+    not break unrelated commands.
+    """
+    return _PROVISION_PARSER.parse(config.provision_raw or None, source)
 
 
 class WorkspaceConfigService:
@@ -198,6 +214,10 @@ class WorkspaceConfigService:
                 f"Either reduce env_aliases (currently {len(env_aliases)} entries) or increase envs_per_workspace."
             )
 
+        provision_raw = merged.get("provision")
+        if not isinstance(provision_raw, dict):
+            provision_raw = {}
+
         return WorkspaceConfig(
             workspace_root=workspace_root,
             session_prefix=merged.get("session_prefix", "winter"),
@@ -220,6 +240,7 @@ class WorkspaceConfigService:
             ports_per_env=ports_per_env,
             env_aliases=env_aliases,
             envs_per_workspace=envs_per_workspace,
+            provision_raw=provision_raw,
         )
 
     @staticmethod

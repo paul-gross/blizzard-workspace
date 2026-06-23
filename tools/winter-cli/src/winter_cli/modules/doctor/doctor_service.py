@@ -9,6 +9,7 @@ from winter_cli.modules.doctor.extension_probe_service import ExtensionProbeServ
 from winter_cli.modules.doctor.models import ProbeResult, ProbeStatus
 from winter_cli.modules.doctor.port_probe_service import PortProbeService
 from winter_cli.modules.doctor.workspace_probe_service import WorkspaceProbeService
+from winter_cli.modules.provision.manifest_probe_service import ProvisionManifestProbeService
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
 
@@ -39,6 +40,7 @@ class DoctorService:
         repo_factory: RepositoryFactory,
         capability_probe_svc: CapabilityProbeService,
         port_probe_svc: PortProbeService | None = None,
+        provision_manifest_probe_svc: ProvisionManifestProbeService | None = None,
     ) -> None:
         self._core_probe_svc = core_probe_svc
         self._workspace_probe_svc = workspace_probe_svc
@@ -46,6 +48,7 @@ class DoctorService:
         self._repo_factory = repo_factory
         self._capability_probe_svc = capability_probe_svc
         self._port_probe_svc = port_probe_svc
+        self._provision_manifest_probe_svc = provision_manifest_probe_svc
 
     def run(self, reporter: IDoctorReporter) -> DoctorSummary:
         reporter.started()
@@ -68,6 +71,11 @@ class DoctorService:
         for result in self._extension_probe_svc.run(standalone_repos):
             reporter.probe_result(result)
             results.append(result)
+
+        if self._provision_manifest_probe_svc is not None:
+            for result in self._provision_manifest_probe_svc.run(standalone_repos):
+                reporter.probe_result(result)
+                results.append(result)
 
         for result in self._capability_probe_svc.run():
             reporter.probe_result(result)

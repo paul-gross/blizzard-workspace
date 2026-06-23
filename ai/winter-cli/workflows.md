@@ -5,7 +5,8 @@ Recipe-style command sequences for the day-to-day operations. For the per-comman
 ### Bootstrap a new workspace
 ```bash
 winter ws init              # clone every declared repo into projects/
-winter ws init alpha        # create the alpha/ feature environment
+winter ws init alpha        # create the alpha/ feature environment (structural only)
+winter provision alpha      # bring alpha to a working state: deps, resources, data (see usage/provision.md)
 ```
 
 ### Check workspace state
@@ -33,7 +34,8 @@ winter ws pull alpha --autostash   # stash dirty tree first, restore after
 
 ### Start a new feature
 ```bash
-winter ws init alpha                       # ensures alpha/ exists
+winter ws init alpha                       # ensures alpha/ exists (structural: worktrees, .winter.env, cmd list)
+winter provision alpha                     # readiness: dependencies, resources, seed data (see usage/provision.md)
 winter ws connect alpha feature/my-feature
 ```
 

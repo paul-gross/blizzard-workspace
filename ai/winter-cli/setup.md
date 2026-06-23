@@ -195,6 +195,30 @@ Repos appear in CLI tables and the TUI grid in the order they're declared in `.w
 
 The `workspace` repo is discovered implicitly — it doesn't appear in `[[project_repository]]` or `[[standalone_repository]]`. Winter detects it from the filesystem: the workspace itself is the repo this CLI is invoked from.
 
+## Provision handlers
+
+`winter provision` reads `[[provision.*]]` tables from `.winter/config.toml` alongside the workspace's other config. Declare handlers per sub-target (`dependency`, `resource`, `data`):
+
+```toml
+[[provision.dependency]]
+scope = "feature-worktree"
+apply = "scripts/install-deps.sh"
+
+[[provision.resource]]
+scope             = "workspace"
+apply             = "scripts/create-db.sh"
+destroy           = "scripts/drop-db.sh"
+required_services = ["workspace/postgres"]
+
+[[provision.data]]
+scope             = "feature-environment"
+apply             = "scripts/seed.sh"
+reset             = "scripts/reseed.sh"
+required_services = ["workspace/postgres"]
+```
+
+For per-entry field semantics (`scope`, `apply`, `destroy`, `reset`, `required_services`, allowed sub-targets, and unknown-key rejection), see [usage/provision.md](./usage/provision.md). Extensions declare the same `[[provision.*]]` shape in their `winter-ext.toml` (paths relative to the extension directory). See [usage/provision.md](./usage/provision.md) for the full command reference, execution model, service-check behavior, and `--json` event contract.
+
 ## Extensions
 
 Standalone repositories can opt into contributing skills and agents to the workspace's `.claude/` directory by shipping a `winter-ext.toml` file at the repo root.
@@ -212,6 +236,22 @@ requires = ["winter-product"]  # optional; other modules this one depends on (se
 
 [provides]
 service = "workflow/service"   # this extension provides the `service` capability; entrypoint relative to repo root
+
+# Provision handlers — same shape as [[provision.*]] in .winter/config.toml (paths relative to extension directory)
+[[provision.dependency]]
+scope = "feature-worktree"
+apply = "scripts/install.sh"
+
+[[provision.resource]]
+scope             = "workspace"
+apply             = "scripts/create-db.sh"
+destroy           = "scripts/drop-db.sh"
+required_services = ["workspace/postgres"]
+
+[[provision.data]]
+scope             = "feature-environment"
+apply             = "scripts/seed.sh"
+reset             = "scripts/reseed.sh"
 ```
 
 `requires` declares the other winter modules this one references and therefore needs when installed on its own. Each entry is a module name — the `<context>` half of a `<context>:/path` reference. It is the data `winter graph` aggregates and the module-extractability lint check validates references against.

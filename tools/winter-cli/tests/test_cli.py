@@ -50,6 +50,7 @@ def test_cli_group_advertises_every_top_level_command() -> None:
         "ext",
         "graph",
         "lint",
+        "provision",
         "repo",
         "service",
         "ws",
