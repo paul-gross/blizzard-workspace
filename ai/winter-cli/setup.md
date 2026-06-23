@@ -227,7 +227,12 @@ When `skills_dir` and `agents_dir` aren't set explicitly, winter searches for th
 
 That covers both the winter convention (top-level `skills/`/`agents/`) and the Claude Code convention (`.claude/skills/`/`.claude/agents/`), so a vanilla Claude Code repo can be adopted as an extension without modification. Setting `skills_dir`/`agents_dir` explicitly in `winter-ext.toml` skips the fallback and uses exactly the declared path.
 
-For each subdirectory under the resolved skills root, winter creates a symlink under **both** `.claude/skills/<prefix>-<dir>` and `.codex/skills/<prefix>-<dir>` pointing to it. Two targets cover all three supported harnesses: Claude Code and OpenCode both read `.claude/skills` (OpenCode free-rides on it natively), and Codex reads `.codex/skills`. Winter deliberately does **not** also populate `.agents/skills` or `.opencode/skills` — OpenCode reads those too, so a redundant copy there would make it double-load every skill. For each `.md` file or subdirectory under the resolved agents root, winter creates a symlink at `.claude/agents/<prefix>-<name>` (agents are Claude-only for now).
+For each subdirectory under the resolved skills root, winter installs the skill into every code-agent vendor's skills directory, choosing the install mechanism from the vendor's capability (the `CodeAgentVendor` enum):
+
+- **Claude Code** (`.claude/skills/<prefix>-<dir>`) and **Codex** (`.codex/skills/<prefix>-<dir>`) get a **relative symlink** to the source.
+- **OpenCode** (`.opencode/skill/<prefix>-<dir>`) gets a **real-directory copy**. OpenCode discovers skills by globbing `skill/**/SKILL.md` and its globber does **not** traverse symlinked directories — a symlink there would be invisible to it, so the skill must be a real directory. The copy is idempotent: on each `winter ws init`, winter content-hashes the source and destination and re-copies (delete-then-copy) only on a mismatch; nothing is persisted. Stale `<prefix>-*` copies with no live source are pruned, mirroring the symlink prune.
+
+`.opencode/skill/` is read only by OpenCode, and OpenCode's read of `.claude/skills` only picks up real directories (not the symlinks there), so there is no double-loading across the symlink and copy sets. For each `.md` file or subdirectory under the resolved agents root, winter creates a symlink at `.claude/agents/<prefix>-<name>` (agents are Claude-only for now).
 
 The workspace `.gitignore` is updated with a marker-bracketed block per extension:
 
@@ -236,13 +241,14 @@ The workspace `.gitignore` is updated with a marker-bracketed block per extensio
 /winter-backlog/
 .claude/skills/wsb-*
 .codex/skills/wsb-*
+.opencode/skill/wsb-*
 .claude/agents/wsb-*
 # <<< winter-backlog
 ```
 
 ### Frontmatter convention
 
-Claude Code lets a SKILL.md frontmatter `name` field override the directory name during skill discovery. That defeats the prefix-by-symlink design, so winter requires extension SKILL.md files to **omit the `name` field** — letting the directory name (which winter controls via the symlink) be authoritative. Winter validates this on install and refuses if any SKILL.md sets `name`.
+Claude Code lets a SKILL.md frontmatter `name` field override the directory name during skill discovery. That defeats the prefix-by-directory-name design, so winter requires extension SKILL.md files to **omit the `name` field** — letting the directory name (which winter controls via the symlink or copy) be authoritative. Winter validates this on install and refuses if any SKILL.md sets `name`.
 
 ### Extension hooks
 

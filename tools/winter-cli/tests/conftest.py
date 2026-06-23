@@ -320,6 +320,28 @@ class FakeFilesystem:
             return
         raise FileNotFoundError(path)
 
+    def copytree(self, src: Path, dst: Path) -> None:
+        # Mirror shutil.copytree: dst must not already exist. Replicate every
+        # directory, file, binary, and symlink rooted at src under dst so a
+        # subsequent content hash of dst matches src.
+        if dst in self.directories or dst in self.files or dst in self.binary_files:
+            raise FileExistsError(dst)
+        self.directories.add(dst)
+        for parent in dst.parents:
+            self.directories.add(parent)
+        for d in list(self.directories):
+            if src in d.parents:
+                self.directories.add(dst / d.relative_to(src))
+        for p, text in list(self.files.items()):
+            if src in p.parents:
+                self.files[dst / p.relative_to(src)] = text
+        for p, blob in list(self.binary_files.items()):
+            if src in p.parents:
+                self.binary_files[dst / p.relative_to(src)] = blob
+        for p, target in list(self.symlinks.items()):
+            if src in p.parents:
+                self.symlinks[dst / p.relative_to(src)] = target
+
     def rmtree(self, path: Path) -> None:
         self.directories.discard(path)
         for collection in (self.files, self.binary_files, self.symlinks):

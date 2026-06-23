@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import logging
-import os
 from pathlib import Path
 
-from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
+from winter_cli.config.models import AdoptExtensions, CodeAgentVendor, SkillInstall, WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.modules.workspace.extension_manifest import (
     EXT_MANIFEST,
     ExtensionManifestLoader,
+)
+from winter_cli.modules.workspace.extension_skill_install import (
+    CopySkillStrategy,
+    InstallSkillStrategy,
+    SymlinkInstaller,
+    SymlinkSkillStrategy,
 )
 from winter_cli.modules.workspace.init_reporter import IInitReporter
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
@@ -17,14 +22,19 @@ logger = logging.getLogger(__name__)
 
 
 class ExtensionSymlinkService:
-    """Installs `.{claude,codex}/skills/<prefix>-*` and `.claude/agents/<prefix>-*` symlinks for an extension repo.
+    """Installs per-vendor `<prefix>-*` skills and `.claude/agents/<prefix>-*` symlinks for an extension repo.
 
     For each standalone repo, decides whether it should contribute skills/agents
     (per `adopt_extensions` mode and the presence of `winter-ext.toml`),
     validates SKILL.md frontmatter conforms to the prefix-by-directory
-    convention, and creates per-entry symlinks. Skills are projected into both
-    `.claude/skills/<prefix>-<dir>` and `.codex/skills/<prefix>-<dir>`; agents into
-    `.claude/agents/<prefix>-<dir>`.
+    convention, and installs per-entry skills and agents.
+
+    Skills are projected into every `CodeAgentVendor`'s skills dir using the
+    install strategy that vendor's `skill_install` capability selects (symlink
+    for ClaudeCode/Codex, copy for OpenCode) — see
+    `extension_skill_install.py`. Agents are Claude-only flat `.md` symlinks
+    under `.claude/agents/<prefix>-<name>`, installed via the shared symlink
+    primitives in that same module.
 
     Error-handling shape: `process` is the wrap site. Leaves raise
     `RepoError` / `OSError`; one try/except at the boundary routes the
@@ -65,35 +75,31 @@ class ExtensionSymlinkService:
 
             self._validate_frontmatter(repo, skills_root, reporter, strict=mode == AdoptExtensions.winter)
 
-            # Skills are always directories containing SKILL.md. Project them into
-            # both `.claude/skills` (read by Claude Code — and by OpenCode, which
-            # reads `.claude/skills` natively) and `.codex/skills` (read by Codex).
-            # Two targets cover all three harnesses. Deliberately do NOT also
-            # populate `.agents/skills` or `.opencode/skills`: OpenCode reads those
-            # too, so a redundant copy there would make it double-load every skill.
-            skills_targets = (
-                self._config.workspace_root / ".claude" / "skills",
-                self._config.workspace_root / ".codex" / "skills",
-            )
-            skill_links: list[str] = []
-            for skills_target in skills_targets:
-                skill_links = self._symlink_entries(
+            # Skills are directories containing SKILL.md. Project them into every
+            # code-agent vendor's skills dir using the install strategy its
+            # `skill_install` capability selects: a relative symlink for ClaudeCode
+            # (`.claude/skills`) and Codex (`.codex/skills`), and a real-directory
+            # copy for OpenCode (`.opencode/skill`). OpenCode globs `skill/**/SKILL.md`
+            # and does NOT traverse symlinked directories, so a symlink there would be
+            # invisible to it; the copy lives only under `.opencode/skill`, which no
+            # other harness reads, so there's no double-loading.
+            skill_names: list[str] = []
+            for vendor in CodeAgentVendor:
+                target_root = self._config.workspace_root / vendor.skills_subpath
+                skill_names = self._skill_strategy(vendor).install(
                     source_root=skills_root,
-                    target_root=skills_target,
+                    target_root=target_root,
                     prefix=manifest.prefix,
-                    kind="skill",
-                    include_dirs=True,
-                    include_files=False,
-                    require_marker_file="SKILL.md",
                 )
-                self._prune_stale_symlinks(skills_target, manifest.prefix, set(skill_links), kind="skill")
 
             # Agents are flat .md files (one per agent). Directories are
             # reserved for the nested-agent convention and must carry an
             # AGENT.md marker; bare doc directories (e.g. `agents/docs/`) and
-            # `README.md` files at the agents root are skipped.
+            # `README.md` files at the agents root are skipped. Agents stay
+            # Claude-only symlinks for now (no per-vendor abstraction).
+            symlinks = SymlinkInstaller(self._fs)
             agents_target = self._config.workspace_root / ".claude" / "agents"
-            agent_links = self._symlink_entries(
+            agent_links = symlinks.install_entries(
                 source_root=agents_root,
                 target_root=agents_target,
                 prefix=manifest.prefix,
@@ -104,14 +110,14 @@ class ExtensionSymlinkService:
                 exclude_filenames=("README.md",),
                 require_marker_file="AGENT.md",
             )
-            self._prune_stale_symlinks(agents_target, manifest.prefix, set(agent_links), kind="agent")
+            symlinks.prune_stale(agents_target, manifest.prefix, set(agent_links), kind="agent")
         except (RepoError, OSError) as exc:
             logger.warning("process symlinks: failed for %s — %s", repo.name, exc)
             reporter.repo_error(repo.name, str(exc))
             return False
 
-        if skill_links or agent_links:
-            detail = f"prefix={manifest.prefix} skills={len(skill_links)} agents={len(agent_links)}"
+        if skill_names or agent_links:
+            detail = f"prefix={manifest.prefix} skills={len(skill_names)} agents={len(agent_links)}"
             reporter.repo_action(repo.name, str(repo.path), "extension_installed", detail)
 
         return True
@@ -195,7 +201,7 @@ class ExtensionSymlinkService:
                     return value
         return None
 
-    # ── Symlinks ──────────────────────────────────────────────────────────
+    # ── Source resolution ─────────────────────────────────────────────────
 
     def _resolve_existing_dir(self, base: Path, candidates: tuple[str, ...]) -> Path | None:
         """Return the first candidate path under `base` that exists as a directory."""
@@ -205,129 +211,13 @@ class ExtensionSymlinkService:
                 return path
         return None
 
-    def _symlink_entries(
-        self,
-        source_root: Path | None,
-        target_root: Path,
-        prefix: str,
-        kind: str,
-        include_dirs: bool,
-        include_files: bool,
-        file_suffix: str = "",
-        exclude_filenames: tuple[str, ...] = (),
-        require_marker_file: str | None = None,
-    ) -> list[str]:
-        """Create one symlink per matching entry in `source_root`.
+    def _skill_strategy(self, vendor: CodeAgentVendor) -> InstallSkillStrategy:
+        """Select a skill-install strategy from the vendor's `skill_install` capability.
 
-        For directory entries the symlink keeps the directory name (`<prefix>-<dirname>`).
-        For file entries with a matching suffix the symlink keeps the full filename
-        (`<prefix>-<filename>`), so a `.md` extension is preserved.
-
-        `exclude_filenames` skips matching file entries by exact basename — used to
-        keep `README.md` out of the installed agent set. `require_marker_file`
-        restricts directory entries to those containing that marker file (e.g.
-        `SKILL.md`, `AGENT.md`), so doc-only subdirectories don't masquerade as
-        skills or nested agents.
-
-        Returns the list of created/existing symlink names. Empty when `source_root`
-        is None or doesn't exist. Raises `RepoError` on conflict or I/O failure.
+        Data-driven off the capability attribute, not a per-member branch — a
+        new vendor that reuses an existing `SkillInstall` mode needs no change
+        here.
         """
-        if source_root is None or not self._fs.is_dir(source_root):
-            return []
-
-        self._fs.mkdir(target_root, parents=True, exist_ok=True)
-
-        linked: list[str] = []
-        for entry in sorted(self._fs.iterdir(source_root)):
-            if self._fs.is_dir(entry):
-                if not include_dirs:
-                    continue
-                if require_marker_file is not None and not self._fs.is_file(entry / require_marker_file):
-                    continue
-                link_name = f"{prefix}-{entry.name}"
-            elif self._fs.is_file(entry):
-                if not include_files:
-                    continue
-                if file_suffix and not entry.name.endswith(file_suffix):
-                    continue
-                if entry.name in exclude_filenames:
-                    continue
-                link_name = f"{prefix}-{entry.name}"
-            else:
-                continue
-
-            link_path = target_root / link_name
-            relative_target = self._relative_symlink_target(target_root, entry)
-
-            if self._fs.is_symlink(link_path):
-                # Update if pointing at the wrong place.
-                try:
-                    current = self._fs.readlink(link_path)
-                except OSError:
-                    current = None
-                if current != relative_target:
-                    try:
-                        self._fs.unlink(link_path)
-                        self._fs.symlink_to(link_path, relative_target)
-                    except OSError as exc:
-                        raise RepoError(f"refresh {kind} symlink {link_name}: {exc}") from exc
-                linked.append(link_name)
-                continue
-
-            if self._fs.exists(link_path):
-                raise RepoError(
-                    f"cannot create {kind} symlink {link_name}: path exists and is not a symlink",
-                )
-
-            try:
-                self._fs.symlink_to(link_path, relative_target)
-            except OSError as exc:
-                raise RepoError(f"create {kind} symlink {link_name}: {exc}") from exc
-            linked.append(link_name)
-
-        return linked
-
-    @staticmethod
-    def _relative_symlink_target(link_dir: Path, target: Path) -> Path:
-        """Compute the symlink target as a path relative to the link's parent directory.
-
-        Relative targets keep the workspace portable — moving the workspace doesn't
-        invalidate the links.
-        """
-        return Path(os.path.relpath(target, link_dir))
-
-    def _prune_stale_symlinks(
-        self,
-        target_root: Path,
-        prefix: str,
-        live_names: set[str],
-        kind: str,
-    ) -> None:
-        """Remove any `<prefix>-*` symlinks in `target_root` that weren't created this pass.
-
-        Catches two cases:
-          - the source entry was deleted upstream (broken symlink like the
-            historical `wf-blizzard` after the source `agents/blizzard/`
-            directory went away);
-          - the source entry still exists but is now filtered out by the
-            install pass (README.md, AGENT.md-less directories).
-
-        Only symlinks whose name starts with `f"{prefix}-"` are considered —
-        each extension owns its prefix, so this won't touch other extensions'
-        links or user-placed files. Raises `RepoError` on I/O failure.
-        """
-        if not self._fs.is_dir(target_root):
-            return
-
-        prefix_with_dash = f"{prefix}-"
-        for entry in sorted(self._fs.iterdir(target_root)):
-            if not self._fs.is_symlink(entry):
-                continue
-            if not entry.name.startswith(prefix_with_dash):
-                continue
-            if entry.name in live_names:
-                continue
-            try:
-                self._fs.unlink(entry)
-            except OSError as exc:
-                raise RepoError(f"prune stale {kind} symlink {entry.name}: {exc}") from exc
+        if vendor.skill_install is SkillInstall.copy:
+            return CopySkillStrategy(self._fs)
+        return SymlinkSkillStrategy(self._fs)

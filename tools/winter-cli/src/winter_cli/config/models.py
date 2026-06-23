@@ -28,6 +28,44 @@ class AdoptExtensions(enum.Enum):
     """Symlink skills/agents from any standalone repo, with or without winter-ext.toml."""
 
 
+class SkillInstall(enum.Enum):
+    """How a code-agent vendor wants extension skills materialized into its skills dir.
+
+    Symlink vendors discover skills through relative directory symlinks; copy
+    vendors need real directories (their skill globber does not traverse
+    symlinked directories).
+    """
+
+    symlink = "symlink"
+    copy = "copy"
+
+
+class CodeAgentVendor(enum.Enum):
+    """A code-agent tool that winter projects extension skills into.
+
+    Each member carries the workspace-relative directory its skills live in
+    (`skills_subpath`) and the `SkillInstall` strategy it requires
+    (`skill_install`), so strategy selection is data-driven off the vendor —
+    adding a vendor is a data change, not a new control-flow branch.
+
+    This enum is the branch-by-abstraction seam reused by future per-vendor
+    work (e.g. agent installation), but skill installation keys only off
+    `skill_install`.
+    """
+
+    ClaudeCode = ("claude-code", ".claude/skills", SkillInstall.symlink)
+    Codex = ("codex", ".codex/skills", SkillInstall.symlink)
+    OpenCode = ("opencode", ".opencode/skill", SkillInstall.copy)
+
+    skills_subpath: str
+    skill_install: SkillInstall
+
+    def __init__(self, label: str, skills_subpath: str, skill_install: SkillInstall) -> None:
+        self._value_ = label
+        self.skills_subpath = skills_subpath
+        self.skill_install = skill_install
+
+
 class DashboardLayout(enum.Enum):
     auto = "auto"
     """Default. 1 repo → list; repos > envs → repos-as-rows; else → repos-as-columns."""

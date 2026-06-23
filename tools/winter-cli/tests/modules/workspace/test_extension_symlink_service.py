@@ -11,6 +11,7 @@ from tests.conftest import (
 )
 from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
 from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
+from winter_cli.modules.workspace.extension_skill_install import CopySkillStrategy
 from winter_cli.modules.workspace.extension_symlink_service import ExtensionSymlinkService
 from winter_cli.modules.workspace.models import StandaloneRepository
 
@@ -97,6 +98,13 @@ def test_process_symlinks_skills_and_agents(workspace_config: WorkspaceConfig, i
     # And mirrored into .codex/skills so Codex can load it too.
     codex_skill_link = WORKSPACE_ROOT / ".codex" / "skills" / "my-ext-do-thing"
     assert fs.is_symlink(codex_skill_link)
+
+    # OpenCode gets a real-directory copy under .opencode/skill (its globber
+    # does not traverse symlinked directories), not a symlink.
+    opencode_skill_dir = WORKSPACE_ROOT / ".opencode" / "skill" / "my-ext-do-thing"
+    assert fs.is_dir(opencode_skill_dir)
+    assert not fs.is_symlink(opencode_skill_dir)
+    assert fs.is_file(opencode_skill_dir / "SKILL.md")
 
     # Agents are Claude-only: no .codex/agents projection.
     assert not fs.is_symlink(WORKSPACE_ROOT / ".codex" / "agents" / "my-ext-reviewer.md")
@@ -243,3 +251,113 @@ def test_process_wrap_catches_manifest_read_error(
     errors = [msg for repo, msg in init_reporter.errors if repo == "broken-ext"]
     assert len(errors) == 1
     assert "winter-ext.toml" in errors[0]
+
+
+# ── Copy strategy (OpenCode) ──────────────────────────────────────────────
+
+
+class CountingFakeFilesystem(FakeFilesystem):
+    """FakeFilesystem that counts copytree calls, to assert copy-vs-no-op."""
+
+    copytree_calls = 0
+
+    def copytree(self, src: Path, dst: Path) -> None:
+        self.copytree_calls += 1
+        super().copytree(src, dst)
+
+
+def _seed_source_skill(fs: FakeFilesystem, source_root: Path, name: str, body: str) -> Path:
+    """Plant a source skill directory `<source_root>/<name>` with a SKILL.md."""
+    skill_dir = source_root / name
+    fs.directories.add(skill_dir)
+    fs.files[skill_dir / "SKILL.md"] = body
+    for parent in skill_dir.parents:
+        fs.directories.add(parent)
+    return skill_dir
+
+
+def test_copy_strategy_fresh_install() -> None:
+    """Copy strategy materializes a real `<prefix>-<name>` directory, not a symlink."""
+    fs = FakeFilesystem()
+    source_root = WORKSPACE_ROOT / "my-ext" / "skills"
+    _seed_source_skill(fs, source_root, "do-thing", "---\ndescription: x\n---\n# do-thing\n")
+    target_root = WORKSPACE_ROOT / ".opencode" / "skill"
+
+    names = CopySkillStrategy(fs).install(source_root=source_root, target_root=target_root, prefix="wf")
+
+    assert names == ["wf-do-thing"]
+    dest = target_root / "wf-do-thing"
+    assert fs.is_dir(dest)
+    assert not fs.is_symlink(dest)
+    assert fs.read_text(dest / "SKILL.md") == "---\ndescription: x\n---\n# do-thing\n"
+
+
+def test_copy_strategy_noop_when_content_unchanged() -> None:
+    """A second install with identical source content does not re-copy."""
+    fs = CountingFakeFilesystem()
+    source_root = WORKSPACE_ROOT / "my-ext" / "skills"
+    _seed_source_skill(fs, source_root, "do-thing", "# unchanged\n")
+    target_root = WORKSPACE_ROOT / ".opencode" / "skill"
+    strategy = CopySkillStrategy(fs)
+
+    strategy.install(source_root=source_root, target_root=target_root, prefix="wf")
+    assert fs.copytree_calls == 1
+
+    strategy.install(source_root=source_root, target_root=target_root, prefix="wf")
+    assert fs.copytree_calls == 1  # hashes matched → destination left untouched
+
+
+def test_copy_strategy_recopies_when_content_changed() -> None:
+    """A changed source re-copies (delete-then-copy) and the destination updates."""
+    fs = CountingFakeFilesystem()
+    source_root = WORKSPACE_ROOT / "my-ext" / "skills"
+    skill_dir = _seed_source_skill(fs, source_root, "do-thing", "# v1\n")
+    target_root = WORKSPACE_ROOT / ".opencode" / "skill"
+    strategy = CopySkillStrategy(fs)
+
+    strategy.install(source_root=source_root, target_root=target_root, prefix="wf")
+    assert fs.copytree_calls == 1
+
+    fs.files[skill_dir / "SKILL.md"] = "# v2 changed\n"
+    strategy.install(source_root=source_root, target_root=target_root, prefix="wf")
+
+    assert fs.copytree_calls == 2
+    assert fs.read_text(target_root / "wf-do-thing" / "SKILL.md") == "# v2 changed\n"
+
+
+def test_copy_strategy_prunes_removed_source() -> None:
+    """A `<prefix>-*` destination with no live source is pruned on re-install."""
+    fs = FakeFilesystem()
+    source_root = WORKSPACE_ROOT / "my-ext" / "skills"
+    _seed_source_skill(fs, source_root, "keep", "# keep\n")
+    _seed_source_skill(fs, source_root, "drop", "# drop\n")
+    target_root = WORKSPACE_ROOT / ".opencode" / "skill"
+    strategy = CopySkillStrategy(fs)
+
+    strategy.install(source_root=source_root, target_root=target_root, prefix="wf")
+    assert fs.is_dir(target_root / "wf-keep")
+    assert fs.is_dir(target_root / "wf-drop")
+
+    # Remove the `drop` source skill entirely, then re-install.
+    fs.rmtree(source_root / "drop")
+    names = strategy.install(source_root=source_root, target_root=target_root, prefix="wf")
+
+    assert names == ["wf-keep"]
+    assert fs.is_dir(target_root / "wf-keep")
+    assert not fs.is_dir(target_root / "wf-drop")
+
+
+def test_copy_strategy_prune_leaves_other_prefixes() -> None:
+    """Pruning only touches the strategy's own `<prefix>-*` destinations."""
+    fs = FakeFilesystem()
+    source_root = WORKSPACE_ROOT / "my-ext" / "skills"
+    _seed_source_skill(fs, source_root, "keep", "# keep\n")
+    target_root = WORKSPACE_ROOT / ".opencode" / "skill"
+    # A different extension's copied skill already lives in the shared target.
+    fs.directories.add(target_root / "other-thing")
+    fs.files[target_root / "other-thing" / "SKILL.md"] = "# other\n"
+
+    CopySkillStrategy(fs).install(source_root=source_root, target_root=target_root, prefix="wf")
+
+    assert fs.is_dir(target_root / "wf-keep")
+    assert fs.is_dir(target_root / "other-thing")  # untouched — different prefix

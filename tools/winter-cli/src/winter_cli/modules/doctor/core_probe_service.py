@@ -255,10 +255,13 @@ class CoreProbeService:
     def _probe_claude_symlinks(self) -> ProbeResult | None:
         """Detect broken extension symlinks under `.claude/{agents,skills}` and `.codex/skills`.
 
-        Skills are projected into both `.claude/skills` and `.codex/skills`
-        (agents only into `.claude/agents`), so all three install surfaces are
-        audited together. `ExtensionSymlinkService._prune_stale_symlinks` heals
-        these on the next `winter ws init`, but until then a stale link silently
+        Skills are projected as symlinks into both `.claude/skills` and
+        `.codex/skills` (agents only into `.claude/agents`), so all three
+        symlink install surfaces are audited together. OpenCode's
+        `.opencode/skill` is excluded by design — it holds real-directory
+        copies, not symlinks, so it has no broken-link failure mode.
+        `SymlinkInstaller.prune_stale` (in `extension_skill_install`) heals these
+        on the next `winter ws init`, but until then a stale link silently
         shadows a renamed agent or skill — the failure surfaces only when
         something tries to spawn the missing target. Returns None when none of
         the directories exist so the probe stays quiet on workspaces that never

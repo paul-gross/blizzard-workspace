@@ -81,6 +81,7 @@ def test_finalize_excludes_writes_one_block_per_extension(
     assert "/ext-a/" in content
     assert ".claude/skills/ext-a-*" in content
     assert ".codex/skills/ext-a-*" in content
+    assert ".opencode/skill/ext-a-*" in content
     assert ".claude/agents/ext-a-*" in content
 
 

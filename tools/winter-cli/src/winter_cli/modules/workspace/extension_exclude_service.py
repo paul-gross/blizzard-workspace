@@ -26,9 +26,10 @@ class ExtensionExcludeService:
     """Aggregate-updates the workspace `.git/info/exclude` with one block per extension repo.
 
     Each block is bracketed with `# >>> <name> (managed by winter)` markers
-    and lists the extension repo path plus the symlink globs under
-    `.claude/skills/`, `.codex/skills/`, and `.claude/agents/`. Orphan blocks
-    for extensions no longer present are stripped automatically.
+    and lists the extension repo path plus the install globs under
+    `.claude/skills/`, `.codex/skills/`, `.opencode/skill/` (OpenCode's copied
+    skills), and `.claude/agents/`. Orphan blocks for extensions no longer
+    present are stripped automatically.
     """
 
     def __init__(
@@ -53,8 +54,8 @@ class ExtensionExcludeService:
 
         Called once after all standalones are reconciled. Each block is bracketed
         with `# >>> <name> (managed by winter)` markers and lists the extension
-        repo path plus the symlink globs under `.claude/skills/`, `.codex/skills/`,
-        and `.claude/agents/`.
+        repo path plus the install globs under `.claude/skills/`, `.codex/skills/`,
+        `.opencode/skill/`, and `.claude/agents/`.
         Orphan blocks for extensions no longer present are stripped automatically;
         if no extensions are eligible, every winter-managed block is removed.
 
@@ -102,6 +103,7 @@ class ExtensionExcludeService:
                     [
                         f".claude/skills/{prefix}-*",
                         f".codex/skills/{prefix}-*",
+                        f".opencode/skill/{prefix}-*",
                         f".claude/agents/{prefix}-*",
                     ]
                 )

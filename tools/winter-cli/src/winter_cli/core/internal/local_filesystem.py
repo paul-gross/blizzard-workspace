@@ -71,6 +71,12 @@ class LocalFilesystem:
         link_path.symlink_to(target)
 
     @staticmethod
+    def copytree(src: Path, dst: Path) -> None:
+        # `dst` must not already exist — callers delete it first (the copy
+        # strategy's delete-then-copy on a content-hash mismatch).
+        shutil.copytree(src, dst)
+
+    @staticmethod
     def unlink(path: Path) -> None:
         path.unlink()
 
