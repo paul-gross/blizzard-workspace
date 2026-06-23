@@ -17,12 +17,14 @@ class ServiceLogsService:
     """Streams logs from the registered orchestrator(s) via the winter-defined contract.
 
     Single-provider (D1 short-circuit): invokes the sole orchestrator entrypoint as
-    ``<entrypoint> logs <pattern...>`` with ``cwd`` at the workspace root. The
-    ``<env>/<service>`` selection patterns are forwarded verbatim as positional argv
-    tokens. Render parameters are conveyed via ``WINTER_LOG_*`` environment variables
-    (``WINTER_LOG_FOLLOW``, ``WINTER_LOG_TAIL``, ``WINTER_LOG_SINCE``,
-    ``WINTER_LOG_UNTIL``, ``WINTER_LOG_TIMESTAMPS``). Like every dispatch it also
-    exports ``WINTER_WORKSPACE_DIR``, ``WINTER_EXT_DIR``, and ``WINTER_EXT_PREFIX``.
+    ``<entrypoint> logs <pattern...> [render flags]`` with ``cwd`` at the workspace
+    root. The ``<env>/<service>`` selection patterns are forwarded verbatim as
+    positional argv tokens. Render parameters are appended as CLI flags mirroring
+    ``winter service logs``' own surface: ``--tail <N|all>`` (always), ``--since``/
+    ``--until`` with the already-resolved RFC3339 values (omitted when empty), and the
+    bare ``--follow`` / ``--timestamps`` flags (emitted only when true). Like every
+    dispatch it also exports ``WINTER_WORKSPACE_DIR``, ``WINTER_EXT_DIR``, and
+    ``WINTER_EXT_PREFIX``.
     The orchestrator's stdout is read as NDJSON; each line must carry an ``env`` field
     in addition to ``svc``/``msg``; winter applies a segment-aware backstop filter
     matching ``<env>/<svc>`` against the requested patterns, then applies time/tail
@@ -149,6 +151,18 @@ class ServiceLogsService:
         caller handles that).
         """
         cmd = [str(provider.entrypoint), "logs", *patterns]
+        # Render options ride on argv as the canonical orchestrator contract:
+        # --tail always (resolved N|all); --since/--until only when non-empty;
+        # --follow/--timestamps as bare flags only when true.
+        cmd.extend(["--tail", str(options.tail)])
+        if options.since_rfc3339:
+            cmd.extend(["--since", options.since_rfc3339])
+        if options.until_rfc3339:
+            cmd.extend(["--until", options.until_rfc3339])
+        if options.follow:
+            cmd.append("--follow")
+        if options.timestamps:
+            cmd.append("--timestamps")
 
         extra_env = build_extension_env(
             workspace_root=self._workspace_root,
@@ -156,11 +170,6 @@ class ServiceLogsService:
             prefix=provider.prefix,
             config_dir=provider.config_dir,
         )
-        extra_env["WINTER_LOG_FOLLOW"] = "1" if options.follow else "0"
-        extra_env["WINTER_LOG_TAIL"] = str(options.tail)
-        extra_env["WINTER_LOG_SINCE"] = options.since_rfc3339
-        extra_env["WINTER_LOG_UNTIL"] = options.until_rfc3339
-        extra_env["WINTER_LOG_TIMESTAMPS"] = "1" if options.timestamps else "0"
 
         own_processor = processor is None
         if own_processor:

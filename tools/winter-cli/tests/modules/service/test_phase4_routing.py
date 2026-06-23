@@ -349,12 +349,12 @@ def test_logs_non_follow_spans_two_providers_and_merges_output() -> None:
         },
         popen_responses={
             # Provider-a receives the original env-scoped pattern "alpha/frontend" on argv.
-            f"{ENTRYPOINT_A} logs alpha/frontend": (
+            f"{ENTRYPOINT_A} logs alpha/frontend --tail 200": (
                 ['{"env":"alpha","svc":"frontend","msg":"frontend-line"}'],
                 0,
             ),
             # Provider-b receives the original env-scoped pattern "alpha/backend" on argv.
-            f"{ENTRYPOINT_B} logs alpha/backend": (
+            f"{ENTRYPOINT_B} logs alpha/backend --tail 200": (
                 ['{"env":"alpha","svc":"backend","msg":"backend-line"}'],
                 0,
             ),
@@ -381,7 +381,7 @@ def test_logs_single_owner_routes_only_to_that_provider() -> None:
         },
         popen_responses={
             # Provider-a receives the original env-scoped pattern "alpha/frontend" on argv.
-            f"{ENTRYPOINT_A} logs alpha/frontend": (
+            f"{ENTRYPOINT_A} logs alpha/frontend --tail 200": (
                 ['{"env":"alpha","svc":"frontend","msg":"a-only-line"}'],
                 0,
             ),
@@ -410,8 +410,9 @@ def test_logs_follow_single_owner_streams() -> None:
             f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("backend")),
         },
         popen_responses={
-            # Provider-a receives the original env-scoped pattern "alpha/frontend" on argv.
-            f"{ENTRYPOINT_A} logs alpha/frontend": (
+            # Provider-a receives the original env-scoped pattern "alpha/frontend" on argv,
+            # followed by the render flags (--tail always, --follow because follow=True).
+            f"{ENTRYPOINT_A} logs alpha/frontend --tail 200 --follow": (
                 ['{"env":"alpha","svc":"frontend","msg":"follow-line"}'],
                 0,
             ),
@@ -471,7 +472,7 @@ def test_logs_single_provider_no_describe_call() -> None:
     registry, resolver = _make_single_provider_registry()
     runner = FakeSubprocessRunner(
         popen_responses={
-            f"{EXT_A / 'workflow/service'} logs alpha/api": (
+            f"{EXT_A / 'workflow/service'} logs alpha/api --tail 200": (
                 ['{"env":"alpha","svc":"api","msg":"log-line"}'],
                 0,
             ),

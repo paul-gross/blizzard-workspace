@@ -32,7 +32,7 @@ class LogStreamProcessor:
     Tail backstop: when `options.follow` is False, rendered lines are buffered in a
     ring buffer (deque(maxlen=N)) and only emitted when `finalize()` is called.
     When `options.follow` is True, lines are yielded immediately and tail is NOT
-    re-applied here (the orchestrator is expected to honour WINTER_LOG_TAIL).
+    re-applied here (the orchestrator is expected to honour the --tail flag).
     """
 
     def __init__(

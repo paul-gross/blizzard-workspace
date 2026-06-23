@@ -87,7 +87,8 @@ def service_group() -> None:
     `<env>/<service>` PATTERNS as positional argv tokens. `status` captures the
     orchestrator's stdout as a structured JSON document and renders it — patterns
     are forwarded on argv but `--json` is a winter-side render toggle only.
-    `logs` render options (-f/-n/--since/--until/-t) travel via WINTER_LOG_* env vars.
+    `logs` render options (-f/-n/--since/--until/-t) are appended to the orchestrator
+    argv as CLI flags after the positional patterns.
     """
 
 
@@ -222,14 +223,14 @@ def logs_cmd(
     orchestrator entrypoint (`<entrypoint> logs <pattern...>`). Winter applies a
     segment-aware backstop filter on the NDJSON stream: each line's env/svc is
     matched against the patterns via matches_any_pattern; lines missing env or
-    svc are dropped. Render options travel via WINTER_LOG_* env vars.
+    svc are dropped. Render options are appended to that argv as CLI flags.
 
     \b
     Duration format: <N>(s|m|h|d) — e.g. 90s, 5m, 2h, 3d.
     Timestamp format: RFC3339 — e.g. 2026-06-13T10:00:00Z.
 
     When --follow is set, winter relays lines live and does NOT re-apply tail
-    (the orchestrator is expected to honour WINTER_LOG_TAIL). Interrupted with
+    (the orchestrator is expected to honour the --tail flag). Interrupted with
     Ctrl-C exits 130.
     """
     now = datetime.now(tz=UTC)

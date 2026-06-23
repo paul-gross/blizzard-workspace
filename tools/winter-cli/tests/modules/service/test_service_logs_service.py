@@ -29,7 +29,35 @@ EXT = WS / "winter-service-tmux"
 ENTRYPOINT = EXT / "workflow/logs"
 PREFIX = "winter-service-tmux"
 
-CMD_KEY = f"{ENTRYPOINT} logs alpha"
+
+def _cmd_key(
+    patterns: tuple[str, ...],
+    *,
+    tail: int | str = 200,
+    since: str = "",
+    until: str = "",
+    follow: bool = False,
+    timestamps: bool = False,
+) -> str:
+    """Reconstruct the expected orchestrator command string for FakeSubprocessRunner.
+
+    Mirrors ``ServiceLogsService._stream_single``'s argv order: positional
+    patterns, then ``--tail`` (always), ``--since``/``--until`` (when set),
+    and the bare ``--follow``/``--timestamps`` flags (when true).
+    """
+    parts = [str(ENTRYPOINT), "logs", *patterns, "--tail", str(tail)]
+    if since:
+        parts += ["--since", since]
+    if until:
+        parts += ["--until", until]
+    if follow:
+        parts.append("--follow")
+    if timestamps:
+        parts.append("--timestamps")
+    return " ".join(parts)
+
+
+CMD_KEY = _cmd_key(("alpha",))
 
 
 CONFIG_DIR = WS / ".winter" / "config" / "winter-service-tmux"
@@ -107,27 +135,44 @@ def _reporter() -> FakeServiceReporter:
     return FakeServiceReporter()
 
 
-# ── WINTER_LOG_* env mapping ──────────────────────────────────────────────────
+# ── render flags on argv ──────────────────────────────────────────────────────
 
 
-def test_stream_sets_winter_log_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
-    """WINTER_LOG_* vars are populated from LogOptions before invoking popen."""
+def test_stream_appends_render_flags_to_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Render options ride on argv (not WINTER_LOG_* env vars) before invoking popen."""
     monkeypatch.setenv("WINTER_TEST_CANARY", "canary")
-    # patterns are forwarded as argv, not via WINTER_LOG_SERVICES; use a two-pattern
-    # key so CMD_KEY reflects the actual command issued.
-    multi_cmd_key = f"{ENTRYPOINT} logs alpha/api alpha/db"
+    multi_cmd_key = _cmd_key(("alpha/api", "alpha/db"), tail=50, timestamps=True)
     runner = FakeSubprocessRunner(
         popen_responses={multi_cmd_key: (['{"ts":"2026-06-13T10:00:01Z","env":"alpha","svc":"api","msg":"up"}'], 0)}
     )
     _svc(runner).stream(_opts(patterns=("alpha/api", "alpha/db"), follow=False, tail=50, timestamps=True), _reporter())
 
-    assert len(runner.popen_envs) == 1
+    assert runner.popen_calls[0][0] == [
+        str(ENTRYPOINT),
+        "logs",
+        "alpha/api",
+        "alpha/db",
+        "--tail",
+        "50",
+        "--timestamps",
+    ]
+
+
+def test_stream_no_winter_log_env_vars_injected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The five WINTER_LOG_* dispatch vars are no longer set on the subprocess env."""
+    monkeypatch.setenv("WINTER_TEST_CANARY", "canary")
+    runner = FakeSubprocessRunner(popen_responses={CMD_KEY: ([], 0)})
+    _svc(runner).stream(_opts(), _reporter())
+
     env = runner.popen_envs[0]
-    assert env["WINTER_LOG_FOLLOW"] == "0"
-    assert env["WINTER_LOG_TAIL"] == "50"
-    assert env["WINTER_LOG_SINCE"] == ""
-    assert env["WINTER_LOG_UNTIL"] == ""
-    assert env["WINTER_LOG_TIMESTAMPS"] == "1"
+    for key in (
+        "WINTER_LOG_FOLLOW",
+        "WINTER_LOG_TAIL",
+        "WINTER_LOG_SINCE",
+        "WINTER_LOG_UNTIL",
+        "WINTER_LOG_TIMESTAMPS",
+    ):
+        assert key not in env
 
 
 def test_stream_sets_workspace_context_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -151,23 +196,35 @@ def test_stream_inherits_parent_environment(monkeypatch: pytest.MonkeyPatch) -> 
     assert runner.popen_envs[0]["WINTER_SENTINEL"] == "hello"
 
 
+def test_stream_tail_always_emitted_including_all(monkeypatch: pytest.MonkeyPatch) -> None:
+    """--tail is emitted unconditionally, carrying the resolved count string (incl. 'all')."""
+    monkeypatch.setenv("WINTER_TEST_CANARY", "canary")
+    key = _cmd_key(("alpha",), tail="all")
+    runner = FakeSubprocessRunner(popen_responses={key: ([], 0)})
+    _svc(runner).stream(_opts(tail="all"), _reporter())
+    cmd = runner.popen_calls[0][0]
+    assert cmd[-2:] == ["--tail", "all"]
+
+
 def test_stream_sets_follow_flag(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WINTER_TEST_CANARY", "canary")
-    runner = FakeSubprocessRunner(popen_responses={CMD_KEY: ([], 0)})
+    key = _cmd_key(("alpha",), follow=True)
+    runner = FakeSubprocessRunner(popen_responses={key: ([], 0)})
     _svc(runner).stream(_opts(follow=True), _reporter())
-    assert runner.popen_envs[0]["WINTER_LOG_FOLLOW"] == "1"
+    assert "--follow" in runner.popen_calls[0][0]
 
 
 def test_stream_sets_since_until_strings(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("WINTER_TEST_CANARY", "canary")
-    runner = FakeSubprocessRunner(popen_responses={CMD_KEY: ([], 0)})
+    key = _cmd_key(("alpha",), since="2026-06-13T10:00:00Z", until="2026-06-13T12:00:00Z")
+    runner = FakeSubprocessRunner(popen_responses={key: ([], 0)})
     _svc(runner).stream(
         _opts(since_rfc3339="2026-06-13T10:00:00Z", until_rfc3339="2026-06-13T12:00:00Z"),
         _reporter(),
     )
-    env = runner.popen_envs[0]
-    assert env["WINTER_LOG_SINCE"] == "2026-06-13T10:00:00Z"
-    assert env["WINTER_LOG_UNTIL"] == "2026-06-13T12:00:00Z"
+    cmd = runner.popen_calls[0][0]
+    assert cmd[cmd.index("--since") + 1] == "2026-06-13T10:00:00Z"
+    assert cmd[cmd.index("--until") + 1] == "2026-06-13T12:00:00Z"
 
 
 # ── rendered output ───────────────────────────────────────────────────────────
@@ -320,7 +377,8 @@ def test_stream_returns_130_on_keyboard_interrupt_at_popen() -> None:
 
 def test_stream_emits_timestamps_warning_when_ts_missing_and_timestamps_requested() -> None:
     """`-t` requested but lines carry no ts field → timestamps_warning fired on reporter."""
-    runner = FakeSubprocessRunner(popen_responses={CMD_KEY: (['{"env":"alpha","svc":"api","msg":"up"}'], 0)})
+    key = _cmd_key(("alpha",), timestamps=True)
+    runner = FakeSubprocessRunner(popen_responses={key: (['{"env":"alpha","svc":"api","msg":"up"}'], 0)})
     rep = _reporter()
     _svc(runner).stream(_opts(timestamps=True), rep)
 
@@ -329,7 +387,8 @@ def test_stream_emits_timestamps_warning_when_ts_missing_and_timestamps_requeste
 
 def test_stream_emits_time_filter_warning_when_ts_missing_and_since_set() -> None:
     """--since set but some lines carry no ts → time_filter_warning fired on reporter."""
-    runner = FakeSubprocessRunner(popen_responses={CMD_KEY: (['{"env":"alpha","svc":"api","msg":"up"}'], 0)})
+    key = _cmd_key(("alpha",), since="2026-06-13T10:00:00Z")
+    runner = FakeSubprocessRunner(popen_responses={key: (['{"env":"alpha","svc":"api","msg":"up"}'], 0)})
     rep = _reporter()
     _svc(runner).stream(
         _opts(since_rfc3339="2026-06-13T10:00:00Z"),
@@ -350,16 +409,16 @@ def test_stream_popen_invoked_with_merge_stderr_false() -> None:
 
 
 def test_stream_workspace_pattern_forwarded_verbatim_on_argv() -> None:
-    """'workspace' pattern is forwarded verbatim as a positional argv token."""
-    key = f"{ENTRYPOINT} logs workspace"
+    """'workspace' pattern is forwarded verbatim as a positional argv token (before render flags)."""
+    key = _cmd_key(("workspace",))
     runner = FakeSubprocessRunner(popen_responses={key: ([], 0)})
     _svc(runner).stream(_opts(patterns=("workspace",)), _reporter())
-    assert runner.popen_calls[0][0] == [str(ENTRYPOINT), "logs", "workspace"]
+    assert runner.popen_calls[0][0] == [str(ENTRYPOINT), "logs", "workspace", "--tail", "200"]
 
 
 def test_stream_workspace_service_pattern_forwarded_verbatim_on_argv() -> None:
-    """'workspace/<svc>' pattern is forwarded verbatim as a positional argv token."""
-    key = f"{ENTRYPOINT} logs workspace/nginx"
+    """'workspace/<svc>' pattern is forwarded verbatim as a positional argv token (before render flags)."""
+    key = _cmd_key(("workspace/nginx",))
     runner = FakeSubprocessRunner(popen_responses={key: ([], 0)})
     _svc(runner).stream(_opts(patterns=("workspace/nginx",)), _reporter())
-    assert runner.popen_calls[0][0] == [str(ENTRYPOINT), "logs", "workspace/nginx"]
+    assert runner.popen_calls[0][0] == [str(ENTRYPOINT), "logs", "workspace/nginx", "--tail", "200"]

@@ -289,7 +289,7 @@ def test_handler_run_logs_streams_rendered_output() -> None:
         '{"env":"alpha","ts":"2026-06-13T10:00:01Z","svc":"api","msg":"started"}',
         '{"env":"alpha","ts":"2026-06-13T10:00:02Z","svc":"api","msg":"ready"}',
     ]
-    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api": (ndjson_lines, 0)})
+    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api --tail 200": (ndjson_lines, 0)})
     recorder = ClickRecorder()
     _handler(runner, recorder).run_logs(_default_log_options(patterns=("alpha/api",)))
     # Both lines rendered (single pattern → no prefix).
@@ -298,7 +298,7 @@ def test_handler_run_logs_streams_rendered_output() -> None:
 
 
 def test_handler_run_logs_exits_nonzero_on_orchestrator_error() -> None:
-    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api": ([], 2)})
+    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api --tail 200": ([], 2)})
     with pytest.raises(SystemExit) as excinfo:
         _handler(runner, ClickRecorder()).run_logs(_default_log_options(patterns=("alpha/api",)))
     assert excinfo.value.code == 2
@@ -306,7 +306,7 @@ def test_handler_run_logs_exits_nonzero_on_orchestrator_error() -> None:
 
 def test_handler_run_logs_sets_workspace_context_env_vars() -> None:
     """Logs stream injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, and cwd."""
-    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api": ([], 0)})
+    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api --tail 200": ([], 0)})
     _handler(runner, ClickRecorder()).run_logs(_default_log_options(patterns=("alpha/api",)))
     assert len(runner.popen_calls) == 1
     assert runner.popen_calls[0][1] == WS
@@ -318,22 +318,24 @@ def test_handler_run_logs_sets_workspace_context_env_vars() -> None:
 
 
 def test_handler_run_logs_patterns_on_argv_not_env_var() -> None:
-    """Patterns appear as positional argv tokens; WINTER_LOG_SERVICES is absent."""
-    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api beta/worker-*": ([], 0)})
+    """Patterns appear as positional argv tokens (before render flags); WINTER_LOG_SERVICES is absent."""
+    runner = FakeSubprocessRunner(
+        popen_responses={f"{ENTRYPOINT} logs alpha/api beta/worker-* --tail 200": ([], 0)}
+    )
     _handler(runner, ClickRecorder()).run_logs(_default_log_options(patterns=("alpha/api", "beta/worker-*")))
     assert len(runner.popen_calls) == 1
     cmd = runner.popen_calls[0][0]
-    assert cmd == [ENTRYPOINT, "logs", "alpha/api", "beta/worker-*"]
+    assert cmd == [ENTRYPOINT, "logs", "alpha/api", "beta/worker-*", "--tail", "200"]
     env = runner.popen_envs[0]
     assert "WINTER_LOG_SERVICES" not in env
 
 
 def test_handler_run_logs_no_patterns_sends_bare_logs_action() -> None:
-    """Empty patterns → argv is just [entrypoint, 'logs']; no selection tokens."""
-    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs": ([], 0)})
+    """Empty patterns → argv carries no selection tokens, only the render flags."""
+    runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs --tail 200": ([], 0)})
     _handler(runner, ClickRecorder()).run_logs(_default_log_options(patterns=()))
     cmd = runner.popen_calls[0][0]
-    assert cmd == [ENTRYPOINT, "logs"]
+    assert cmd == [ENTRYPOINT, "logs", "--tail", "200"]
     env = runner.popen_envs[0]
     assert "WINTER_LOG_SERVICES" not in env
 

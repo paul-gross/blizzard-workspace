@@ -69,25 +69,15 @@ name    = "logs"
 arity   = "patterns-required"
 summary = "Stream or emit the log backlog for matched services as NDJSON on stdout."
 
-[[action.env_var]]
-name        = "WINTER_LOG_FOLLOW"
-description = "1 = stream live until Ctrl-C; 0 = emit backlog and exit."
-
-[[action.env_var]]
-name        = "WINTER_LOG_TAIL"
-description = "Positive integer or 'all'. The orchestrator SHOULD honour this; winter applies a backstop."
-
-[[action.env_var]]
-name        = "WINTER_LOG_SINCE"
-description = "RFC3339 absolute timestamp (pre-normalised from any duration); empty string if not set."
-
-[[action.env_var]]
-name        = "WINTER_LOG_UNTIL"
-description = "RFC3339 absolute timestamp; empty string if not set."
-
-[[action.env_var]]
-name        = "WINTER_LOG_TIMESTAMPS"
-description = "1 = per-line timestamps requested; 0 = not requested."
+# The logs render options ride on argv as CLI flags appended after the
+# positional <env>/<service> patterns (NOT environment variables):
+#   <entrypoint> logs <pattern...> [-f|--follow] [-n|--tail <N|all>] \
+#     [--since <rfc3339>] [--until <rfc3339>] [-t|--timestamps]
+# Rules (source of truth: modules/service/service_logs_service.py::_stream_single):
+#   --tail        always emitted, carrying the resolved count string (N or all).
+#   --since/--until carry pre-normalised RFC3339 timestamps; omitted when empty.
+#   --follow/--timestamps emitted as bare flags only when true.
+# Only the four always-present WINTER_* base vars above are set on a logs dispatch.
 
 [[action]]
 name    = "describe"

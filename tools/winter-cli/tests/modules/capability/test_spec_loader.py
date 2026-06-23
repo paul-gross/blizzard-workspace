@@ -64,15 +64,11 @@ def test_load_service_v1_always_present_env_vars() -> None:
     assert "WINTER_EXT_PREFIX" in env_names
 
 
-def test_load_service_v1_logs_per_action_env_vars() -> None:
+def test_load_service_v1_logs_no_per_action_env_vars() -> None:
+    """logs render options moved off env vars onto argv flags — the action declares none."""
     spec = _loader_real().load("service", "v1")
     logs_action = next(a for a in spec.actions if a.name == "logs")
-    env_names = {e.name for e in logs_action.env_vars}
-    assert "WINTER_LOG_FOLLOW" in env_names
-    assert "WINTER_LOG_TAIL" in env_names
-    assert "WINTER_LOG_SINCE" in env_names
-    assert "WINTER_LOG_UNTIL" in env_names
-    assert "WINTER_LOG_TIMESTAMPS" in env_names
+    assert logs_action.env_vars == ()
 
 
 def test_load_service_v1_exit_codes_include_0_2_3() -> None:

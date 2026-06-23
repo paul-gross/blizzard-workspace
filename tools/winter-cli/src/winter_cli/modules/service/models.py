@@ -26,8 +26,8 @@ def parse_since_until(value: str, now: datetime) -> str:
     """Parse a duration (90s, 5m, 2h, 3d) or RFC3339 timestamp into an RFC3339 string.
 
     Durations are normalized to an absolute threshold relative to `now`.
-    The returned string is always UTC with a Z suffix, suitable for
-    WINTER_LOG_SINCE / WINTER_LOG_UNTIL env vars.
+    The returned string is always UTC with a Z suffix, passed to the
+    orchestrator as the --since / --until argv flag value.
 
     Raises ValueError on unrecognised input.
     """

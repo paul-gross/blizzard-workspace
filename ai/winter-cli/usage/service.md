@@ -209,19 +209,26 @@ Every dispatch — regardless of action — sets these four variables and runs t
 
 These four form the winter base extension contract, set uniformly by `core/extension_invocation.py::build_extension_env`. They are defined for the hook/doctor/lint dispatches in [setup.md](../setup.md#hook-env-var-contract); `winter service` provides them identically. Working directory varies by surface: `winter service`, `doctor`, `lint`, and the `on_workspace_reconcile` hook run at the workspace root, while the `on_env_*` hooks run at the env root.
 
-### Per-action environment variables
+### Per-action parameters
 
-Service selection for `status`, `restart`, and `logs` is on argv (not env vars). The only per-action env vars set by winter are the `logs` render options:
+No action sets per-action environment variables — only the four always-present base vars above are exported on any dispatch. All action parameters travel on argv.
 
-| Action | Env var | Value |
-|--------|---------|-------|
-| `logs` | `WINTER_LOG_FOLLOW` | `1` = stream live, `0` = emit backlog and exit. |
-| `logs` | `WINTER_LOG_TAIL` | Positive integer or `all`. The orchestrator SHOULD honour this; winter applies a backstop. |
-| `logs` | `WINTER_LOG_SINCE` | RFC3339 absolute timestamp (pre-normalised from any duration); empty if unset. |
-| `logs` | `WINTER_LOG_UNTIL` | RFC3339 absolute timestamp; empty if unset. |
-| `logs` | `WINTER_LOG_TIMESTAMPS` | `1` = per-line timestamps requested; `0` = not requested. |
+Service selection for `status`, `restart`, and `logs` is positional argv. The `logs` action additionally carries its render options as CLI flags appended **after** the positional patterns, mirroring `winter service logs`' own surface:
 
-For `up`, `down`, and `status`, no action-specific env vars are set beyond the always-present three above. Specifically for `status`: `--json` is a **winter-side render toggle only** — it is never propagated to the orchestrator as an env var or an argv token. The orchestrator argv is byte-identical with and without `--json`: `[<entrypoint>, "status", *patterns]`.
+```
+<entrypoint> logs <pattern...> [-f|--follow] [-n|--tail <N|all>] \
+  [--since <rfc3339>] [--until <rfc3339>] [-t|--timestamps]
+```
+
+| Flag | Value |
+|------|-------|
+| `-n` / `--tail <N\|all>` | Emitted **always**, carrying the resolved count string (`N` or `all`). The orchestrator SHOULD honour it; winter applies a backstop. |
+| `--since <rfc3339>` | RFC3339 absolute timestamp (pre-normalised from any duration). Omitted when empty. |
+| `--until <rfc3339>` | RFC3339 absolute timestamp. Omitted when empty. |
+| `-f` / `--follow` | Bare flag, emitted only when follow was requested (stream live vs. emit backlog and exit). |
+| `-t` / `--timestamps` | Bare flag, emitted only when per-line timestamps were requested. A provider MAY always emit a `ts` field regardless (e.g. docker passes `--timestamps` unconditionally); winter's `-t` handling is the authoritative render toggle. |
+
+For `up`, `down`, and `status`, no action-specific flags are set beyond the positional patterns. Specifically for `status`: `--json` is a **winter-side render toggle only** — it is never propagated to the orchestrator as an env var or an argv token. The orchestrator argv is byte-identical with and without `--json`: `[<entrypoint>, "status", *patterns]`.
 
 ### Wire contract (orchestrator stdout → winter)
 
@@ -240,7 +247,7 @@ Fields:
 - `msg` (required) — the log message.
 - `ts` (optional) — RFC3339 timestamp; omit when the backend has no per-line timestamps (e.g. `tmux capture-pane`).
 
-The orchestrator's **stderr must reach winter's stderr** (diagnostics), NOT be merged into the NDJSON stdout. The orchestrator MAY pre-filter by `WINTER_LOG_SINCE`/`UNTIL`/`FOLLOW`/`TAIL` server-side for efficiency; winter applies idempotent backstops regardless.
+The orchestrator's **stderr must reach winter's stderr** (diagnostics), NOT be merged into the NDJSON stdout. The orchestrator MAY pre-filter by the `--since`/`--until`/`--follow`/`--tail` argv flags server-side for efficiency; winter applies idempotent backstops regardless.
 
 #### `status` wire contract
 
@@ -326,7 +333,7 @@ Winter applies these backstops even when the orchestrator has pre-filtered, ensu
 - **Service filter (status):** when patterns are present, each service in the parsed `StatusDocument` is tested via the same segment-aware matcher (`<env>/<service-name>`); services that do not match any pattern are dropped. Envs whose service list becomes empty after filtering are dropped entirely. When no patterns are given, the document is returned unchanged.
 - **Time filter — `(logs)` only (`--since`/`--until`):** applied per-line only to lines that have a parseable `ts`. The boundary is **inclusive**: a line whose `ts` exactly equals the `--since` or `--until` threshold is kept. Lines without `ts` are always kept (winter cannot time-filter them). If `--since`/`--until` was requested AND at least one line lacked a `ts`, winter emits one stderr warning that the time filter is partial.
 - **Timestamps — `(logs)` only (`-t`):** if requested but a line has no `ts`, the timestamp prefix is omitted for that line; winter emits one stderr warning.
-- **Tail backstop — `(logs)` only:** in **non-follow** mode, winter keeps a ring buffer (last N lines) and emits only those after the stream ends. In **follow** mode (`-f`), winter does NOT re-tail — it relays lines live and relies on the orchestrator having honoured `WINTER_LOG_TAIL`. This is an intentional limitation: winter cannot distinguish backlog from live output during a follow session.
+- **Tail backstop — `(logs)` only:** in **non-follow** mode, winter keeps a ring buffer (last N lines) and emits only those after the stream ends. In **follow** mode (`-f`), winter does NOT re-tail — it relays lines live and relies on the orchestrator having honoured the `--tail` flag. This is an intentional limitation: winter cannot distinguish backlog from live output during a follow session.
 
 ### Exit codes
 
