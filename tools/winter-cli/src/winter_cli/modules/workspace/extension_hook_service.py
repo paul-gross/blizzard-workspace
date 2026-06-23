@@ -29,12 +29,14 @@ class ExtensionHookService:
 
     The env-hook contract: each script runs from the env's directory with
     `WINTER_WORKSPACE_DIR`, `WINTER_EXT_DIR`, `WINTER_EXT_PREFIX`,
-    `WINTER_ENV`, `WINTER_ENV_INDEX`, and `WINTER_PORT_BASE` in the
-    environment.
+    `WINTER_WORKSPACE_PORT_BASE`, `WINTER_ENV`, `WINTER_ENV_INDEX`, and
+    `WINTER_PORT_BASE` in the environment.
 
     The workspace-hook contract: each script runs from the workspace root with
-    only `WINTER_WORKSPACE_DIR`, `WINTER_EXT_DIR`, and `WINTER_EXT_PREFIX` in
-    the environment — no `WINTER_ENV`, `WINTER_ENV_INDEX`, or `WINTER_PORT_BASE`.
+    `WINTER_WORKSPACE_DIR`, `WINTER_EXT_DIR`, `WINTER_EXT_PREFIX`, and
+    `WINTER_WORKSPACE_PORT_BASE` (the index-0 port base for workspace-scope
+    services) in the environment — no `WINTER_ENV`, `WINTER_ENV_INDEX`, or
+    `WINTER_PORT_BASE`.
     `on_workspace_reconcile` fires once per workspace reconcile (`winter ws init`
     no-target/all-target) after standalones are reconciled (so extension repos
     exist on disk), and before per-env loops.
@@ -120,8 +122,9 @@ class ExtensionHookService:
 
         Called once per workspace reconcile (`winter ws init` no-target or
         all-target) after standalones are reconciled so extension repos exist
-        on disk. Runs from the workspace root with only `WINTER_WORKSPACE_DIR`,
-        `WINTER_EXT_DIR`, and `WINTER_EXT_PREFIX` — no env-scoped vars.
+        on disk. Runs from the workspace root with `WINTER_WORKSPACE_DIR`,
+        `WINTER_EXT_DIR`, `WINTER_EXT_PREFIX`, and `WINTER_WORKSPACE_PORT_BASE`
+        — no env-scoped vars.
 
         Returns False if any hook errored or exited non-zero.
         """
@@ -183,7 +186,8 @@ class ExtensionHookService:
 
         `env_name` is None for workspace-level hooks (no WINTER_ENV* vars);
         a string for env-scoped hooks (WINTER_ENV, WINTER_ENV_INDEX,
-        WINTER_PORT_BASE are added).
+        WINTER_PORT_BASE are added). WINTER_WORKSPACE_PORT_BASE is added for
+        every hook regardless of scope.
         """
         try:
             manifest = self._manifest_loader.load(repo, manifest_path)
@@ -229,6 +233,10 @@ class ExtensionHookService:
             prefix=manifest.prefix,
             config_dir=config_dir,
         )
+        # Workspace (index 0) port base — the band reserved for workspace-scope
+        # services. Workspace-global, so it is exposed to every hook (env-init,
+        # env-destroy, and workspace-reconcile) regardless of env scope.
+        env["WINTER_WORKSPACE_PORT_BASE"] = str(self._config.port_base_for_index(0))
         if env_name is not None:
             # Resolve registry-first so WINTER_ENV_INDEX/WINTER_PORT_BASE agree
             # with the .winter.env that init_service already wrote.  Fall back

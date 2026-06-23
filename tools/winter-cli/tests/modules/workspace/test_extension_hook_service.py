@@ -281,6 +281,9 @@ def test_run_workspace_reconcile_hook_env_contains_workspace_trio(
     assert env["WINTER_EXT_DIR"] == str(ext_path)
     assert env["WINTER_EXT_PREFIX"] == "my-ext"
 
+    # Workspace (index 0) port base is present for workspace-scoped hooks too.
+    assert env["WINTER_WORKSPACE_PORT_BASE"] == str(workspace_config.port_base_for_index(0))
+
     # Env-scoped vars must NOT be present.
     assert "WINTER_ENV" not in env
     assert "WINTER_ENV_INDEX" not in env
@@ -490,6 +493,7 @@ def test_env_hook_env_contains_env_scoped_vars(
     assert env["WINTER_ENV"] == "alpha"
     assert "WINTER_ENV_INDEX" in env
     assert "WINTER_PORT_BASE" in env
+    assert env["WINTER_WORKSPACE_PORT_BASE"] == str(workspace_config.port_base_for_index(0))
 
 
 # ── M1: hook vars == persisted/config-derived values ─────────────────────────

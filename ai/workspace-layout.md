@@ -23,6 +23,7 @@ This workspace manages **multiple project repositories** as peers. All repos are
 │   ├── config.local.toml       # Optional local override (gitignored)
 │   ├── state.toml              # Machine-local env-index registry (gitignored, managed by winter)
 │   └── ext/<short-name>/       # Standalone clones for installed extensions
+├── .winter.workspace.env       # Workspace-scope shell env (WINTER_PORT_BASE for index 0); gitignored, managed by winter
 ├── tools/                      # Workspace tooling
 │   └── winter-cli/             # The `winter` CLI source
 ├── projects/                   # All project repositories (source checkouts)
@@ -36,7 +37,7 @@ This workspace manages **multiple project repositories** as peers. All repos are
     ├── <repo-2>/               # Worktree of project repo (feature branch)
     ├── <repo-n>/               # Worktree of project repo (feature branch)
     ├── up / down / status      # Symlinks to the extension scripts above (running services from the env dir)
-    ├── .winter.env             # Per-environment shell env file (WINTER_ENV, WINTER_PORT_BASE, project-specific vars)
+    ├── .winter.env             # Per-environment shell env file (WINTER_ENV, WINTER_PORT_BASE, WINTER_WORKSPACE_PORT_BASE, project-specific vars)
     └── .winter/                # Per-env service logs/state (e.g. logs/<svc>.log) — NOT a workspace root
 ```
 
@@ -63,7 +64,7 @@ Each Greek letter directory (e.g., `alpha/`) contains a git worktree for **every
 
 When working on a feature in `alpha/`:
 - Repo code is at `./alpha/<repo-name>/`
-- Environment shell vars are at `./alpha/.winter.env` — `WINTER_ENV`, `WINTER_ENV_INDEX`, and `WINTER_PORT_BASE` are seeded by `winter ws init`; project-specific vars (per-service ports, database URLs, etc.) are appended below the managed block by `project-setup.md`.
+- Environment shell vars are at `./alpha/.winter.env` — `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, and `WINTER_WORKSPACE_PORT_BASE` are seeded by `winter ws init`; project-specific vars (per-service ports, database URLs, etc.) are appended below the managed block by `project-setup.md`. Workspace-scope services read their own band from `.winter.workspace.env` at the workspace root (`WINTER_PORT_BASE` = the index-0 base).
 
 ## Repo Inventory
 

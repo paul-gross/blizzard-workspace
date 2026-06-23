@@ -21,7 +21,7 @@ The CLI treats pinned repos specially across commands:
 winter ws init
 ```
 
-This reads `.winter/config.toml`, clones every declared repo that's missing into `projects/`, applies git identity, writes git-exclude entries, and runs each repo's `cmd` list. Safe to re-run.
+This reads `.winter/config.toml`, clones every declared repo that's missing into `projects/`, applies git identity, writes git-exclude entries, and runs each repo's `cmd` list. Safe to re-run. It also seeds `.winter.workspace.env` at the workspace root with `WINTER_PORT_BASE` for the workspace (index-0) scope, and git-excludes both that file and the runtime `.winter/logs/` capture dir.
 
 Raw equivalent for a single repo:
 
@@ -43,7 +43,7 @@ This command:
 - Writes git-exclude entries.
 - For pinned repos, wires the upstream to `origin/<main-branch>` — see [Pinned repos](#pinned-repos).
 - Runs each repo's `cmd` list.
-- Seeds `./<name>/.winter.env` with `WINTER_ENV`, `WINTER_ENV_INDEX`, and `WINTER_PORT_BASE`.
+- Seeds `./<name>/.winter.env` with `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, and `WINTER_WORKSPACE_PORT_BASE` (the index-0 base shared by every env).
 - Runs every installed extension's `on_env_init` hook.
 
 Greek letters (`alpha`, `beta`, …) are the convention. The first 10 (`alpha`…`kappa`) are the default `env_aliases` and receive fixed port-offset indices; other names hash into a higher band. Any valid directory name is accepted.

@@ -66,15 +66,18 @@ The env-file *generation logic* (heredocs that write per-environment values into
 
 #### `.winter.env` — append, don't overwrite
 
-`winter ws init <name>` seeds `<name>/.winter.env` with `WINTER_ENV`, `WINTER_ENV_INDEX`, and `WINTER_PORT_BASE`, bracketed in a managed block at the top:
+`winter ws init <name>` seeds `<name>/.winter.env` with `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, and `WINTER_WORKSPACE_PORT_BASE`, bracketed in a managed block at the top:
 
 ```
 # >>> winter (managed) — base environment variables; do not edit by hand
 WINTER_ENV=alpha
 WINTER_ENV_INDEX=1
 WINTER_PORT_BASE=4020
+WINTER_WORKSPACE_PORT_BASE=4000
 # <<< winter (managed) — project-specific variables go below this marker
 ```
+
+(`WINTER_WORKSPACE_PORT_BASE` is the index-0 base shared by every env — the port band reserved for workspace-scope singleton services. The workspace root also gets its own `.winter.workspace.env` carrying `WINTER_PORT_BASE` for that scope.)
 
 Project-specific variables go *below* the closing marker. The shape for `project-setup.md` is an `>>` (append) heredoc that derives values from the seeded vars:
 

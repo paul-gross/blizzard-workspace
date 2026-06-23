@@ -277,9 +277,10 @@ Hook scripts must be **relative paths inside the extension directory** (so the e
 | `WINTER_EXT_DIR` | Absolute path to this extension's clone (the dir containing `winter-ext.toml`). |
 | `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension (`wf`, `wst`, …). |
 | `WINTER_EXT_CONFIG_DIR` | Absolute path to this extension's writable config/asset directory (default `.winter/config/<name>/`). |
-| `WINTER_ENV` | The env name (`alpha`, `beta`, …). |
-| `WINTER_ENV_INDEX` | The persisted port-offset index for this env (alias envs get fixed slots `1..N`; ad-hoc names hash into the remainder band). |
-| `WINTER_PORT_BASE` | `base_port + ports_per_env * WINTER_ENV_INDEX` (defaults: `4000 + 20 * index`). |
+| `WINTER_WORKSPACE_PORT_BASE` | `base_port + ports_per_env * 0` — the index-0 base, i.e. the port band reserved for workspace-scope services. Present for **every** hook, including `on_workspace_reconcile` (which otherwise gets no `WINTER_ENV*`/`WINTER_PORT_BASE`). |
+| `WINTER_ENV` | The env name (`alpha`, `beta`, …). Env-scoped hooks only. |
+| `WINTER_ENV_INDEX` | The persisted port-offset index for this env (alias envs get fixed slots `1..N`; ad-hoc names hash into the remainder band). Env-scoped hooks only. |
+| `WINTER_PORT_BASE` | `base_port + ports_per_env * WINTER_ENV_INDEX` (defaults: `4000 + 20 * index`). Env-scoped hooks only. |
 
 The hook's **cwd is the env root** (`<workspace>/<env>/`). Hooks should read these env vars rather than parse `argv`.
 

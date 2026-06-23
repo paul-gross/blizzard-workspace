@@ -166,8 +166,67 @@ def test_reconcile_env_creates_worktree_and_seeds_env_file(
     assert "WINTER_ENV=alpha" in content
     assert "WINTER_ENV_INDEX=1" in content
     assert "WINTER_PORT_BASE=4020" in content
+    # Workspace (index 0) port base is exposed alongside the env's own base.
+    assert "WINTER_WORKSPACE_PORT_BASE=4000" in content
     # Identity applied to the worktree.
     assert (WORKSPACE_ROOT / "alpha" / "demo", "Bot", "bot@example.com") in git.identities
+
+
+def test_reconcile_projects_seeds_workspace_env_and_excludes(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """reconcile_projects writes .winter.workspace.env (index-0 base) and excludes it + .winter/logs/."""
+    demo_path = WORKSPACE_ROOT / "projects" / "demo"
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", demo_path])
+    fs.directories.add(WORKSPACE_ROOT / ".git")
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    subprocess = FakeSubprocessRunner()
+    git = FakeGitRepository()
+
+    svc = _service(workspace_config, fs, subprocess, git)
+    ok = svc.reconcile_projects(init_reporter)
+
+    assert ok is True
+    # Workspace env file seeded at the root with the index-0 port base.
+    ws_env = WORKSPACE_ROOT / ".winter.workspace.env"
+    assert ws_env in fs.files
+    ws_content = fs.files[ws_env]
+    assert "WINTER_PORT_BASE=4000" in ws_content
+    # Both workspace-root artifacts are git-excluded in one managed block.
+    exclude = fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"]
+    assert "# >>> winter-workspace/artifacts (managed by winter)" in exclude
+    assert "/.winter.workspace.env" in exclude
+    assert "/.winter/logs/" in exclude
+
+
+def test_reconcile_projects_workspace_artifacts_idempotent_and_preserve_local(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """Re-running leaves no duplicate blocks and preserves user vars below the marker."""
+    demo_path = WORKSPACE_ROOT / "projects" / "demo"
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", demo_path])
+    fs.directories.add(WORKSPACE_ROOT / ".git")
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    subprocess = FakeSubprocessRunner()
+    git = FakeGitRepository()
+
+    svc = _service(workspace_config, fs, subprocess, git)
+    assert svc.reconcile_projects(init_reporter) is True
+
+    # Append a user-managed var below the closing marker, then reconcile again.
+    ws_env = WORKSPACE_ROOT / ".winter.workspace.env"
+    fs.files[ws_env] = fs.files[ws_env] + "MY_LOCAL_VAR=keep\n"
+
+    assert svc.reconcile_projects(init_reporter) is True
+
+    ws_content = fs.files[ws_env]
+    # User var preserved; managed block not duplicated.
+    assert "MY_LOCAL_VAR=keep" in ws_content
+    assert ws_content.count("WINTER_PORT_BASE=4000") == 1
+    exclude = fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"]
+    assert exclude.count("# >>> winter-workspace/artifacts (managed by winter)") == 1
 
 
 def test_reconcile_env_uses_persisted_registry_index(
