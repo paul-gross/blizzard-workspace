@@ -219,5 +219,5 @@ class ExtensionSymlinkService:
         here.
         """
         if vendor.skill_install is SkillInstall.copy:
-            return CopySkillStrategy(self._fs)
+            return CopySkillStrategy(self._fs, vendor)
         return SymlinkSkillStrategy(self._fs)

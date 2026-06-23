@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Protocol
 
+from winter_cli.config.models import CodeAgentVendor
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.modules.workspace.models import RepoError
 
@@ -199,8 +200,9 @@ class CopySkillStrategy:
     destinations with no live source are removed.
     """
 
-    def __init__(self, fs: IFilesystemWriter) -> None:
+    def __init__(self, fs: IFilesystemWriter, vendor: CodeAgentVendor) -> None:
         self._fs = fs
+        self._transforms = CopiedSkillTransformPipeline.for_vendor(vendor)
 
     def install(self, *, source_root: Path | None, target_root: Path, prefix: str) -> list[str]:
         installed: list[str] = []
@@ -212,23 +214,31 @@ class CopySkillStrategy:
                 if not self._fs.is_file(entry / "SKILL.md"):
                     continue
                 name = f"{prefix}-{entry.name}"
-                self._sync(entry, target_root / name)
+                self._sync(entry, target_root / name, skill_name=name)
                 installed.append(name)
 
         self._prune(target_root, prefix, set(installed))
         return installed
 
-    def _sync(self, source_dir: Path, dest_dir: Path) -> None:
+    def _sync(self, source_dir: Path, dest_dir: Path, *, skill_name: str) -> None:
         """Copy `source_dir` to `dest_dir`, skipping the copy when content matches."""
         dest_present = self._fs.is_dir(dest_dir)
-        if dest_present and self._hash_tree(source_dir) == self._hash_tree(dest_dir):
+        if dest_present and self._hash_tree(source_dir, skill_name=skill_name) == self._hash_tree(dest_dir):
             return
         try:
             if dest_present:
                 self._fs.rmtree(dest_dir)
             self._fs.copytree(source_dir, dest_dir)
+            self._apply_transforms(dest_dir, skill_name=skill_name)
         except OSError as exc:
             raise RepoError(f"copy skill {dest_dir.name}: {exc}") from exc
+
+    def _apply_transforms(self, dest_dir: Path, *, skill_name: str) -> None:
+        skill_md = dest_dir / "SKILL.md"
+        text = self._fs.read_text(skill_md)
+        transformed = self._transforms.apply(skill_md.relative_to(dest_dir), text, skill_name=skill_name)
+        if transformed != text:
+            self._fs.write_text(skill_md, transformed)
 
     def _prune(self, target_root: Path, prefix: str, live_names: set[str]) -> None:
         """Remove `<prefix>-*` destination directories with no live source."""
@@ -247,7 +257,7 @@ class CopySkillStrategy:
             except OSError as exc:
                 raise RepoError(f"prune stale skill copy {entry.name}: {exc}") from exc
 
-    def _hash_tree(self, root: Path) -> str:
+    def _hash_tree(self, root: Path, *, skill_name: str | None = None) -> str:
         """Deterministically hash the file contents of a directory tree.
 
         Walks every file under `root` in a stable order and folds each file's
@@ -258,7 +268,7 @@ class CopySkillStrategy:
         Recomputed from scratch each call; nothing is persisted.
         """
         files: list[tuple[str, bytes]] = []
-        self._collect_files(root, Path("."), files)
+        self._collect_files(root, Path("."), files, skill_name=skill_name)
         files.sort(key=lambda item: item[0])
 
         digest = hashlib.sha256()
@@ -270,13 +280,74 @@ class CopySkillStrategy:
             digest.update(data)
         return digest.hexdigest()
 
-    def _collect_files(self, current: Path, rel: Path, out: list[tuple[str, bytes]]) -> None:
+    def _collect_files(
+        self,
+        current: Path,
+        rel: Path,
+        out: list[tuple[str, bytes]],
+        *,
+        skill_name: str | None,
+    ) -> None:
         for entry in sorted(self._fs.iterdir(current)):
             entry_rel = rel / entry.name
             if self._fs.is_dir(entry):
-                self._collect_files(entry, entry_rel, out)
+                self._collect_files(entry, entry_rel, out, skill_name=skill_name)
             elif self._fs.is_file(entry):
-                out.append((entry_rel.as_posix(), self._fs.read_bytes(entry)))
+                if skill_name is not None and entry_rel == Path("SKILL.md"):
+                    text = self._fs.read_text(entry)
+                    transformed = self._transforms.apply(entry_rel, text, skill_name=skill_name)
+                    out.append((entry_rel.as_posix(), transformed.encode()))
+                else:
+                    out.append((entry_rel.as_posix(), self._fs.read_bytes(entry)))
+
+
+class CopiedSkillTransformPipeline:
+    """Applies vendor-specific transforms to copied skill files."""
+
+    def __init__(self, transforms: tuple[CopiedSkillTransform, ...]) -> None:
+        self._transforms = transforms
+
+    @classmethod
+    def for_vendor(cls, vendor: CodeAgentVendor) -> CopiedSkillTransformPipeline:
+        if vendor is CodeAgentVendor.OpenCode:
+            return cls((OpenCodeSkillNameTransform(),))
+        return cls(())
+
+    def apply(self, rel_path: Path, text: str, *, skill_name: str) -> str:
+        for transform in self._transforms:
+            text = transform.apply(rel_path, text, skill_name=skill_name)
+        return text
+
+
+class CopiedSkillTransform(Protocol):
+    def apply(self, rel_path: Path, text: str, *, skill_name: str) -> str: ...
+
+
+class OpenCodeSkillNameTransform:
+    """Set copied OpenCode SKILL.md frontmatter `name` to its installed directory."""
+
+    def apply(self, rel_path: Path, text: str, *, skill_name: str) -> str:
+        if rel_path != Path("SKILL.md"):
+            return text
+        if not text.startswith("---"):
+            return f"---\nname: {skill_name}\n---\n\n{text}"
+
+        lines = text.split("\n")
+        end_idx = None
+        for i, line in enumerate(lines[1:], start=1):
+            if line.strip() == "---":
+                end_idx = i
+                break
+        if end_idx is None:
+            return text
+
+        for i in range(1, end_idx):
+            if lines[i].strip().startswith("name:"):
+                lines[i] = f"name: {skill_name}"
+                return "\n".join(lines)
+
+        lines.insert(1, f"name: {skill_name}")
+        return "\n".join(lines)
 
 
 # One sentinel per Protocol/adapter pair (winter-harness:/standards/protocol-conformance.md):
