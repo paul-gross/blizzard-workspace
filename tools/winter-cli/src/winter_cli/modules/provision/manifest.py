@@ -21,11 +21,57 @@ class ProvisionScope(enum.Enum):
 class ProvisionHandler:
     subtarget: str
     scope: ProvisionScope
-    apply: str
+    apply: tuple[str, ...]
     source: str
-    destroy: str | None = None
-    reset: str | None = None
+    destroy: tuple[str, ...] | None = None
+    reset: tuple[str, ...] | None = None
     required_services: tuple[str, ...] = field(default_factory=tuple)
+
+
+def _parse_commands(
+    raw: object,
+    location: str,
+    field: str,
+    source: str,
+    *,
+    required: bool,
+) -> tuple[str, ...] | None:
+    """Normalize a raw field value to a command tuple.
+
+    Accepts a non-empty string or a non-empty list of non-empty strings.
+    A bare string becomes a single-element tuple; a list becomes a tuple in
+    declaration order.  Returns ``None`` when the field is absent and not
+    required.  Raises ``ConfigError`` for any invalid value.
+    """
+    if raw is None:
+        if required:
+            raise ConfigError(
+                f"{location} in {source!r} is missing required field {field!r} "
+                f"(must be a non-empty string or non-empty list of strings)."
+            )
+        return None
+
+    if isinstance(raw, str):
+        if not raw:
+            raise ConfigError(
+                f"{location} in {source!r} field {field!r} must be a non-empty string (got empty string)."
+            )
+        return (raw,)
+
+    if isinstance(raw, list):
+        if not raw:
+            raise ConfigError(f"{location} in {source!r} field {field!r} must be a non-empty list (got empty list).")
+        for idx, item in enumerate(raw):
+            if not isinstance(item, str) or not item:
+                raise ConfigError(
+                    f"{location} in {source!r} field {field!r}[{idx}] must be a non-empty string "
+                    f"(got {type(item).__name__!r})."
+                )
+        return tuple(raw)
+
+    raise ConfigError(
+        f"{location} in {source!r} field {field!r} must be a string or list of strings (got {type(raw).__name__!r})."
+    )
 
 
 class ProvisionManifestParser:
@@ -49,37 +95,29 @@ class ProvisionManifestParser:
         for key, entries in raw.items():
             if key not in PROVISION_SUBTARGETS:
                 valid = ", ".join(repr(s) for s in PROVISION_SUBTARGETS)
-                raise ConfigError(
-                    f"Unknown provision sub-target {key!r} in {source!r}. "
-                    f"Must be one of: {valid}."
-                )
+                raise ConfigError(f"Unknown provision sub-target {key!r} in {source!r}. Must be one of: {valid}.")
 
             if not isinstance(entries, list):
                 raise ConfigError(
-                    f"provision.{key} in {source!r} must be a list of tables, "
-                    f"got {type(entries).__name__!r}."
+                    f"provision.{key} in {source!r} must be a list of tables, got {type(entries).__name__!r}."
                 )
 
             for i, entry in enumerate(entries):
                 if not isinstance(entry, dict):
                     raise ConfigError(
-                        f"provision.{key}[{i}] in {source!r} must be a table (dict), "
-                        f"got {type(entry).__name__!r}."
+                        f"provision.{key}[{i}] in {source!r} must be a table (dict), got {type(entry).__name__!r}."
                     )
                 unknown = set(entry.keys()) - _ENTRY_ALLOWED_KEYS
                 if unknown:
                     bad = ", ".join(repr(k) for k in sorted(unknown))
                     allowed = ", ".join(repr(k) for k in sorted(_ENTRY_ALLOWED_KEYS))
                     raise ConfigError(
-                        f"Unknown key(s) {bad} in provision.{key}[{i}] in {source!r}. "
-                        f"Allowed keys: {allowed}."
+                        f"Unknown key(s) {bad} in provision.{key}[{i}] in {source!r}. Allowed keys: {allowed}."
                     )
 
                 scope_raw = entry.get("scope")
                 if scope_raw is None:
-                    raise ConfigError(
-                        f"provision.{key}[{i}] in {source!r} is missing required field 'scope'."
-                    )
+                    raise ConfigError(f"provision.{key}[{i}] in {source!r} is missing required field 'scope'.")
                 try:
                     scope = ProvisionScope(scope_raw)
                 except ValueError:
@@ -90,17 +128,14 @@ class ProvisionManifestParser:
                     )
 
                 apply_raw = entry.get("apply")
-                if not apply_raw or not isinstance(apply_raw, str):
-                    raise ConfigError(
-                        f"provision.{key}[{i}] in {source!r} is missing required field 'apply' "
-                        f"(must be a non-empty string)."
-                    )
+                apply = _parse_commands(apply_raw, f"provision.{key}[{i}]", "apply", source, required=True)
+                assert apply is not None  # required=True guarantees non-None
 
                 destroy_raw = entry.get("destroy")
-                destroy = destroy_raw if isinstance(destroy_raw, str) and destroy_raw else None
+                destroy = _parse_commands(destroy_raw, f"provision.{key}[{i}]", "destroy", source, required=False)
 
                 reset_raw = entry.get("reset")
-                reset = reset_raw if isinstance(reset_raw, str) and reset_raw else None
+                reset = _parse_commands(reset_raw, f"provision.{key}[{i}]", "reset", source, required=False)
 
                 required_services_raw = entry.get("required_services")
                 if required_services_raw is not None:
@@ -123,7 +158,7 @@ class ProvisionManifestParser:
                     ProvisionHandler(
                         subtarget=key,
                         scope=scope,
-                        apply=apply_raw,
+                        apply=apply,
                         source=source,
                         destroy=destroy,
                         reset=reset,

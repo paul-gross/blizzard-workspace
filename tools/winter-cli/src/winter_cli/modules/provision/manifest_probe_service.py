@@ -19,6 +19,46 @@ PROVISION_SOURCE = "provision"
 _VALID_SCOPES = frozenset(s.value for s in ProvisionScope)
 
 
+def _validate_command_field(
+    raw: object,
+    location: str,
+    field: str,
+    *,
+    required: bool,
+) -> str | None:
+    """Return an error message string if *raw* is invalid for a command field,
+    or ``None`` if it is acceptable.
+
+    Accepts a non-empty string or a non-empty list of non-empty strings.
+    When *required* is ``False`` and *raw* is ``None`` (field absent), returns
+    ``None`` (no finding).  Mirrors the accept/reject logic of
+    ``manifest._parse_commands`` so the lenient probe and the strict parser
+    agree on what is valid.
+    """
+    if raw is None:
+        if required:
+            return (
+                f"{location} is missing required field {field!r} "
+                f"(must be a non-empty string or non-empty list of strings)."
+            )
+        return None
+
+    if isinstance(raw, str):
+        if not raw:
+            return f"{location} field {field!r} must be a non-empty string (got empty string)."
+        return None
+
+    if isinstance(raw, list):
+        if not raw:
+            return f"{location} field {field!r} must be a non-empty list (got empty list)."
+        for idx, item in enumerate(raw):
+            if not isinstance(item, str) or not item:
+                return f"{location} field {field!r}[{idx}] must be a non-empty string (got {type(item).__name__!r})."
+        return None
+
+    return f"{location} field {field!r} must be a string or list of strings (got {type(raw).__name__!r})."
+
+
 def _validate_raw_provision(raw: dict, source: str) -> list[ProbeResult]:
     """Lenient per-entry validator for a raw ``[provision]`` table.
 
@@ -42,10 +82,7 @@ def _validate_raw_provision(raw: dict, source: str) -> list[ProbeResult]:
                     source=PROVISION_SOURCE,
                     name=f"provision manifest: {source}",
                     status=ProbeStatus.fail,
-                    message=(
-                        f"Unknown provision sub-target {key!r} in {source!r}. "
-                        f"Must be one of: {valid}."
-                    ),
+                    message=(f"Unknown provision sub-target {key!r} in {source!r}. Must be one of: {valid}."),
                 )
             )
             continue
@@ -57,8 +94,7 @@ def _validate_raw_provision(raw: dict, source: str) -> list[ProbeResult]:
                     name=f"provision manifest: {source}",
                     status=ProbeStatus.fail,
                     message=(
-                        f"provision.{key} in {source!r} must be a list of tables, "
-                        f"got {type(entries).__name__!r}."
+                        f"provision.{key} in {source!r} must be a list of tables, got {type(entries).__name__!r}."
                     ),
                 )
             )
@@ -113,26 +149,49 @@ def _validate_raw_provision(raw: dict, source: str) -> list[ProbeResult]:
                         source=PROVISION_SOURCE,
                         name=f"provision manifest: {source}",
                         status=ProbeStatus.fail,
-                        message=(
-                            f"Invalid scope {scope_raw!r} in {location}. "
-                            f"Must be one of: {valid_scopes}."
-                        ),
+                        message=(f"Invalid scope {scope_raw!r} in {location}. Must be one of: {valid_scopes}."),
                     )
                 )
                 entry_ok = False
 
-            # apply present and non-empty.
+            # apply present and non-empty string or non-empty list of non-empty strings.
             apply_raw = entry.get("apply")
-            if not apply_raw or not isinstance(apply_raw, str):
+            apply_msg = _validate_command_field(apply_raw, location, "apply", required=True)
+            if apply_msg is not None:
                 findings.append(
                     ProbeResult(
                         source=PROVISION_SOURCE,
                         name=f"provision manifest: {source}",
                         status=ProbeStatus.fail,
-                        message=(
-                            f"{location} is missing required field 'apply' "
-                            f"(must be a non-empty string)."
-                        ),
+                        message=apply_msg,
+                    )
+                )
+                entry_ok = False
+
+            # destroy optional; present-but-invalid is a failure.
+            destroy_raw = entry.get("destroy")
+            destroy_msg = _validate_command_field(destroy_raw, location, "destroy", required=False)
+            if destroy_msg is not None:
+                findings.append(
+                    ProbeResult(
+                        source=PROVISION_SOURCE,
+                        name=f"provision manifest: {source}",
+                        status=ProbeStatus.fail,
+                        message=destroy_msg,
+                    )
+                )
+                entry_ok = False
+
+            # reset optional; present-but-invalid is a failure.
+            reset_raw = entry.get("reset")
+            reset_msg = _validate_command_field(reset_raw, location, "reset", required=False)
+            if reset_msg is not None:
+                findings.append(
+                    ProbeResult(
+                        source=PROVISION_SOURCE,
+                        name=f"provision manifest: {source}",
+                        status=ProbeStatus.fail,
+                        message=reset_msg,
                     )
                 )
                 entry_ok = False

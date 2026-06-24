@@ -314,6 +314,286 @@ def test_no_ext_manifest_file_emits_no_results() -> None:
     assert results == []
 
 
+# ── apply field: string | list validation ─────────────────────────────────────
+
+
+def test_apply_string_ok() -> None:
+    raw = {"dependency": [{"scope": "feature-worktree", "apply": "echo hello"}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+
+
+def test_apply_list_ok() -> None:
+    raw = {"dependency": [{"scope": "feature-worktree", "apply": ["echo hello", "echo world"]}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+
+
+def test_apply_empty_string_fail() -> None:
+    raw = {"dependency": [{"scope": "feature-worktree", "apply": ""}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "apply" in r.message
+    assert "empty string" in r.message
+
+
+def test_apply_empty_list_fail() -> None:
+    raw = {"dependency": [{"scope": "feature-worktree", "apply": []}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "apply" in r.message
+    assert "empty list" in r.message
+
+
+def test_apply_list_with_non_string_element_fail() -> None:
+    raw = {"dependency": [{"scope": "feature-worktree", "apply": ["echo ok", 42]}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "apply" in r.message
+
+
+def test_apply_list_with_empty_string_element_fail() -> None:
+    raw = {"dependency": [{"scope": "feature-worktree", "apply": ["echo ok", ""]}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "apply" in r.message
+
+
+def test_apply_neither_str_nor_list_fail() -> None:
+    raw = {"dependency": [{"scope": "feature-worktree", "apply": 123}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "apply" in r.message
+
+
+# ── destroy field: optional, same validation ──────────────────────────────────
+
+
+def test_destroy_absent_ok() -> None:
+    raw = {"dependency": [{"scope": "feature-worktree", "apply": "echo hello"}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+
+
+def test_destroy_string_ok() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "destroy": "echo destroy"}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+
+
+def test_destroy_list_ok() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "destroy": ["echo a", "echo b"]}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+
+
+def test_destroy_empty_string_fail() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "destroy": ""}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "destroy" in r.message
+
+
+def test_destroy_empty_list_fail() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "destroy": []}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "destroy" in r.message
+    assert "empty list" in r.message
+
+
+def test_destroy_non_string_element_fail() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "destroy": ["ok", None]}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "destroy" in r.message
+
+
+def test_destroy_neither_str_nor_list_fail() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "destroy": 99}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "destroy" in r.message
+
+
+# ── reset field: optional, same validation ────────────────────────────────────
+
+
+def test_reset_absent_ok() -> None:
+    raw = {"dependency": [{"scope": "feature-worktree", "apply": "echo hello"}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+
+
+def test_reset_string_ok() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "reset": "echo reset"}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+
+
+def test_reset_list_ok() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "reset": ["echo a", "echo b"]}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+
+
+def test_reset_empty_string_fail() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "reset": ""}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "reset" in r.message
+
+
+def test_reset_empty_list_fail() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "reset": []}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "reset" in r.message
+    assert "empty list" in r.message
+
+
+def test_reset_non_string_element_fail() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "reset": [True]}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "reset" in r.message
+
+
+def test_reset_neither_str_nor_list_fail() -> None:
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "reset": 3.14}]}
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    r = results[0]
+    assert r.status == ProbeStatus.fail
+    assert "reset" in r.message
+
+
+# ── multi-field well-formed manifest ─────────────────────────────────────────
+
+
+def test_well_formed_multi_field_manifest_emits_single_pass() -> None:
+    """An entry with apply/destroy/reset all as lists yields a single pass."""
+    raw = {
+        "resource": [
+            {
+                "scope": "workspace",
+                "apply": ["echo step-1", "echo step-2"],
+                "destroy": ["echo clean-1", "echo clean-2"],
+                "reset": "echo reset",
+                "required_services": ["workspace/postgres"],
+            }
+        ],
+        "dependency": [
+            {"scope": "feature-worktree", "apply": "echo install"},
+        ],
+    }
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+    assert "2 provision handler(s) valid" in results[0].message
+
+
+# ── invalid destroy/reset emit per-field findings ────────────────────────────
+
+
+def test_invalid_destroy_and_reset_both_reported() -> None:
+    """Both destroy and reset violations on the same entry produce two findings."""
+    raw = {
+        "resource": [
+            {
+                "scope": "workspace",
+                "apply": "echo ok",
+                "destroy": [],
+                "reset": 0,
+            }
+        ],
+    }
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+    results = svc.run([])
+    assert len(results) == 2
+    assert all(r.status == ProbeStatus.fail for r in results)
+    messages = " ".join(r.message for r in results)
+    assert "destroy" in messages
+    assert "reset" in messages
+
+
 def test_workspace_and_extension_findings_combined() -> None:
     """Workspace and extension findings are both reported in the same run."""
     raw = {

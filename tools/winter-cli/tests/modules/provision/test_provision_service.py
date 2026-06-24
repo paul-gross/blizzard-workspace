@@ -137,7 +137,7 @@ class _FakeReporter:
         subtarget: str,
         scope: str,
         source: str,
-        script: str,
+        commands: list[str],
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
@@ -147,7 +147,7 @@ class _FakeReporter:
                 "subtarget": subtarget,
                 "scope": scope,
                 "source": source,
-                "script": script,
+                "commands": commands,
                 "action": action,
                 "required_services": required_services,
                 "service_check_preview": service_check_preview,
@@ -189,9 +189,9 @@ def _make_handler(
     subtarget: str,
     scope: ProvisionScope,
     source: str = "project",
-    apply: str = "scripts/apply.sh",
-    destroy: str | None = None,
-    reset: str | None = None,
+    apply: tuple[str, ...] = ("scripts/apply.sh",),
+    destroy: tuple[str, ...] | None = None,
+    reset: tuple[str, ...] | None = None,
 ) -> ProvisionHandler:
     return ProvisionHandler(
         subtarget=subtarget,
@@ -298,7 +298,7 @@ def test_project_before_extension_within_same_scope() -> None:
             ProvisionHandler(
                 subtarget="dependency",
                 scope=ProvisionScope.workspace,
-                apply="scripts/apply.sh",
+                apply=("scripts/apply.sh",),
                 source="my-ext",
             ),
         )
@@ -363,7 +363,11 @@ def test_declaration_order_tiebreak() -> None:
     )  # type: ignore[arg-type]
 
     apply_scripts = [call[0].apply for call in exec_svc.calls]
-    assert apply_scripts == ["scripts/first.sh", "scripts/second.sh", "scripts/third.sh"]
+    assert apply_scripts == [
+        ("scripts/first.sh",),
+        ("scripts/second.sh",),
+        ("scripts/third.sh",),
+    ]
 
 
 # ---------------------------------------------------------------------------

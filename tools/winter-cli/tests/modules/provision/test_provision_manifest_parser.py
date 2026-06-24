@@ -81,8 +81,8 @@ def test_parse_valid_workspace_scope() -> None:
     h = handlers[0]
     assert h.subtarget == "resource"
     assert h.scope == ProvisionScope.workspace
-    assert h.apply == "scripts/create-db.sh"
-    assert h.destroy == "scripts/drop-db.sh"
+    assert h.apply == ("scripts/create-db.sh",)
+    assert h.destroy == ("scripts/drop-db.sh",)
     assert h.reset is None
     assert h.required_services == ("workspace/postgres",)
     assert h.source == SOURCE
@@ -105,8 +105,8 @@ def test_parse_valid_feature_environment_scope() -> None:
     h = handlers[0]
     assert h.subtarget == "data"
     assert h.scope == ProvisionScope.feature_environment
-    assert h.apply == "scripts/seed.sh"
-    assert h.reset == "scripts/reseed.sh"
+    assert h.apply == ("scripts/seed.sh",)
+    assert h.reset == ("scripts/reseed.sh",)
     assert h.destroy is None
     assert h.required_services == ("workspace/postgres",)
 
@@ -126,7 +126,7 @@ def test_parse_valid_feature_worktree_scope() -> None:
     h = handlers[0]
     assert h.subtarget == "dependency"
     assert h.scope == ProvisionScope.feature_worktree
-    assert h.apply == "scripts/install.sh"
+    assert h.apply == ("scripts/install.sh",)
     assert h.destroy is None
     assert h.reset is None
     assert h.required_services == ()
@@ -211,7 +211,7 @@ def test_parse_missing_apply_rejected() -> None:
 def test_parse_empty_apply_rejected() -> None:
     parser = ProvisionManifestParser()
     raw = {"dependency": [{"scope": "feature-worktree", "apply": ""}]}
-    with pytest.raises(ConfigError, match="missing required field 'apply'"):
+    with pytest.raises(ConfigError):
         parser.parse(raw, SOURCE)
 
 
@@ -343,3 +343,134 @@ def test_parse_provision_returns_empty_when_no_provision_key() -> None:
     svc = _config_service({config_path: {"main_branch": "main"}})
     config = svc.load()
     assert parse_provision(config, source="project") == []
+
+
+# ── String / list normalization ───────────────────────────────────────────────
+
+
+def test_parse_apply_as_string_normalizes_to_single_element_tuple() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"dependency": [{"scope": "workspace", "apply": "echo hello"}]}
+    handlers = parser.parse(raw, SOURCE)
+    assert handlers[0].apply == ("echo hello",)
+    assert isinstance(handlers[0].apply, tuple)
+
+
+def test_parse_apply_as_list_normalizes_to_tuple() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"dependency": [{"scope": "workspace", "apply": ["echo step1", "echo step2"]}]}
+    handlers = parser.parse(raw, SOURCE)
+    assert handlers[0].apply == ("echo step1", "echo step2")
+    assert isinstance(handlers[0].apply, tuple)
+
+
+def test_parse_destroy_as_string_normalizes_to_single_element_tuple() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "destroy": "echo destroy"}]}
+    handlers = parser.parse(raw, SOURCE)
+    assert handlers[0].destroy == ("echo destroy",)
+
+
+def test_parse_destroy_as_list_normalizes_to_tuple() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "destroy": ["echo d1", "echo d2"]}]}
+    handlers = parser.parse(raw, SOURCE)
+    assert handlers[0].destroy == ("echo d1", "echo d2")
+
+
+def test_parse_reset_as_string_normalizes_to_single_element_tuple() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "workspace", "apply": "echo apply", "reset": "echo reset"}]}
+    handlers = parser.parse(raw, SOURCE)
+    assert handlers[0].reset == ("echo reset",)
+
+
+def test_parse_reset_as_list_normalizes_to_tuple() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "workspace", "apply": "echo apply", "reset": ["echo r1", "echo r2"]}]}
+    handlers = parser.parse(raw, SOURCE)
+    assert handlers[0].reset == ("echo r1", "echo r2")
+
+
+def test_parse_apply_empty_list_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"dependency": [{"scope": "workspace", "apply": []}]}
+    with pytest.raises(ConfigError):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_apply_non_string_element_in_list_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"dependency": [{"scope": "workspace", "apply": ["echo ok", 123]}]}
+    with pytest.raises(ConfigError):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_apply_neither_str_nor_list_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"dependency": [{"scope": "workspace", "apply": 42}]}
+    with pytest.raises(ConfigError):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_destroy_empty_list_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "destroy": []}]}
+    with pytest.raises(ConfigError):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_destroy_empty_string_element_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "destroy": ["echo ok", ""]}]}
+    with pytest.raises(ConfigError):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_reset_empty_list_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "workspace", "apply": "echo apply", "reset": []}]}
+    with pytest.raises(ConfigError):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_reset_non_string_element_in_list_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "workspace", "apply": "echo apply", "reset": [None]}]}
+    with pytest.raises(ConfigError):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_apply_empty_string_in_list_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"dependency": [{"scope": "workspace", "apply": ["echo ok", ""]}]}
+    with pytest.raises(ConfigError):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_destroy_neither_str_nor_list_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "destroy": 99}]}
+    with pytest.raises(ConfigError):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_reset_neither_str_nor_list_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "workspace", "apply": "echo apply", "reset": {"cmd": "bad"}}]}
+    with pytest.raises(ConfigError):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_absent_destroy_is_none() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"dependency": [{"scope": "workspace", "apply": "echo apply"}]}
+    handlers = parser.parse(raw, SOURCE)
+    assert handlers[0].destroy is None
+
+
+def test_parse_absent_reset_is_none() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"dependency": [{"scope": "workspace", "apply": "echo apply"}]}
+    handlers = parser.parse(raw, SOURCE)
+    assert handlers[0].reset is None

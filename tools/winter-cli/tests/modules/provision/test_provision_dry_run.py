@@ -151,7 +151,7 @@ class _FakeReporter:
         subtarget: str,
         scope: str,
         source: str,
-        script: str,
+        commands: list[str],
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
@@ -161,7 +161,7 @@ class _FakeReporter:
                 "subtarget": subtarget,
                 "scope": scope,
                 "source": source,
-                "script": script,
+                "commands": commands,
                 "action": action,
                 "required_services": required_services,
                 "service_check_preview": service_check_preview,
@@ -204,9 +204,9 @@ def _make_handler(
     subtarget: str,
     scope: ProvisionScope = ProvisionScope.workspace,
     source: str = "project",
-    apply: str = "scripts/apply.sh",
-    destroy: str | None = None,
-    reset: str | None = None,
+    apply: tuple[str, ...] = ("scripts/apply.sh",),
+    destroy: tuple[str, ...] | None = None,
+    reset: tuple[str, ...] | None = None,
     required_services: tuple[str, ...] = (),
 ) -> ProvisionHandler:
     return ProvisionHandler(
@@ -330,7 +330,7 @@ def test_dry_run_plan_event_fields_are_complete() -> None:
     assert evt["subtarget"] == "resource"
     assert evt["scope"] == "workspace"
     assert evt["source"] == "project"
-    assert evt["script"] == "scripts/res.sh"
+    assert evt["commands"] == ["scripts/res.sh"]
     assert evt["action"] == "apply"
     assert evt["required_services"] == []
     assert evt["service_check_preview"] is None
@@ -363,7 +363,7 @@ def test_dry_run_destroy_emits_destroy_action_when_declared() -> None:
     assert summary.status == "ok"
     assert len(reporter.plan_handler_calls) == 1
     assert reporter.plan_handler_calls[0]["action"] == "destroy"
-    assert reporter.plan_handler_calls[0]["script"] == "scripts/drop.sh"
+    assert reporter.plan_handler_calls[0]["commands"] == ["scripts/drop.sh"]
     assert len(exec_svc.calls) == 0
 
 
@@ -412,7 +412,7 @@ def test_dry_run_reset_with_dedicated_reset_script() -> None:
 
     assert len(reporter.plan_handler_calls) == 1
     assert reporter.plan_handler_calls[0]["action"] == "reset"
-    assert reporter.plan_handler_calls[0]["script"] == "scripts/reseed.sh"
+    assert reporter.plan_handler_calls[0]["commands"] == ["scripts/reseed.sh"]
     assert len(exec_svc.calls) == 0
 
 
@@ -437,9 +437,9 @@ def test_dry_run_reset_compose_destroy_then_apply() -> None:
 
     assert len(reporter.plan_handler_calls) == 2
     assert reporter.plan_handler_calls[0]["action"] == "destroy"
-    assert reporter.plan_handler_calls[0]["script"] == "scripts/drop.sh"
+    assert reporter.plan_handler_calls[0]["commands"] == ["scripts/drop.sh"]
     assert reporter.plan_handler_calls[1]["action"] == "apply"
-    assert reporter.plan_handler_calls[1]["script"] == "scripts/apply.sh"
+    assert reporter.plan_handler_calls[1]["commands"] == ["scripts/apply.sh"]
     assert len(exec_svc.calls) == 0
 
 
@@ -726,7 +726,7 @@ def test_dry_run_json_emits_plan_handler_with_would_run_flag() -> None:
     assert dep_evt["would_run"] is True
     assert dep_evt["subtarget"] == "dependency"
     assert dep_evt["action"] == "apply"
-    assert dep_evt["script"] == "scripts/dep.sh"
+    assert dep_evt["commands"] == ["scripts/dep.sh"]
     assert dep_evt["required_services"] == []
     assert dep_evt["service_check_preview"] is None
 

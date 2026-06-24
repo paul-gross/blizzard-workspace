@@ -275,12 +275,12 @@ class ProvisionService:
             for handler in handlers:
                 actions = self._resolve_dry_actions(handler, reset=reset, destroy=destroy)
                 service_check_preview = _service_check_preview(handler, env_name)
-                for action, script in actions:
+                for action, commands in actions:
                     reporter.plan_handler(
                         subtarget=handler.subtarget,
                         scope=handler.scope.value,
                         source=handler.source,
-                        script=script,
+                        commands=list(commands),
                         action=action,
                         required_services=list(handler.required_services),
                         service_check_preview=service_check_preview,
@@ -294,8 +294,8 @@ class ProvisionService:
         handler: ProvisionHandler,
         reset: bool,
         destroy: bool,
-    ) -> list[tuple[str, str]]:
-        """Return the (action, script) pairs that would run for this handler.
+    ) -> list[tuple[str, tuple[str, ...]]]:
+        """Return the (action, commands) pairs that would run for this handler.
 
         Mirrors the real action-resolution logic in ``_run_handler_with_action``
         / ``_run_destroy`` / ``_run_reset`` but returns the plan without executing.
@@ -470,7 +470,7 @@ class ProvisionService:
                 subtarget=st,
                 scope=scope_str,
                 source=source_str,
-                message="no destroy script declared — skipping",
+                message="no destroy command declared — skipping",
             )
             return None
         return self._run_action(
@@ -539,7 +539,7 @@ class ProvisionService:
             subtarget=st,
             scope=scope_str,
             source=source_str,
-            message="no reset or destroy script declared — degrading to apply",
+            message="no reset or destroy command declared — degrading to apply",
         )
         return self._run_action(
             handler=handler,

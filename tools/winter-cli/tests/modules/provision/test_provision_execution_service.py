@@ -112,9 +112,9 @@ def _make_service(
 def _project_handler(
     subtarget: str = "dependency",
     scope: ProvisionScope = ProvisionScope.workspace,
-    apply: str = "scripts/apply.sh",
-    destroy: str | None = None,
-    reset: str | None = None,
+    apply: tuple[str, ...] = ("echo apply",),
+    destroy: tuple[str, ...] | None = None,
+    reset: tuple[str, ...] | None = None,
 ) -> ProvisionHandler:
     return ProvisionHandler(
         subtarget=subtarget,
@@ -126,20 +126,9 @@ def _project_handler(
     )
 
 
-def _setup_apply_script(
-    fs: FakeFilesystem,
-    source_root: Path,
-    script_rel: str,
-    *,
-    executable: bool = True,
-) -> Path:
-    """Register a script in the fake filesystem under source_root."""
-    script_path = (source_root / script_rel).resolve()
-    fs.files[script_path] = ""
-    fs.directories.add(script_path.parent)
-    if executable:
-        fs.executables.add(script_path)
-    return script_path
+def _sh_c_key(command: str) -> str:
+    """Return the FakeSubprocessRunner key for sh -c <command>."""
+    return f"sh -c {command}"
 
 
 # ── workspace scope ───────────────────────────────────────────────────────────
@@ -149,15 +138,15 @@ def test_workspace_scope_apply_cwd_is_workspace_root() -> None:
     """apply at workspace scope runs with cwd = workspace root."""
     config = _make_config()
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
+    cmd = "echo apply"
 
     subprocess = FakeSubprocessRunner(
-        popen_responses={str(script_path): ([], 0)},
+        popen_responses={_sh_c_key(cmd): ([], 0)},
     )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.workspace)
+    handler = _project_handler(scope=ProvisionScope.workspace, apply=(cmd,))
     result = svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     assert result.ok
@@ -166,19 +155,37 @@ def test_workspace_scope_apply_cwd_is_workspace_root() -> None:
     assert subprocess.popen_calls[0][1] == WORKSPACE_ROOT
 
 
-def test_workspace_scope_apply_base_env_no_env_trio() -> None:
-    """workspace scope: env contains WINTER_WORKSPACE_DIR but NOT WINTER_ENV*."""
+def test_workspace_scope_apply_popen_called_with_sh_c() -> None:
+    """apply invokes popen with ['sh', '-c', command]."""
     config = _make_config()
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
+    cmd = "echo apply"
 
     subprocess = FakeSubprocessRunner(
-        popen_responses={str(script_path): ([], 0)},
+        popen_responses={_sh_c_key(cmd): ([], 0)},
     )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.workspace)
+    handler = _project_handler(scope=ProvisionScope.workspace, apply=(cmd,))
+    svc.run_handler(handler, "apply", ENV_NAME, sink)
+
+    assert subprocess.popen_calls[0][0] == ["sh", "-c", cmd]
+
+
+def test_workspace_scope_apply_base_env_no_env_trio() -> None:
+    """workspace scope: env contains WINTER_WORKSPACE_DIR but NOT WINTER_ENV*."""
+    config = _make_config()
+    fs = FakeFilesystem()
+    cmd = "echo apply"
+
+    subprocess = FakeSubprocessRunner(
+        popen_responses={_sh_c_key(cmd): ([], 0)},
+    )
+    sink = FakeProvisionOutputSink()
+    svc = _make_service(config, fs, {}, subprocess)
+
+    handler = _project_handler(scope=ProvisionScope.workspace, apply=(cmd,))
     svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     env = subprocess.popen_envs[0]
@@ -192,15 +199,15 @@ def test_workspace_scope_apply_streams_output_to_sink() -> None:
     """Script stdout lines are forwarded to the sink."""
     config = _make_config()
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
+    cmd = "echo apply"
 
     subprocess = FakeSubprocessRunner(
-        popen_responses={str(script_path): (["line one", "line two"], 0)},
+        popen_responses={_sh_c_key(cmd): (["line one", "line two"], 0)},
     )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.workspace)
+    handler = _project_handler(scope=ProvisionScope.workspace, apply=(cmd,))
     svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     lines = [line for _, line in sink.output_lines]
@@ -215,15 +222,15 @@ def test_feature_environment_scope_cwd_is_env_root() -> None:
     """apply at feature-environment scope: cwd = <workspace>/<env>."""
     config = _make_config()
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
+    cmd = "echo apply"
 
     subprocess = FakeSubprocessRunner(
-        popen_responses={str(script_path): ([], 0)},
+        popen_responses={_sh_c_key(cmd): ([], 0)},
     )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.feature_environment)
+    handler = _project_handler(scope=ProvisionScope.feature_environment, apply=(cmd,))
     result = svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     assert result.ok
@@ -235,16 +242,16 @@ def test_feature_environment_scope_env_trio_present() -> None:
     """apply at feature-environment scope: WINTER_ENV/WINTER_ENV_INDEX/WINTER_PORT_BASE set."""
     config = _make_config(base_port=4000, ports_per_env=20)
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
+    cmd = "echo apply"
 
     # alpha is alias index 1 → port base 4000 + 1*20 = 4020
     subprocess = FakeSubprocessRunner(
-        popen_responses={str(script_path): ([], 0)},
+        popen_responses={_sh_c_key(cmd): ([], 0)},
     )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.feature_environment)
+    handler = _project_handler(scope=ProvisionScope.feature_environment, apply=(cmd,))
     svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     env = subprocess.popen_envs[0]
@@ -257,16 +264,16 @@ def test_feature_environment_scope_env_trio_uses_registry_index() -> None:
     """WINTER_ENV_INDEX agrees with the registry-persisted index, not the suggestion."""
     config = _make_config(base_port=5000, ports_per_env=30)
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
+    cmd = "echo apply"
 
     registry = _InMemoryRegistry({"alpha": 7})
     subprocess = FakeSubprocessRunner(
-        popen_responses={str(script_path): ([], 0)},
+        popen_responses={_sh_c_key(cmd): ([], 0)},
     )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess, registry=registry)
 
-    handler = _project_handler(scope=ProvisionScope.feature_environment)
+    handler = _project_handler(scope=ProvisionScope.feature_environment, apply=(cmd,))
     svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     env = subprocess.popen_envs[0]
@@ -286,15 +293,15 @@ def test_feature_worktree_scope_runs_once_per_project_repo() -> None:
         ]
     )
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
+    cmd = "echo apply"
 
     subprocess = FakeSubprocessRunner(
-        popen_responses={str(script_path): ([], 0)},
+        popen_responses={_sh_c_key(cmd): ([], 0)},
     )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.feature_worktree)
+    handler = _project_handler(scope=ProvisionScope.feature_worktree, apply=(cmd,))
     result = svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     assert result.ok
@@ -315,15 +322,15 @@ def test_feature_worktree_scope_correct_cwd_per_repo() -> None:
         ]
     )
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
+    cmd = "echo apply"
 
     subprocess = FakeSubprocessRunner(
-        popen_responses={str(script_path): ([], 0)},
+        popen_responses={_sh_c_key(cmd): ([], 0)},
     )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.feature_worktree)
+    handler = _project_handler(scope=ProvisionScope.feature_worktree, apply=(cmd,))
     result = svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     assert result.runs[0].cwd == WORKSPACE_ROOT / ENV_NAME / "myrepo"
@@ -339,15 +346,15 @@ def test_feature_worktree_scope_env_trio_present_for_each_run() -> None:
         ]
     )
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
+    cmd = "echo apply"
 
     subprocess = FakeSubprocessRunner(
-        popen_responses={str(script_path): ([], 0)},
+        popen_responses={_sh_c_key(cmd): ([], 0)},
     )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.feature_worktree)
+    handler = _project_handler(scope=ProvisionScope.feature_worktree, apply=(cmd,))
     svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     assert len(subprocess.popen_envs) == 2
@@ -364,15 +371,15 @@ def test_non_zero_exit_code_captured_in_result() -> None:
     """A non-zero exit code is recorded in SingleRunResult.exit_code and ok=False."""
     config = _make_config()
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
+    cmd = "echo apply"
 
     subprocess = FakeSubprocessRunner(
-        popen_responses={str(script_path): (["error output"], 1)},
+        popen_responses={_sh_c_key(cmd): (["error output"], 1)},
     )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.workspace)
+    handler = _project_handler(scope=ProvisionScope.workspace, apply=(cmd,))
     result = svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     assert not result.ok
@@ -390,119 +397,164 @@ def test_non_zero_exit_among_worktrees_propagates() -> None:
         ]
     )
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
+    cmd = "echo apply"
 
-    # Return different exit codes on successive calls
-    call_count: list[int] = [0]
-    original_popen = FakeSubprocessRunner(
-        popen_responses={str(script_path): ([], 1)},  # always exit 1 for simplicity
+    subprocess = FakeSubprocessRunner(
+        popen_responses={_sh_c_key(cmd): ([], 1)},  # always exit 1 for simplicity
     )
     sink = FakeProvisionOutputSink()
-    svc = _make_service(config, fs, {}, original_popen)
+    svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.feature_worktree)
+    handler = _project_handler(scope=ProvisionScope.feature_worktree, apply=(cmd,))
     result = svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     assert not result.ok
 
 
-# ── path-escape guard ─────────────────────────────────────────────────────────
+# ── multi-command ordered execution ──────────────────────────────────────────
 
 
-def test_path_escape_script_is_rejected() -> None:
-    """A script path that escapes the source root is rejected without running."""
+def test_multi_command_apply_runs_in_order() -> None:
+    """Multiple commands in apply tuple run in declaration order."""
     config = _make_config()
     fs = FakeFilesystem()
-    # Don't register the escaped path as a real file — it shouldn't be reached.
-    subprocess = FakeSubprocessRunner()
+    cmd1 = "echo step1"
+    cmd2 = "echo step2"
+    cmd3 = "echo step3"
+
+    subprocess = FakeSubprocessRunner(
+        popen_responses={
+            _sh_c_key(cmd1): (["step1"], 0),
+            _sh_c_key(cmd2): (["step2"], 0),
+            _sh_c_key(cmd3): (["step3"], 0),
+        },
+    )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    # "../../../etc/passwd" escapes from WORKSPACE_ROOT
-    handler = _project_handler(apply="../../../etc/passwd", scope=ProvisionScope.workspace)
+    handler = _project_handler(scope=ProvisionScope.workspace, apply=(cmd1, cmd2, cmd3))
     result = svc.run_handler(handler, "apply", ENV_NAME, sink)
 
-    assert not result.ok
-    assert result.error is not None
-    assert "escapes" in result.error
-    assert not subprocess.popen_calls
+    assert result.ok
+    assert len(result.runs) == 1
+    assert result.runs[0].exit_code == 0
+    # Three popen calls in order.
+    assert subprocess.popen_calls[0][0] == ["sh", "-c", cmd1]
+    assert subprocess.popen_calls[1][0] == ["sh", "-c", cmd2]
+    assert subprocess.popen_calls[2][0] == ["sh", "-c", cmd3]
 
 
-def test_missing_script_file_is_rejected() -> None:
-    """A script declared but not present on disk produces an error result."""
+def test_multi_command_stops_at_first_failure() -> None:
+    """A non-zero exit from any command stops subsequent commands in that cwd."""
     config = _make_config()
     fs = FakeFilesystem()
-    # Do NOT add the script to fs.files
-    subprocess = FakeSubprocessRunner()
+    cmd1 = "echo step1"
+    cmd2 = "echo step2_fail"
+    cmd3 = "echo step3_should_not_run"
+
+    subprocess = FakeSubprocessRunner(
+        popen_responses={
+            _sh_c_key(cmd1): ([], 0),
+            _sh_c_key(cmd2): ([], 1),
+            # cmd3 is registered but must not be called.
+            _sh_c_key(cmd3): ([], 0),
+        },
+    )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.workspace)
+    handler = _project_handler(scope=ProvisionScope.workspace, apply=(cmd1, cmd2, cmd3))
     result = svc.run_handler(handler, "apply", ENV_NAME, sink)
 
     assert not result.ok
-    assert result.error is not None
-    assert "not found" in result.error
-    assert not subprocess.popen_calls
+    assert result.runs[0].exit_code == 1
+    # Only two popen calls: cmd1 then cmd2; cmd3 was skipped.
+    assert len(subprocess.popen_calls) == 2
+    assert subprocess.popen_calls[1][0] == ["sh", "-c", cmd2]
 
 
-def test_non_executable_script_is_rejected() -> None:
-    """A script that exists but is not executable produces an error result."""
+def test_single_string_same_as_single_element_tuple() -> None:
+    """A single-command tuple behaves identically to a single-element list."""
     config = _make_config()
     fs = FakeFilesystem()
-    script_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh", executable=False)
+    cmd = "echo hello"
 
-    subprocess = FakeSubprocessRunner()
+    subprocess = FakeSubprocessRunner(
+        popen_responses={_sh_c_key(cmd): (["hello"], 0)},
+    )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    handler = _project_handler(scope=ProvisionScope.workspace)
+    handler = _project_handler(scope=ProvisionScope.workspace, apply=(cmd,))
     result = svc.run_handler(handler, "apply", ENV_NAME, sink)
 
-    assert not result.ok
-    assert result.error is not None
-    assert "not executable" in result.error
-    assert not subprocess.popen_calls
+    assert result.ok
+    assert len(result.runs) == 1
+    assert len(subprocess.popen_calls) == 1
+    assert subprocess.popen_calls[0][0] == ["sh", "-c", cmd]
+
+
+def test_multi_command_all_pass_exit_code_zero() -> None:
+    """When all commands pass the cwd result exit_code is 0."""
+    config = _make_config()
+    fs = FakeFilesystem()
+    cmd1 = "echo a"
+    cmd2 = "echo b"
+
+    subprocess = FakeSubprocessRunner(
+        popen_responses={
+            _sh_c_key(cmd1): ([], 0),
+            _sh_c_key(cmd2): ([], 0),
+        },
+    )
+    sink = FakeProvisionOutputSink()
+    svc = _make_service(config, fs, {}, subprocess)
+
+    handler = _project_handler(scope=ProvisionScope.workspace, apply=(cmd1, cmd2))
+    result = svc.run_handler(handler, "apply", ENV_NAME, sink)
+
+    assert result.ok
+    assert result.runs[0].exit_code == 0
+
+
+def test_execution_started_completed_once_per_cwd_multi_command() -> None:
+    """execution_started / execution_completed fire once per cwd, not per command."""
+    config = _make_config()
+    fs = FakeFilesystem()
+    cmd1 = "echo a"
+    cmd2 = "echo b"
+
+    subprocess = FakeSubprocessRunner(
+        popen_responses={
+            _sh_c_key(cmd1): ([], 0),
+            _sh_c_key(cmd2): ([], 0),
+        },
+    )
+    sink = FakeProvisionOutputSink()
+    svc = _make_service(config, fs, {}, subprocess)
+
+    handler = _project_handler(scope=ProvisionScope.workspace, apply=(cmd1, cmd2))
+    svc.run_handler(handler, "apply", ENV_NAME, sink)
+
+    # workspace scope → one cwd → one started, one completed
+    assert len(sink.started) == 1
+    assert len(sink.completed) == 1
 
 
 # ── destroy / reset actions ───────────────────────────────────────────────────
 
 
-def test_destroy_action_runs_destroy_script() -> None:
-    """action='destroy' runs handler.destroy, not handler.apply."""
+def test_destroy_action_runs_destroy_commands() -> None:
+    """action='destroy' runs handler.destroy commands, not handler.apply."""
     config = _make_config()
     fs = FakeFilesystem()
-    apply_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
-    destroy_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/destroy.sh")
+    apply_cmd = "echo apply"
+    destroy_cmd = "echo destroy"
 
     subprocess = FakeSubprocessRunner(
         popen_responses={
-            str(apply_path): ([], 0),
-            str(destroy_path): (["destroyed"], 0),
-        }
-    )
-    sink = FakeProvisionOutputSink()
-    svc = _make_service(config, fs, {}, subprocess)
-
-    handler = _project_handler(scope=ProvisionScope.workspace, destroy="scripts/destroy.sh")
-    result = svc.run_handler(handler, "destroy", ENV_NAME, sink)
-
-    assert result.ok
-    # Only destroy should have been invoked
-    assert str(destroy_path) in subprocess.popen_calls[0][0]
-
-
-def test_reset_action_runs_reset_script() -> None:
-    """action='reset' runs handler.reset, not handler.apply or handler.destroy."""
-    config = _make_config()
-    fs = FakeFilesystem()
-    apply_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
-    reset_path = _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/reset.sh")
-
-    subprocess = FakeSubprocessRunner(
-        popen_responses={
-            str(apply_path): ([], 0),
-            str(reset_path): (["reset"], 0),
+            _sh_c_key(apply_cmd): ([], 0),
+            _sh_c_key(destroy_cmd): (["destroyed"], 0),
         }
     )
     sink = FakeProvisionOutputSink()
@@ -510,26 +562,51 @@ def test_reset_action_runs_reset_script() -> None:
 
     handler = _project_handler(
         scope=ProvisionScope.workspace,
-        destroy="scripts/destroy.sh",
-        reset="scripts/reset.sh",
+        apply=(apply_cmd,),
+        destroy=(destroy_cmd,),
+    )
+    result = svc.run_handler(handler, "destroy", ENV_NAME, sink)
+
+    assert result.ok
+    assert subprocess.popen_calls[0][0] == ["sh", "-c", destroy_cmd]
+
+
+def test_reset_action_runs_reset_commands() -> None:
+    """action='reset' runs handler.reset commands, not apply or destroy."""
+    config = _make_config()
+    fs = FakeFilesystem()
+    apply_cmd = "echo apply"
+    reset_cmd = "echo reset"
+
+    subprocess = FakeSubprocessRunner(
+        popen_responses={
+            _sh_c_key(apply_cmd): ([], 0),
+            _sh_c_key(reset_cmd): (["reset"], 0),
+        }
+    )
+    sink = FakeProvisionOutputSink()
+    svc = _make_service(config, fs, {}, subprocess)
+
+    handler = _project_handler(
+        scope=ProvisionScope.workspace,
+        apply=(apply_cmd,),
+        reset=(reset_cmd,),
     )
     result = svc.run_handler(handler, "reset", ENV_NAME, sink)
 
     assert result.ok
-    assert str(reset_path) in subprocess.popen_calls[0][0]
+    assert subprocess.popen_calls[0][0] == ["sh", "-c", reset_cmd]
 
 
-def test_destroy_action_returns_error_when_no_destroy_script() -> None:
+def test_destroy_action_returns_error_when_no_destroy_commands() -> None:
     """When handler.destroy is None, destroy action returns an error (caller violated contract)."""
     config = _make_config()
     fs = FakeFilesystem()
-    _setup_apply_script(fs, WORKSPACE_ROOT, "scripts/apply.sh")
 
     subprocess = FakeSubprocessRunner()
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, {}, subprocess)
 
-    # handler has no destroy script
     handler = _project_handler(scope=ProvisionScope.workspace, destroy=None)
     result = svc.run_handler(handler, "destroy", ENV_NAME, sink)
 
@@ -545,22 +622,18 @@ def _setup_extension(
     fs: FakeFilesystem,
     config_files: dict[Path, dict],
     ext_name: str,
-    script_rel: str,
-    *,
-    executable: bool = True,
-) -> tuple[Path, Path]:
-    """Register an extension repo with a provision script; returns (ext_path, script_path)."""
+) -> Path:
+    """Register an extension repo; returns ext_path."""
     ext_path = WORKSPACE_ROOT / ext_name
     fs.directories.add(ext_path)
     manifest_path = ext_path / "winter-ext.toml"
     fs.files[manifest_path] = ""
     config_files[manifest_path] = {"name": ext_name}
-    script_path = _setup_apply_script(fs, ext_path, script_rel, executable=executable)
-    return ext_path, script_path
+    return ext_path
 
 
-def test_extension_source_script_runs_from_extension_root() -> None:
-    """Extension handler: source root is the extension directory, not workspace root."""
+def test_extension_source_env_vars_set_correctly() -> None:
+    """Extension handler: WINTER_EXT_DIR and WINTER_EXT_PREFIX reflect the extension."""
     from winter_cli.config.models import StandaloneRepositoryConfig
 
     config = WorkspaceConfig(
@@ -574,19 +647,19 @@ def test_extension_source_script_runs_from_extension_root() -> None:
     )
     fs = FakeFilesystem()
     config_files: dict[Path, dict] = {}
-    _, script_path = _setup_extension(fs, config_files, "my-ext", "scripts/provision.sh")
+    _setup_extension(fs, config_files, "my-ext")
 
+    cmd = "echo provision"
     subprocess = FakeSubprocessRunner(
-        popen_responses={str(script_path): (["ran"], 0)},
+        popen_responses={_sh_c_key(cmd): (["ran"], 0)},
     )
     sink = FakeProvisionOutputSink()
     svc = _make_service(config, fs, config_files, subprocess)
 
-    # Extension prefix defaults to its name ("my-ext")
     handler = ProvisionHandler(
         subtarget="dependency",
         scope=ProvisionScope.workspace,
-        apply="scripts/provision.sh",
+        apply=(cmd,),
         source="my-ext",
     )
     result = svc.run_handler(handler, "apply", ENV_NAME, sink)
@@ -595,45 +668,6 @@ def test_extension_source_script_runs_from_extension_root() -> None:
     env = subprocess.popen_envs[0]
     assert env["WINTER_EXT_DIR"] == str(WORKSPACE_ROOT / "my-ext")
     assert env["WINTER_EXT_PREFIX"] == "my-ext"
-
-
-def test_extension_source_path_escape_is_rejected() -> None:
-    """Extension handler: path escape from the extension root is rejected."""
-    from winter_cli.config.models import StandaloneRepositoryConfig
-
-    config = WorkspaceConfig(
-        workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
-        main_branch="main",
-        adopt_extensions=AdoptExtensions.winter,
-        standalone_repos=[
-            StandaloneRepositoryConfig(name="my-ext", url="git@example.com:org/my-ext.git"),
-        ],
-    )
-    fs = FakeFilesystem()
-    config_files: dict[Path, dict] = {}
-    ext_path = WORKSPACE_ROOT / "my-ext"
-    fs.directories.add(ext_path)
-    manifest_path = ext_path / "winter-ext.toml"
-    fs.files[manifest_path] = ""
-    config_files[manifest_path] = {"name": "my-ext"}
-
-    subprocess = FakeSubprocessRunner()
-    sink = FakeProvisionOutputSink()
-    svc = _make_service(config, fs, config_files, subprocess)
-
-    handler = ProvisionHandler(
-        subtarget="dependency",
-        scope=ProvisionScope.workspace,
-        apply="../../escape.sh",
-        source="my-ext",
-    )
-    result = svc.run_handler(handler, "apply", ENV_NAME, sink)
-
-    assert not result.ok
-    assert result.error is not None
-    assert "escapes" in result.error
-    assert not subprocess.popen_calls
 
 
 def test_unknown_extension_source_produces_error() -> None:
@@ -647,7 +681,7 @@ def test_unknown_extension_source_produces_error() -> None:
     handler = ProvisionHandler(
         subtarget="dependency",
         scope=ProvisionScope.workspace,
-        apply="scripts/apply.sh",
+        apply=("echo apply",),
         source="no-such-ext",
     )
     result = svc.run_handler(handler, "apply", ENV_NAME, sink)

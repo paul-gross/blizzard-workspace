@@ -52,7 +52,7 @@ class IProvisionReporter(Protocol):
         subtarget: str,
         scope: str,
         source: str,
-        script: str,
+        commands: list[str],
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
@@ -142,7 +142,7 @@ class StreamProvisionReporter:
         subtarget: str,
         scope: str,
         source: str,
-        script: str,
+        commands: list[str],
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
@@ -150,7 +150,8 @@ class StreamProvisionReporter:
         svc_info = ""
         if required_services:
             svc_info = f" [requires: {', '.join(required_services)}]"
-        self._click.echo(f"  would {action}: {source}/{subtarget}[{scope}] → {script}{svc_info}")
+        cmds_display = " && ".join(commands) if len(commands) > 1 else (commands[0] if commands else "")
+        self._click.echo(f"  would {action}: {source}/{subtarget}[{scope}] → {cmds_display}{svc_info}")
 
 
 # ---------------------------------------------------------------------------
@@ -206,15 +207,16 @@ class JsonProvisionReporter:
         ``status`` is ``"aborted"``, otherwise null.
 
     ``{"type":"plan_handler", "would_run":true, "subtarget":str, "scope":str,
-       "source":str, "script":str, "action":str,
+       "source":str, "commands":[str,...], "action":str,
        "required_services":[str,...], "service_check_preview":str|null}``
         Emitted in dry-run mode instead of ``execution_started`` / ``handler_result``.
         One event per handler in plan order.  ``would_run`` is always ``true``
         so agents can distinguish plan events from real-run events.
-        ``service_check_preview`` describes the service-check that WOULD run:
-        ``null`` when no ``required_services`` are declared, or a scope string
-        such as ``"workspace"`` / the env name indicating which scope would be
-        started if needed.
+        ``commands`` is the ordered list of shell commands that would run (each
+        via ``sh -c``).  ``service_check_preview`` describes the service-check
+        that WOULD run: ``null`` when no ``required_services`` are declared, or
+        a scope string such as ``"workspace"`` / the env name indicating which
+        scope would be started if needed.
     """
 
     def __init__(self, click: Any) -> None:
@@ -292,7 +294,7 @@ class JsonProvisionReporter:
         subtarget: str,
         scope: str,
         source: str,
-        script: str,
+        commands: list[str],
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
@@ -304,7 +306,7 @@ class JsonProvisionReporter:
                 "subtarget": subtarget,
                 "scope": scope,
                 "source": source,
-                "script": script,
+                "commands": commands,
                 "action": action,
                 "required_services": required_services,
                 "service_check_preview": service_check_preview,

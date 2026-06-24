@@ -312,7 +312,7 @@ def test_load_parses_provision_handlers_with_correct_source() -> None:
     dep = manifest.provision[0]
     assert dep.subtarget == "dependency"
     assert dep.scope == ProvisionScope.feature_environment
-    assert dep.apply == "scripts/install.sh"
+    assert dep.apply == ("scripts/install.sh",)
     assert dep.source == "my-ext"
     assert dep.destroy is None
     assert dep.required_services == ()
@@ -320,8 +320,8 @@ def test_load_parses_provision_handlers_with_correct_source() -> None:
     res = manifest.provision[1]
     assert res.subtarget == "resource"
     assert res.scope == ProvisionScope.workspace
-    assert res.apply == "scripts/create-db.sh"
-    assert res.destroy == "scripts/drop-db.sh"
+    assert res.apply == ("scripts/create-db.sh",)
+    assert res.destroy == ("scripts/drop-db.sh",)
     assert res.source == "my-ext"
     assert res.required_services == ("postgres",)
 

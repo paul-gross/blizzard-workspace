@@ -21,7 +21,7 @@ winter provision alpha data --destroy         # delete data only
 # Global flags
 winter provision alpha --no-service-check     # skip the required_services check entirely
 winter provision alpha --json                 # NDJSON event stream (see below)
-winter provision alpha --dry-run              # print plan; no scripts run, no services started
+winter provision alpha --dry-run              # print plan; no commands run, no services started
 winter provision alpha --dry-run --json       # structured plan as NDJSON (see below)
 ```
 
@@ -61,18 +61,20 @@ Handlers are declared in both the workspace config and extension manifests using
 ```toml
 [[provision.dependency]]
 scope = "feature-worktree"
-apply = "scripts/install-deps.sh"
+# Single inline command (string form):
+apply = "uv sync && mise trust"
 
 [[provision.resource]]
 scope            = "workspace"
-apply            = "scripts/create-db.sh"
-destroy          = "scripts/drop-db.sh"
+# Array form — commands run in order; stop at first non-zero exit:
+apply            = ["createdb myapp", "psql myapp -f schema.sql"]
+destroy          = "dropdb --if-exists myapp"
 required_services = ["workspace/postgres"]
 
 [[provision.data]]
 scope            = "feature-environment"
-apply            = "scripts/seed.sh"
-reset            = "scripts/reseed.sh"
+apply            = "$WINTER_WORKSPACE_DIR/.winter/config/provision/seed.sh"
+reset            = "$WINTER_WORKSPACE_DIR/.winter/config/provision/reseed.sh"
 required_services = ["workspace/postgres"]
 ```
 
@@ -83,12 +85,12 @@ Extensions declare the same shape under `[[provision.*]]` in their `winter-ext.t
 ```toml
 [[provision.dependency]]
 scope = "feature-worktree"
-apply = "scripts/install.sh"
+apply = "npm ci"
 
 [[provision.resource]]
 scope   = "workspace"
-apply   = "scripts/create-db.sh"
-destroy = "scripts/drop-db.sh"
+apply   = ["createdb myapp_ext", "psql myapp_ext -f schema.sql"]
+destroy = "dropdb --if-exists myapp_ext"
 ```
 
 ### Per-entry fields
@@ -96,12 +98,64 @@ destroy = "scripts/drop-db.sh"
 | Field | Required | Meaning |
 |-------|----------|---------|
 | `scope` | yes | Where the handler runs (see Scope and ordering below). One of `workspace`, `feature-environment`, `feature-worktree`. |
-| `apply` | yes | Path to the script run by the bare (apply) action. Relative to the declaring directory (workspace root or extension root). |
-| `destroy` | no | Path to the script run by `--destroy`. If absent, `--destroy` warns and no-ops. |
-| `reset` | no | Path to the script run by `--reset`. If absent, winter composes destroy + apply when both exist; otherwise warns and degrades to re-apply. |
+| `apply` | yes | Inline shell command (string) or list of inline shell commands (array), run via `sh -c`. |
+| `destroy` | no | Inline shell command (string) or list (array) run by `--destroy`. If absent, `--destroy` warns and no-ops. |
+| `reset` | no | Inline shell command (string) or list (array) run by `--reset`. If absent, winter composes destroy + apply when both exist; otherwise warns and degrades to re-apply. |
 | `required_services` | no | Services that must be running before this handler executes (valid only on `resource` and `data` — rejected on `dependency`). See Service check below. |
 
 **Sub-targets:** `dependency`, `resource`, `data`. Unknown sub-target keys (e.g. `[[provision.custom]]`) are rejected. Unknown per-entry keys are also rejected.
+
+### Command execution semantics
+
+Each command (string or each element of an array) runs via `sh -c "<command>"`. This means:
+
+- Shell constructs work: `&&`, `||`, pipes (`|`), `$VAR` expansion, globs, and subshells.
+- **Array elements run in declaration order.** Execution within a scope stops at the first non-zero exit; that exit code is the handler's result for that scope.
+- For `feature-worktree` scope the full command sequence runs once per project worktree; each worktree is an independent execution (a failure in one worktree does not automatically skip others — the service layer owns that policy).
+- There is no path-escape guard, no `is_file` check, and no executable-bit check. To invoke a script, write it as a command and locate it via an environment variable (see below).
+
+### Environment variables
+
+All handlers receive `WINTER_WORKSPACE_DIR` plus the three extension-identity vars. `feature-environment` and `feature-worktree` handlers additionally receive the env-var trio:
+
+| Var | Meaning |
+|-----|---------|
+| `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root |
+| `WINTER_EXT_DIR` | Absolute path to the extension repo (workspace root for project-source handlers) |
+| `WINTER_EXT_PREFIX` | The extension's resolved symlink prefix (`"project"` for project-source handlers) |
+| `WINTER_EXT_CONFIG_DIR` | Absolute path to the extension's writable config directory |
+| `WINTER_ENV` | The env name (`alpha`, `beta`, …) — feature-environment/feature-worktree only |
+| `WINTER_ENV_INDEX` | The persisted port-offset index for this env — feature-environment/feature-worktree only |
+| `WINTER_PORT_BASE` | `base_port + ports_per_env * WINTER_ENV_INDEX` — feature-environment/feature-worktree only |
+
+`workspace`-scope handlers receive the four base vars above but not the trio (same pattern as `on_workspace_reconcile` hooks — see [setup.md](../setup.md#hook-env-var-contract)).
+
+### Validation
+
+The following values are rejected at parse time (`ConfigError`) and flagged by the doctor `[provision]` probe:
+
+- An empty string (`""`)
+- An empty list (`[]`)
+- A list containing any non-string or empty-string element
+- A value that is neither a string nor a list
+
+### BREAKING CHANGE — migration from script paths
+
+**Previous contract:** `apply`, `destroy`, and `reset` accepted a path to an executable script, resolved relative to the declaring directory (workspace root or extension root).
+
+**New contract:** these fields accept an **inline shell command** (string) or a **list of inline shell commands** (array). There is no path resolution — the value is passed directly to `sh -c`.
+
+**To migrate:** replace any script-path value with a command that invokes the script via `$WINTER_WORKSPACE_DIR` (or `$WINTER_EXT_DIR` for extension handlers):
+
+```toml
+# Before (old — no longer valid):
+apply = "scripts/install-deps.sh"
+
+# After (new — invoke the script as a command):
+apply = "$WINTER_WORKSPACE_DIR/.winter/config/provision/install-deps.sh"
+```
+
+Because the value runs via `sh -c "<command>"`, a bare path to a script must be executable (`chmod +x`); alternatively, invoke it through an interpreter (e.g. `sh $WINTER_WORKSPACE_DIR/.winter/config/provision/install-deps.sh`) to avoid that requirement.
 
 ## Scope and ordering
 
@@ -113,7 +167,7 @@ When the bare `winter provision <env>` full-chain form is used, sub-targets run 
 dependency → resource → data
 ```
 
-A handler apply failure in any sub-target aborts the remaining sub-targets (failure is non-zero exit from the script).
+A handler apply failure in any sub-target aborts the remaining sub-targets (failure is non-zero exit from any command in the handler).
 
 A sub-target with no declared handlers is a no-op; provision reports that no handlers are declared for it.
 
@@ -137,15 +191,19 @@ feature-worktree (config) → feature-worktree (extensions)
 
 ### Environment variables
 
-Handlers at `feature-environment` and `feature-worktree` scope receive the standard env-var trio:
+All handlers receive `WINTER_WORKSPACE_DIR` plus the three extension-identity vars (`WINTER_EXT_DIR`, `WINTER_EXT_PREFIX`, `WINTER_EXT_CONFIG_DIR`). `feature-environment` and `feature-worktree` handlers additionally receive the env-var trio:
 
 | Var | Meaning |
 |-----|---------|
-| `WINTER_ENV` | The env name (`alpha`, `beta`, …) |
-| `WINTER_ENV_INDEX` | The persisted port-offset index for this env |
-| `WINTER_PORT_BASE` | `base_port + ports_per_env * WINTER_ENV_INDEX` |
+| `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root |
+| `WINTER_EXT_DIR` | Absolute path to the extension repo (workspace root for project-source handlers) |
+| `WINTER_EXT_PREFIX` | The extension's resolved symlink prefix (`"project"` for project-source handlers) |
+| `WINTER_EXT_CONFIG_DIR` | Absolute path to the extension's writable config directory |
+| `WINTER_ENV` | The env name (`alpha`, `beta`, …) — feature-environment/feature-worktree only |
+| `WINTER_ENV_INDEX` | The persisted port-offset index for this env — feature-environment/feature-worktree only |
+| `WINTER_PORT_BASE` | `base_port + ports_per_env * WINTER_ENV_INDEX` — feature-environment/feature-worktree only |
 
-`workspace`-scope handlers receive `WINTER_WORKSPACE_DIR` only (same contract as `on_workspace_reconcile` hooks — see [setup.md](../setup.md#hook-env-var-contract)).
+`workspace`-scope handlers receive the four base vars above but not the trio (same pattern as `on_workspace_reconcile` hooks — see [setup.md](../setup.md#hook-env-var-contract)).
 
 ## Service check (`required_services`)
 
@@ -166,14 +224,14 @@ A `required_services` token must be scoped as `workspace/<service>` or `<current
 
 ## `--dry-run`
 
-`--dry-run` prints the ordered list of handlers that **would** run without executing any script or starting any service:
+`--dry-run` prints the ordered list of handlers that **would** run without executing any commands or starting any service:
 
-- Per-handler output: sub-target, scope, source, script path, resolved action (apply / destroy / reset), and which `required_services` it would check (if any).
+- Per-handler output: sub-target, scope, source, the commands that would run (joined with ` && ` for display when multiple), resolved action (apply / destroy / reset), and which `required_services` it would check (if any).
 - A sub-target with no declared handlers is reported as a no-op.
-- No mutation occurs: no scripts run, no `winter service up` calls are made.
+- No mutation occurs: no commands run, no `winter service up` calls are made.
 - `--dry-run` may be combined with any action flag (`--reset`, `--destroy`, `--seed`) or sub-target to preview that specific path.
 
-`--dry-run --json` emits the same NDJSON stream as a real run (see below), replacing `execution_*` and `handler_result` events with `plan_handler` events — one per resolved action in plan order. (A handler with `--reset` that has no `reset` script but does have a `destroy` script emits two events: a `destroy` then an `apply`.)
+`--dry-run --json` emits the same NDJSON stream as a real run (see below), replacing `execution_*` and `handler_result` events with `plan_handler` events — one per resolved action in plan order. (A handler with `--reset` that has no `reset` field but does have a `destroy` field emits two events: a `destroy` then an `apply`.)
 
 ## `--json` output
 
@@ -184,14 +242,14 @@ A `required_services` token must be scoped as `workspace/<service>` or `<current
 | `started` | Beginning of the run | `env`, `subtargets` (ordered list of sub-targets to run) |
 | `subtarget_started` | Before each sub-target | `subtarget` |
 | `no_handlers` | Sub-target has no declared handlers | `subtarget` |
-| `execution_started` | Before each script invocation | `label`, `action`, `cwd` |
-| `execution_output_line` | Each line from the script | `label`, `line` |
-| `execution_completed` | Script finished | `label`, `action`, `exit_status` |
-| `execution_error` | Script could not be launched | `label`, `error` |
+| `execution_started` | Before each command sequence invocation (one per cwd) | `label`, `action`, `cwd` |
+| `execution_output_line` | Each line from the running command | `label`, `line` |
+| `execution_completed` | Command sequence finished for this cwd | `label`, `action`, `exit_status` |
+| `execution_error` | Command could not be launched | `label`, `error` |
 | `handler_result` | Summary after a handler completes | `subtarget`, `scope`, `source`, `action`, `service_check`, `runs:[{cwd, exit_status}]`, `exit_status` |
 | `handler_warn` | Degraded action (e.g. no destroy handler) | `subtarget`, `scope`, `source`, `message` |
 | `finished` | End of the run | `status` (`"ok"` / `"aborted"` / `"error"`), `aborted_at` (sub-target name when aborted, else absent) |
-| `plan_handler` | (`--dry-run` only) Handler that would run | `would_run: true`, `subtarget`, `scope`, `source`, `script`, `action`, `required_services`, `service_check_preview` |
+| `plan_handler` | (`--dry-run` only) Handler that would run | `would_run: true`, `subtarget`, `scope`, `source`, `commands`, `action`, `required_services`, `service_check_preview` |
 
 **`plan_handler` fields** (emitted only with `--dry-run --json`):
 
@@ -201,7 +259,7 @@ A `required_services` token must be scoped as `workspace/<service>` or `<current
 | `subtarget` | string | Sub-target name (`dependency`, `resource`, `data`) |
 | `scope` | string | Handler scope (`workspace`, `feature-environment`, `feature-worktree`) |
 | `source` | string | Declaring source (`project` or extension prefix) |
-| `script` | string | Path to the script that would be invoked |
+| `commands` | list of strings | Ordered list of shell commands that would run (each via `sh -c`) |
 | `action` | string | Resolved action (`apply`, `destroy`, or `reset`) |
 | `required_services` | list of strings | `required_services` tokens from the handler declaration |
 | `service_check_preview` | string or null | Comma-separated owning scopes that would be checked/started; `null` when no `required_services` |
@@ -220,7 +278,8 @@ A `required_services` token must be scoped as `workspace/<service>` or `<current
 `winter doctor` includes a built-in `[provision]` probe that validates every declared `[[provision.*]]` manifest entry — from both `.winter/config.toml` and installed extension `winter-ext.toml` files. It reports one finding per bad entry without aborting other doctor checks:
 
 - `scope` is a known value (`workspace`, `feature-environment`, `feature-worktree`)
-- `apply` is present
+- `apply` is present and is a non-empty string or a non-empty list of non-empty strings
+- `destroy` and `reset`, when present, are each a non-empty string or a non-empty list of non-empty strings
 - `required_services` is only declared on `resource` or `data` (not `dependency`)
 - No unknown keys are present
 
