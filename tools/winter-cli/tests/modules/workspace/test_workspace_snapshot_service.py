@@ -562,10 +562,10 @@ def test_collect_last_commit_subject_populated(workspace: Workspace, workspace_c
     assert wt_b.last_commit_subject is None
 
 
-def test_collect_drifted_source_checkout_surfaces_behind_origin(
+def test_collect_drifted_project_surfaces_behind_origin(
     workspace: Workspace, workspace_config: WorkspaceConfig
 ) -> None:
-    """A source checkout that is behind origin surfaces in source_checkouts."""
+    """A project checkout that is behind origin surfaces in projects."""
     alpha = _make_env(workspace, "alpha", 1)
     worktree_statuses = {
         "repo-a": _clean_repo_status("repo-a"),
@@ -601,8 +601,8 @@ def test_collect_drifted_source_checkout_surfaces_behind_origin(
 
     snapshot = svc.collect()
 
-    # repo-a has behind=3, so it should appear in source_checkouts
-    repo_a_checkout = next((sc for sc in snapshot.source_checkouts if sc.repo == "repo-a"), None)
+    # repo-a has behind=3, so it should appear in projects
+    repo_a_checkout = next((sc for sc in snapshot.projects if sc.repo == "repo-a"), None)
     assert repo_a_checkout is not None
     assert repo_a_checkout.behind_origin == 3
     assert repo_a_checkout.ahead_origin == 0
@@ -675,10 +675,12 @@ def test_collect_drift_missing_populates_workspace_level(
 def test_collect_extensions_lists_declared_standalones_without_probing(workspace: Workspace) -> None:
     """`collect().workspace.extensions` is a pure name read of the declared standalones.
 
-    It must NOT git-probe them: a broken standalone repo (here, wired to raise
-    on `get_standalone_status`) must not fail `ws status` / `--json` just to list
-    the extension's name. The dashboard, which needs each standalone's health,
-    probes separately — see `test_collect_for_dashboard_probes_singletons_and_standalones`.
+    The name list must NOT depend on a git probe: a broken standalone repo
+    (here, both wired to raise on `get_standalone_status`) must not fail
+    `ws status` / `--json` just to list the extension's name. The standalone
+    *git-status* probe that feeds `snapshot.standalones` is tolerant, so a
+    raising standalone is logged and skipped (it just doesn't appear in
+    `standalones`) — the command still succeeds and still lists every name.
     """
     config = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
@@ -698,13 +700,129 @@ def test_collect_extensions_lists_declared_standalones_without_probing(workspace
         envs=[alpha],
         feature_branch="feature/x",
         worktree_statuses={"repo-a": _clean_repo_status("repo-a")},
-        # If collect() probed standalones, these would raise and fail the call.
+        # Both standalone probes raise; the tolerant probe logs and skips them.
         repo_errors={"ext-a": RepoError("ext-a would explode if probed"), "ext-b": RepoError("boom")},
     )
 
     snapshot = svc.collect()
 
+    # Names still listed (pure config read), and the raising probes are skipped
+    # rather than aborting the command.
     assert sorted(snapshot.workspace.extensions) == ["ext-a", "ext-b"]
+    assert snapshot.standalones == []
+
+
+def _config_with_two_standalones() -> WorkspaceConfig:
+    return WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        project_repos=[ProjectRepositoryConfig(name="repo-a", url="git@example.com:org/repo-a.git")],
+        standalone_repos=[
+            StandaloneRepositoryConfig(name="ext-a", url="git@example.com:org/ext-a.git"),
+            StandaloneRepositoryConfig(name="ext-b", url="git@example.com:org/ext-b.git"),
+        ],
+    )
+
+
+def test_collect_standalone_clean_surfaces_in_standalones(workspace: Workspace) -> None:
+    """A clean declared standalone surfaces in `snapshot.standalones` with zeroed counts."""
+    config = _config_with_two_standalones()
+    alpha = _make_env(workspace, "alpha", 1)
+    standalone_statuses = {
+        "ext-a": StandaloneRepoStatus(
+            repository=StandaloneRepository(name="ext-a", path=WORKSPACE_ROOT / "ext-a"),
+            branch="master",
+        ),
+        "ext-b": StandaloneRepoStatus(
+            repository=StandaloneRepository(name="ext-b", path=WORKSPACE_ROOT / "ext-b"),
+            branch="master",
+        ),
+    }
+    svc = _service(
+        workspace,
+        config,
+        envs=[alpha],
+        feature_branch="feature/x",
+        worktree_statuses={"repo-a": _clean_repo_status("repo-a")},
+        standalone_statuses=standalone_statuses,
+    )
+
+    snapshot = svc.collect()
+
+    by_name = {s.repo: s for s in snapshot.standalones}
+    assert sorted(by_name) == ["ext-a", "ext-b"]
+    ext_a = by_name["ext-a"]
+    assert ext_a.branch == "master"
+    assert (ext_a.behind_origin, ext_a.ahead_origin, ext_a.dirty) == (0, 0, 0)
+
+
+def test_collect_standalone_dirty_ahead_behind_surfaces(workspace: Workspace) -> None:
+    """A dirty/ahead/behind declared standalone surfaces with its git counts (issue #89)."""
+    config = _config_with_two_standalones()
+    alpha = _make_env(workspace, "alpha", 1)
+    standalone_statuses = {
+        "ext-a": StandaloneRepoStatus(
+            repository=StandaloneRepository(name="ext-a", path=WORKSPACE_ROOT / "ext-a"),
+            branch="topic",
+            ahead=2,
+            behind=4,
+            dirty_count=3,
+        ),
+        "ext-b": StandaloneRepoStatus(
+            repository=StandaloneRepository(name="ext-b", path=WORKSPACE_ROOT / "ext-b"),
+            branch="master",
+        ),
+    }
+    svc = _service(
+        workspace,
+        config,
+        envs=[alpha],
+        feature_branch="feature/x",
+        worktree_statuses={"repo-a": _clean_repo_status("repo-a")},
+        standalone_statuses=standalone_statuses,
+    )
+
+    snapshot = svc.collect()
+
+    ext_a = next(s for s in snapshot.standalones if s.repo == "ext-a")
+    assert ext_a.branch == "topic"
+    assert ext_a.ahead_origin == 2
+    assert ext_a.behind_origin == 4
+    assert ext_a.dirty == 3
+
+
+def test_collect_standalone_failing_probe_is_skipped_not_fatal(workspace: Workspace) -> None:
+    """A standalone whose probe raises is logged and skipped; the good one still surfaces.
+
+    No `on_repo_error` callback is passed (the CLI/`--json` path), yet collect()
+    does not raise — standalone probes are always tolerant, unlike project
+    worktree/main probes which propagate on this path.
+    """
+    config = _config_with_two_standalones()
+    alpha = _make_env(workspace, "alpha", 1)
+    standalone_statuses = {
+        "ext-a": StandaloneRepoStatus(
+            repository=StandaloneRepository(name="ext-a", path=WORKSPACE_ROOT / "ext-a"),
+            branch="master",
+            dirty_count=1,
+        ),
+    }
+    svc = _service(
+        workspace,
+        config,
+        envs=[alpha],
+        feature_branch="feature/x",
+        worktree_statuses={"repo-a": _clean_repo_status("repo-a")},
+        standalone_statuses=standalone_statuses,
+        repo_errors={"ext-b": RepoError("ext-b probe exploded")},
+    )
+
+    snapshot = svc.collect()
+
+    assert [s.repo for s in snapshot.standalones] == ["ext-a"]
+    assert snapshot.standalones[0].dirty == 1
 
 
 def test_collect_on_repo_error_callback_skips_failed_worktree(

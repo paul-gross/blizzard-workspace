@@ -20,9 +20,10 @@ from winter_cli.modules.workspace.models import (
     EnvSnapshot,
     FetchReport,
     OrphanSnapshot,
+    ProjectCheckoutSnapshot,
     RepoFetchOutcome,
     RepoScope,
-    SourceCheckoutSnapshot,
+    StandaloneCheckoutSnapshot,
     StandaloneRepository,
     StandaloneRepoStatus,
     WorkspaceLevelSnapshot,
@@ -737,8 +738,8 @@ def _clean_env_snapshot(name: str = "alpha", worktrees: list[WorktreeSnapshot] |
     )
 
 
-def _clean_sc_snapshot(repo: str = "repo-a") -> SourceCheckoutSnapshot:
-    return SourceCheckoutSnapshot(
+def _clean_project_snapshot(repo: str = "repo-a") -> ProjectCheckoutSnapshot:
+    return ProjectCheckoutSnapshot(
         repo=repo,
         branch="main",
         behind_origin=0,
@@ -748,14 +749,36 @@ def _clean_sc_snapshot(repo: str = "repo-a") -> SourceCheckoutSnapshot:
     )
 
 
-def _drifted_sc_snapshot(repo: str = "repo-a", behind: int = 3) -> SourceCheckoutSnapshot:
-    return SourceCheckoutSnapshot(
+def _drifted_project_snapshot(repo: str = "repo-a", behind: int = 3) -> ProjectCheckoutSnapshot:
+    return ProjectCheckoutSnapshot(
         repo=repo,
         branch="main",
         behind_origin=behind,
         ahead_origin=0,
         dirty=0,
         drift=[],
+    )
+
+
+def _clean_standalone_snapshot(repo: str = "winter-harness") -> StandaloneCheckoutSnapshot:
+    return StandaloneCheckoutSnapshot(
+        repo=repo,
+        branch="master",
+        behind_origin=0,
+        ahead_origin=0,
+        dirty=0,
+    )
+
+
+def _diverged_standalone_snapshot(
+    repo: str = "winter-harness", *, behind: int = 0, ahead: int = 0, dirty: int = 0
+) -> StandaloneCheckoutSnapshot:
+    return StandaloneCheckoutSnapshot(
+        repo=repo,
+        branch="master",
+        behind_origin=behind,
+        ahead_origin=ahead,
+        dirty=dirty,
     )
 
 
@@ -771,14 +794,16 @@ def _clean_workspace_level(root: str = "/ws") -> WorkspaceLevelSnapshot:
 
 def _make_snapshot(
     envs: list[EnvSnapshot] | None = None,
-    source_checkouts: list[SourceCheckoutSnapshot] | None = None,
+    projects: list[ProjectCheckoutSnapshot] | None = None,
+    standalones: list[StandaloneCheckoutSnapshot] | None = None,
     workspace: WorkspaceLevelSnapshot | None = None,
     dashboard: DashboardSnapshot | None = None,
 ) -> WorkspaceSnapshot:
     return WorkspaceSnapshot(
         schema_version=1,
         environments=envs if envs is not None else [_clean_env_snapshot()],
-        source_checkouts=source_checkouts if source_checkouts is not None else [_clean_sc_snapshot()],
+        projects=projects if projects is not None else [_clean_project_snapshot()],
+        standalones=standalones if standalones is not None else [_clean_standalone_snapshot()],
         workspace=workspace if workspace is not None else _clean_workspace_level(),
         dashboard=dashboard
         if dashboard is not None
@@ -797,10 +822,10 @@ def test_compute_status_exit_code_dirty_worktree_returns_one() -> None:
     assert compute_status_exit_code(snapshot, scoped=False) == 1
 
 
-def test_compute_status_exit_code_drifted_source_checkout_returns_one() -> None:
+def test_compute_status_exit_code_drifted_project_returns_one() -> None:
     snapshot = _make_snapshot(
         envs=[_clean_env_snapshot()],
-        source_checkouts=[_drifted_sc_snapshot(behind=3)],
+        projects=[_drifted_project_snapshot(behind=3)],
     )
     assert compute_status_exit_code(snapshot, scoped=False) == 1
 
@@ -810,7 +835,7 @@ def test_compute_status_exit_code_scoped_clean_env_global_drift_returns_zero() -
     env = _clean_env_snapshot(name="alpha", worktrees=[_clean_wt_snapshot()])
     snapshot = _make_snapshot(
         envs=[env],
-        source_checkouts=[_drifted_sc_snapshot(behind=5)],
+        projects=[_drifted_project_snapshot(behind=5)],
     )
     assert compute_status_exit_code(snapshot, scoped=True) == 0
 
@@ -901,7 +926,8 @@ def test_status_json_emits_all_top_level_keys(capsys: pytest.CaptureFixture[Any]
     out = json.loads(capsys.readouterr().out)
     assert "schema_version" in out
     assert "environments" in out
-    assert "source_checkouts" in out
+    assert "projects" in out
+    assert "standalones" in out
     assert "workspace" in out
     assert "dashboard" in out
 
@@ -943,7 +969,7 @@ def test_status_clean_env_global_drift_scoped_exits_zero(capsys: pytest.CaptureF
     env = _clean_env_snapshot(name="alpha", worktrees=[_clean_wt_snapshot()])
     snapshot = _make_snapshot(
         envs=[env],
-        source_checkouts=[_drifted_sc_snapshot(behind=3)],
+        projects=[_drifted_project_snapshot(behind=3)],
     )
     handler = _make_status_handler(snapshot)
     handler.status(EnvStatusParams(patterns=["alpha"], output_json=False))  # no SystemExit
@@ -1063,12 +1089,12 @@ def test_status_with_fetch_scoped_passes_patterns_to_fetch(capsys: pytest.Captur
 
 
 # ---------------------------------------------------------------------------
-# compute_status_exit_code — dirty source checkout (fix 2)
+# compute_status_exit_code — dirty project checkout (fix 2)
 # ---------------------------------------------------------------------------
 
 
-def _dirty_sc_snapshot(repo: str = "repo-a", dirty: int = 1) -> SourceCheckoutSnapshot:
-    return SourceCheckoutSnapshot(
+def _dirty_project_snapshot(repo: str = "repo-a", dirty: int = 1) -> ProjectCheckoutSnapshot:
+    return ProjectCheckoutSnapshot(
         repo=repo,
         branch="main",
         behind_origin=0,
@@ -1078,21 +1104,41 @@ def _dirty_sc_snapshot(repo: str = "repo-a", dirty: int = 1) -> SourceCheckoutSn
     )
 
 
-def test_compute_status_exit_code_dirty_source_checkout_returns_one() -> None:
-    """A source checkout with dirty files (but in-sync with origin) returns exit 1."""
+def test_compute_status_exit_code_dirty_project_returns_one() -> None:
+    """A project checkout with dirty files (but in-sync with origin) returns exit 1."""
     snapshot = _make_snapshot(
         envs=[_clean_env_snapshot()],
-        source_checkouts=[_dirty_sc_snapshot(dirty=3)],
+        projects=[_dirty_project_snapshot(dirty=3)],
     )
     assert compute_status_exit_code(snapshot, scoped=False) == 1
 
 
-def test_compute_status_exit_code_dirty_source_checkout_scoped_returns_zero() -> None:
-    """Pattern scoping: dirty source checkout does NOT flip exit code for a scoped run."""
+def test_compute_status_exit_code_dirty_project_scoped_returns_zero() -> None:
+    """Pattern scoping: dirty project checkout does NOT flip exit code for a scoped run."""
     env = _clean_env_snapshot(name="alpha", worktrees=[_clean_wt_snapshot()])
     snapshot = _make_snapshot(
         envs=[env],
-        source_checkouts=[_dirty_sc_snapshot(dirty=2)],
+        projects=[_dirty_project_snapshot(dirty=2)],
+    )
+    assert compute_status_exit_code(snapshot, scoped=True) == 0
+
+
+def test_compute_status_exit_code_diverged_standalone_returns_one() -> None:
+    """An unscoped run flips to exit 1 when a standalone is dirty/ahead/behind."""
+    for kwargs in ({"dirty": 2}, {"ahead": 1}, {"behind": 4}):
+        snapshot = _make_snapshot(
+            envs=[_clean_env_snapshot()],
+            standalones=[_diverged_standalone_snapshot(**kwargs)],
+        )
+        assert compute_status_exit_code(snapshot, scoped=False) == 1
+
+
+def test_compute_status_exit_code_diverged_standalone_scoped_returns_zero() -> None:
+    """Pattern scoping: a diverged standalone does NOT flip exit code for a scoped run."""
+    env = _clean_env_snapshot(name="alpha", worktrees=[_clean_wt_snapshot()])
+    snapshot = _make_snapshot(
+        envs=[env],
+        standalones=[_diverged_standalone_snapshot(dirty=3)],
     )
     assert compute_status_exit_code(snapshot, scoped=True) == 0
 
@@ -1142,7 +1188,8 @@ def test_status_json_emits_v1_schema(capsys: pytest.CaptureFixture[Any]) -> None
     # top-level keys
     assert out["schema_version"] == 1
     assert "environments" in out
-    assert "source_checkouts" in out
+    assert "projects" in out
+    assert "standalones" in out
     assert "workspace" in out
 
     # worktrees[] entry — every documented field including pinned
@@ -1254,8 +1301,12 @@ def test_status_json_keys_match_ws_status_v1_schema(capsys: pytest.CaptureFixtur
         check(env_obj, "EnvSnapshot")
         for wt in env_obj["worktrees"]:
             check(wt, "WorktreeSnapshot")
-    for sc in doc.get("source_checkouts", []):
-        check(sc, "SourceCheckoutSnapshot")
+    assert doc["projects"], "expected at least one project checkout to exercise the def"
+    for sc in doc["projects"]:
+        check(sc, "ProjectCheckoutSnapshot")
+    assert doc["standalones"], "expected at least one standalone to exercise the def"
+    for st in doc["standalones"]:
+        check(st, "StandaloneCheckoutSnapshot")
     check(doc["workspace"], "WorkspaceLevelSnapshot")
     for orphan in doc["workspace"].get("orphans", []):
         check(orphan, "OrphanSnapshot")

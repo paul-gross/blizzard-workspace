@@ -140,13 +140,13 @@ class EnvSnapshot:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
-class SourceCheckoutSnapshot:
-    """Snapshot of a source checkout (project main clone or standalone repo).
+class ProjectCheckoutSnapshot:
+    """Snapshot of a project repo's source checkout (its ``projects/<name>`` main clone).
 
     `behind_origin` and `ahead_origin` are relative to ``origin/<main-branch>``.
     `dirty` is the count of changed files (staged + unstaged + untracked).
-    `drift` lists any drift findings specific to this checkout (e.g. missing
-    declared sub-paths).
+    `drift` lists any drift findings specific to this checkout (e.g. the clone is
+    missing from ``projects/`` or a directory is undeclared in config).
     """
 
     repo: str
@@ -155,6 +155,27 @@ class SourceCheckoutSnapshot:
     ahead_origin: int
     dirty: int
     drift: list[str]
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class StandaloneCheckoutSnapshot:
+    """Git status of a declared ``[[standalone_repository]]`` checkout (under ``.winter/ext/``).
+
+    Mirrors `ProjectCheckoutSnapshot`'s git fields so JSON consumers render the
+    two with the same logic, but carries no ``drift`` list: standalone repos are
+    not subject to the ``projects/`` drift detection (a standalone absent on disk
+    or whose probe fails is simply omitted, not reported as drift).
+
+    `behind_origin` and `ahead_origin` are relative to the standalone's configured
+    upstream tracking ref (``origin/<ref>``). `dirty` is the count of changed
+    files (staged + unstaged + untracked).
+    """
+
+    repo: str
+    branch: str | None
+    behind_origin: int
+    ahead_origin: int
+    dirty: int
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -189,5 +210,6 @@ class WorkspaceSnapshot:
     schema_version: int
     workspace: WorkspaceLevelSnapshot
     environments: list[EnvSnapshot]
-    source_checkouts: list[SourceCheckoutSnapshot]
+    projects: list[ProjectCheckoutSnapshot]
+    standalones: list[StandaloneCheckoutSnapshot]
     dashboard: DashboardSnapshot

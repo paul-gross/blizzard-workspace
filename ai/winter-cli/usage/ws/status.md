@@ -39,13 +39,13 @@ Shell reminder: quote patterns containing `*` or `?` to prevent shell glob expan
 
 | Code | Meaning |
 |------|---------|
-| `0` | Clean — no dirty worktrees, no source-checkout drift, no orphans, no config drift. |
+| `0` | Clean — no dirty worktrees, no project-checkout drift, no diverged standalones, no orphans, no config drift. |
 | `1` | Dirty or drifted — at least one condition triggers (see scoping rule below). |
-| `2` | Command error — no match for the given patterns, a per-repo probe failure during collection (no partial snapshot is emitted), config parse failure, or other internal error. |
+| `2` | Command error — no match for the given patterns, a per-repo probe failure during project collection (no partial snapshot is emitted), config parse failure, or other internal error. |
 
-**Extensions are not probed.** The probe failure that triggers exit 2 applies to project worktrees and source checkouts. The `workspace.extensions` list is a config-only read — `ws status` never git-probes extension repos to populate it — so a broken extension checkout cannot fail the command.
+**Standalone probes are tolerant, but they still count.** A standalone whose git probe fails is logged and skipped — unlike a project worktree or source checkout, it never raises exit 2. But a *successfully probed* standalone that is dirty, ahead, or behind its upstream **does** flip an unscoped run to exit 1, the same as a diverged project checkout. The `workspace.extensions` **name list** remains a config-only read — `ws status` never needs a git probe to populate it.
 
-**Scoping rule.** When patterns are given, the exit code reflects **only the matched worktrees' dirtiness** (`dirty > 0` on any matched worktree → exit 1). Global source-checkout drift, workspace orphans, and config drift are still printed as context but do **not** flip the exit code for a scoped run. An unscoped run (no patterns) considers all four categories.
+**Scoping rule.** When patterns are given, the exit code reflects **only the matched worktrees' dirtiness** (`dirty > 0` on any matched worktree → exit 1). Global project-checkout drift, standalone divergence, workspace orphans, and config drift are still printed as context but do **not** flip the exit code for a scoped run. An unscoped run (no patterns) considers all of them.
 
 ## JSON schema (`schema_version: 1`)
 
@@ -65,8 +65,9 @@ jsonschema.validate(data, schema)
 | Field | Type | Description |
 |-------|------|-------------|
 | `schema_version` | `int` | Schema version; currently `1`. |
-| `environments` | `array` | One `EnvSnapshot` object per matching feature environment. When patterns are given, only the matched environments appear here; source checkouts and workspace sections remain unfiltered. |
-| `source_checkouts` | `array` | One `SourceCheckoutSnapshot` per source checkout with drift or non-zero counts. Always the full workspace view regardless of patterns. Empty array when everything is clean. |
+| `environments` | `array` | One `EnvSnapshot` object per matching feature environment. When patterns are given, only the matched environments appear here; the projects, standalones, and workspace sections remain unfiltered. |
+| `projects` | `array` | One `ProjectCheckoutSnapshot` per project repo's `projects/<name>` main clone with drift or non-zero counts. Always the full workspace view regardless of patterns. Empty array when every project clone is clean. |
+| `standalones` | `array` | One `StandaloneCheckoutSnapshot` per declared `[[standalone_repository]]` checkout (under `.winter/ext/`) — git status only. Dirty/diverged standalones included; a standalone absent on disk or whose probe fails is omitted (logged, never aborts status). Always the full workspace view regardless of patterns. |
 | `workspace` | `object` | `WorkspaceLevelSnapshot` — extensions, orphans, config drift. Always the full workspace view regardless of patterns. |
 | `dashboard` | `object` | `DashboardSnapshot` — the configured dashboard grid layout and the concrete layout it resolves to for the current workspace shape. Always the full-workspace view regardless of patterns. |
 
@@ -103,7 +104,7 @@ jsonschema.validate(data, schema)
 
 > **Note — per-worktree extension badges:** `WorktreeRepoStatus.extensions` is populated by worktree-repo decorator plugins (used by the Textual TUI to render per-cell badges), but is deliberately not serialized into the JSON contract. If you are building a non-TUI client and need per-worktree extension data, open a contract proposal — the field will be added when a tested decorator exists to drive it.
 
-**`source_checkouts[]` — `SourceCheckoutSnapshot`:**
+**`projects[]` — `ProjectCheckoutSnapshot`:**
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -112,7 +113,19 @@ jsonschema.validate(data, schema)
 | `behind_origin` | `int` | Commits behind `origin/<main-branch>`. |
 | `ahead_origin` | `int` | Commits ahead of `origin/<main-branch>` (shouldn't happen on a well-managed main checkout). |
 | `dirty` | `int` | Count of changed files (staged + unstaged + untracked) in the source checkout. |
-| `drift` | `array[string]` | Drift findings for this checkout (e.g. missing declared sub-paths). Empty array when clean. |
+| `drift` | `array[string]` | Drift findings for this checkout (e.g. `missing from projects/`, `undeclared in config`). Empty array when clean. |
+
+**`standalones[]` — `StandaloneCheckoutSnapshot`:**
+
+Git status for each declared `[[standalone_repository]]` checkout (the extension clones under `.winter/ext/`), reaching parity with the Textual TUI's standalone panel. Git status only — no service/runtime health, and no `drift` list (standalones are not subject to `projects/` drift detection; an absent or unprobeable standalone is simply omitted). The probe is tolerant: a broken extension repo is logged and skipped, never aborting `ws status`.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `repo` | `string` | Standalone repository name (matches `[[standalone_repository]].name`). |
+| `branch` | `string \| null` | Current local branch in the standalone checkout, or `null` when detached/unborn. |
+| `behind_origin` | `int` | Commits behind the standalone's configured upstream tracking ref. |
+| `ahead_origin` | `int` | Commits ahead of the standalone's configured upstream tracking ref. |
+| `dirty` | `int` | Count of changed files (staged + unstaged + untracked) in the standalone checkout. |
 
 **`workspace` — `WorkspaceLevelSnapshot`:**
 

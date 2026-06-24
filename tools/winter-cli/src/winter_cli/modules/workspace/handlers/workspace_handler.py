@@ -23,12 +23,13 @@ from winter_cli.modules.workspace.models import (
     FeatureEnvironment,
     MergeMode,
     PinnedScope,
+    ProjectCheckoutSnapshot,
     ProjectRepository,
     PullMode,
     PushReport,
     RepoError,
     RepoScope,
-    SourceCheckoutSnapshot,
+    StandaloneCheckoutSnapshot,
     SyncResult,
     Workspace,
     WorkspaceLevelSnapshot,
@@ -922,12 +923,12 @@ class WorkspaceHandler:
                 click.echo(line)
             click.echo()
 
-        # ── source checkouts ──────────────────────────────────────────────────
-        if snapshot.source_checkouts:
-            click.echo(out.style("Source checkouts:", "bold"))
+        # ── projects (source checkouts) ───────────────────────────────────────
+        if snapshot.projects:
+            click.echo(out.style("Projects:", "bold"))
             sc_rows: list[list[str | Cell]] = []
             sc_styles: list[str | None] = []
-            for sc in snapshot.source_checkouts:
+            for sc in snapshot.projects:
                 sc_sync_parts: list[str] = []
                 if sc.ahead_origin:
                     sc_sync_parts.append(f"+{sc.ahead_origin}")
@@ -947,6 +948,44 @@ class WorkspaceHandler:
                 sc_styles.append(sc_style)
 
             for line in out.render_table(sc_rows, headers=["REPO", "BRANCH", "SYNC", "DRIFT"], row_styles=sc_styles):
+                click.echo(line)
+            click.echo()
+
+        # ── standalones (extension checkouts; git status only, no drift) ───────
+        if snapshot.standalones:
+            click.echo(out.style("Standalones:", "bold"))
+            st_rows: list[list[str | Cell]] = []
+            st_styles: list[str | None] = []
+            for st in snapshot.standalones:
+                st_sync_parts: list[str] = []
+                if st.ahead_origin:
+                    st_sync_parts.append(f"+{st.ahead_origin}")
+                if st.behind_origin:
+                    st_sync_parts.append(f"-{st.behind_origin}")
+                st_sync_str = ", ".join(st_sync_parts) if st_sync_parts else ""
+
+                if st.dirty == 0:
+                    dirty_str = ""
+                elif st.dirty == 1:
+                    dirty_str = "1 file"
+                else:
+                    dirty_str = f"{st.dirty} files"
+
+                if st.dirty:
+                    st_style: str | None = "red"
+                elif st.ahead_origin and st.behind_origin:
+                    st_style = "dark_orange"
+                elif st.ahead_origin:
+                    st_style = "green"
+                elif st.behind_origin:
+                    st_style = "yellow"
+                else:
+                    st_style = None
+
+                st_rows.append([st.repo, st.branch or "-", st_sync_str, dirty_str])
+                st_styles.append(st_style)
+
+            for line in out.render_table(st_rows, headers=["REPO", "BRANCH", "SYNC", "DIRTY"], row_styles=st_styles):
                 click.echo(line)
             click.echo()
 
@@ -988,9 +1027,10 @@ def compute_status_exit_code(snapshot: WorkspaceSnapshot, *, scoped: bool) -> in
     context but do NOT flip the exit code.
 
     When ``scoped`` is False (no patterns, full workspace) the full workspace is
-    considered: any dirty worktree OR any source-checkout drift (behind_origin >
-    0 or ahead_origin > 0 or non-empty drift list) OR any orphans OR any config
-    drift counts as ``1``.
+    considered: any dirty worktree OR any project source-checkout divergence
+    (behind_origin > 0 or ahead_origin > 0 or dirty > 0 or non-empty drift list)
+    OR any standalone divergence (behind/ahead/dirty) OR any orphans OR any
+    config drift counts as ``1``.
     """
     if scoped:
         # Scoped: only the matched worktrees contribute to dirtiness.
@@ -1006,8 +1046,12 @@ def compute_status_exit_code(snapshot: WorkspaceSnapshot, *, scoped: bool) -> in
             if wt.dirty > 0:
                 return 1
 
-    for sc in snapshot.source_checkouts:
+    for sc in snapshot.projects:
         if sc.behind_origin > 0 or sc.ahead_origin > 0 or sc.dirty > 0 or sc.drift:
+            return 1
+
+    for st in snapshot.standalones:
+        if st.behind_origin > 0 or st.ahead_origin > 0 or st.dirty > 0:
             return 1
 
     ws = snapshot.workspace
@@ -1022,7 +1066,8 @@ def _snapshot_to_dict(snapshot: WorkspaceSnapshot) -> dict[str, Any]:
     return {
         "schema_version": snapshot.schema_version,
         "environments": [_env_snap_to_dict(e) for e in snapshot.environments],
-        "source_checkouts": [_sc_snap_to_dict(sc) for sc in snapshot.source_checkouts],
+        "projects": [_project_snap_to_dict(p) for p in snapshot.projects],
+        "standalones": [_standalone_snap_to_dict(s) for s in snapshot.standalones],
         "workspace": _workspace_level_to_dict(snapshot.workspace),
         "dashboard": {
             "configured_layout": snapshot.dashboard.configured_layout,
@@ -1062,7 +1107,7 @@ def _worktree_snap_to_dict(wt: WorktreeSnapshot) -> dict[str, Any]:
     }
 
 
-def _sc_snap_to_dict(sc: SourceCheckoutSnapshot) -> dict[str, Any]:
+def _project_snap_to_dict(sc: ProjectCheckoutSnapshot) -> dict[str, Any]:
     return {
         "repo": sc.repo,
         "branch": sc.branch,
@@ -1070,6 +1115,16 @@ def _sc_snap_to_dict(sc: SourceCheckoutSnapshot) -> dict[str, Any]:
         "ahead_origin": sc.ahead_origin,
         "dirty": sc.dirty,
         "drift": list(sc.drift),
+    }
+
+
+def _standalone_snap_to_dict(st: StandaloneCheckoutSnapshot) -> dict[str, Any]:
+    return {
+        "repo": st.repo,
+        "branch": st.branch,
+        "behind_origin": st.behind_origin,
+        "ahead_origin": st.ahead_origin,
+        "dirty": st.dirty,
     }
 
 

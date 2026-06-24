@@ -18,9 +18,10 @@ from winter_cli.modules.workspace.models import (
     FeatureEnvironmentOverview,
     FeatureWorktree,
     OrphanSnapshot,
+    ProjectCheckoutSnapshot,
     ProjectRepository,
     RepoError,
-    SourceCheckoutSnapshot,
+    StandaloneCheckoutSnapshot,
     StandalonePinSnapshot,
     StandaloneRepository,
     StandaloneRepoStatus,
@@ -200,11 +201,11 @@ class WorkspaceSnapshotService:
         if effective_patterns and total_matched_worktrees == 0:
             raise click.ClickException(f"No worktrees match: {', '.join(effective_patterns)}")
 
-        # ── source checkouts (project main clones) ────────────────────────
+        # ── projects (project main clones) ────────────────────────────────
         drift_report = self._drift_warning_svc.detect()
         missing_names = {r.name for r in drift_report.missing}
 
-        source_checkout_snapshots: list[SourceCheckoutSnapshot] = []
+        project_snapshots: list[ProjectCheckoutSnapshot] = []
 
         main_statuses = self._collect_main_branch_statuses(project_repos, tolerate=on_repo_error is not None)
 
@@ -215,8 +216,8 @@ class WorkspaceSnapshotService:
 
             wt_status = main_statuses.get(repo.name)
             if wt_status is not None:
-                source_checkout_snapshots.append(
-                    SourceCheckoutSnapshot(
+                project_snapshots.append(
+                    ProjectCheckoutSnapshot(
                         repo=repo.name,
                         branch=wt_status.branch,
                         behind_origin=wt_status.behind,
@@ -228,8 +229,8 @@ class WorkspaceSnapshotService:
             elif drift_notes:
                 # Repo has drift notes but no git status (missing on disk) —
                 # still include it so callers see the drift finding.
-                source_checkout_snapshots.append(
-                    SourceCheckoutSnapshot(
+                project_snapshots.append(
+                    ProjectCheckoutSnapshot(
                         repo=repo.name,
                         branch=None,
                         behind_origin=0,
@@ -241,8 +242,8 @@ class WorkspaceSnapshotService:
 
         # Add undeclared dirs as drift entries (no corresponding ProjectRepository)
         for undeclared_name in drift_report.undeclared:
-            source_checkout_snapshots.append(
-                SourceCheckoutSnapshot(
+            project_snapshots.append(
+                ProjectCheckoutSnapshot(
                     repo=undeclared_name,
                     branch=None,
                     behind_origin=0,
@@ -251,6 +252,30 @@ class WorkspaceSnapshotService:
                     drift=["undeclared in config"],
                 )
             )
+
+        # ── standalones (declared [[standalone_repository]] checkouts) ─────
+        # Git status only — branch/ahead/behind/dirty for every declared
+        # standalone, dirty ones included. Always tolerant: a broken extension
+        # repo logs and is skipped, never aborting `ws status` — even on the
+        # CLI/JSON path where the project-main probe above propagates. The
+        # probe is the same one feeding the dashboard's standalone panel, so the
+        # two surfaces cannot disagree. Singletons are dashboard-only and are
+        # deliberately excluded here (the issue scopes this to declared
+        # standalones).
+        standalone_statuses = self._collect_standalone_statuses(
+            self._repo_factory.get_standalone_repos(),
+            tolerate=True,
+        )
+        standalone_snapshots = [
+            StandaloneCheckoutSnapshot(
+                repo=st.name,
+                branch=st.branch,
+                behind_origin=st.behind,
+                ahead_origin=st.ahead,
+                dirty=st.dirty_count,
+            )
+            for st in standalone_statuses
+        ]
 
         # ── workspace-level ───────────────────────────────────────────────
         orphan_raw = self._prune_svc.find_orphans()
@@ -268,9 +293,9 @@ class WorkspaceSnapshotService:
         # name — the user-declared standalones, excluding the implicit singletons
         # (workspace/product/harness) the dashboard additionally surfaces. This
         # is a pure config read with NO git probe: `ws status` / `--json` must
-        # not fail on a broken extension repo just to list its name. The
-        # dashboard, which needs each standalone's health, probes them separately
-        # via `_collect_standalone_statuses`.
+        # not fail on a broken extension repo just to list its name. Each
+        # standalone's git status is serialized separately in the `standalones`
+        # section above (tolerant probe via `_collect_standalone_statuses`).
         standalone_repos = self._repo_factory.get_standalone_repos()
         extension_names = [repo.name for repo in standalone_repos]
 
@@ -304,7 +329,8 @@ class WorkspaceSnapshotService:
             schema_version=1,
             workspace=workspace_level,
             environments=env_snapshots,
-            source_checkouts=source_checkout_snapshots,
+            projects=project_snapshots,
+            standalones=standalone_snapshots,
             dashboard=dashboard,
         )
 
@@ -369,8 +395,9 @@ class WorkspaceSnapshotService:
     # cannot be silently forgotten on the other; they differ only in return
     # shape and a cheap, explicit opt-out (the per-worktree count re-probe in
     # `collect()`, commented at its call site). `_collect_standalone_statuses`
-    # is dashboard-only — `collect()`'s `extensions` field is a pure name read
-    # that needs no probe (see its call site).
+    # is shared too: `collect()` probes the declared standalones for the JSON
+    # `standalones` section, and the dashboard probes singletons + standalones
+    # for its panel.
     #
     # The two non-worktree helpers take a `tolerate` flag rather than the
     # `on_repo_error` callback: they operate on `ProjectRepository` /
@@ -428,7 +455,7 @@ class WorkspaceSnapshotService:
     ) -> dict[str, WorktreeRepoStatus]:
         """Probe each project repo's main-branch checkout under the shared error policy.
 
-        Feeds `collect()`'s source-checkout snapshots and the dashboard's
+        Feeds `collect()`'s `projects` snapshots and the dashboard's
         repo-label column. When `tolerate` is true (dashboard) a failed probe is
         logged and skipped; when false (CLI / JSON) the first `RepoError`
         propagates.
@@ -451,12 +478,12 @@ class WorkspaceSnapshotService:
     ) -> list[StandaloneRepoStatus]:
         """Probe each standalone/singleton repo's status under the shared error policy.
 
-        Dashboard-only: it passes the implicit singletons plus the declared
-        standalones for its standalone panel. (`collect()` does not call this —
-        its `extensions` field is a pure name read.) When `tolerate` is true a
-        failed probe is logged and skipped; when false the first `RepoError`
-        propagates — the same propagate-vs-skip contract used for worktree and
-        main-branch probes.
+        Two callers: `collect()` passes the declared standalones (always
+        `tolerate=True`) to build the JSON `standalones` section, and the
+        dashboard passes the implicit singletons plus the declared standalones
+        for its standalone panel. When `tolerate` is true a failed probe is
+        logged and skipped; when false the first `RepoError` propagates — the
+        same propagate-vs-skip contract used for worktree and main-branch probes.
         """
         statuses: list[StandaloneRepoStatus] = []
         for repo in repos:

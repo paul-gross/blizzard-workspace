@@ -4,7 +4,7 @@
   "title": "WsStatusSnapshot",
   "description": "JSON output of `winter ws status --json` (schema_version 1). All diagnostics go to stderr; this document appears on stdout only.",
   "type": "object",
-  "required": ["schema_version", "environments", "source_checkouts", "workspace", "dashboard"],
+  "required": ["schema_version", "environments", "projects", "standalones", "workspace", "dashboard"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {
@@ -19,11 +19,18 @@
         "$ref": "#/$defs/EnvSnapshot"
       }
     },
-    "source_checkouts": {
+    "projects": {
       "type": "array",
-      "description": "One SourceCheckoutSnapshot per source checkout. Always the full workspace view regardless of patterns.",
+      "description": "One ProjectCheckoutSnapshot per project repo's projects/<name> main clone with drift or non-zero counts. Always the full workspace view regardless of patterns.",
       "items": {
-        "$ref": "#/$defs/SourceCheckoutSnapshot"
+        "$ref": "#/$defs/ProjectCheckoutSnapshot"
+      }
+    },
+    "standalones": {
+      "type": "array",
+      "description": "One StandaloneCheckoutSnapshot per declared [[standalone_repository]] checkout (under .winter/ext/). Git status only; dirty/diverged ones included. A standalone absent on disk or whose probe fails is omitted (logged, never aborts status). Always the full workspace view regardless of patterns.",
+      "items": {
+        "$ref": "#/$defs/StandaloneCheckoutSnapshot"
       }
     },
     "workspace": {
@@ -181,7 +188,7 @@
         }
       }
     },
-    "SourceCheckoutSnapshot": {
+    "ProjectCheckoutSnapshot": {
       "type": "object",
       "required": ["repo", "branch", "behind_origin", "ahead_origin", "dirty", "drift"],
       "additionalProperties": false,
@@ -214,7 +221,37 @@
           "items": {
             "type": "string"
           },
-          "description": "Drift findings for this checkout (e.g. missing declared sub-paths). Empty array when clean."
+          "description": "Drift findings for this checkout (e.g. missing from projects/, undeclared in config). Empty array when clean."
+        }
+      }
+    },
+    "StandaloneCheckoutSnapshot": {
+      "type": "object",
+      "required": ["repo", "branch", "behind_origin", "ahead_origin", "dirty"],
+      "additionalProperties": false,
+      "properties": {
+        "repo": {
+          "type": "string",
+          "description": "Standalone repository name (matches [[standalone_repository]].name)."
+        },
+        "branch": {
+          "type": ["string", "null"],
+          "description": "Current local branch in the standalone checkout, or null when detached/unborn."
+        },
+        "behind_origin": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Commits behind the standalone's configured upstream tracking ref."
+        },
+        "ahead_origin": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Commits ahead of the standalone's configured upstream tracking ref."
+        },
+        "dirty": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of changed files (staged + unstaged + untracked) in the standalone checkout."
         }
       }
     },
