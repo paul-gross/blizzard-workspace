@@ -406,7 +406,7 @@ def test_load_service_defs_parses_valid_entries() -> None:
         manifest_path: {
             "prefix": "my-ext",
             "service": [
-                {"name": "api", "scope": "feature-environment", "command": "uvicorn"},
+                {"name": "api", "scope": "feature-environment", "cmd": "uvicorn"},
                 {"name": "db", "scope": "workspace"},
             ],
         }
@@ -420,7 +420,7 @@ def test_load_service_defs_parses_valid_entries() -> None:
     api = manifest.service_defs[0]
     assert api.name == "api"
     assert api.scope == "feature-environment"
-    assert api.command == "uvicorn"
+    assert api.cmd == "uvicorn"
     assert api.source == "my-ext"
 
     db = manifest.service_defs[1]

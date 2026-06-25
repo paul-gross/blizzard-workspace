@@ -6,10 +6,12 @@ Covers:
 - ServiceDefinitionAggregator: extension-only, workspace+extension merge, name
   collision across sources, scope routing (workspace vs feature-environment)
 - write_service_manifest_toml: produces parseable TOML with expected content
+- cmd/command key handling: canonical cmd, deprecated command alias, both present
 """
 
 from __future__ import annotations
 
+import logging
 import tomllib
 from pathlib import Path
 
@@ -61,19 +63,19 @@ def test_parse_minimal_entry() -> None:
     assert svc.name == "my-svc"
     assert svc.scope == "feature-environment"
     assert svc.source == "my-ext"
-    assert svc.command == ""
+    assert svc.cmd == ""
     assert svc.image == ""
     assert svc.target == ""
     assert svc.ports == ()
 
 
 def test_parse_full_entry() -> None:
-    """All optional fields are parsed correctly."""
+    """All optional fields are parsed correctly (canonical cmd key)."""
     raw = [
         {
             "name": "api",
             "scope": "workspace",
-            "command": "uvicorn app:app",
+            "cmd": "uvicorn app:app",
             "image": "my-image:latest",
             "target": "2.0",
             "ports": ["http", "grpc"],
@@ -84,7 +86,7 @@ def test_parse_full_entry() -> None:
     svc = result[0]
     assert svc.name == "api"
     assert svc.scope == "workspace"
-    assert svc.command == "uvicorn app:app"
+    assert svc.cmd == "uvicorn app:app"
     assert svc.image == "my-image:latest"
     assert svc.target == "2.0"
     assert svc.ports == ("http", "grpc")
@@ -96,6 +98,66 @@ def test_parse_multiple_entries() -> None:
     assert [s.name for s in result] == ["a", "b"]
     assert result[0].scope == "feature-environment"
     assert result[1].scope == "workspace"
+
+
+# ── cmd / command key handling ────────────────────────────────────────────────
+
+
+def test_parse_cmd_key_parses_and_roundtrips(tmp_path: Path) -> None:
+    """A [[service]] declared with cmd= parses correctly and round-trips as cmd=."""
+    result = _parse([{"name": "api", "cmd": "uvicorn app:app"}], source="my-ext")
+    assert len(result) == 1
+    assert result[0].cmd == "uvicorn app:app"
+
+    # Round-trip via write_service_manifest_toml — output key must be 'cmd'.
+    out = tmp_path / "manifest.toml"
+    write_service_manifest_toml(tuple(result), out)
+    doc = tomllib.loads(out.read_text(encoding="utf-8"))
+    entry = doc["service"][0]
+    assert entry["cmd"] == "uvicorn app:app"
+    assert "command" not in entry
+
+
+def test_parse_legacy_command_key_emits_deprecation_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """A [[service]] declared with command= still parses, emits a deprecation warning,
+    and the resulting ExtServiceDef carries the value in .cmd."""
+    with caplog.at_level(logging.WARNING, logger="winter_cli.modules.service.ext_service_manifest"):
+        result = _parse([{"name": "worker", "command": "python -m worker"}], source="my-ext")
+
+    assert len(result) == 1
+    assert result[0].cmd == "python -m worker"
+
+    # A deprecation warning must have been emitted.
+    assert len(caplog.records) == 1
+    msg = caplog.records[0].message
+    assert "command" in msg
+    assert "cmd" in msg
+    assert "worker" in msg
+    assert "my-ext" in msg
+
+
+def test_parse_legacy_command_key_written_as_cmd(tmp_path: Path) -> None:
+    """A legacy command= declaration round-trips through write_service_manifest_toml as cmd=."""
+    result = _parse([{"name": "worker", "command": "python -m worker"}], source="my-ext")
+    out = tmp_path / "manifest.toml"
+    write_service_manifest_toml(tuple(result), out)
+    doc = tomllib.loads(out.read_text(encoding="utf-8"))
+    entry = doc["service"][0]
+    assert entry["cmd"] == "python -m worker"
+    assert "command" not in entry
+
+
+def test_parse_cmd_wins_over_command_no_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """When both cmd= and command= are present, cmd= wins and no warning is emitted."""
+    with caplog.at_level(logging.WARNING, logger="winter_cli.modules.service.ext_service_manifest"):
+        result = _parse(
+            [{"name": "api", "cmd": "the-cmd", "command": "old-cmd"}],
+            source="my-ext",
+        )
+
+    assert len(result) == 1
+    assert result[0].cmd == "the-cmd"
+    assert len(caplog.records) == 0
 
 
 # ── ExtServiceManifestParser — error cases ────────────────────────────────────
@@ -135,6 +197,11 @@ def test_parse_empty_name_raises() -> None:
 def test_parse_invalid_scope_raises() -> None:
     with pytest.raises(ConfigError, match="Invalid scope"):
         _parse([{"name": "svc", "scope": "bad-scope"}])
+
+
+def test_parse_non_string_cmd_raises() -> None:
+    with pytest.raises(ConfigError, match="cmd"):
+        _parse([{"name": "svc", "cmd": 42}])
 
 
 def test_parse_non_string_command_raises() -> None:
@@ -241,7 +308,7 @@ def test_aggregate_scope_routing_workspace_vs_feature_env() -> None:
 def test_write_toml_produces_parseable_output(tmp_path: Path) -> None:
     """The written TOML can be round-tripped back to a dict."""
     defs = (
-        ExtServiceDef(name="api", scope="feature-environment", source="my-ext", command="uvicorn app:app"),
+        ExtServiceDef(name="api", scope="feature-environment", source="my-ext", cmd="uvicorn app:app"),
         ExtServiceDef(name="db", scope="workspace", source="workspace"),
     )
     out = tmp_path / "manifest.toml"
@@ -265,12 +332,13 @@ def test_write_toml_includes_target_when_set(tmp_path: Path) -> None:
 
 
 def test_write_toml_omits_empty_optional_fields(tmp_path: Path) -> None:
-    """Empty command, image, target, and ports are omitted from the TOML output."""
+    """Empty cmd, image, target, and ports are omitted from the TOML output."""
     defs = (ExtServiceDef(name="bare", scope="feature-environment", source="ext"),)
     out = tmp_path / "manifest.toml"
     write_service_manifest_toml(defs, out)
     doc = tomllib.loads(out.read_text(encoding="utf-8"))
     entry = doc["service"][0]
+    assert "cmd" not in entry
     assert "command" not in entry
     assert "image" not in entry
     assert "target" not in entry

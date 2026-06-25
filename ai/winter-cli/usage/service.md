@@ -226,7 +226,7 @@ The TOML file written to `WINTER_SERVICE_MANIFEST` contains an array of service 
 name    = "worker"
 scope   = "feature-environment"
 source  = "my-extension"
-command = "python -m worker"
+cmd     = "python -m worker"
 target  = "2.0"
 # image and ports are optional; absent when not declared
 
@@ -234,7 +234,7 @@ target  = "2.0"
 name    = "postgres"
 scope   = "workspace"
 source  = "workspace"
-command = "pg_ctl start"
+cmd     = "pg_ctl start"
 target  = "1.0"
 ```
 
@@ -245,7 +245,7 @@ Fields per entry:
 | `name` | yes | Service name (unique across all sources). |
 | `scope` | yes | `"feature-environment"` or `"workspace"`. |
 | `source` | yes | Contributing source: `"workspace"` for workspace config, or the extension name. |
-| `command` | yes | The command to run. |
+| `cmd` | no | The shell command to run (omitted when not declared). `command` is accepted on input as a deprecated alias and will be removed in a future release. |
 | `image` | no | Container image (docker-style providers). |
 | `target` | no | Provider-specific routing target (e.g. tmux window.pane address `"2.0"`). |
 | `ports` | no | List of port numbers declared by the service. |

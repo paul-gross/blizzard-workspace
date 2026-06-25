@@ -9,11 +9,13 @@ via the ``WINTER_SERVICE_MANIFEST`` environment variable.
 Contract
 --------
 - ``ExtServiceDef`` is an immutable value object carrying the fields an
-  extension may declare about a service (``name``, ``command``/``image``,
+  extension may declare about a service (``name``, ``cmd``/``image``,
   ``scope``, ``ports``).  Unknown keys REJECT at parse time (mirrors
   ``ProvisionManifestParser`` strictness).
 - ``ExtServiceManifestParser`` parses the raw ``[[service]]`` list from a
-  single ``winter-ext.toml`` with full unknown-key rejection.
+  single ``winter-ext.toml`` with full unknown-key rejection.  ``cmd`` is the
+  canonical key; ``command`` is accepted as a deprecated input alias and emits
+  a warning.
 - ``ServiceDefinitionAggregator`` collects defs from:
   1. The workspace config (``service_defs_raw`` field) — source label
      ``"workspace"``.
@@ -21,7 +23,8 @@ Contract
   Ordering: workspace defs first, then extensions in declaration order.
   Colliding names across sources produce a ``ConfigError`` naming both sources.
 - ``write_service_manifest_toml`` serialises the aggregated list to a TOML
-  file so providers can read it without knowing the aggregation logic.
+  file so providers can read it without knowing the aggregation logic.  The
+  wire key for the shell command is ``cmd``.
 
 Orchestrator contract
 ---------------------
@@ -45,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 # ── Allowed keys in a [[service]] entry ─────────────────────────────────────
 
-_ENTRY_ALLOWED_KEYS = frozenset({"name", "command", "image", "scope", "ports", "target"})
+_ENTRY_ALLOWED_KEYS = frozenset({"name", "cmd", "command", "image", "scope", "ports", "target"})
 
 # Valid scope values (mirrors the catalog scope names).
 _VALID_SCOPES = frozenset({"workspace", "feature-environment"})
@@ -61,7 +64,7 @@ class ExtServiceDef:
     Fields:
         name:    Unique service identifier (required).
         scope:   ``"workspace"`` or ``"feature-environment"`` (default).
-        command: Shell command string (optional — provider may default).
+        cmd:     Shell command string (optional — provider may default).
         image:   Container image reference (optional — used by docker provider).
         target:  Provider-specific placement hint (optional).  For the tmux
                  provider this is a ``"<window>.<pane>"`` string.  Ignored by
@@ -74,7 +77,7 @@ class ExtServiceDef:
     name: str
     scope: str
     source: str
-    command: str = ""
+    cmd: str = ""
     image: str = ""
     target: str = ""
     ports: tuple[str, ...] = field(default_factory=tuple)
@@ -91,6 +94,10 @@ class ExtServiceManifestParser:
 
     ``source`` is the human-readable label used in error messages and stored on
     each ``ExtServiceDef`` (e.g. the extension prefix or ``"workspace"``).
+
+    ``cmd`` is the canonical key for the shell command; ``command`` is accepted
+    as a deprecated alias (emits a warning, will be removed in a future release).
+    When both ``cmd`` and ``command`` are present, ``cmd`` wins with no warning.
     """
 
     def parse(self, raw: object, source: str) -> list[ExtServiceDef]:
@@ -132,11 +139,31 @@ class ExtServiceManifestParser:
                     f"Invalid scope {scope_raw!r} in [[service]][{i}] in {source!r}. Must be one of: {valid}."
                 )
 
-            command_raw = entry.get("command", "")
-            if not isinstance(command_raw, str):
-                raise ConfigError(
-                    f"[[service]][{i}].command in {source!r} must be a string, got {type(command_raw).__name__!r}."
+            # cmd is canonical; command is a deprecated input alias.
+            # When both are present, cmd wins (no warning).
+            cmd_raw: str | None = entry.get("cmd")
+            command_raw: str | None = entry.get("command")
+
+            if cmd_raw is not None:
+                if not isinstance(cmd_raw, str):
+                    raise ConfigError(
+                        f"[[service]][{i}].cmd in {source!r} must be a string, got {type(cmd_raw).__name__!r}."
+                    )
+                resolved_cmd = cmd_raw
+            elif command_raw is not None:
+                if not isinstance(command_raw, str):
+                    raise ConfigError(
+                        f"[[service]][{i}].command in {source!r} must be a string, got {type(command_raw).__name__!r}."
+                    )
+                logger.warning(
+                    "[[service]] %r in %r uses deprecated key 'command'; rename it to 'cmd'. "
+                    "'command' will be removed in a future release.",
+                    name_raw,
+                    source,
                 )
+                resolved_cmd = command_raw
+            else:
+                resolved_cmd = ""
 
             image_raw = entry.get("image", "")
             if not isinstance(image_raw, str):
@@ -159,7 +186,7 @@ class ExtServiceManifestParser:
                     name=name_raw,
                     scope=scope_raw,
                     source=source,
-                    command=command_raw,
+                    cmd=resolved_cmd,
                     image=image_raw,
                     target=target_raw,
                     ports=tuple(ports_raw),
@@ -246,12 +273,12 @@ def write_service_manifest_toml(defs: tuple[ExtServiceDef, ...], path: Path) -> 
         name    = "my-service"
         scope   = "feature-environment"
         source  = "my-ext"
-        command = "..."
-        image   = ""
-        ports   = []
+        cmd     = "..."
+        # image, target, ports are omitted when empty
 
     Providers read this file to discover extension-declared services and merge
-    them into their running configuration.
+    them into their running configuration.  The wire key for the shell command
+    is ``cmd`` (canonical).
     """
     lines: list[str] = []
     for svc in defs:
@@ -259,8 +286,8 @@ def write_service_manifest_toml(defs: tuple[ExtServiceDef, ...], path: Path) -> 
         lines.append(f"name    = {svc.name!r}")
         lines.append(f"scope   = {svc.scope!r}")
         lines.append(f"source  = {svc.source!r}")
-        if svc.command:
-            lines.append(f"command = {svc.command!r}")
+        if svc.cmd:
+            lines.append(f"cmd     = {svc.cmd!r}")
         if svc.image:
             lines.append(f"image   = {svc.image!r}")
         if svc.target:
