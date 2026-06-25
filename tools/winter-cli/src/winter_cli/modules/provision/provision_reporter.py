@@ -56,6 +56,7 @@ class IProvisionReporter(Protocol):
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
+        project: str | None = None,
     ) -> None: ...
 
 
@@ -146,12 +147,14 @@ class StreamProvisionReporter:
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
+        project: str | None = None,
     ) -> None:
         svc_info = ""
         if required_services:
             svc_info = f" [requires: {', '.join(required_services)}]"
+        project_info = f" (project={project})" if project is not None else ""
         cmds_display = " && ".join(commands) if len(commands) > 1 else (commands[0] if commands else "")
-        self._click.echo(f"  would {action}: {source}/{subtarget}[{scope}] → {cmds_display}{svc_info}")
+        self._click.echo(f"  would {action}: {source}/{subtarget}[{scope}]{project_info} → {cmds_display}{svc_info}")
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +301,7 @@ class JsonProvisionReporter:
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
+        project: str | None = None,
     ) -> None:
         self._emit(
             {
@@ -310,5 +314,6 @@ class JsonProvisionReporter:
                 "action": action,
                 "required_services": required_services,
                 "service_check_preview": service_check_preview,
+                "project": project,
             }
         )

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.conftest import FakeFilesystem, FakeSubprocessRunner
 from winter_cli.config.models import AdoptExtensions, ProjectRepositoryConfig, WorkspaceConfig
 from winter_cli.modules.provision.execution_service import (
@@ -686,3 +688,108 @@ def test_unknown_extension_source_produces_error() -> None:
     assert not result.ok
     assert result.error is not None
     assert not subprocess.popen_calls
+
+
+# ── project cwd ───────────────────────────────────────────────────────────────
+
+
+def test_feature_environment_with_project_cwd_is_env_project_subdir() -> None:
+    """feature-environment + project sets cwd = <workspace>/<env>/<project>/."""
+    config = _make_config(project_repos=[ProjectRepositoryConfig(name="web", url="git@example.com:org/web.git")])
+    project_cwd = WORKSPACE_ROOT / ENV_NAME / "web"
+    fs = FakeFilesystem(directories=[project_cwd])
+    cmd = "echo apply"
+
+    subprocess = FakeSubprocessRunner(popen_responses={_sh_c_key(cmd): ([], 0)})
+    sink = FakeProvisionOutputSink()
+    svc = _make_service(config, fs, {}, subprocess)
+
+    handler = ProvisionHandler(
+        subtarget="data",
+        scope=ProvisionScope.feature_environment,
+        apply=(cmd,),
+        source="project",
+        project="web",
+    )
+    result = svc.run_handler(handler, "apply", ENV_NAME, sink)
+
+    assert result.ok
+    assert len(result.runs) == 1
+    assert result.runs[0].cwd == project_cwd
+    assert subprocess.popen_calls[0][1] == project_cwd
+
+
+def test_feature_environment_with_project_missing_worktree_raises_click_exception() -> None:
+    """feature-environment + project with no matching worktree raises ClickException (hard error)."""
+    import click as _click
+
+    config = _make_config(project_repos=[ProjectRepositoryConfig(name="web", url="git@example.com:org/web.git")])
+    # Filesystem does NOT contain the project worktree directory.
+    fs = FakeFilesystem()
+    subprocess = FakeSubprocessRunner()
+    sink = FakeProvisionOutputSink()
+    svc = _make_service(config, fs, {}, subprocess)
+
+    handler = ProvisionHandler(
+        subtarget="data",
+        scope=ProvisionScope.feature_environment,
+        apply=("echo apply",),
+        source="project",
+        project="web",
+    )
+
+    with pytest.raises(_click.ClickException) as exc_info:
+        svc.run_handler(handler, "apply", ENV_NAME, sink)
+
+    assert "web" in str(exc_info.value)
+    assert ENV_NAME in str(exc_info.value)
+    assert not subprocess.popen_calls
+
+
+def test_feature_environment_with_project_error_names_env_and_project() -> None:
+    """The hard-error message names both the missing project and the env."""
+    import click as _click
+
+    config = _make_config()
+    fs = FakeFilesystem()
+    subprocess = FakeSubprocessRunner()
+    sink = FakeProvisionOutputSink()
+    svc = _make_service(config, fs, {}, subprocess)
+
+    handler = ProvisionHandler(
+        subtarget="data",
+        scope=ProvisionScope.feature_environment,
+        apply=("echo apply",),
+        source="project",
+        project="api",
+    )
+
+    with pytest.raises(_click.ClickException) as exc_info:
+        svc.run_handler(handler, "apply", ENV_NAME, sink)
+
+    message = str(exc_info.value)
+    assert "api" in message
+    assert ENV_NAME in message
+
+
+def test_feature_environment_without_project_still_uses_env_root() -> None:
+    """feature-environment scope without project still uses env root (no regression)."""
+    config = _make_config()
+    fs = FakeFilesystem()
+    cmd = "echo apply"
+
+    subprocess = FakeSubprocessRunner(popen_responses={_sh_c_key(cmd): ([], 0)})
+    sink = FakeProvisionOutputSink()
+    svc = _make_service(config, fs, {}, subprocess)
+
+    handler = ProvisionHandler(
+        subtarget="data",
+        scope=ProvisionScope.feature_environment,
+        apply=(cmd,),
+        source="project",
+        project=None,
+    )
+    result = svc.run_handler(handler, "apply", ENV_NAME, sink)
+
+    assert result.ok
+    assert result.runs[0].cwd == ENV_ROOT

@@ -284,6 +284,7 @@ class ProvisionService:
                         action=action,
                         required_services=list(handler.required_services),
                         service_check_preview=service_check_preview,
+                        project=handler.project,
                     )
 
         reporter.provision_finished(status="ok", aborted_at=None)

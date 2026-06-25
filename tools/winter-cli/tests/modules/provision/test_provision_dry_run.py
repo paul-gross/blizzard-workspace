@@ -152,6 +152,7 @@ class _FakeReporter:
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
+        project: str | None = None,
     ) -> None:
         self.plan_handler_calls.append(
             {
@@ -162,6 +163,7 @@ class _FakeReporter:
                 "action": action,
                 "required_services": required_services,
                 "service_check_preview": service_check_preview,
+                "project": project,
             }
         )
 
@@ -864,3 +866,111 @@ def test_dry_run_plan_preserves_scope_ordering() -> None:
     scopes = [e["scope"] for e in reporter.plan_handler_calls]
     assert scopes == ["workspace", "feature-environment", "feature-worktree"]
     assert len(exec_svc.calls) == 0
+
+
+# ---------------------------------------------------------------------------
+# project field in dry-run plan
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_plan_handler_includes_project_when_set() -> None:
+    """plan_handler event includes the project field when handler declares one."""
+    from winter_cli.config.models import AdoptExtensions, ProjectRepositoryConfig
+
+    # parse_provision needs project_names; inject via project_repos.
+    config_with_project = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        provision_raw={"data": [{"scope": "feature-environment", "apply": "scripts/seed.sh", "project": "web"}]},
+        project_repos=[ProjectRepositoryConfig(name="web", url="git@example.com:org/web.git")],
+    )
+    svc, _, _, reporter = _make_service(config_with_project)
+    svc.run(
+        ENV_NAME,
+        subtarget="data",
+        reset=False,
+        destroy=False,
+        seed=False,
+        no_service_check=False,
+        reporter=reporter,
+        dry_run=True,  # type: ignore[arg-type]
+    )
+
+    assert len(reporter.plan_handler_calls) == 1
+    evt = reporter.plan_handler_calls[0]
+    assert evt["project"] == "web"
+
+
+def test_dry_run_plan_handler_project_is_none_when_not_set() -> None:
+    """plan_handler event has project=None when handler has no project field."""
+    config = _make_config(
+        provision_raw={
+            "data": [{"scope": "feature-environment", "apply": "scripts/seed.sh"}],
+        }
+    )
+    svc, _, _, reporter = _make_service(config)
+    svc.run(
+        ENV_NAME,
+        subtarget="data",
+        reset=False,
+        destroy=False,
+        seed=False,
+        no_service_check=False,
+        reporter=reporter,
+        dry_run=True,  # type: ignore[arg-type]
+    )
+
+    assert len(reporter.plan_handler_calls) == 1
+    assert reporter.plan_handler_calls[0]["project"] is None
+
+
+def test_dry_run_json_plan_handler_includes_project_field() -> None:
+    """--dry-run --json plan_handler event includes the project key."""
+    from winter_cli.config.models import AdoptExtensions, ProjectRepositoryConfig
+    from winter_cli.modules.provision.provision_reporter import JsonProvisionReporter
+
+    class _CapturingClick:
+        def __init__(self) -> None:
+            self.lines: list[str] = []
+
+        def echo(self, msg: str, err: bool = False) -> None:
+            self.lines.append(msg)
+
+    capturing_click = _CapturingClick()
+    json_reporter = JsonProvisionReporter(click=capturing_click)
+
+    config_with_project = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        provision_raw={"data": [{"scope": "feature-environment", "apply": "scripts/seed.sh", "project": "api"}]},
+        project_repos=[ProjectRepositoryConfig(name="api", url="git@example.com:org/api.git")],
+    )
+    svc = ProvisionService(
+        config=config_with_project,
+        execution_svc=_RecordingExecutionService(),  # type: ignore[arg-type]
+        manifest_loader=_FakeManifestLoader(),
+        repo_factory=_FakeRepoFactory(),
+        service_check=_RecordingServiceCheck(),  # type: ignore[arg-type]
+        fs=_make_fs_with_env(),
+    )
+    svc.run(
+        ENV_NAME,
+        subtarget="data",
+        reset=False,
+        destroy=False,
+        seed=False,
+        no_service_check=False,
+        reporter=json_reporter,  # type: ignore[arg-type]
+        dry_run=True,
+    )
+
+    import json as _json
+
+    events = [_json.loads(line) for line in capturing_click.lines]
+    plan_events = [e for e in events if e.get("type") == "plan_handler"]
+    assert len(plan_events) == 1
+    assert plan_events[0]["project"] == "api"

@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from tests.conftest import FakeConfigFileReader, FakeFilesystem
-from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
+from winter_cli.config.models import AdoptExtensions, ProjectRepositoryConfig, WorkspaceConfig
 from winter_cli.modules.doctor.models import ProbeStatus
 from winter_cli.modules.provision.manifest_probe_service import (
     PROVISION_SOURCE,
@@ -610,3 +610,99 @@ def test_workspace_and_extension_findings_combined() -> None:
     fail_results = [r for r in results if r.status == ProbeStatus.fail]
     # One from workspace (bad scope), one from extension (missing apply).
     assert len(fail_results) == 2
+
+
+# ── project field doctor probe ────────────────────────────────────────────────
+
+
+def _build_config_with_repos(
+    provision_raw: dict,
+    project_names: list[str],
+) -> WorkspaceConfig:
+    return WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        provision_raw=provision_raw,
+        project_repos=[
+            ProjectRepositoryConfig(name=name, url=f"git@example.com:org/{name}.git") for name in project_names
+        ],
+    )
+
+
+def test_project_on_feature_environment_with_declared_repo_passes() -> None:
+    """project on feature-environment scope with a declared repo passes the probe."""
+    raw = {
+        "data": [{"scope": "feature-environment", "apply": "echo seed", "project": "web"}],
+    }
+    config = _build_config_with_repos(raw, ["web", "api"])
+    svc, _repo = _build_service(config)
+
+    results = svc.run([])
+
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+
+
+def test_project_on_workspace_scope_emits_fail() -> None:
+    """project on workspace scope is flagged by the doctor probe."""
+    raw = {
+        "data": [{"scope": "workspace", "apply": "echo apply", "project": "web"}],
+    }
+    config = _build_config_with_repos(raw, ["web"])
+    svc, _repo = _build_service(config)
+
+    results = svc.run([])
+
+    fail_results = [r for r in results if r.status == ProbeStatus.fail]
+    assert len(fail_results) >= 1
+    messages = " ".join(r.message for r in fail_results)
+    assert "project" in messages
+    assert "workspace" in messages
+
+
+def test_project_on_feature_worktree_scope_emits_fail() -> None:
+    """project on feature-worktree scope is flagged by the doctor probe."""
+    raw = {
+        "dependency": [{"scope": "feature-worktree", "apply": "echo install", "project": "web"}],
+    }
+    config = _build_config_with_repos(raw, ["web"])
+    svc, _repo = _build_service(config)
+
+    results = svc.run([])
+
+    fail_results = [r for r in results if r.status == ProbeStatus.fail]
+    assert len(fail_results) >= 1
+    messages = " ".join(r.message for r in fail_results)
+    assert "project" in messages
+
+
+def test_project_undeclared_repo_emits_fail() -> None:
+    """project naming a repo not in [[project_repository]] is flagged."""
+    raw = {
+        "data": [{"scope": "feature-environment", "apply": "echo seed", "project": "missing-repo"}],
+    }
+    config = _build_config_with_repos(raw, ["web", "api"])
+    svc, _repo = _build_service(config)
+
+    results = svc.run([])
+
+    fail_results = [r for r in results if r.status == ProbeStatus.fail]
+    assert len(fail_results) >= 1
+    messages = " ".join(r.message for r in fail_results)
+    assert "missing-repo" in messages
+
+
+def test_project_absent_on_feature_environment_is_fine() -> None:
+    """feature-environment without project is valid (regression guard)."""
+    raw = {
+        "data": [{"scope": "feature-environment", "apply": "echo seed"}],
+    }
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+
+    results = svc.run([])
+
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_

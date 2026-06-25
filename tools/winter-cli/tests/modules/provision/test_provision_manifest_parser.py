@@ -472,3 +472,82 @@ def test_parse_absent_reset_is_none() -> None:
     raw = {"dependency": [{"scope": "workspace", "apply": "echo apply"}]}
     handlers = parser.parse(raw, SOURCE)
     assert handlers[0].reset is None
+
+
+# ── project field ─────────────────────────────────────────────────────────────
+
+
+def test_parse_project_absent_is_none() -> None:
+    """No project field → handler.project is None."""
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "feature-environment", "apply": "echo seed"}]}
+    handlers = parser.parse(raw, SOURCE)
+    assert handlers[0].project is None
+
+
+def test_parse_project_valid_on_feature_environment_scope() -> None:
+    """project on feature-environment scope with a declared repo name is accepted."""
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "feature-environment", "apply": "echo seed", "project": "web"}]}
+    project_names: frozenset[str] = frozenset({"web", "api"})
+    handlers = parser.parse(raw, SOURCE, project_names=project_names)
+    assert len(handlers) == 1
+    assert handlers[0].project == "web"
+
+
+def test_parse_project_no_membership_check_when_project_names_is_none() -> None:
+    """When project_names is None (extension case), membership is not checked."""
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "feature-environment", "apply": "echo seed", "project": "any-name"}]}
+    handlers = parser.parse(raw, SOURCE, project_names=None)
+    assert handlers[0].project == "any-name"
+
+
+def test_parse_project_on_workspace_scope_rejected() -> None:
+    """project on workspace scope raises ConfigError."""
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "workspace", "apply": "echo apply", "project": "web"}]}
+    with pytest.raises(ConfigError, match="'project' is not allowed"):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_project_on_feature_worktree_scope_rejected() -> None:
+    """project on feature-worktree scope raises ConfigError."""
+    parser = ProvisionManifestParser()
+    raw = {"dependency": [{"scope": "feature-worktree", "apply": "echo install", "project": "web"}]}
+    with pytest.raises(ConfigError, match="'project' is not allowed"):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_project_scope_error_mentions_scope_value() -> None:
+    """Wrong-scope error message names the invalid scope."""
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "workspace", "apply": "echo apply", "project": "web"}]}
+    with pytest.raises(ConfigError, match="'workspace'"):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_project_undeclared_repo_rejected_when_names_provided() -> None:
+    """project naming a repo not in project_names is a ConfigError."""
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "feature-environment", "apply": "echo seed", "project": "unknown-repo"}]}
+    project_names: frozenset[str] = frozenset({"web", "api"})
+    with pytest.raises(ConfigError, match="not a declared"):
+        parser.parse(raw, SOURCE, project_names=project_names)
+
+
+def test_parse_project_undeclared_repo_error_names_the_project() -> None:
+    """Error message for undeclared project includes the project name."""
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "feature-environment", "apply": "echo seed", "project": "no-such-repo"}]}
+    project_names: frozenset[str] = frozenset({"web"})
+    with pytest.raises(ConfigError, match="no-such-repo"):
+        parser.parse(raw, SOURCE, project_names=project_names)
+
+
+def test_parse_project_empty_string_rejected() -> None:
+    """An empty string for project is rejected."""
+    parser = ProvisionManifestParser()
+    raw = {"data": [{"scope": "feature-environment", "apply": "echo seed", "project": ""}]}
+    with pytest.raises(ConfigError, match="non-empty string"):
+        parser.parse(raw, SOURCE)

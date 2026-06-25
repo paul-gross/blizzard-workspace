@@ -144,18 +144,20 @@ class _FakeProvisionReporter:
         subtarget: str,
         scope: str,
         source: str,
-        script: str,
+        commands: list[str],
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
+        project: str | None = None,
     ) -> None:
         self.plan_handler_calls.append(
             {
                 "subtarget": subtarget,
                 "scope": scope,
                 "source": source,
-                "script": script,
+                "commands": commands,
                 "action": action,
+                "project": project,
             }
         )
 

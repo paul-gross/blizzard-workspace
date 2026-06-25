@@ -123,6 +123,7 @@ class _DestroyProvisionReporter:
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
+        project: str | None = None,
     ) -> None:
         label = f"{source}/{subtarget}[{scope}]"
         script = " && ".join(commands) if commands else ""

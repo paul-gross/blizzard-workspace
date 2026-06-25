@@ -102,6 +102,7 @@ destroy = "dropdb --if-exists myapp_ext"
 | `destroy` | no | Inline shell command (string) or list (array) run by `--destroy`. If absent, `--destroy` warns and no-ops. |
 | `reset` | no | Inline shell command (string) or list (array) run by `--reset`. If absent, winter composes destroy + apply when both exist; otherwise warns and degrades to re-apply. |
 | `required_services` | no | Services that must be running before this handler executes (valid only on `resource` and `data` — rejected on `dependency`). See Service check below. |
+| `project` | no | Project repo name (must be a declared `[[project_repository]]`). Valid only on `feature-environment` scope. When set, the handler's cwd is `<workspace>/<env>/<project>/` instead of the env root. See Project field below. |
 
 **Sub-targets:** `dependency`, `resource`, `data`. Unknown sub-target keys (e.g. `[[provision.custom]]`) are rejected. Unknown per-entry keys are also rejected.
 
@@ -130,6 +131,24 @@ All handlers receive `WINTER_WORKSPACE_DIR` plus the three extension-identity va
 
 `workspace`-scope handlers receive the four base vars above but not the trio (same pattern as `on_workspace_reconcile` hooks — see [setup.md](../setup.md#hook-env-var-contract)).
 
+### Project field
+
+`project` targets a `feature-environment` handler at a specific repo worktree rather than the env root. Use it when the handler's tooling lives in one repo (e.g. a migration runner, a seed script) and you want a validated cwd rather than hand-rolling `cd <repo>` inside the inline command.
+
+```toml
+[[provision.data]]
+scope   = "feature-environment"
+project = "web"
+apply   = "bundle exec rails db:seed"
+```
+
+**Rules:**
+
+- `project` is only valid on `feature-environment` scope. Declaring it on `workspace` or `feature-worktree` is a `ConfigError` at parse time and a `[provision]` doctor finding.
+- The value must be the exact name of a declared `[[project_repository]]`. An undeclared name is a `ConfigError` at parse time and a `[provision]` doctor finding.
+- If `project` is set and the named worktree does not exist in the target env at provision time, `winter provision` **aborts with a hard error** naming the missing project and env. There is no skip-with-warning fallback — use `winter ws init <env>` to create the worktree first.
+- `--dry-run` / `--json` plan output shows the resolved `project` value in the plan event so you can verify the target before running.
+
 ### Validation
 
 The following values are rejected at parse time (`ConfigError`) and flagged by the doctor `[provision]` probe:
@@ -138,6 +157,8 @@ The following values are rejected at parse time (`ConfigError`) and flagged by t
 - An empty list (`[]`)
 - A list containing any non-string or empty-string element
 - A value that is neither a string nor a list
+- `project` on `workspace` or `feature-worktree` scope
+- `project` naming a repo not declared in `[[project_repository]]`
 
 ### BREAKING CHANGE — migration from script paths
 
@@ -186,7 +207,7 @@ feature-worktree (config) → feature-worktree (extensions)
 | Scope | Working directory | Notes |
 |-------|-------------------|-------|
 | `workspace` | workspace root | `<workspace>/` |
-| `feature-environment` | env root | `<workspace>/<env>/` |
+| `feature-environment` | env root | `<workspace>/<env>/` — or `<workspace>/<env>/<project>/` when `project` is set |
 | `feature-worktree` | per-repo worktree | `<workspace>/<env>/<repo>/` — runs ONCE PER PROJECT WORKTREE in the env |
 
 ### Environment variables
@@ -226,12 +247,12 @@ A `required_services` token must be scoped as `workspace/<service>` or `<current
 
 `--dry-run` prints the ordered list of handlers that **would** run without executing any commands or starting any service:
 
-- Per-handler output: sub-target, scope, source, the commands that would run (joined with ` && ` for display when multiple), resolved action (apply / destroy / reset), and which `required_services` it would check (if any).
+- Per-handler output: sub-target, scope, source, the commands that would run (joined with ` && ` for display when multiple), resolved action (apply / destroy / reset), resolved `project` cwd (when set), and which `required_services` it would check (if any).
 - A sub-target with no declared handlers is reported as a no-op.
 - No mutation occurs: no commands run, no `winter service up` calls are made.
 - `--dry-run` may be combined with any action flag (`--reset`, `--destroy`, `--seed`) or sub-target to preview that specific path.
 
-`--dry-run --json` emits the same NDJSON stream as a real run (see below), replacing `execution_*` and `handler_result` events with `plan_handler` events — one per resolved action in plan order. (A handler with `--reset` that has no `reset` field but does have a `destroy` field emits two events: a `destroy` then an `apply`.)
+`--dry-run --json` emits the same NDJSON stream as a real run (see below), replacing `execution_*` and `handler_result` events with `plan_handler` events — one per resolved action in plan order. (A handler with `--reset` that has no `reset` field but does have a `destroy` field emits two events: a `destroy` then an `apply`.) The `plan_handler` event includes a `project` key (`null` or the project name) so the resolved cwd is visible in the structured output.
 
 ## `--json` output
 
@@ -263,6 +284,7 @@ A `required_services` token must be scoped as `workspace/<service>` or `<current
 | `action` | string | Resolved action (`apply`, `destroy`, or `reset`) |
 | `required_services` | list of strings | `required_services` tokens from the handler declaration |
 | `service_check_preview` | string or null | Comma-separated owning scopes that would be checked/started; `null` when no `required_services` |
+| `project` | string or null | Resolved project name when `project` is declared; `null` otherwise. Identifies the worktree subdir `<env>/<project>/` that would be the cwd. |
 
 **`service_check` field values in `handler_result`:**
 
@@ -281,6 +303,8 @@ A `required_services` token must be scoped as `workspace/<service>` or `<current
 - `apply` is present and is a non-empty string or a non-empty list of non-empty strings
 - `destroy` and `reset`, when present, are each a non-empty string or a non-empty list of non-empty strings
 - `required_services` is only declared on `resource` or `data` (not `dependency`)
+- `project`, when present, is only declared on `feature-environment` scope
+- `project`, when present, names a declared `[[project_repository]]`
 - No unknown keys are present
 
 See [doctor.md](./doctor.md) for the full doctor probe contract.

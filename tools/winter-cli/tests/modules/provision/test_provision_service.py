@@ -141,6 +141,7 @@ class _FakeReporter:
         action: str,
         required_services: list[str],
         service_check_preview: str | None,
+        project: str | None = None,
     ) -> None:
         self.plan_handler_calls.append(
             {
@@ -151,6 +152,7 @@ class _FakeReporter:
                 "action": action,
                 "required_services": required_services,
                 "service_check_preview": service_check_preview,
+                "project": project,
             }
         )
 

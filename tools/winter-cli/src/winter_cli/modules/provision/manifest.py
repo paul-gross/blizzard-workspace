@@ -7,7 +7,7 @@ from winter_cli.core.config_file import ConfigError
 
 PROVISION_SUBTARGETS = ("dependency", "resource", "data")
 
-_ENTRY_ALLOWED_KEYS = frozenset({"scope", "apply", "destroy", "reset", "required_services"})
+_ENTRY_ALLOWED_KEYS = frozenset({"scope", "apply", "destroy", "reset", "required_services", "project"})
 _SUBTARGETS_WITH_REQUIRED_SERVICES = frozenset({"resource", "data"})
 
 
@@ -15,6 +15,10 @@ class ProvisionScope(enum.Enum):
     workspace = "workspace"
     feature_environment = "feature-environment"
     feature_worktree = "feature-worktree"
+
+
+# Scopes on which ``project`` is permitted (defined after the enum so the enum members are available).
+_PROJECT_ALLOWED_SCOPES = frozenset({ProvisionScope.feature_environment})
 
 
 @dataclass(frozen=True)
@@ -26,6 +30,7 @@ class ProvisionHandler:
     destroy: tuple[str, ...] | None = None
     reset: tuple[str, ...] | None = None
     required_services: tuple[str, ...] = field(default_factory=tuple)
+    project: str | None = None
 
 
 def _parse_commands(
@@ -80,12 +85,22 @@ class ProvisionManifestParser:
     Raises ``ConfigError`` on any structural or semantic violation.
     """
 
-    def parse(self, raw: dict | None, source: str) -> list[ProvisionHandler]:
+    def parse(
+        self,
+        raw: dict | None,
+        source: str,
+        project_names: frozenset[str] | None = None,
+    ) -> list[ProvisionHandler]:
         """Parse raw ``[provision]`` table data.
 
         ``raw`` is the value of the ``[provision]`` table — a dict mapping
         sub-target names to lists of entry dicts.  Returns ``[]`` for
         ``None`` or empty input.
+
+        ``project_names`` is the set of declared ``[[project_repository]]``
+        names.  When provided, a ``project`` field is validated against this
+        set; when ``None`` (e.g. for extension manifests), membership is not
+        checked.
         """
         if not raw:
             return []
@@ -154,6 +169,25 @@ class ProvisionManifestParser:
                 else:
                     required_services = ()
 
+                project_raw = entry.get("project")
+                project: str | None = None
+                if project_raw is not None:
+                    if scope not in _PROJECT_ALLOWED_SCOPES:
+                        raise ConfigError(
+                            f"'project' is not allowed on provision.{key}[{i}] in {source!r} "
+                            f"with scope {scope.value!r}. "
+                            f"'project' may only be declared on 'feature-environment' handlers."
+                        )
+                    if not isinstance(project_raw, str) or not project_raw:
+                        raise ConfigError(f"provision.{key}[{i}].project in {source!r} must be a non-empty string.")
+                    if project_names is not None and project_raw not in project_names:
+                        declared = ", ".join(repr(n) for n in sorted(project_names)) or "(none)"
+                        raise ConfigError(
+                            f"provision.{key}[{i}].project {project_raw!r} in {source!r} "
+                            f"is not a declared [[project_repository]]. Declared repos: {declared}."
+                        )
+                    project = project_raw
+
                 handlers.append(
                     ProvisionHandler(
                         subtarget=key,
@@ -163,6 +197,7 @@ class ProvisionManifestParser:
                         destroy=destroy,
                         reset=reset,
                         required_services=required_services,
+                        project=project,
                     )
                 )
 

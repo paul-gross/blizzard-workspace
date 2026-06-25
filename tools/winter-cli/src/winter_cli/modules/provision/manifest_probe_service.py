@@ -6,6 +6,7 @@ from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.doctor.models import ProbeResult, ProbeStatus
 from winter_cli.modules.provision.manifest import (
     _ENTRY_ALLOWED_KEYS,
+    _PROJECT_ALLOWED_SCOPES,
     _SUBTARGETS_WITH_REQUIRED_SERVICES,
     PROVISION_SUBTARGETS,
     ProvisionScope,
@@ -59,7 +60,11 @@ def _validate_command_field(
     return f"{location} field {field!r} must be a string or list of strings (got {type(raw).__name__!r})."
 
 
-def _validate_raw_provision(raw: dict, source: str) -> list[ProbeResult]:
+def _validate_raw_provision(
+    raw: dict,
+    source: str,
+    project_names: frozenset[str] | None = None,
+) -> list[ProbeResult]:
     """Lenient per-entry validator for a raw ``[provision]`` table.
 
     Unlike ``ProvisionManifestParser`` (which raises on the first error),
@@ -67,6 +72,9 @@ def _validate_raw_provision(raw: dict, source: str) -> list[ProbeResult]:
     emitting one ``fail`` ``ProbeResult`` per violation.  A well-formed
     manifest produces a single ``pass`` result; an empty or absent manifest
     produces no results.
+
+    ``project_names`` is the set of declared ``[[project_repository]]`` names.
+    When provided, a ``project`` field is validated against this set.
     """
     if not raw:
         return []
@@ -212,6 +220,54 @@ def _validate_raw_provision(raw: dict, source: str) -> list[ProbeResult]:
                 )
                 entry_ok = False
 
+            # project: only allowed on feature-environment scope.
+            project_raw = entry.get("project")
+            if project_raw is not None:
+                # Validate scope constraint — we can only check this when scope_raw is a valid scope.
+                if scope_raw in _VALID_SCOPES:
+                    try:
+                        entry_scope = ProvisionScope(scope_raw)
+                    except ValueError:
+                        entry_scope = None
+                    if entry_scope is not None and entry_scope not in _PROJECT_ALLOWED_SCOPES:
+                        findings.append(
+                            ProbeResult(
+                                source=PROVISION_SOURCE,
+                                name=f"provision manifest: {source}",
+                                status=ProbeStatus.fail,
+                                message=(
+                                    f"'project' is not allowed on {location} "
+                                    f"with scope {scope_raw!r}. "
+                                    f"'project' may only be declared on 'feature-environment' handlers."
+                                ),
+                            )
+                        )
+                        entry_ok = False
+                if not isinstance(project_raw, str) or not project_raw:
+                    findings.append(
+                        ProbeResult(
+                            source=PROVISION_SOURCE,
+                            name=f"provision manifest: {source}",
+                            status=ProbeStatus.fail,
+                            message=f"{location}.project must be a non-empty string.",
+                        )
+                    )
+                    entry_ok = False
+                elif project_names is not None and project_raw not in project_names:
+                    declared = ", ".join(repr(n) for n in sorted(project_names)) or "(none)"
+                    findings.append(
+                        ProbeResult(
+                            source=PROVISION_SOURCE,
+                            name=f"provision manifest: {source}",
+                            status=ProbeStatus.fail,
+                            message=(
+                                f"{location}.project {project_raw!r} is not a declared "
+                                f"[[project_repository]]. Declared repos: {declared}."
+                            ),
+                        )
+                    )
+                    entry_ok = False
+
             if entry_ok:
                 valid_entries += 1
 
@@ -270,7 +326,10 @@ class ProvisionManifestProbeService:
         raw = self._config.provision_raw
         if not raw:
             return []
-        return _validate_raw_provision(raw, "project")
+        project_names: frozenset[str] = frozenset(
+            repo.name for repo in self._config.project_repos if repo.name is not None
+        )
+        return _validate_raw_provision(raw, "project", project_names=project_names)
 
     def _probe_extension_provision(self, standalone_repos: list[StandaloneRepository]) -> list[ProbeResult]:
         if self._config.adopt_extensions == AdoptExtensions.none:

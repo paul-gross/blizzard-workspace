@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+import click
+
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.extension_invocation import build_extension_env
 from winter_cli.core.filesystem import IFilesystemWriter
@@ -150,7 +152,7 @@ class ProvisionExecutionService:
             sink.execution_error(_handler_label(handler), error)
             return HandlerExecutionResult(handler=handler, action=action, error=error)
 
-        cwds = self._resolve_cwds(handler.scope, env_name)
+        cwds = self._resolve_cwds(handler, env_name)
         runs: list[SingleRunResult] = []
 
         for cwd in cwds:
@@ -265,12 +267,29 @@ class ProvisionExecutionService:
                 continue
         return None
 
-    def _resolve_cwds(self, scope: ProvisionScope, env_name: str) -> list[Path]:
-        """Return the list of cwds to run the script in for the given scope."""
+    def _resolve_cwds(self, handler: ProvisionHandler, env_name: str) -> list[Path]:
+        """Return the list of cwds to run the script in for the given handler.
+
+        For ``feature-environment`` handlers with a ``project`` field, returns
+        a single-element list containing ``<workspace>/<env>/<project>/``.
+        Raises ``click.ClickException`` with a hard error when that directory
+        does not exist (missing worktree for the target env).
+        """
         workspace_root = self._config.workspace_root
+        scope = handler.scope
         if scope is ProvisionScope.workspace:
             return [workspace_root]
         if scope is ProvisionScope.feature_environment:
+            if handler.project is not None:
+                project_cwd = workspace_root / env_name / handler.project
+                if not self._fs.is_dir(project_cwd):
+                    raise click.ClickException(
+                        f"provision handler requires project {handler.project!r} "
+                        f"but its worktree does not exist in env {env_name!r} "
+                        f"(expected: {project_cwd}). "
+                        f"Run 'winter ws init {env_name}' to create worktrees."
+                    )
+                return [project_cwd]
             return [workspace_root / env_name]
         # feature-worktree: one cwd per project repo in the env
         return [workspace_root / env_name / repo.name for repo in self._repo_factory.get_project_repos()]

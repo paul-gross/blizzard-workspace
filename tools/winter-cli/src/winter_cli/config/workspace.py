@@ -63,7 +63,8 @@ def parse_provision(config: WorkspaceConfig, source: str = "project") -> list[Pr
     doctor probe) — not at config-load time — so a malformed manifest does
     not break unrelated commands.
     """
-    return _PROVISION_PARSER.parse(config.provision_raw or None, source)
+    project_names: frozenset[str] = frozenset(repo.name for repo in config.project_repos if repo.name is not None)
+    return _PROVISION_PARSER.parse(config.provision_raw or None, source, project_names=project_names)
 
 
 def parse_service_defs(config: WorkspaceConfig, source: str = "workspace") -> list[ExtServiceDef]:
