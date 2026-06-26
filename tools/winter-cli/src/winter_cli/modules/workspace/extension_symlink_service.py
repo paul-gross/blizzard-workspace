@@ -12,6 +12,7 @@ from winter_cli.modules.workspace.extension_manifest import (
 from winter_cli.modules.workspace.extension_skill_install import (
     CopySkillStrategy,
     InstallSkillStrategy,
+    SkillFrontmatterGuard,
     SymlinkInstaller,
     SymlinkSkillStrategy,
 )
@@ -138,21 +139,7 @@ class ExtensionSymlinkService:
         strict (`winter`) mode, raise so the wrap site fails the install. In
         `all` mode, the user opts into a less-curated experience, so we only warn.
         """
-        if skills_root is None or not self._fs.is_dir(skills_root):
-            return
-
-        offenders: list[str] = []
-        for entry in sorted(self._fs.iterdir(skills_root)):
-            if not self._fs.is_dir(entry):
-                continue
-            skill_md = entry / "SKILL.md"
-            if not self._fs.is_file(skill_md):
-                continue
-            name_field = self._extract_frontmatter_name(skill_md)
-            if name_field is None:
-                continue
-            offenders.append(f"{entry.name}/SKILL.md sets `name: {name_field}`")
-
+        offenders = SkillFrontmatterGuard(self._fs).collect_offenders(skills_root)
         if not offenders:
             return
 
@@ -166,40 +153,6 @@ class ExtensionSymlinkService:
             raise RepoError(msg)
         # adopt_extensions = "all": warn via repo_action so the user sees it but install proceeds.
         reporter.repo_action(repo.name, str(repo.path), "extension_warning", msg)
-
-    def _extract_frontmatter_name(self, skill_md: Path) -> str | None:
-        """Return the `name` field from YAML frontmatter, or None if not set.
-
-        Looks only at the top-level frontmatter delimited by `---`. Returns None
-        if there's no frontmatter, no `name` key, or any read error.
-        """
-        try:
-            text = self._fs.read_text(skill_md)
-        except OSError:
-            return None
-        if not text.startswith("---"):
-            return None
-        # Find closing delimiter.
-        lines = text.split("\n")
-        if len(lines) < 2:
-            return None
-        end_idx = None
-        for i, line in enumerate(lines[1:], start=1):
-            if line.strip() == "---":
-                end_idx = i
-                break
-        if end_idx is None:
-            return None
-        for line in lines[1:end_idx]:
-            stripped = line.strip()
-            if stripped.startswith("name:"):
-                value = stripped.split(":", 1)[1].strip()
-                # Strip optional surrounding quotes.
-                if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
-                    value = value[1:-1]
-                if value:
-                    return value
-        return None
 
     # ── Source resolution ─────────────────────────────────────────────────
 

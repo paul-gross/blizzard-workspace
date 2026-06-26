@@ -362,6 +362,80 @@ class OpenCodeSkillNameTransform:
         return "\n".join(lines)
 
 
+# ── Shared frontmatter utilities ─────────────────────────────────────────────
+# Used by both ExtensionSymlinkService and WorkspaceSkillService to enforce
+# the prefix-by-directory convention: SKILL.md must not set a `name:` field
+# that would override the directory name winter controls via symlink/copy naming.
+
+
+def _parse_frontmatter_name(text: str) -> str | None:
+    """Return the `name` field from YAML frontmatter text, or None if not set.
+
+    Looks only at the top-level frontmatter delimited by `---`. Returns None
+    if there is no frontmatter block, no `name` key, or the value is empty.
+    """
+    if not text.startswith("---"):
+        return None
+    lines = text.split("\n")
+    if len(lines) < 2:
+        return None
+    end_idx = None
+    for i, line in enumerate(lines[1:], start=1):
+        if line.strip() == "---":
+            end_idx = i
+            break
+    if end_idx is None:
+        return None
+    for line in lines[1:end_idx]:
+        stripped = line.strip()
+        if stripped.startswith("name:"):
+            value = stripped.split(":", 1)[1].strip()
+            # Strip optional surrounding quotes.
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+                value = value[1:-1]
+            if value:
+                return value
+    return None
+
+
+class SkillFrontmatterGuard:
+    """Scans a skills directory for SKILL.md files whose `name:` frontmatter would defeat namespacing.
+
+    Claude Code lets a SKILL.md `name` field override the directory name during skill
+    discovery. That defeats the prefix-by-directory design, so winter requires `name` to be
+    absent. This guard is shared between `ExtensionSymlinkService` and `WorkspaceSkillService`
+    so both services enforce the same rule.
+    """
+
+    def __init__(self, fs: IFilesystemWriter) -> None:
+        self._fs = fs
+
+    def collect_offenders(self, skills_root: Path | None) -> list[str]:
+        """Return offender strings for skill dirs whose SKILL.md sets a `name:` frontmatter field.
+
+        Returns an empty list when `skills_root` is absent or all SKILL.md files are clean.
+        Callers treat a non-empty result as an error condition.
+        """
+        if skills_root is None or not self._fs.is_dir(skills_root):
+            return []
+        offenders: list[str] = []
+        for entry in sorted(self._fs.iterdir(skills_root)):
+            if not self._fs.is_dir(entry):
+                continue
+            skill_md = entry / "SKILL.md"
+            if not self._fs.is_file(skill_md):
+                continue
+            try:
+                text = self._fs.read_text(skill_md)
+            except OSError:
+                continue
+            name_field = _parse_frontmatter_name(text)
+            if name_field is None:
+                continue
+            offenders.append(f"{entry.name}/SKILL.md sets `name: {name_field}`")
+        return offenders
+
+
 # One sentinel per Protocol/adapter pair (winter-harness:/standards/protocol-conformance.md):
 # both strategies must satisfy InstallSkillStrategy independent of the factory site.
 def _conforms_symlink_skill_strategy(x: SymlinkSkillStrategy) -> InstallSkillStrategy:

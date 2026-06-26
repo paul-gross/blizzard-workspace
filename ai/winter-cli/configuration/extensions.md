@@ -86,9 +86,13 @@ The workspace `.gitignore` is updated with a marker-bracketed block per extensio
 # <<< winter-backlog
 ```
 
+## Workspace-authored skill projection
+
+Besides extension skills from standalone repos, `winter ws init` can project skills authored directly in the workspace. When the top-level `prefix` key is set in `.winter/config.toml`, winter reads every skill directory under `workspace_root/skills/` and installs it into per-vendor skill directories using the same symlink/copy mechanism as extension skills. The `prefix` namespace for workspace skills must be distinct from any `[[standalone_repository]]` `prefix` value — both prune `<prefix>-*` entries in the same target directories and a collision is rejected at config load. See [config-files.md — workspace skill prefix](./config-files.md#workspace-skill-prefix) for details.
+
 ## Frontmatter convention
 
-Claude Code lets a SKILL.md frontmatter `name` field override the directory name during skill discovery. That defeats the prefix-by-directory-name design, so winter requires extension SKILL.md files to **omit the `name` field** — letting the directory name (which winter controls via the symlink or copy) be authoritative. Winter validates this on install and refuses if any SKILL.md sets `name`.
+Claude Code lets a SKILL.md frontmatter `name` field override the directory name during skill discovery. That defeats the prefix-by-directory-name design, so winter requires extension SKILL.md files to **omit the `name` field** — letting the directory name (which winter controls via the symlink or copy) be authoritative. Winter validates this on install and refuses if any SKILL.md sets `name`. This rule applies equally to workspace-authored skills.
 
 ## Extension hooks
 

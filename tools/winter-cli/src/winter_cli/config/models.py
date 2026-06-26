@@ -418,6 +418,19 @@ class WorkspaceConfig(BaseModel):
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     """Dashboard layout configuration from the `[tui.dashboard]` table."""
 
+    skill_prefix: str | None = None
+    """Workspace-owned skill prefix for workspace_root/skills/ projection.
+
+    When set, `winter ws init` projects skills under `workspace_root/skills/` into
+    every code-agent vendor's skills directory using the per-vendor install strategies
+    (symlink for ClaudeCode/Codex, copy for OpenCode). Stale `<prefix>-*` entries
+    are pruned on each reconcile pass.
+
+    Maps to the top-level `prefix` key in `.winter/config.toml`. When absent,
+    the `workspace_root/skills/` directory is not projected into any vendor
+    skills directory.
+    """
+
     provision_raw: dict = Field(default_factory=dict)
     """Raw ``[provision]`` table from the merged config.
 

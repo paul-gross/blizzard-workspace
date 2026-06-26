@@ -118,6 +118,33 @@ def test_load_service_orchestrator_defaults_to_none() -> None:
     assert svc.load().service_orchestrator is None
 
 
+def test_load_maps_top_level_prefix_to_skill_prefix() -> None:
+    """Top-level `prefix` key sets WorkspaceConfig.skill_prefix."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {"prefix": "ws"}})
+
+    assert svc.load().skill_prefix == "ws"
+
+
+def test_load_skill_prefix_defaults_to_none() -> None:
+    """skill_prefix is None when the top-level `prefix` key is absent."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {}})
+
+    assert svc.load().skill_prefix is None
+
+
+def test_load_empty_prefix_treated_as_none() -> None:
+    """An empty string `prefix` is treated as absent (no workspace skills)."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {"prefix": ""}})
+
+    assert svc.load().skill_prefix is None
+
+
 def test_load_accepts_lint_as_a_list() -> None:
     config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
     fs = FakeFilesystem(files={config_path: ""})

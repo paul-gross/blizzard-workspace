@@ -55,6 +55,7 @@ from winter_cli.modules.workspace.reporter_factory import ReporterFactory
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_merge_service import WorkspaceMergeService
 from winter_cli.modules.workspace.workspace_push_service import WorkspacePushService
+from winter_cli.modules.workspace.workspace_skill_service import WorkspaceSkillService
 from winter_cli.modules.workspace.workspace_snapshot_service import WorkspaceSnapshotService
 from winter_cli.modules.workspace.workspace_sync_service import WorkspaceSyncService
 from winter_cli.plugins.internal.importlib_plugin_loader import ImportlibPluginLoader
@@ -270,6 +271,12 @@ class Container(containers.DeclarativeContainer):
         fs=fs,
     )
 
+    workspace_skill_svc = providers.Singleton(
+        WorkspaceSkillService,
+        config=workspace_config,
+        fs=fs,
+    )
+
     prune_svc = providers.Factory(
         PruneService,
         config=workspace_config,
@@ -307,6 +314,7 @@ class Container(containers.DeclarativeContainer):
         git_ops=git_ops_svc,
         registry=env_index_registry,
         config_lock_repo=config_lock_repo,
+        workspace_skill_svc=workspace_skill_svc,
     )
 
     stream_reporter = providers.Factory(

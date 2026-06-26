@@ -230,6 +230,19 @@ class WorkspaceConfigService:
                 f"Either reduce env_aliases (currently {len(env_aliases)} entries) or increase envs_per_workspace."
             )
 
+        skill_prefix_raw = merged.get("prefix")
+        skill_prefix = skill_prefix_raw if isinstance(skill_prefix_raw, str) and skill_prefix_raw else None
+
+        if skill_prefix is not None:
+            for repo in standalone_repos:
+                if repo.prefix == skill_prefix:
+                    repo_label = repo.name or str(repo.url)
+                    raise ConfigError(
+                        f"Workspace `prefix = {skill_prefix!r}` collides with [[standalone_repository]] "
+                        f"{repo_label!r}: both write into .claude/skills/ and prune `{skill_prefix}-*` "
+                        f"entries. Use a distinct prefix for workspace skills."
+                    )
+
         provision_raw = merged.get("provision")
         if not isinstance(provision_raw, dict):
             provision_raw = {}
@@ -252,6 +265,7 @@ class WorkspaceConfigService:
             singleton_repos=singletons,
             project_repos=project_repos,
             standalone_repos=standalone_repos,
+            skill_prefix=skill_prefix,
             service_orchestrator=(
                 merged.get("service_orchestrator") if isinstance(merged.get("service_orchestrator"), str) else None
             ),

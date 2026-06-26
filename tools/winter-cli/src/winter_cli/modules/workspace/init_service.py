@@ -17,6 +17,7 @@ from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcl
 from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
 from winter_cli.modules.workspace.extension_symlink_service import ExtensionSymlinkService
 from winter_cli.modules.workspace.git_repository import IGitRepository
+from winter_cli.modules.workspace.workspace_skill_service import WorkspaceSkillService
 from winter_cli.modules.workspace.init_reporter import IInitReporter
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.managed_block import (
@@ -138,6 +139,7 @@ class InitService:
         git_ops: GitOpsService,
         registry: IEnvIndexRegistry,
         config_lock_repo: IConfigLockRepository | None = None,
+        workspace_skill_svc: WorkspaceSkillService | None = None,
     ) -> None:
         self._config = config
         self._repo_factory = repo_factory
@@ -151,6 +153,7 @@ class InitService:
         self._git_ops = git_ops
         self._registry = registry
         self._config_lock_repo = config_lock_repo
+        self._workspace_skill_svc = workspace_skill_svc
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -173,6 +176,10 @@ class InitService:
         repos = self._repo_factory.get_project_repos()
         if not self._run_per_repo(repos, lambda r: self._reconcile_source_checkout(r, reporter)):
             success = False
+
+        if self._workspace_skill_svc is not None:
+            if not self._workspace_skill_svc.reconcile(reporter):
+                success = False
 
         reporter.target_completed(target, success)
         return success

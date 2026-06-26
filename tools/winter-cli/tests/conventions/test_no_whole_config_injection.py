@@ -59,6 +59,7 @@ ALLOWED_FILES = frozenset(
         "modules/workspace/extension_hook_service.py",
         "modules/workspace/extension_exclude_service.py",
         "modules/workspace/extension_claudemd_service.py",
+        "modules/workspace/workspace_skill_service.py",  # workspace-lifecycle carve-out: reads skill_prefix and workspace_root to project workspace-owned skills into all vendor skill dirs on init
         # Doctor probe services — walk every declared repo / extension.
         "modules/doctor/core_probe_service.py",
         "modules/doctor/workspace_probe_service.py",
