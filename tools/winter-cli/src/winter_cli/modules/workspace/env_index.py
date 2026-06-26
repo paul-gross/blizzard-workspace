@@ -133,8 +133,8 @@ def build_env_trio(
 ) -> dict[str, str]:
     """Return ``WINTER_ENV``/``WINTER_ENV_INDEX``/``WINTER_PORT_BASE`` for *env_name*.
 
-    Resolves the index registry-first (so the value agrees with the
-    ``.winter.env`` that ``init_service`` already wrote), falling back to the
+    Resolves the index registry-first (so the value agrees with the persisted
+    index ``init_service`` recorded in the registry), falling back to the
     config-aware formula for envs not yet recorded (pre-init hooks or
     pre-registry environments).
     """

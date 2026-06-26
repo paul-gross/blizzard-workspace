@@ -43,15 +43,20 @@ Per-cell env injection
 Each cell's provider subprocess environment is built as:
 
     build_provider_env(provider, ws_root)          # WINTER_WORKSPACE_DIR / EXT_* vars
-    | build_env_trio(env, config, registry)        # WINTER_ENV / INDEX / PORT_BASE
-    | sourced env-file vars                        # .winter.env or .winter.workspace.env
+    | EnvProvisionerService.compute(scope)         # WINTER_ENV / INDEX / PORT_BASE /
+                                                   # WINTER_WORKSPACE_PORT_BASE + [env.vars]
 
-Sourced vars win on conflict (rightmost overlay takes precedence).  Each scope's
-env file is sourced at most once per matrix run (cache).
+The provisioner is the single source of truth for all WINTER_* variables.  Each
+scope's env is computed at most once per matrix run (cache).
 
-An ``EnvFileSourcerError`` (syntax error in the env file) degrades the affected
-cell: the cell is skipped with a diagnostic via the reporter (same resilience
-contract as describe errors in ``ServiceDescribeService.build``).
+Env is computed via ``EnvProvisionerService.compute``.  A ``ValueError`` (e.g. a
+bad ``[env.vars]`` template) does not crash ``service status``: it is caught by
+``provision_scope_env``, surfaced as a diagnostic via the reporter, and degrades
+that scope to **no injected env** — the scope's cells still run, reporting live
+state without the ``WINTER_*`` / ``[env.vars]`` values (same best-effort
+resilience contract as describe errors in ``ServiceDescribeService.build``).
+Because ``[env.vars]`` is workspace-global, a malformed template degrades every
+scope; each emits its own diagnostic.
 
 Per-cell invocation
 -------------------
@@ -83,17 +88,18 @@ from collections.abc import Callable
 from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 from pathlib import Path
 
-from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.subprocess_runner import ISubprocessRunner
 from winter_cli.modules.capability.models import ResolvedCapability
-from winter_cli.modules.service.env_file_sourcer import EnvFileSourcerError, IEnvFileSourcer
-from winter_cli.modules.service.provider_invocation import build_provider_env
+from winter_cli.modules.service.provider_invocation import (
+    IEnvProvisioner,
+    build_provider_env,
+    provision_scope_env,
+)
 from winter_cli.modules.service.scope import WORKSPACE_SCOPE
 from winter_cli.modules.service.service_provider_index import ServiceDescribeService
 from winter_cli.modules.service.service_reporter import IServiceReporter
 from winter_cli.modules.service.status_models import StatusDocument
 from winter_cli.modules.service.status_parser import StatusDocumentParser, StatusParseError
-from winter_cli.modules.workspace.env_index import build_env_trio
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
 
 # Maximum number of provider-cell subprocesses that may run concurrently.
@@ -215,17 +221,15 @@ class ServiceStatusMatrixService:
         self,
         subprocess_runner: ISubprocessRunner,
         describe_service: ServiceDescribeService,
-        env_file_sourcer: IEnvFileSourcer,
+        env_provisioner: IEnvProvisioner,
         status_parser: StatusDocumentParser,
-        workspace_config: WorkspaceConfig,
         env_index_registry: IEnvIndexRegistry,
         workspace_root: Path,
     ) -> None:
         self._subprocess_runner = subprocess_runner
         self._describe_service = describe_service
-        self._env_file_sourcer = env_file_sourcer
+        self._env_provisioner = env_provisioner
         self._status_parser = status_parser
-        self._workspace_config = workspace_config
         self._env_index_registry = env_index_registry
         self._workspace_root = workspace_root
 
@@ -265,48 +269,33 @@ class ServiceStatusMatrixService:
         Returns ``(docs_in_order, first_nonzero_exit_code)``.  The exit code is
         the first non-zero exit seen in enumeration order (not the numeric
         maximum), matching the behaviour of the previous single-call path.
-        A cell whose env-file is broken (``EnvFileSourcerError``) is skipped.
         A cell that returns a non-parseable status document is silently skipped
         (``collect`` contract) or surfaced via the reporter (``report`` contract).
         ``KeyboardInterrupt`` propagates as exit code 130 immediately.
 
-        Env files are sourced once per scope and reused across providers.
+        Env is provisioned once per scope and reused across providers.
         """
-        # Pre-source env files, one per unique scope.
+        # Pre-compute env once per unique scope.  A malformed [env.vars] template
+        # makes compute() raise ValueError; provision_scope_env catches it, emits a
+        # diagnostic via the reporter, and degrades that scope to no injection
+        # rather than letting a raw traceback escape and crash `service status`.
         unique_scopes = list(dict.fromkeys(cell.scope for cell in cells))
-        sourced: dict[str, dict[str, str]] = {}
-        broken_scopes: set[str] = set()
+        provisioned: dict[str, dict[str, str]] = {}
         for scope in unique_scopes:
-            try:
-                sourced[scope] = self._env_file_sourcer.source(scope, self._workspace_root)
-            except EnvFileSourcerError as exc:
-                broken_scopes.add(scope)
-                if reporter is not None:
-                    env_file_path = (
-                        self._workspace_root / ".winter.workspace.env"
-                        if scope == WORKSPACE_SCOPE
-                        else self._workspace_root / scope / ".winter.env"
-                    )
-                    reporter.status_parse_error(
-                        scope,
-                        scope,
-                        f"env-file sourcing failed for scope {scope!r} ({env_file_path}): {exc}",
-                    )
+            provisioned[scope] = provision_scope_env(self._env_provisioner, scope, reporter)
 
-        # Filter out cells whose scope has a broken env file.
-        active_cells = [c for c in cells if c.scope not in broken_scopes]
-
-        if not active_cells:
+        if not cells:
             return [], 0
 
         # Run cells in parallel, preserving order in results.
+        active_cells = cells
         results: list[tuple[StatusDocument | None, int]] = [None] * len(active_cells)  # type: ignore[list-item]
 
         worst_exit = 0
         interrupted = False
 
         def _run_cell(idx: int, cell: _StatusCell) -> None:
-            doc, code = self._invoke_cell(cell, sourced.get(cell.scope, {}), reporter)
+            doc, code = self._invoke_cell(cell, provisioned.get(cell.scope, {}), reporter)
             results[idx] = (doc, code)
 
         try:
@@ -456,7 +445,7 @@ class ServiceStatusMatrixService:
     def _invoke_cell(
         self,
         cell: _StatusCell,
-        sourced_env: dict[str, str],
+        provisioned_env: dict[str, str],
         reporter: IServiceReporter | None,
     ) -> tuple[StatusDocument | None, int]:
         """Run one cell's status subprocess and return ``(doc_or_none, exit_code)``.
@@ -466,27 +455,14 @@ class ServiceStatusMatrixService:
         ``(None, 0)`` so it does not block the poll loop.  When *reporter* is
         supplied (``report`` path) the error is surfaced via ``status_parse_error``.
         """
-        # Build env: base provider vars → env trio → sourced env-file vars (wins).
-        # For the workspace scope, index 0 is reserved; its band = base_port
-        # (base_port + 0 * ports_per_env).  The workspace env file is
-        # .winter.workspace.env (no per-env port band).  The workspace band is
-        # exposed ONLY as WINTER_WORKSPACE_PORT_BASE — the name
-        # .winter.workspace.env seeds and the name workspace-compose files
-        # reference — so it resolves identically whether the env arrives via
-        # injection (status) or file sourcing (up/down/restart/logs).  The per-env
-        # WINTER_PORT_BASE name is deliberately NOT set for the workspace scope:
-        # that name means the env's own band, and exposing it here under the
-        # workspace value collides with that meaning.
+        # Build env: base provider vars → provisioned env (WINTER_ENV / INDEX /
+        # WORKSPACE_PORT_BASE + [env.vars] for workspace scope; additionally
+        # WINTER_PORT_BASE for feature-env scopes).  The provisioner is the single
+        # source of truth; there is no file to source.  For the workspace scope,
+        # WINTER_PORT_BASE is deliberately NOT injected — the workspace band is
+        # WINTER_WORKSPACE_PORT_BASE only, so the name carries one meaning everywhere.
         base_env = build_provider_env(cell.provider, self._workspace_root)
-        if cell.scope == WORKSPACE_SCOPE:
-            env_trio = {
-                "WINTER_ENV": WORKSPACE_SCOPE,
-                "WINTER_ENV_INDEX": "0",
-                "WINTER_WORKSPACE_PORT_BASE": str(self._workspace_config.base_port),
-            }
-        else:
-            env_trio = build_env_trio(cell.scope, self._workspace_config, self._env_index_registry)
-        merged_env = {**base_env, **env_trio, **sourced_env}
+        merged_env = {**base_env, **provisioned_env}
 
         cmd = [str(cell.provider.entrypoint), "status", cell.cell_pattern]
 

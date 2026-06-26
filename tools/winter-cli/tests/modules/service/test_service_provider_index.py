@@ -353,7 +353,7 @@ def test_on_describe_error_called_for_broken_provider() -> None:
     )
 
     errors: list[tuple[str, str]] = []
-    idx = _svc(runner).build([pa, pb], on_describe_error=lambda name, detail: errors.append((name, detail)))
+    _svc(runner).build([pa, pb], on_describe_error=lambda name, detail: errors.append((name, detail)))
 
     assert len(errors) == 1
     assert errors[0][0] == "provider-a"

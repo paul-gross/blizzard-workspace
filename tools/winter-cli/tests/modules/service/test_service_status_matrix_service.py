@@ -3,12 +3,13 @@
 Covers:
 - Multi-provider matrix enumeration: cells = providers x configured envs + workspace
 - Single-provider describe-skip: all configured envs + workspace cell, no describe call
-- Per-cell env injection: WINTER_ENV/INDEX/PORT_BASE injected + sourced vars overlay
+- Per-cell env injection: WINTER_ENV/INDEX/PORT_BASE injected + [env.vars] overlay
 - Scope-qualified matrix filtering: gamma/web -> only gamma cells of owning provider
 - Bare env pattern filtering: gamma -> only gamma cells (all owning providers)
 - Workspace cell filtering: workspace/* -> only workspace cells
 - No-pattern full matrix: all cells returned
-- EnvFileSourcerError degrades only affected scope, keeps the rest
+- ValueError from a bad [env.vars] template is caught, reported via the reporter, and
+  degrades that scope to no injection; cells still run; other scopes are unaffected
 - Merged-document equivalence: N single-env docs merge to the same shape
 - collect() degenerates to a single-env cell (cheap poll)
 - Subprocess integration: real fake-provider scripts prove env injection at runtime
@@ -33,7 +34,6 @@ from winter_cli.core.subprocess_runner import SubprocessResult
 from winter_cli.modules.capability.capability_registry_service import CapabilityRegistryService
 from winter_cli.modules.capability.models import CapabilitySlot, ResolvedCapability
 from winter_cli.modules.service.describe_parser import DescribeResultParser
-from winter_cli.modules.service.env_file_sourcer import EnvFileSourcerError
 from winter_cli.modules.service.orchestrator_resolver import ServiceOrchestratorResolver
 from winter_cli.modules.service.service_provider_index import ServiceDescribeService
 from winter_cli.modules.service.service_status_matrix_service import (
@@ -64,26 +64,26 @@ class _StubRepoFactory:
         return self._repos
 
 
-class FakeEnvFileSourcer:
-    """Fake IEnvFileSourcer that returns canned dicts per scope."""
+class FakeEnvProvisionerService:
+    """Fake EnvProvisionerService returning canned dicts per scope.
+
+    When *errors* is supplied, ``compute`` raises ``ValueError`` for any scope
+    in the set — used to exercise the degrade-on-provision-error path.
+    """
 
     def __init__(
         self,
         responses: dict[str, dict[str, str]] | None = None,
-        broken: set[str] | None = None,
+        errors: set[str] | None = None,
     ) -> None:
         self._responses = responses or {}
-        self._broken = broken or set()
+        self._errors = errors or set()
         self.calls: list[str] = []
 
-    def source(self, scope: str, ws_root: Path) -> dict[str, str]:
+    def compute(self, scope: str) -> dict[str, str]:
         self.calls.append(scope)
-        if scope in self._broken:
-            raise EnvFileSourcerError(
-                f"broken env file for {scope!r}",
-                exit_code=1,
-                stderr="syntax error",
-            )
+        if scope in self._errors:
+            raise ValueError(f"bad template for {scope}")
         return self._responses.get(scope, {})
 
 
@@ -172,12 +172,21 @@ class _FakeEnvIndexRegistry:
 
 def _matrix_svc(
     runner: FakeSubprocessRunner,
-    sourcer: FakeEnvFileSourcer | None = None,
+    provisioner: FakeEnvProvisionerService | None = None,
     registry_assignments: dict[str, int] | None = None,
 ) -> ServiceStatusMatrixService:
-    """Build a ServiceStatusMatrixService with test doubles."""
+    """Build a ServiceStatusMatrixService with test doubles.
+
+    When no provisioner is given, a real EnvProvisionerService is wired so that
+    the env-injection tests can assert correct WINTER_* values.
+    """
+    from winter_cli.modules.workspace.env_provisioner import EnvProvisionerService
+
     ws_config = _fake_ws_config()
     reg = _FakeEnvIndexRegistry(registry_assignments or {"alpha": 1, "beta": 2})
+    actual_provisioner = (
+        provisioner if provisioner is not None else EnvProvisionerService(config=ws_config, registry=reg)
+    )
     describe_svc = ServiceDescribeService(
         subprocess_runner=runner,
         describe_parser=DescribeResultParser(),
@@ -186,9 +195,8 @@ def _matrix_svc(
     return ServiceStatusMatrixService(
         subprocess_runner=runner,
         describe_service=describe_svc,
-        env_file_sourcer=sourcer or FakeEnvFileSourcer(),
+        env_provisioner=actual_provisioner,
         status_parser=StatusDocumentParser(),
-        workspace_config=ws_config,
         env_index_registry=reg,
         workspace_root=WS,
     )
@@ -596,17 +604,27 @@ def test_env_injection_winter_port_base_beta() -> None:
     assert env.get("WINTER_PORT_BASE") == "4040"
 
 
-def test_env_injection_sourced_vars_overlay_env_trio() -> None:
-    """Sourced env-file vars are overlaid onto the env trio (sourced wins on conflict)."""
+def test_env_injection_provisioner_custom_vars_reach_provider() -> None:
+    """Custom vars returned by the provisioner are injected into the provider subprocess."""
     alpha_doc = _status_doc_json("alpha")
     runner = FakeSubprocessRunner(
         popen_responses={
             f"{ENTRYPOINT_A} status alpha/*": ([alpha_doc], 0),
         }
     )
-    # Sourced env overrides WINTER_PORT_BASE for alpha.
-    sourcer = FakeEnvFileSourcer(responses={"alpha": {"MY_APP_PORT": "5555", "WINTER_PORT_BASE": "9999"}})
-    svc = _matrix_svc(runner, sourcer=sourcer, registry_assignments={"alpha": 1})
+    # Provisioner returns custom vars including an app-level var for alpha.
+    provisioner = FakeEnvProvisionerService(
+        responses={
+            "alpha": {
+                "WINTER_ENV": "alpha",
+                "WINTER_ENV_INDEX": "1",
+                "WINTER_PORT_BASE": "4020",
+                "WINTER_WORKSPACE_PORT_BASE": "4000",
+                "MY_APP_PORT": "5555",
+            }
+        }
+    )
+    svc = _matrix_svc(runner, provisioner=provisioner, registry_assignments={"alpha": 1})
     pa = _provider_a()
 
     cells = svc.build_matrix([pa], patterns=("alpha",))
@@ -615,11 +633,11 @@ def test_env_injection_sourced_vars_overlay_env_trio() -> None:
     idx = next(i for i, call in enumerate(runner.popen_calls) if "alpha/*" in str(call[0]))
     env = runner.popen_envs[idx]
     assert env.get("MY_APP_PORT") == "5555"
-    assert env.get("WINTER_PORT_BASE") == "9999"  # sourced wins
+    assert env.get("WINTER_PORT_BASE") == "4020"
 
 
-def test_env_sourcing_called_once_per_scope() -> None:
-    """Each scope's env file is sourced at most once, even with two providers."""
+def test_env_provisioner_compute_called_once_per_scope() -> None:
+    """Each scope's env is computed at most once per run_matrix, even with two providers."""
     alpha_doc = _status_doc_json("alpha")
     runner = FakeSubprocessRunner(
         run_responses={
@@ -631,16 +649,16 @@ def test_env_sourcing_called_once_per_scope() -> None:
             f"{ENTRYPOINT_B} status alpha/*": ([alpha_doc], 0),
         },
     )
-    sourcer = FakeEnvFileSourcer()
-    svc = _matrix_svc(runner, sourcer=sourcer, registry_assignments={"alpha": 1})
+    provisioner = FakeEnvProvisionerService()
+    svc = _matrix_svc(runner, provisioner=provisioner, registry_assignments={"alpha": 1})
     pa = _provider_a()
     pb = _provider_b()
 
     cells = svc.build_matrix([pa, pb], patterns=("alpha",))
     svc.run_matrix(cells, reporter=None)
 
-    # alpha sourced exactly once (not once per provider).
-    assert sourcer.calls.count("alpha") == 1
+    # alpha computed exactly once (not once per provider).
+    assert provisioner.calls.count("alpha") == 1
 
 
 def test_workspace_scope_env_trio_uses_index_zero() -> None:
@@ -665,47 +683,44 @@ def test_workspace_scope_env_trio_uses_index_zero() -> None:
     assert env.get("WINTER_WORKSPACE_PORT_BASE") == "4000"  # base_port + 0 * 20
 
 
-# ── EnvFileSourcerError resilience ───────────────────────────────────────────
+def test_matrix_degrade_on_provision_error() -> None:
+    """ValueError from compute() is caught: cells still run; reporter notified; other scopes fine.
 
-
-def test_broken_env_file_scope_degraded_not_crashed() -> None:
-    """A broken env file for one scope skips that scope's cells; other scopes run."""
+    When one scope's env provisioner raises ValueError (e.g. a bad [env.vars]
+    template), run_matrix must not propagate it as a traceback: the erroring
+    scope's cells still execute (degraded to no injected env),
+    reporter.env_provision_error is called for that scope, and the unaffected
+    scope (beta) still receives its computed env and returns a valid document.
+    """
+    alpha_doc = _status_doc_json("alpha")
+    beta_doc = _status_doc_json("beta")
     runner = FakeSubprocessRunner(
         popen_responses={
-            f"{ENTRYPOINT_A} status alpha/*": ([_status_doc_json("alpha")], 0),
+            f"{ENTRYPOINT_A} status alpha/*": ([alpha_doc], 0),
+            f"{ENTRYPOINT_A} status beta/*": ([beta_doc], 0),
             f"{ENTRYPOINT_A} status workspace/*": ([json.dumps({"envs": []})], 0),
         }
     )
-    # beta's env file is broken; alpha should still work.
-    sourcer = FakeEnvFileSourcer(broken={"beta"})
-    svc = _matrix_svc(runner, sourcer=sourcer, registry_assignments={"alpha": 1, "beta": 2})
+    # alpha compute raises ValueError; beta and workspace succeed.
+    provisioner = FakeEnvProvisionerService(errors={"alpha"})
+    svc = _matrix_svc(runner, provisioner=provisioner, registry_assignments={"alpha": 1, "beta": 2})
     pa = _provider_a()
-
     reporter = FakeServiceReporter()
-    cells = svc.build_matrix([pa], patterns=())
-    docs, _worst_exit = svc.run_matrix(cells, reporter=reporter)
-
-    # alpha's doc should appear; beta is skipped.
-    env_names = {env.env for doc in docs for env in doc.envs}
-    assert "alpha" in env_names
-    assert "beta" not in env_names
-
-
-def test_broken_env_file_does_not_crash_run_matrix() -> None:
-    """run_matrix returns normally even when a scope's env file is broken."""
-    runner = FakeSubprocessRunner(
-        popen_responses={
-            f"{ENTRYPOINT_A} status alpha/*": ([_status_doc_json("alpha")], 0),
-        }
-    )
-    svc = _matrix_svc(runner, sourcer=FakeEnvFileSourcer(broken={"workspace"}), registry_assignments={"alpha": 1})
-    pa = _provider_a()
 
     cells = svc.build_matrix([pa], patterns=())
-    _docs, worst_exit = svc.run_matrix(cells, reporter=None)
+    docs, worst_exit = svc.run_matrix(cells, reporter=reporter)
 
-    # run_matrix returns without raising; workspace was skipped.
+    # No traceback — run_matrix returned normally with exit 0.
     assert worst_exit == 0
+    # The erroring scope is reported exactly once via env_provision_error.
+    assert len(reporter.env_provision_error_calls) == 1
+    scope_reported, detail_reported = reporter.env_provision_error_calls[0]
+    assert scope_reported == "alpha"
+    assert "bad template for alpha" in detail_reported
+    # Both alpha and beta cells still ran and returned documents.
+    env_names = {e.env for doc in docs for e in doc.envs}
+    assert "alpha" in env_names
+    assert "beta" in env_names
 
 
 # ── Merged-document equivalence ───────────────────────────────────────────────
@@ -822,6 +837,8 @@ def _make_status_svc(
     registry_assignments: dict[str, int] | None = None,
 ) -> ServiceStatusService:
     """Build a ServiceStatusService with all Phase 2 deps wired."""
+    from winter_cli.modules.workspace.env_provisioner import EnvProvisionerService
+
     ws_config = _fake_ws_config()
     reg = _FakeEnvIndexRegistry(registry_assignments or {"alpha": 1, "beta": 2})
     describe_svc = ServiceDescribeService(
@@ -832,9 +849,8 @@ def _make_status_svc(
     matrix_svc = ServiceStatusMatrixService(
         subprocess_runner=runner,
         describe_service=describe_svc,
-        env_file_sourcer=FakeEnvFileSourcer(),
+        env_provisioner=EnvProvisionerService(config=ws_config, registry=reg),
         status_parser=StatusDocumentParser(),
-        workspace_config=ws_config,
         env_index_registry=reg,
         workspace_root=WS,
     )
@@ -910,7 +926,7 @@ def test_status_service_collect_degenerates_to_single_env() -> None:
 
 # ── Subprocess integration tests (real fake-provider entrypoints) ─────────────
 # These tests write tiny executable scripts into a temp directory, then drive a
-# real ServiceStatusMatrixService with LocalSubprocessRunner and ShellEnvFileSourcer.
+# real ServiceStatusMatrixService with LocalSubprocessRunner and EnvProvisionerService.
 # They prove that env injection is actually observed by provider subprocesses —
 # the unit tests above only verify what the matrix *passes* to the runner,
 # not that a real subprocess receives it.
@@ -994,25 +1010,18 @@ exit 1
 
 @pytest.fixture()
 def tmp_workspace(tmp_path: Path) -> Path:
-    """Return a minimal workspace directory with two fake providers and env files.
+    """Return a minimal workspace directory with two fake providers.
 
     Layout::
 
         <tmp>/
-          alpha/.winter.env          (WINTER_PORT_BASE=4020, MY_APP_VAR=from-alpha-file)
-          beta/.winter.env           (WINTER_PORT_BASE=4040)
-          .winter.workspace.env      (WINTER_WORKSPACE_PORT_BASE=4000, MY_APP_VAR=from-workspace-file)
           provider-a/workflow/service  (executable: describe -> */probe; status -> echo env)
           provider-b/workflow/service  (executable: describe -> workspace/probe; status -> echo env)
+
+    Env vars (WINTER_PORT_BASE etc.) are injected by EnvProvisionerService at
+    run_matrix time — no ``.winter.env`` files are needed or created.
     """
     ws = tmp_path
-
-    # Create env files.
-    (ws / "alpha").mkdir()
-    (ws / "alpha" / ".winter.env").write_text("WINTER_PORT_BASE=4020\nMY_APP_VAR=from-alpha-file\n")
-    (ws / "beta").mkdir()
-    (ws / "beta" / ".winter.env").write_text("WINTER_PORT_BASE=4040\n")
-    (ws / ".winter.workspace.env").write_text("WINTER_WORKSPACE_PORT_BASE=4000\nMY_APP_VAR=from-workspace-file\n")
 
     # Create provider-a: owns */probe (per-env).
     ep_a = ws / "provider-a" / "workflow"
@@ -1050,12 +1059,12 @@ def _real_matrix_svc(
     provider_names: list[str],
 ) -> tuple[ServiceStatusMatrixService, list[ResolvedCapability]]:
     """Build a ServiceStatusMatrixService driven by real subprocesses."""
-    from winter_cli.modules.service.internal.shell_env_file_sourcer import ShellEnvFileSourcer
+    from winter_cli.modules.workspace.env_provisioner import EnvProvisionerService
 
     runner = LocalSubprocessRunner()
-    sourcer = ShellEnvFileSourcer()
     reg = _FakeEnvIndexRegistry(assignments)
     ws_config = _fake_ws_config(base_port=4000, ports_per_env=20)
+    provisioner = EnvProvisionerService(config=ws_config, registry=reg)
 
     providers = []
     for name in provider_names:
@@ -1079,9 +1088,8 @@ def _real_matrix_svc(
     matrix_svc = ServiceStatusMatrixService(
         subprocess_runner=runner,
         describe_service=describe_svc,
-        env_file_sourcer=sourcer,
+        env_provisioner=provisioner,
         status_parser=StatusDocumentParser(),
-        workspace_config=ws_config,
         env_index_registry=reg,
         workspace_root=ws,
     )
@@ -1134,40 +1142,9 @@ def test_subprocess_env_injection_observed_by_provider(tmp_workspace: Path) -> N
                 if svc.name == "probe" and env_status.env in ("alpha", "beta"):
                     handles[env_status.env] = svc.handle or ""
 
-    # The env files override WINTER_PORT_BASE; sourced values must win.
+    # EnvProvisionerService computes WINTER_PORT_BASE from registry index.
     assert handles.get("alpha") == "4020", f"alpha handle={handles.get('alpha')!r}"
     assert handles.get("beta") == "4040", f"beta handle={handles.get('beta')!r}"
-
-
-def test_subprocess_sourced_env_file_var_reaches_provider(tmp_workspace: Path) -> None:
-    """Workspace band + MY_APP_VAR from .winter.workspace.env reach provider-b.
-
-    provider-b echoes ``WINTER_WORKSPACE_PORT_BASE|MY_APP_VAR``.  The band (4000)
-    arrives both by core injection (the workspace cell injects
-    ``WINTER_WORKSPACE_PORT_BASE``) and by sourcing the workspace env file, and
-    ``MY_APP_VAR`` arrives only by sourcing — so a non-MISSING band proves the
-    new name resolves on the workspace status path end to end.
-    """
-    matrix_svc, providers = _real_matrix_svc(
-        tmp_workspace,
-        assignments={"alpha": 1},
-        provider_names=["provider-a", "provider-b"],
-    )
-    cells = matrix_svc.build_matrix(providers, patterns=("workspace",))
-    docs, worst_exit = matrix_svc.run_matrix(cells, reporter=None)
-
-    assert worst_exit == 0
-
-    ws_handles: list[str] = []
-    for doc in docs:
-        for env_status in doc.envs:
-            if env_status.env == "workspace":
-                for svc in env_status.services:
-                    ws_handles.append(svc.handle or "")
-
-    # handle is "WINTER_WORKSPACE_PORT_BASE|MY_APP_VAR"; the band resolves to 4000
-    # (injection + sourcing) and MY_APP_VAR flows through from the workspace file.
-    assert any(h == "4000|from-workspace-file" for h in ws_handles), f"ws handles: {ws_handles}"
 
 
 def test_subprocess_scope_qualified_filter_narrows_to_one_env(tmp_workspace: Path) -> None:
@@ -1177,10 +1154,6 @@ def test_subprocess_scope_qualified_filter_narrows_to_one_env(tmp_workspace: Pat
         assignments={"alpha": 1, "beta": 2, "gamma": 3},
         provider_names=["provider-a", "provider-b"],
     )
-    # gamma/ needs an env file; create a minimal one.
-    (tmp_workspace / "gamma").mkdir(exist_ok=True)
-    (tmp_workspace / "gamma" / ".winter.env").write_text("WINTER_PORT_BASE=4060\n")
-
     cells = matrix_svc.build_matrix(providers, patterns=("gamma/probe",))
 
     # Only provider-a (owns */probe) for gamma scope.
@@ -1212,9 +1185,6 @@ def test_subprocess_single_provider_no_describe_sentinel(tmp_path: Path) -> None
     ep_dir = ws / "sole-provider" / "workflow"
     ep_dir.mkdir(parents=True)
     _make_executable(ep_dir / "service", _build_describe_sentinel_script(sentinel))
-
-    (ws / "alpha").mkdir()
-    (ws / "alpha" / ".winter.env").write_text("")
 
     matrix_svc, providers = _real_matrix_svc(ws, assignments={"alpha": 1}, provider_names=["sole-provider"])
 

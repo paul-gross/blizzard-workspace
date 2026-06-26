@@ -52,10 +52,10 @@ ENTRYPOINT_B = EXT_B / "workflow/service"
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-class _FakeEnvFileSourcer:
-    """Fake IEnvFileSourcer that returns empty dicts for all scopes."""
+class _FakeEnvProvisionerService:
+    """Fake EnvProvisionerService that returns empty dicts for all scopes."""
 
-    def source(self, scope: str, ws_root: Path) -> dict[str, str]:
+    def compute(self, scope: str) -> dict[str, str]:
         return {}
 
 
@@ -259,9 +259,8 @@ def _make_status(
     matrix_svc = ServiceStatusMatrixService(
         subprocess_runner=runner,
         describe_service=describe_svc,
-        env_file_sourcer=_FakeEnvFileSourcer(),
+        env_provisioner=_FakeEnvProvisionerService(),
         status_parser=StatusDocumentParser(),
-        workspace_config=_ws_config(),
         env_index_registry=_FakeEnvIndexRegistry(assignments),
         workspace_root=WS,
     )
@@ -665,9 +664,8 @@ def test_status_merge_json_output_merged() -> None:
     matrix_svc = ServiceStatusMatrixService(
         subprocess_runner=runner,
         describe_service=describe_svc,
-        env_file_sourcer=_FakeEnvFileSourcer(),
+        env_provisioner=_FakeEnvProvisionerService(),
         status_parser=StatusDocumentParser(),
-        workspace_config=_ws_config(),
         env_index_registry=_FakeEnvIndexRegistry({"alpha": 1}),
         workspace_root=WS,
     )
@@ -892,9 +890,8 @@ def test_override_wins_over_configured_list_for_status() -> None:
     matrix_svc2 = ServiceStatusMatrixService(
         subprocess_runner=runner2,
         describe_service=describe_svc2,
-        env_file_sourcer=_FakeEnvFileSourcer(),
+        env_provisioner=_FakeEnvProvisionerService(),
         status_parser=StatusDocumentParser(),
-        workspace_config=_ws_config(),
         env_index_registry=_FakeEnvIndexRegistry({"alpha": 1}),
         workspace_root=WS,
     )

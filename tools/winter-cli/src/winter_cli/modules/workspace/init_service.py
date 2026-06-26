@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from concurrent.futures import as_completed
 from pathlib import Path
 
@@ -17,7 +16,6 @@ from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcl
 from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
 from winter_cli.modules.workspace.extension_symlink_service import ExtensionSymlinkService
 from winter_cli.modules.workspace.git_repository import IGitRepository
-from winter_cli.modules.workspace.workspace_skill_service import WorkspaceSkillService
 from winter_cli.modules.workspace.init_reporter import IInitReporter
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.managed_block import (
@@ -33,68 +31,9 @@ from winter_cli.modules.workspace.models import (
 )
 from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
+from winter_cli.modules.workspace.workspace_skill_service import WorkspaceSkillService
 
 logger = logging.getLogger(__name__)
-
-WINTER_ENV_FILE = ".winter.env"
-WINTER_WORKSPACE_ENV_FILE = ".winter.workspace.env"
-WINTER_ENV_BEGIN = "# >>> winter (managed) — base environment variables; do not edit by hand"
-WINTER_ENV_END = "# <<< winter (managed) — base block end; hand-managed vars go below the last managed block"
-WINTER_ENV_VARS_BEGIN = "# >>> winter (managed) — [env.vars] derived variables; do not edit by hand"
-WINTER_ENV_VARS_END = "# <<< winter (managed) — end of [env.vars] derived variables"
-
-# Matches ${NAME} or ${NAME+N}: a reference to an in-scope variable, optionally
-# plus a non-negative integer offset. NAME is an env-var-style identifier.
-_REF_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?:\+(\d+))?\}")
-# Matches any ${...} token the reference form did not consume — malformed/unsupported.
-_UNKNOWN_TOKEN_RE = re.compile(r"\$\{[^}]*\}")
-
-
-def _render_env_var_value(key: str, template: str, scope: dict[str, str]) -> str:
-    """Resolve ``${NAME}`` / ``${NAME+N}`` references in *template* against *scope*.
-
-    *scope* holds the variables visible to this entry: the managed base vars
-    (``WINTER_ENV``, ``WINTER_ENV_INDEX``, ``WINTER_PORT_BASE``,
-    ``WINTER_WORKSPACE_PORT_BASE``) plus every earlier ``[env.vars]`` entry
-    already rendered, in declaration order.
-
-    - ``${NAME}``   → NAME's resolved string value.
-    - ``${NAME+N}`` → ``int(NAME) + N`` (NAME must parse as an int; N ≥ 0).
-
-    Literal values (no ``${...}`` token) pass through unchanged. A reference to
-    an undefined name, a ``+N`` offset applied to a non-integer value, or any
-    other ``${...}`` token is a fatal substitution error — raises ``ValueError``
-    with a clear message.
-    """
-    def _replace(m: re.Match[str]) -> str:
-        name, offset = m.group(1), m.group(2)
-        if name not in scope:
-            raise ValueError(
-                f"[env.vars] key {key!r}: reference to undefined variable {name!r} "
-                f"— reference a managed base var or an earlier [env.vars] entry."
-            )
-        value = scope[name]
-        if offset is None:
-            return value
-        try:
-            return str(int(value) + int(offset))
-        except ValueError:
-            raise ValueError(
-                f"[env.vars] key {key!r}: cannot apply +{offset} to non-integer "
-                f"value of {name!r} ({value!r})."
-            ) from None
-
-    rendered = _REF_RE.sub(_replace, template)
-
-    # Any ${...} the reference form left behind is an unsupported token.
-    unknown = _UNKNOWN_TOKEN_RE.search(rendered)
-    if unknown:
-        raise ValueError(
-            f"[env.vars] key {key!r}: unsupported substitution token {unknown.group()!r}. "
-            f"Use ${{NAME}} or ${{NAME+N}} referencing a managed base var or an earlier entry."
-        )
-    return rendered
-
 
 TUI_SUPPRESS_ENV = {
     "CI": "1",
@@ -151,9 +90,9 @@ class InitService:
         self._subprocess = subprocess_runner
         self._git_repo = git_repo
         self._git_ops = git_ops
-        self._registry = registry
         self._config_lock_repo = config_lock_repo
         self._workspace_skill_svc = workspace_skill_svc
+        self._registry = registry
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -166,10 +105,7 @@ class InitService:
 
         success = self._write_workspace_self_exclude("projects", reporter)
 
-        # Workspace-scope artifacts: the index-0 env file plus the excludes that
-        # keep it and the runtime log dir out of the workspace repo.
-        if not self._seed_workspace_env(reporter):
-            success = False
+        # Workspace-scope artifacts: keep the runtime log dir out of the workspace repo.
         if not self._write_workspace_artifact_excludes(reporter):
             success = False
 
@@ -177,9 +113,8 @@ class InitService:
         if not self._run_per_repo(repos, lambda r: self._reconcile_source_checkout(r, reporter)):
             success = False
 
-        if self._workspace_skill_svc is not None:
-            if not self._workspace_skill_svc.reconcile(reporter):
-                success = False
+        if self._workspace_skill_svc is not None and not self._workspace_skill_svc.reconcile(reporter):
+            success = False
 
         reporter.target_completed(target, success)
         return success
@@ -214,6 +149,15 @@ class InitService:
         env_root = self._config.workspace_root / name
         self._fs.mkdir(env_root, parents=True, exist_ok=True)
 
+        # Allocate and persist the env index so EnvProvisionerService can read a
+        # stable, collision-free index on every subsequent call to compute(name).
+        # Env files are no longer written here — env is injected at runtime.
+        EnvIndexAllocator(self._registry).allocate(
+            name,
+            self._config.env_aliases,
+            self._config.envs_per_workspace,
+        )
+
         if not self._write_workspace_self_exclude(name, reporter):
             success = False
 
@@ -234,9 +178,6 @@ class InitService:
             ready_repos,
             lambda r: self._reconcile_worktree_repo(r, name, env_root, reporter, inferred_upstream),
         ):
-            success = False
-
-        if not self._seed_winter_env(env_root, name, reporter):
             success = False
 
         standalones = self._repo_factory.get_standalone_repos()
@@ -612,23 +553,21 @@ class InitService:
     def _write_workspace_artifact_excludes(self, reporter: IInitReporter) -> bool:
         """Exclude the workspace-root paths winter owns from the workspace repo.
 
-        Covers two paths under winter's `.winter/` namespace:
-        - `.winter.workspace.env` — generated by this service (workspace-scope env file).
-        - `.winter/logs/` — the framework's canonical service-log location. winter
-          owns the *convention* here, not any single orchestrator: today only
-          winter-service-tmux's file-capture mode writes there, but core defining
-          the path is what lets winter point any future provider at it. Owning the
-          exclude in core keeps that one decision in one place rather than asking
-          each provider to re-declare it.
+        Covers the `/.winter/logs/` path — the framework's canonical service-log
+        location.  winter owns the *convention* here, not any single orchestrator:
+        today only winter-service-tmux's file-capture mode writes there, but core
+        defining the path is what lets winter point any future provider at it.
+        Owning the exclude in core keeps that one decision in one place rather than
+        asking each provider to re-declare it.
 
-        Both live at the workspace root — outside any per-env dir block — so they
-        need their own managed exclude entry. The `winter-workspace/` namespace
-        contains a `/`, so the extension orphan-stripping pass leaves it alone.
+        Lives at the workspace root — outside any per-env dir block — so it needs
+        its own managed exclude entry. The `winter-workspace/` namespace contains a
+        `/`, so the extension orphan-stripping pass leaves it alone.
         """
         return self._write_workspace_exclude_block(
             "winter-workspace/artifacts",
-            [f"/{WINTER_WORKSPACE_ENV_FILE}", "/.winter/logs/"],
-            f"/{WINTER_WORKSPACE_ENV_FILE}, /.winter/logs/",
+            ["/.winter/logs/"],
+            "/.winter/logs/",
             reporter,
         )
 
@@ -668,148 +607,6 @@ class InitService:
             str(exclude_path),
             "workspace_excludes_updated",
             summary,
-        )
-        return True
-
-    def _seed_winter_env(
-        self,
-        env_root: Path,
-        env_name: str,
-        reporter: IInitReporter,
-    ) -> bool:
-        """Seed the worktree's .winter.env with workspace-managed base variables.
-
-        Writes a marker-bracketed block at the top of the file containing the
-        environment's identity and port window. Project-specific variables
-        (set by the project's project-setup.md) live below the closing marker
-        and are preserved across re-runs. The block itself is rewritten in full
-        each time, so changing the worktree's index updates the file cleanly.
-
-        When the workspace config has an ``[env.vars]`` table, a second managed
-        block with the rendered ``export KEY=value`` lines is appended below the
-        base block.  ``${WINTER_PORT_BASE+N}`` tokens are resolved against this
-        env's port base.  Any unsupported token is a fatal per-env error.
-        """
-        index = EnvIndexAllocator(self._registry).allocate(
-            env_name,
-            self._config.env_aliases,
-            self._config.envs_per_workspace,
-        )
-        port_base = self._config.port_base_for_index(index)
-        workspace_port_base = self._config.port_base_for_index(0)
-
-        base_block_lines = [
-            WINTER_ENV_BEGIN,
-            f"WINTER_ENV={env_name}",
-            f"WINTER_ENV_INDEX={index}",
-            f"WINTER_PORT_BASE={port_base}",
-            f"WINTER_WORKSPACE_PORT_BASE={workspace_port_base}",
-            WINTER_ENV_END,
-        ]
-
-        env_path = env_root / WINTER_ENV_FILE
-        try:
-            existing = self._fs.read_text(env_path) if self._fs.exists(env_path) else ""
-            new_content = replace_or_append_block(
-                existing,
-                WINTER_ENV_BEGIN,
-                WINTER_ENV_END,
-                base_block_lines,
-                position="prepend",
-            )
-
-            # Render and write the [env.vars] block when the table is non-empty.
-            # The scope is seeded with the managed base vars and grows by each
-            # rendered entry, so a value can reference earlier entries (and the
-            # base vars) in TOML declaration order.
-            if self._config.env_vars:
-                scope: dict[str, str] = {
-                    "WINTER_ENV": env_name,
-                    "WINTER_ENV_INDEX": str(index),
-                    "WINTER_PORT_BASE": str(port_base),
-                    "WINTER_WORKSPACE_PORT_BASE": str(workspace_port_base),
-                }
-                rendered_lines: list[str] = []
-                for key, template in self._config.env_vars.items():
-                    try:
-                        value = _render_env_var_value(key, template, scope)
-                    except ValueError as exc:
-                        reporter.repo_error("winter", f"{WINTER_ENV_FILE} — {exc}")
-                        return False
-                    scope[key] = value
-                    rendered_lines.append(f"export {key}={value}")
-
-                vars_block_lines = [WINTER_ENV_VARS_BEGIN, *rendered_lines, WINTER_ENV_VARS_END]
-                new_content = replace_or_append_block(
-                    new_content,
-                    WINTER_ENV_VARS_BEGIN,
-                    WINTER_ENV_VARS_END,
-                    vars_block_lines,
-                    position="append",
-                )
-
-            if new_content == existing:
-                return True
-            self._fs.write_text(env_path, new_content)
-        except OSError as exc:
-            reporter.repo_error("winter", f"{WINTER_ENV_FILE} — {exc}")
-            return False
-
-        reporter.repo_action(
-            "winter",
-            str(env_path),
-            "winter_env_seeded",
-            f"WINTER_PORT_BASE={port_base}",
-        )
-        return True
-
-    def _seed_workspace_env(self, reporter: IInitReporter) -> bool:
-        """Seed `.winter.workspace.env` at the workspace root with the index-0 port base.
-
-        The `workspace` service scope is not a feature env, so it has no
-        per-env `.winter.env`. This file gives workspace-scoped services a port
-        band to read: the workspace is treated as index 0, whose base
-        (`port_base_for_index(0)`) is never allocated to any feature env. Mirrors
-        `_seed_winter_env`: a marker-bracketed managed block holds the base
-        variables; anything below the closing marker is preserved across re-runs.
-
-        The band is exposed only as ``WINTER_WORKSPACE_PORT_BASE`` — the same
-        name the per-env `.winter.env` uses for it — so the variable carries one
-        meaning everywhere. It deliberately does NOT define ``WINTER_PORT_BASE``:
-        that name is the *per-env* base, and emitting it here under the workspace
-        value (index-0 band) collides with the per-env meaning whenever both
-        files are in play.
-        """
-        workspace_port_base = self._config.port_base_for_index(0)
-
-        block_lines = [
-            WINTER_ENV_BEGIN,
-            f"WINTER_WORKSPACE_PORT_BASE={workspace_port_base}",
-            WINTER_ENV_END,
-        ]
-
-        env_path = self._config.workspace_root / WINTER_WORKSPACE_ENV_FILE
-        try:
-            existing = self._fs.read_text(env_path) if self._fs.exists(env_path) else ""
-            new_content = replace_or_append_block(
-                existing,
-                WINTER_ENV_BEGIN,
-                WINTER_ENV_END,
-                block_lines,
-                position="prepend",
-            )
-            if new_content == existing:
-                return True
-            self._fs.write_text(env_path, new_content)
-        except OSError as exc:
-            reporter.repo_error("winter", f"{WINTER_WORKSPACE_ENV_FILE} — {exc}")
-            return False
-
-        reporter.repo_action(
-            "winter",
-            str(env_path),
-            "winter_workspace_env_seeded",
-            f"WINTER_WORKSPACE_PORT_BASE={workspace_port_base}",
         )
         return True
 

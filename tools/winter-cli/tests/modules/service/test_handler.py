@@ -69,8 +69,8 @@ class _StubRepoFactory:
         return self._repos
 
 
-class _FakeEnvFileSourcer:
-    def source(self, scope: str, ws_root: Path) -> dict[str, str]:
+class _FakeEnvProvisionerService:
+    def compute(self, scope: str) -> dict[str, str]:
         return {}
 
 
@@ -158,9 +158,8 @@ def _handler(runner: FakeSubprocessRunner, click: Any = None) -> ServiceHandler:
     matrix = ServiceStatusMatrixService(
         subprocess_runner=runner,
         describe_service=describe_svc,
-        env_file_sourcer=_FakeEnvFileSourcer(),
+        env_provisioner=_FakeEnvProvisionerService(),
         status_parser=StatusDocumentParser(),
-        workspace_config=_ws_config(),
         env_index_registry=_FakeEnvIndexRegistry({"alpha": 1}),
         workspace_root=WS,
     )

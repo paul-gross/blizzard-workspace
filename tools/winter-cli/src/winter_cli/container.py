@@ -312,9 +312,15 @@ class Container(containers.DeclarativeContainer):
         subprocess_runner=subprocess_runner,
         git_repo=git_repo,
         git_ops=git_ops_svc,
-        registry=env_index_registry,
         config_lock_repo=config_lock_repo,
         workspace_skill_svc=workspace_skill_svc,
+        registry=env_index_registry,
+    )
+
+    env_provisioner = providers.Factory(
+        _lazy("winter_cli.modules.workspace.env_provisioner:EnvProvisionerService"),
+        config=workspace_config,
+        registry=env_index_registry,
     )
 
     stream_reporter = providers.Factory(
@@ -533,12 +539,6 @@ class Container(containers.DeclarativeContainer):
         json_reporter=json_graph_reporter,
     )
 
-    # ── service: env-file sourcer (shell-sources per-scope .winter.env files) ─
-
-    env_file_sourcer = providers.Singleton(
-        _lazy("winter_cli.modules.service.internal.shell_env_file_sourcer:ShellEnvFileSourcer")
-    )
-
     # ── service: dispatch to the registered orchestrator extension ──────────
 
     # Holds the effective `--service-orchestrator` / WINTER_SERVICE_ORCHESTRATOR
@@ -604,13 +604,6 @@ class Container(containers.DeclarativeContainer):
         workspace_root=workspace_config.provided.workspace_root,
     )
 
-    service_fan_out_svc = providers.Factory(
-        _lazy("winter_cli.modules.service.service_fan_out_service:ServiceFanOutService"),
-        subprocess_runner=subprocess_runner,
-        workspace_root=workspace_config.provided.workspace_root,
-        manifest_collector=service_manifest_collector_svc,
-    )
-
     stream_service_reporter = providers.Factory(
         _lazy("winter_cli.modules.service.service_reporter:StreamServiceReporter"),
         click=providers.Object(click),
@@ -621,6 +614,15 @@ class Container(containers.DeclarativeContainer):
         _lazy("winter_cli.modules.service.service_reporter:JsonServiceReporter"),
         click=providers.Object(click),
         cli_output=cli_output_svc,
+    )
+
+    service_fan_out_svc = providers.Factory(
+        _lazy("winter_cli.modules.service.service_fan_out_service:ServiceFanOutService"),
+        subprocess_runner=subprocess_runner,
+        workspace_root=workspace_config.provided.workspace_root,
+        manifest_collector=service_manifest_collector_svc,
+        env_provisioner=env_provisioner,
+        reporter=stream_service_reporter,
     )
 
     service_dispatch_svc = providers.Factory(
@@ -645,9 +647,8 @@ class Container(containers.DeclarativeContainer):
         _lazy("winter_cli.modules.service.service_status_matrix_service:ServiceStatusMatrixService"),
         subprocess_runner=subprocess_runner,
         describe_service=service_describe_svc,
-        env_file_sourcer=env_file_sourcer,
+        env_provisioner=env_provisioner,
         status_parser=status_document_parser,
-        workspace_config=workspace_config,
         env_index_registry=env_index_registry,
         workspace_root=workspace_config.provided.workspace_root,
     )

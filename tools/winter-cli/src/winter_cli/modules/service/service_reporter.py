@@ -34,6 +34,7 @@ class IServiceReporter(Protocol):
     def follow_multi_provider_error(self, provider_names: str) -> None: ...
     def status_parse_error(self, entrypoint: str, prefix: str, detail: str) -> None: ...
     def describe_parse_error(self, provider_name: str, detail: str) -> None: ...
+    def env_provision_error(self, scope: str, detail: str) -> None: ...
     def timestamps_warning(self) -> None: ...
     def time_filter_warning(self) -> None: ...
     def no_match_diagnostic(self, token_list: str) -> None: ...
@@ -123,6 +124,15 @@ class StreamServiceReporter:
             err=True,
         )
 
+    def env_provision_error(self, scope: str, detail: str) -> None:
+        self._click.echo(
+            f"warning: could not compute the environment for scope {scope!r} "
+            f"— services will run without injected WINTER_* / [env.vars] values. "
+            f"Fix the [env.vars] template in .winter/config.toml. "
+            f"Detail: {detail}",
+            err=True,
+        )
+
     def timestamps_warning(self) -> None:
         self._click.echo(
             "warning: the orchestrator supplies no per-line timestamps — timestamp prefixes omitted for affected lines",
@@ -200,6 +210,15 @@ class JsonServiceReporter:
             f"warning: provider {provider_name!r} did not emit a valid describe document "
             f"and will be skipped for service ownership resolution. "
             f"Ensure the extension implements the describe action. "
+            f"Detail: {detail}",
+            err=True,
+        )
+
+    def env_provision_error(self, scope: str, detail: str) -> None:
+        self._click.echo(
+            f"warning: could not compute the environment for scope {scope!r} "
+            f"— services will run without injected WINTER_* / [env.vars] values. "
+            f"Fix the [env.vars] template in .winter/config.toml. "
             f"Detail: {detail}",
             err=True,
         )

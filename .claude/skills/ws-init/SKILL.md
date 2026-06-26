@@ -52,11 +52,11 @@ Reconcile a single feature environment:
 winter ws init <env>
 ```
 
-If `./<env>/` doesn't already exist, this creates it (per-repo worktrees on branch `<env>`, `.winter.env` seeded with `WINTER_ENV` / `WINTER_ENV_INDEX` / `WINTER_PORT_BASE`, every extension's `on_env_init` hook fired). If it already exists, the CLI re-applies the per-repo reconcile and is a no-op for already-correct state.
+If `./<env>/` doesn't already exist, this creates it (per-repo worktrees on branch `<env>`, env index allocated for stable port assignment, every extension's `on_env_init` hook fired). If it already exists, the CLI re-applies the per-repo reconcile and is a no-op for already-correct state. Use `source <(winter env <env>)` (or `winter service up`) to get the runtime variables.
 
 If the CLI exits non-zero, stop and surface the per-repo errors — don't fall through to the post-init step on a half-built env.
 
-Then, if `workspace:/ai/project/project-setup.md` exists, apply its post-init steps to `<env>`. Read the file and follow its instructions for this environment — it typically appends project-specific variables to `<env>/.winter.env` below the managed block, provisions per-environment databases, generates other env files, etc. If a step describes state that's already present (e.g. an env file that already has the project block), report it as `already-applied` and move on rather than re-running.
+Then, if `workspace:/ai/project/project-setup.md` exists, apply its post-init steps to `<env>`. Read the file and follow its instructions for this environment — it typically provisions per-environment databases, generates project-specific env files (e.g. `.env.local`), or runs seed scripts. If a step describes state that's already present (e.g. a generated file that already exists with the right content), report it as `already-applied` and move on rather than re-running.
 
 **`project-setup.md` is assumed agent-runnable without prompts.** If a step would require user input (a missing secret, a decision the config doesn't cover), surface that as a halt with the specific gap rather than asking the question. The non-interactivity contract extends to the post-init pass.
 

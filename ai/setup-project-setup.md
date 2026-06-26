@@ -6,7 +6,7 @@
 
 ## Why it exists
 
-Each feature environment is independent — its own checkout, its own dependencies, its own ports and databases — intended to run in parallel with other feature environments on the same machine. Each environment gets a port window from its index (workspace base seeds `WINTER_PORT_BASE` in the per-environment `.winter.env`); a service orchestration extension like `winter-service-tmux` runs services that consume those vars. This is what allows multiple agents to work on different features simultaneously without interfering with each other. Without setup instructions, agents have to guess how to get things running — or ask the user every time. This file makes environment initialization fast, repeatable, and autonomous.
+Each feature environment is independent — its own checkout, its own dependencies, its own ports and databases — intended to run in parallel with other feature environments on the same machine. Each environment gets a port window from its index; `winter service` injects `WINTER_PORT_BASE` and related vars into every provider subprocess at runtime (inspectable via `winter env <name>`). This is what allows multiple agents to work on different features simultaneously without interfering with each other. Without setup instructions, agents have to guess how to get things running — or ask the user every time. This file makes environment initialization fast, repeatable, and autonomous.
 
 ## Division of responsibility: config, provision handlers, and project-setup.md
 
@@ -81,36 +81,14 @@ Probe for:
 
 The env-file *generation logic* (heredocs that write per-environment values into env files) goes into `project-setup.md` as numbered steps.
 
-#### `.winter.env` — config-driven vars via `[env.vars]`
+#### Config-driven vars via `[env.vars]`
 
-`winter ws init <name>` seeds `<name>/.winter.env` with two marker-bracketed managed blocks:
+winter computes the environment at runtime from `[env.vars]` and the managed base vars, and injects it via two paths:
 
-1. **Base block** (written first, at the top) — the env's identity and port window:
+- **`winter service up`** injects the full env into every provider subprocess environment directly.
+- **`winter env <name>`** prints the vars as sourceable `export KEY=value` lines for shell use.
 
-```
-# >>> winter (managed) — base environment variables; do not edit by hand
-WINTER_ENV=alpha
-WINTER_ENV_INDEX=1
-WINTER_PORT_BASE=4020
-WINTER_WORKSPACE_PORT_BASE=4000
-# <<< winter (managed) — base block end; hand-managed vars go below the last managed block
-```
-
-(`WINTER_WORKSPACE_PORT_BASE` is the index-0 base shared by every env — the port band reserved for workspace-scope singleton services. The workspace root also gets its own `.winter.workspace.env` carrying `WINTER_WORKSPACE_PORT_BASE` for that scope.)
-
-2. **Derived-vars block** (written below the base block, when `[env.vars]` is declared in `.winter/config.toml`) — project-specific derived variables:
-
-```
-# >>> winter (managed) — [env.vars] derived variables; do not edit by hand
-export BACKEND_PORT=4020
-export FRONTEND_PORT=4021
-export DATABASE_URL=postgres://localhost/myapp_4022
-# <<< winter (managed) — end of [env.vars] derived variables
-```
-
-Both blocks are rewritten idempotently on every `winter ws init` run. Hand-managed lines go below **both** managed blocks (below the `[env.vars]` block closing marker when present, or below the base block otherwise) and are preserved across re-runs.
-
-**Declare project-specific port offsets in `[env.vars]`** rather than appending them by hand per environment:
+**Declare project-specific port offsets in `[env.vars]`** rather than writing them by hand per environment:
 
 ```toml
 # .winter/config.toml
@@ -121,7 +99,14 @@ DB_PORT       = "${WINTER_PORT_BASE+2}"
 DATABASE_URL  = "postgres://localhost:${DB_PORT}/myapp-${WINTER_ENV}"  # reuses DB_PORT and WINTER_ENV
 ```
 
-This means every new environment gets the right ports automatically on `winter ws init <name>`, without any manual step in `project-setup.md`. Use this for any variable derived from the managed base vars (`WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE`, `WINTER_ENV`, `WINTER_ENV_INDEX`) or from an earlier `[env.vars]` entry. Only variables that depend on state winter doesn't know (secrets, externally provisioned values) need to be documented in `project-setup.md` instead.
+This means every new environment gets the right ports automatically, without any manual step in `project-setup.md`. Use this for any variable derived from the managed base vars (`WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE`, `WINTER_ENV`, `WINTER_ENV_INDEX`) or from an earlier `[env.vars]` entry. Only variables that depend on state winter doesn't know (secrets, externally provisioned values) need to be documented in `project-setup.md` instead.
+
+To inspect the computed vars for a given env:
+
+```bash
+winter env alpha                        # print as export lines
+source <(winter env alpha)              # source into the current shell
+```
 
 For the full `[env.vars]` token grammar and supported substitutions, see [winter-cli/configuration/ports-and-environments.md — `[env.vars]`](./winter-cli/configuration/ports-and-environments.md#per-env-derived-variables).
 

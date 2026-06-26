@@ -64,10 +64,10 @@ def _opts(**kwargs: Any) -> StatusOptions:
     return StatusOptions(**defaults)
 
 
-class _FakeEnvFileSourcer:
-    """Fake IEnvFileSourcer that returns empty dicts for all scopes."""
+class _FakeEnvProvisionerService:
+    """Fake EnvProvisionerService that returns empty dicts for all scopes."""
 
-    def source(self, scope: str, ws_root: Path) -> dict[str, str]:
+    def compute(self, scope: str) -> dict[str, str]:
         return {}
 
 
@@ -144,9 +144,8 @@ def _svc(
     matrix_svc = ServiceStatusMatrixService(
         subprocess_runner=actual_runner,
         describe_service=describe_svc,
-        env_file_sourcer=_FakeEnvFileSourcer(),
+        env_provisioner=_FakeEnvProvisionerService(),
         status_parser=StatusDocumentParser(),
-        workspace_config=_ws_config(),
         env_index_registry=_FakeEnvIndexRegistry(assignments),
         workspace_root=WS,
     )

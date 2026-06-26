@@ -105,7 +105,7 @@ on_env_destroy         = "./hooks/destroy-worktree.sh"
 on_workspace_reconcile = "./hooks/reconcile-workspace.sh"
 ```
 
-- `on_env_init` fires after `winter ws init <env>` creates every per-repo worktree and seeds `.winter.env`. Use it to provision per-env state (tmux sessions, databases, watchers).
+- `on_env_init` fires after `winter ws init <env>` creates every per-repo worktree and allocates the env index. Use it to provision per-env state (tmux sessions, databases, watchers).
 - `on_env_destroy` fires *before* `winter ws destroy <env>` removes any per-repo worktree or the env directory. Use it to release whatever `on_env_init` provisioned.
 - `on_workspace_reconcile` fires **once per workspace-level reconcile** — specifically `winter ws init` (no target) and `winter ws init --all`. Fires after standalone/extension repos are reconciled so the extension exists on disk, and for the `--all` path, before the per-env loop. Use it for one-time workspace setup that should re-run when the workspace is re-reconciled (e.g. writing workspace-level config files, registering extensions with external tools).
 

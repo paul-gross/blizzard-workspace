@@ -42,7 +42,7 @@ Winter is two pieces of machinery: a directory convention and a CLI that maintai
 
 **Directory convention.** Each declared project repo is cloned into `projects/<name>/` (the source-of-truth checkout, always on its main branch). Feature environments live in their own top-level directories — configurable shorthands like `alpha/`, `beta/`, ... or arbitrary names like `feature-xyz/` or `jira-123-feature/` — each containing a per-repo git worktree on a branch matching the directory name. Extensions are cloned within the workspace (wherever you like) and discovered automatically. Nothing in your application repos changes: the workspace is the only thing that knows about winter.
 
-**`winter ws init <name>`** is the single entry point: it creates the feature environment — worktrees, git identity, ports, and environment files (a custom `.winter.env` in each feature environment that your agent embellishes) — and reconciles every installed extension's capabilities through their lifecycle hooks. Idempotent — safe to re-run. With no name, it bootstraps the workspace itself rather than a feature environment.
+**`winter ws init <name>`** is the single entry point: it creates the feature environment — worktrees, git identity, stable port allocation — and reconciles every installed extension's capabilities through their lifecycle hooks. Idempotent — safe to re-run. With no name, it bootstraps the workspace itself rather than a feature environment. Environment variables (the winter base vars like `WINTER_ENV` and `WINTER_PORT_BASE`, plus your `[env.vars]` entries) are computed at runtime and sourced with `source <(winter env <name>)` or injected automatically by `winter service up`.
 
 **Configurable port allocation.** Each environment gets a configurable port window keyed off its index (`base_port + index * ports_per_env`; defaults: `base_port=4000`, `ports_per_env=20`). Preconfigured shorthands (like alpha, beta, …) have fixed indices (alpha=1, beta=2, …) so alpha starts at 4020, beta at 4040, and so on. Multiple environments can run their services simultaneously without colliding.
 
@@ -87,6 +87,7 @@ To take framework updates after the initial fork, run `/ws-update`: it fetches t
 The workspace includes a CLI (for agent use) and a TUI dashboard (for human use) that together expose the full feature-environment surface across all project repos at once:
 
 - **Feature environments & worktrees** — create, inspect, sync (`fetch`/`pull`/`push`/`merge`), connect, check out, and tear down feature environments and their per-repo worktrees
+- **Runtime environment** — print a scope's `WINTER_*` and `[env.vars]` variables as shell-sourceable `export` lines (`winter env <scope>`)
 - **Repositories** — add, remove, and list the repos the workspace tracks
 - **Service orchestration** — start, stop, restart, inspect, and tail the logs of a feature env's services
 - **Resource provisioning** — bring a fresh environment to a working state: install dependencies, create resources, load seed data

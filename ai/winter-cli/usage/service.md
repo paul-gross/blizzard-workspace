@@ -129,7 +129,7 @@ With a single provider, `describe` is never called — the sole provider implici
 
 ### `status` (multi-provider)
 
-`status` is always built as a **two-dimensional call-matrix** (rows = scope instances, columns = owning providers), regardless of whether one or many providers are bound.  Core enumerates the matrix, sources per-scope env files, injects `WINTER_ENV`/`WINTER_ENV_INDEX` plus the scope's port band and the sourced vars into each provider subprocess, runs cells in parallel, and merges the per-cell `StatusDocument` results into a single document before filtering and rendering. The port band is `WINTER_PORT_BASE` for a feature-env cell and `WINTER_WORKSPACE_PORT_BASE` for the `workspace` cell (index-0 band); the workspace cell does not inject `WINTER_PORT_BASE`, matching what `.winter.workspace.env` seeds.
+`status` is always built as a **two-dimensional call-matrix** (rows = scope instances, columns = owning providers), regardless of whether one or many providers are bound.  Core enumerates the matrix, computes the full env map for each scope via `EnvProvisionerService` (the same computation `winter env <scope>` prints), injects the scope vars into each provider subprocess, runs cells in parallel, and merges the per-cell `StatusDocument` results into a single document before filtering and rendering.  For a feature-env cell the injected set includes `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE`, and all `[env.vars]` entries; for the `workspace` cell `WINTER_PORT_BASE` is NOT injected — the workspace band is `WINTER_WORKSPACE_PORT_BASE` only, so the name carries one meaning everywhere.
 
 **Registry-driven enumeration:** scope rows are the **configured env names** from the workspace env-index registry (not a filesystem scan) plus the `workspace` scope.  Core owns enumeration — the orchestrator is called once per `(provider, scope)` cell with an explicit `<scope>/*` pattern so that it can report configured-but-stopped envs without needing to scan the file system itself.
 
@@ -218,7 +218,7 @@ The `catalog` action takes no positionals and is called by winter internally dur
 
 ### Always-present environment variables
 
-Every dispatch — regardless of action — sets these four variables and runs the entrypoint with **cwd at the workspace root**:
+Every dispatch — regardless of action — sets these variables and runs the entrypoint with **cwd at the workspace root**:
 
 | Var | Meaning |
 |-----|---------|
@@ -226,8 +226,14 @@ Every dispatch — regardless of action — sets these four variables and runs t
 | `WINTER_EXT_DIR` | Absolute path to this orchestrator extension's clone (the dir containing `winter-ext.toml`). |
 | `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension. |
 | `WINTER_EXT_CONFIG_DIR` | Absolute path to this extension's writable config/asset directory (default `.winter/config/<repo-name>/`); the writable counterpart to the read-only `WINTER_EXT_DIR`. Set via `config_dir` in `[[standalone_repository]]`, or defaults to the workspace-relative `.winter/config/<name>/` path. |
+| `WINTER_ENV` | The scope name — a feature-env name (e.g. `alpha`) or the reserved literal `workspace`. Injected on `up`/`down`/`status` only. |
+| `WINTER_ENV_INDEX` | The allocated integer index for the scope (0 for workspace, 1-N for feature envs). Injected on `up`/`down`/`status` only. |
+| `WINTER_PORT_BASE` | Port-band start for this scope: `base_port + WINTER_ENV_INDEX * ports_per_env`. Injected on `up`/`down`/`status` only. |
+| `WINTER_WORKSPACE_PORT_BASE` | Port-band start for index 0 (the workspace scope); equals `WINTER_PORT_BASE` when scope is `workspace`. Injected on `up`/`down`/`status` only. |
 
-These four form the winter base extension contract, set uniformly by `core/extension_invocation.py::build_extension_env`. They are defined for the hook/doctor/lint dispatches in [configuration/extensions.md](../configuration/extensions.md#hook-env-var-contract); `winter service` provides them identically. Working directory varies by surface: `winter service`, `doctor`, `lint`, and the `on_workspace_reconcile` hook run at the workspace root, while the `on_env_*` hooks run at the env root.
+Plus any `[env.vars]` entries declared in `.winter/config.toml` — these are computed and injected into the provider process on `up`/`down`/`status` by `EnvProvisionerService` alongside the scope vars above. The full set is inspectable via `winter env <scope>` (see [env.md](./env.md)). `up`/`down` and the `status` matrix inject the scope env for the target scope; `restart` and `logs` forward patterns verbatim and **do not inject scope vars** into the provider process (only the four base extension vars) — a tmux-style provider's services obtain their env by sourcing `winter env <scope>` in their own runtime, and docker restart/logs operate on already-provisioned resources.
+
+The first four form the winter base extension contract, set uniformly by `core/extension_invocation.py::build_extension_env`. They are defined for the hook/doctor/lint dispatches in [configuration/extensions.md](../configuration/extensions.md#hook-env-var-contract); `winter service` provides them identically. Working directory varies by surface: `winter service`, `doctor`, `lint`, and the `on_workspace_reconcile` hook run at the workspace root, while the `on_env_*` hooks run at the env root.
 
 ### Per-action env var: `WINTER_SERVICE_MANIFEST`
 
@@ -272,7 +278,7 @@ Fields per entry:
 
 ### Per-action parameters
 
-The four always-present base vars above are exported on every dispatch. `WINTER_SERVICE_MANIFEST` is additionally set on `up` when extension-declared services exist (see above). All action parameters travel on argv.
+The always-present vars above — the four base-contract vars — are exported on every dispatch. The scope vars (`WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE`, and `[env.vars]` entries) are additionally injected on `up`/`down`/`status`; `restart` and `logs` forward verbatim with only the four base vars (services source their scope env via `winter env <scope>` at runtime). `WINTER_SERVICE_MANIFEST` is additionally set on `up` when extension-declared services exist (see above). All action parameters travel on argv.
 
 Service selection for `status`, `restart`, and `logs` is positional argv. The `logs` action additionally carries its render options as CLI flags appended **after** the positional patterns, mirroring `winter service logs`' own surface:
 

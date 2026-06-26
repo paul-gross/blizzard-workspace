@@ -84,10 +84,11 @@ ALLOWED_FILES = frozenset(
         # Env-index utility — workspace-lifecycle carve-out: reads base_port, ports_per_env,
         # env_aliases, and envs_per_workspace to compute per-env port assignments.
         "modules/workspace/env_index.py",
-        # Status matrix service — carve-out: reads base_port, ports_per_env,
-        # env_aliases, and envs_per_workspace to compute per-env port assignments
-        # for each status cell via build_env_trio; same rationale as execution_service.py.
-        "modules/service/service_status_matrix_service.py",
+        # Env provisioner — translation carve-out: reads base_port, ports_per_env,
+        # env_aliases, envs_per_workspace, and env_vars to compute the full runtime
+        # env map (WINTER_* trio + [env.vars] render) for any scope.  Single source
+        # of truth replacing the file-seeding approach.
+        "modules/workspace/env_provisioner.py",
     }
 )
 

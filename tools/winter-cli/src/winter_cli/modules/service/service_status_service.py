@@ -12,11 +12,11 @@ Multi-provider call-matrix (Phase 2, winter#109)
 The status action builds a two-dimensional call-matrix: rows are scope
 instances (configured env names + the workspace scope), columns are owning
 providers.  Core enumerates the matrix via ``ServiceStatusMatrixService``,
-sources the correct ``.winter.env`` file per scope, injects
-``WINTER_ENV``/``WINTER_ENV_INDEX``/``WINTER_PORT_BASE`` and the sourced
-vars into each provider subprocess, runs cells in parallel, and merges the
-per-cell documents into a single ``StatusDocument`` before filtering and
-rendering.
+computes the full env map for each scope via ``EnvProvisionerService``,
+injects ``WINTER_ENV``/``WINTER_ENV_INDEX``/``WINTER_PORT_BASE`` and all
+``[env.vars]`` vars into each provider subprocess, runs cells in parallel,
+and merges the per-cell documents into a single ``StatusDocument`` before
+filtering and rendering.
 
 For scope-qualified patterns (containing ``/``), the matrix is narrowed to
 matching ``(provider, scope)`` cells — both the provider axis (ownership,

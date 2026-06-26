@@ -34,7 +34,7 @@ winter ws pull alpha --autostash   # stash dirty tree first, restore after
 
 ### Start a new feature
 ```bash
-winter ws init alpha                       # ensures alpha/ exists (structural: worktrees, .winter.env, cmd list)
+winter ws init alpha                       # ensures alpha/ exists (structural: worktrees, env-index, cmd list)
 winter provision alpha                     # readiness: dependencies, resources, seed data (see usage/provision.md)
 winter ws connect alpha feature/my-feature
 ```

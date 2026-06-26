@@ -188,8 +188,12 @@ class TestInitRecordsRegistry:
         assert ok is True
         assert registry.get_index("alpha") == 1
 
-    def test_init_env_file_index_matches_registry(self) -> None:
-        """.winter.env WINTER_ENV_INDEX matches what the registry recorded."""
+    def test_init_registry_records_correct_index_for_alias(self) -> None:
+        """After reconcile_env for an alias, the registry holds the correct fixed index.
+
+        Env files are no longer written — env is injected at runtime via
+        EnvProvisionerService, which reads from the registry.
+        """
         demo_path = WORKSPACE_ROOT / "projects" / "demo"
         fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", demo_path])
         fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
@@ -203,14 +207,12 @@ class TestInitRecordsRegistry:
         svc.reconcile_env("alpha", FakeInitReporter())
 
         recorded_index = registry.get_index("alpha")
-        assert recorded_index is not None
+        assert recorded_index == 1
+        # No .winter.env file — env is injected at runtime.
+        assert (WORKSPACE_ROOT / "alpha" / ".winter.env") not in fs.files
 
-        env_file = WORKSPACE_ROOT / "alpha" / ".winter.env"
-        content = fs.files[env_file]
-        assert f"WINTER_ENV_INDEX={recorded_index}" in content
-
-    def test_init_env_file_port_base_matches_port_base_for_index(self) -> None:
-        """.winter.env WINTER_PORT_BASE == config.port_base_for_index(registry_index)."""
+    def test_init_no_env_file_written(self) -> None:
+        """reconcile_env does NOT write .winter.env — env vars are injected at runtime."""
         demo_path = WORKSPACE_ROOT / "projects" / "demo"
         fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", demo_path])
         fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
@@ -221,15 +223,10 @@ class TestInitRecordsRegistry:
         cfg = _default_config()
         registry = _InMemoryRegistry()
         svc = _init_service(cfg, fs, FakeSubprocessRunner(), git, registry)
-        svc.reconcile_env("alpha", FakeInitReporter())
+        ok = svc.reconcile_env("alpha", FakeInitReporter())
 
-        recorded_index = registry.get_index("alpha")
-        assert recorded_index is not None
-        expected_port_base = cfg.port_base_for_index(recorded_index)
-
-        env_file = WORKSPACE_ROOT / "alpha" / ".winter.env"
-        content = fs.files[env_file]
-        assert f"WINTER_PORT_BASE={expected_port_base}" in content
+        assert ok is True
+        assert (WORKSPACE_ROOT / "alpha" / ".winter.env") not in fs.files
 
     def test_init_idempotent_reuses_recorded_index(self) -> None:
         """A second reconcile_env reuses the registry-recorded index (no collision probe)."""
@@ -266,7 +263,6 @@ class TestDestroyRemovesRegistry:
         return FakeFilesystem(
             directories=[WORKSPACE_ROOT / "projects", WORKSPACE_ROOT / "projects" / "demo", env_root, worktree_path],
             files={
-                env_root / ".winter.env": "WINTER_ENV=alpha\n",
                 WORKSPACE_ROOT / ".git" / "info" / "exclude": "",
             },
         )

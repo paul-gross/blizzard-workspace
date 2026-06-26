@@ -1,6 +1,6 @@
 # Ports & environments
 
-Winter assigns each feature environment a port band derived from its index, and can write per-env derived variables into each env's `.winter.env`. These keys live in `.winter/config.toml`.
+Winter assigns each feature environment a port band derived from its index, and computes per-env derived variables at runtime. These keys live in `.winter/config.toml`.
 
 ## Port allocation
 
@@ -17,7 +17,7 @@ envs_per_workspace = 48   # max feature-env index (1..envs_per_workspace); must 
 
 ## Per-env derived variables
 
-The `[env.vars]` table is rendered into each env's `.winter.env` as a second managed block on `winter ws init`. Values support `${...}` substitution; literal text passes through unchanged.
+The `[env.vars]` table declares per-env derived variables. Values support `${...}` substitution; literal text passes through unchanged. These variables are computed at runtime by `EnvProvisionerService` and injected into every provider subprocess by `winter service`. To inspect the computed values for a scope, use `winter env <scope>` (see [usage/env.md](../usage/env.md)).
 
 ```toml
 [env.vars]
@@ -34,7 +34,7 @@ DATABASE_URL = "postgresql://wts:wts@localhost:${WTS_DB_PORT}/wts-${WINTER_ENV}"
 
 `NAME` resolves against an **accumulating scope**: seeded with the managed base vars (`WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE`) and grown by each rendered `[env.vars]` entry **in TOML declaration order** — so a later entry can reuse an earlier one (as `DATABASE_URL` reuses `WTS_DB_PORT` above). `WINTER_PORT_BASE` is not special: `${WINTER_PORT_BASE+N}` is just the base-var case.
 
-Resolution happens in the parser — concrete values are written into `.winter.env`, not deferred to shell-source time. An undefined name, `+N` applied to a non-integer value, or any other malformed `${...}` token is a fatal per-env error at init time.
+Resolution is computed at dispatch time by `EnvProvisionerService` — concrete values are injected into the subprocess environment. An undefined name, `+N` applied to a non-integer value, or any other malformed `${...}` token is a fatal error surfaced when the command runs.
 
 ## Index reservation
 

@@ -162,6 +162,7 @@ class FakeServiceReporter:
         self.time_filter_warning_called: int = 0
         self.no_match_diagnostic_calls: list[str] = []
         self.readiness_timeout_calls: list[tuple[str, float, tuple[str, ...]]] = []
+        self.env_provision_error_calls: list[tuple[str, str]] = []
 
     def status_document(self, doc: Any, parser: Any) -> None:
         self.status_documents.append((doc, parser))
@@ -183,6 +184,9 @@ class FakeServiceReporter:
 
     def describe_parse_error(self, provider_name: str, detail: str) -> None:
         self.describe_parse_error_calls.append((provider_name, detail))
+
+    def env_provision_error(self, scope: str, detail: str) -> None:
+        self.env_provision_error_calls.append((scope, detail))
 
     def timestamps_warning(self) -> None:
         self.timestamps_warning_called += 1

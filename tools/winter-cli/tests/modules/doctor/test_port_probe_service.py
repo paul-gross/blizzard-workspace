@@ -82,13 +82,21 @@ def _empty_fs() -> FakeFilesystem:
 
 
 def _env_fs(*env_names: str) -> FakeFilesystem:
-    """Build a FakeFilesystem with env directories (each with a .winter.env)."""
+    """Build a FakeFilesystem with env directories (each with a git-worktree child).
+
+    A git worktree directory has a ``.git`` FILE (not directory) pointing back to
+    the main clone.  This is the canonical marker that ``_discover_env_dirs`` uses
+    after the elimination of ``.winter.env``.
+    """
     files: dict[Path, str] = {}
     directories = {WORKSPACE_ROOT}
     for name in env_names:
         env_dir = WORKSPACE_ROOT / name
         directories.add(env_dir)
-        files[env_dir / ".winter.env"] = f"WINTER_ENV={name}\n"
+        # Simulate a repo worktree child: <env>/<repo_name>/ containing a .git file.
+        worktree_dir = env_dir / "my-repo"
+        directories.add(worktree_dir)
+        files[worktree_dir / ".git"] = f"gitdir: ../../projects/my-repo/.git/worktrees/{name}\n"
     return FakeFilesystem(files=files, directories=directories)
 
 

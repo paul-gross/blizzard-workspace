@@ -29,7 +29,7 @@ winter provision alpha --dry-run --json       # structured plan as NDJSON (see b
 
 ## Relationship to `winter ws init`
 
-`winter ws init` is structural: it creates worktrees, branches, seeds `.winter.env`, copies git identity, writes excludes, and fires `on_env_init` hooks. It also runs each repo's `cmd` list — that list is now a lightweight trust/bootstrap step (e.g. `mise trust`, `direnv allow`) rather than full dependency installation.
+`winter ws init` is structural: it creates worktrees, branches, allocates a stable env index, copies git identity, writes excludes, and fires `on_env_init` hooks. It also runs each repo's `cmd` list — that list is a lightweight trust/bootstrap step (e.g. `mise trust`, `direnv allow`) rather than full dependency installation. Runtime environment variables are computed and injected by `winter service` or printed by `winter env <name>`.
 
 Run `winter provision <env>` after `winter ws init` to bring the environment to a working state: install dependencies, provision resources, and load seed data. For project-specific readiness steps not yet migrated to `[[provision.*]]` handlers, also follow `workspace:/ai/project/project-setup.md`.
 

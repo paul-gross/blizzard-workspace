@@ -292,8 +292,8 @@ class DestroyService:
             if not self._remove_git_worktree(repo, wt_path, force, reporter):
                 success = False
 
-        # Phase 4: drop the env directory itself (covers .winter.env and any
-        # stray files from project setup steps).
+        # Phase 4: drop the env directory itself (covers any stray files
+        # from project setup steps; no .winter.env is written in the new model).
         if not self._remove_env_directory(name, env_root, reporter):
             success = False
 

@@ -3,9 +3,14 @@ version = "v1"
 title   = "Service orchestration"
 
 # Always-present environment variables set by winter on every dispatch,
-# regardless of action. These four form the winter base extension contract:
+# regardless of action. The first four form the winter base extension contract:
 # workspace context, extension identity, and writable config location.
 # Source of truth: core/extension_invocation.py::build_extension_env.
+# The next four are scope vars injected by EnvProvisionerService on up/down/status;
+# restart/logs do NOT inject scope vars into the provider process (only the four
+# base extension vars) — a tmux-style provider's services obtain their env by
+# sourcing `winter env <scope>` in their own runtime, and docker restart/logs
+# operate on already-provisioned resources.
 [[env_var]]
 name        = "WINTER_WORKSPACE_DIR"
 description = "Absolute path to the workspace root."
@@ -21,6 +26,22 @@ description = "The resolved symlink prefix for this extension."
 [[env_var]]
 name        = "WINTER_EXT_CONFIG_DIR"
 description = "Absolute path to this extension's writable config/asset directory (default `.winter/config/<repo-name>/`); the writable counterpart to the read-only `WINTER_EXT_DIR`."
+
+[[env_var]]
+name        = "WINTER_ENV"
+description = "The scope name — a feature-env name (e.g. 'alpha') or the reserved literal 'workspace'. Injected on up/down/status only."
+
+[[env_var]]
+name        = "WINTER_ENV_INDEX"
+description = "The allocated integer index for the scope (0 for workspace, 1-N for feature envs). Injected on up/down/status only."
+
+[[env_var]]
+name        = "WINTER_PORT_BASE"
+description = "Port-band start for this scope: config.base_port + WINTER_ENV_INDEX * config.ports_per_env. Injected on up/down/status only."
+
+[[env_var]]
+name        = "WINTER_WORKSPACE_PORT_BASE"
+description = "Port-band start for index 0 (the workspace scope); always equals WINTER_PORT_BASE when scope is 'workspace'. Injected on up/down/status only."
 
 # Exit-code conventions for the service capability.
 [[exit_code]]
@@ -77,7 +98,9 @@ summary = "Stream or emit the log backlog for matched services as NDJSON on stdo
 #   --tail        always emitted, carrying the resolved count string (N or all).
 #   --since/--until carry pre-normalised RFC3339 timestamps; omitted when empty.
 #   --follow/--timestamps emitted as bare flags only when true.
-# Only the four always-present WINTER_* base vars above are set on a logs dispatch.
+# Env: logs receives only the four always-present base extension vars (not scope
+# vars). Services obtain their scope env by sourcing `winter env <scope>` at
+# runtime; docker-style providers operate on already-provisioned resources.
 
 [[action]]
 name    = "describe"

@@ -247,3 +247,88 @@ def test_down_injects_provider_env_vars() -> None:
     assert call_env["WINTER_WORKSPACE_DIR"] == str(WS)
     assert call_env["WINTER_EXT_DIR"] == str(EXT_B)
     assert call_env["WINTER_EXT_PREFIX"] == "provider-b"
+
+
+def test_up_injects_provisioned_env_vars_when_provisioner_present() -> None:
+    """When an env_provisioner is present, its computed vars are merged into the subprocess env."""
+
+    class _FakeProvisioner:
+        def compute(self, scope: str) -> dict[str, str]:
+            return {
+                "WINTER_ENV": scope,
+                "WINTER_PORT_BASE": "4060",
+                "DATABASE_URL": f"postgres://localhost/myapp_{scope}",
+            }
+
+    pa = _pa()
+    runner = FakeSubprocessRunner()
+    svc = ServiceFanOutService(
+        subprocess_runner=runner,
+        workspace_root=WS,
+        env_provisioner=_FakeProvisioner(),
+    )
+
+    svc.up("alpha", [pa])
+
+    assert len(runner.call_envs) == 1
+    call_env = runner.call_envs[0]
+    assert call_env["WINTER_ENV"] == "alpha"
+    assert call_env["WINTER_PORT_BASE"] == "4060"
+    assert call_env["DATABASE_URL"] == "postgres://localhost/myapp_alpha"
+
+
+def test_up_no_provisioned_env_vars_when_provisioner_absent() -> None:
+    """Without an env_provisioner, scope vars are not injected into the subprocess env."""
+    pa = _pa()
+    runner = FakeSubprocessRunner()
+    svc = _make_fan_out(runner)
+
+    svc.up("alpha", [pa])
+
+    call_env = runner.call_envs[0]
+    assert "WINTER_ENV" not in call_env
+
+
+# ── env provision error resilience ───────────────────────────────────────────
+
+
+def test_provision_error_does_not_raise_on_up_or_down() -> None:
+    """A ValueError from the provisioner degrades to no-injection; up/down do not raise."""
+
+    class _ErrorProvisioner:
+        def compute(self, scope: str) -> dict[str, str]:
+            raise ValueError(f"bad template for {scope}")
+
+    class _FakeReporter:
+        def __init__(self) -> None:
+            self.provision_errors: list[tuple[str, str]] = []
+
+        def env_provision_error(self, scope: str, detail: str) -> None:
+            self.provision_errors.append((scope, detail))
+
+    pa = _pa()
+    runner = FakeSubprocessRunner()
+    reporter = _FakeReporter()
+    svc = ServiceFanOutService(
+        subprocess_runner=runner,
+        workspace_root=WS,
+        env_provisioner=_ErrorProvisioner(),
+        reporter=reporter,  # type: ignore[arg-type]
+    )
+
+    # up must not raise; provider still runs (degraded to no injection)
+    code_up = svc.up("alpha", [pa])
+    assert code_up == 0
+
+    # down must not raise; provider still runs
+    code_down = svc.down("alpha", [pa])
+    assert code_down == 0
+
+    # reporter received env_provision_error for each call (one up + one down)
+    assert len(reporter.provision_errors) == 2
+    assert all(scope == "alpha" for scope, _ in reporter.provision_errors)
+
+    # The provider did run despite the error (both up and down invocations)
+    call_cmds = [tuple(c[0]) for c in runner.call_calls]
+    assert (_EP_A, "up", "alpha") in call_cmds
+    assert (_EP_A, "down", "alpha") in call_cmds

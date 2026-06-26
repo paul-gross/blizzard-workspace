@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import FakeConfigFileReader, FakeFilesystem, FakeSpecLoader, FakeSubprocessRunner
+from tests.conftest import (
+    FakeConfigFileReader,
+    FakeFilesystem,
+    FakeSpecLoader,
+    FakeSubprocessRunner,
+)
 from winter_cli.modules.capability.capability_registry_service import CapabilityRegistryService
 from winter_cli.modules.service.describe_parser import DescribeResultParser
 from winter_cli.modules.service.orchestrator_resolver import ServiceOrchestratorResolver

@@ -21,7 +21,7 @@ The CLI treats pinned repos specially across commands:
 winter ws init
 ```
 
-This reads `.winter/config.toml`, clones every declared repo that's missing into `projects/`, applies git identity, writes git-exclude entries, and runs each repo's `cmd` list. Safe to re-run. It also seeds `.winter.workspace.env` at the workspace root with `WINTER_WORKSPACE_PORT_BASE` for the workspace (index-0) scope, and git-excludes both that file and the runtime `.winter/logs/` capture dir.
+This reads `.winter/config.toml`, clones every declared repo that's missing into `projects/`, applies git identity, writes git-exclude entries, and runs each repo's `cmd` list. Safe to re-run. It also git-excludes the runtime `.winter/logs/` capture dir.
 
 Raw equivalent for a single repo:
 
@@ -44,12 +44,12 @@ This command:
 - For pinned repos, wires the upstream to `origin/<main-branch>` — see [Pinned repos](#pinned-repos).
 - For non-pinned repos that are **newly added** (worktree absent before this run) and have no upstream: if every non-pinned sibling worktree that already exists agrees on the same upstream, init connects the new worktree to that inferred ref (e.g. `origin/master` or `origin/<feature-branch>`). When siblings diverge or there is no connected sibling to infer from, the worktree is left unconnected — use `winter ws connect` explicitly in that case. See [Connecting a feature environment](#connecting-a-feature-environment-to-a-remote-feature-branch).
 - Runs each repo's `cmd` list.
-- Seeds `./<name>/.winter.env` with `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, and `WINTER_WORKSPACE_PORT_BASE` (the index-0 base shared by every env).
+- Allocates and persists a stable index for `<name>` so runtime env injection (`WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE`) is collision-free. No env file is written — env is injected at dispatch time. Inspect with `winter env <name>`.
 - Runs every installed extension's `on_env_init` hook.
 
 Greek letters (`alpha`, `beta`, …) are the convention. The first 10 (`alpha`…`kappa`) are the default `env_aliases` and receive fixed port-offset indices; other names hash into a higher band. Any valid directory name is accepted.
 
-After this runs, `winter ws init` is structural — it creates the worktrees, seeds `.winter.env`, and runs each repo's `cmd` list as a lightweight trust/bootstrap step (e.g. `mise trust`, `direnv allow`), not full dependency installation.
+After this runs, `winter ws init` is structural — it creates the worktrees, allocates the env index, and runs each repo's `cmd` list as a lightweight trust/bootstrap step (e.g. `mise trust`, `direnv allow`), not full dependency installation.
 
 To bring the environment to a working state, run:
 
