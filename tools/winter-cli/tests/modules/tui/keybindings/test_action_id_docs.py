@@ -1,6 +1,6 @@
 """The documented action-id table is the single source of truth — pin it.
 
-`actions.py` instructs authors to keep `ai/winter-cli/usage/dashboard.md` in sync
+`actions.py` instructs authors to keep `context/winter-cli/usage/dashboard.md` in sync
 when they add, rename, or remove a built-in action. This test converts that
 honor-system reminder into a gate: the action ids in the dashboard doc's
 keybindings table must match `all_builtin_action_ids()` exactly, so a new
@@ -15,9 +15,9 @@ from pathlib import Path
 from winter_cli.modules.tui.keybindings.actions import all_builtin_action_ids
 
 # this file -> keybindings/tui/modules/tests/winter-cli/tools/<repo root>.
-# The dashboard usage doc lives in the winter repo's ai/ tree.
+# The dashboard usage doc lives in the winter repo's context/ tree.
 _REPO_ROOT = Path(__file__).resolve().parents[6]
-_DASHBOARD_MD = _REPO_ROOT / "ai" / "winter-cli" / "usage" / "dashboard.md"
+_DASHBOARD_MD = _REPO_ROOT / "context" / "winter-cli" / "usage" / "dashboard.md"
 
 # An action id: dotted lowercase segments. Excludes the `plugin.<name>` template.
 _ACTION_ID = re.compile(r"`([a-z]+(?:\.[a-z_]+)+)`")

@@ -67,7 +67,7 @@ def test_parses_findings_under_core_source() -> None:
     svc, _ = _build_service(
         run_response=SubprocessResult(
             0,
-            '{"check": "extractability", "status": "fail", "message": "layering", "file": "ai/x.md", "line": 3}\n',
+            '{"check": "extractability", "status": "fail", "message": "layering", "file": "context/x.md", "line": 3}\n',
             "",
         )
     )
@@ -80,7 +80,7 @@ def test_parses_findings_under_core_source() -> None:
     assert finding.source == CORE_SOURCE
     assert finding.check == "extractability"
     assert finding.status == LintStatus.fail
-    assert finding.file == "ai/x.md"
+    assert finding.file == "context/x.md"
     assert finding.line == 3
 
 
@@ -122,7 +122,7 @@ def tmp_ws(tmp_path: Path) -> Path:
 
 def test_file_under_threshold_passes(tmp_ws: Path) -> None:
     """A markdown file smaller than both thresholds produces no findings."""
-    md = tmp_ws / "ai" / "small.md"
+    md = tmp_ws / "context" / "small.md"
     md.parent.mkdir(parents=True)
     md.write_text("# tiny\n")  # well under any threshold
 
@@ -134,23 +134,23 @@ def test_file_under_threshold_passes(tmp_ws: Path) -> None:
 
 def test_injected_file_over_tighter_threshold_fails(tmp_ws: Path) -> None:
     """A file in the @import graph that exceeds the injected threshold is flagged."""
-    # Create CLAUDE.md that @imports ai/index.md
+    # Create CLAUDE.md that @imports context/index.md
     claude_md = tmp_ws / "CLAUDE.md"
-    ai_index = tmp_ws / "ai" / "index.md"
-    ai_index.parent.mkdir(parents=True)
+    context_index = tmp_ws / "context" / "index.md"
+    context_index.parent.mkdir(parents=True)
 
-    # ai/index.md is over the injected threshold (6000 bytes) but under reference (12000)
+    # context/index.md is over the injected threshold (6000 bytes) but under reference (12000)
     oversized_content = "x" * 7000
-    ai_index.write_bytes(oversized_content.encode())
+    context_index.write_bytes(oversized_content.encode())
 
-    claude_md.write_text("See @ai/index.md for details.\n")
+    claude_md.write_text("See @context/index.md for details.\n")
 
     check = FileSizeLintCheck(tmp_ws, FileSizeLintConfig(injected_bytes=6000, reference_bytes=12000))
     scope = LintScope(kind=LintScopeKind.all, label="all", paths=[tmp_ws])
     findings = check.check(scope)
 
-    injected_findings = [f for f in findings if f.check == FILE_SIZE_CHECK and "ai/index.md" in (f.file or "")]
-    assert injected_findings, f"Expected a finding for ai/index.md; got {findings}"
+    injected_findings = [f for f in findings if f.check == FILE_SIZE_CHECK and "context/index.md" in (f.file or "")]
+    assert injected_findings, f"Expected a finding for context/index.md; got {findings}"
     f = injected_findings[0]
     assert f.status == LintStatus.fail
     assert "7000" in f.message

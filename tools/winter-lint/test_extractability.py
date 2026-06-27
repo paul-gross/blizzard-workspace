@@ -57,7 +57,7 @@ class ReferenceScanTests(unittest.TestCase):
         self.scanner = ext.ReferenceScanner()
 
     def test_extracts_winter_contexts(self) -> None:
-        line = "see winter-harness:/python/x.md and workspace:/ai/y.md and winter:/z"
+        line = "see winter-harness:/python/x.md and workspace:/context/y.md and winter:/z"
         self.assertEqual(self.scanner.references_in_line(line), ["winter-harness", "workspace", "winter"])
 
     def test_ignores_non_winter_schemes(self) -> None:
@@ -125,17 +125,17 @@ class CheckPathsTests(unittest.TestCase):
                 ),
             )
             # A workspace doc (no winter-ext.toml ancestor) pointing at an extension.
-            self._write(root / "ai" / "guide.md", "see winter-a:/thing.md")  # FAIL layering
+            self._write(root / "context" / "guide.md", "see winter-a:/thing.md")  # FAIL layering
 
             graph = {"winter-a": [], "winter-b": [], "winter-c": [], "winter-d": []}
             findings = self.lint.check_paths([root], graph, root)
 
             msgs = sorted((f.file, f.line, f.status) for f in findings)
-            # Three failures: undeclared (modA line 4), unknown (modA line 6), layering (ai/guide line 1).
+            # Three failures: undeclared (modA line 4), unknown (modA line 6), layering (context/guide line 1).
             self.assertEqual(len(findings), 3, msgs)
             files = {f.file for f in findings}
             self.assertIn(str(Path("modA") / "doc.md"), files)
-            self.assertIn(str(Path("ai") / "guide.md"), files)
+            self.assertIn(str(Path("context") / "guide.md"), files)
             layering = [f for f in findings if "layering" in f.message]
             self.assertEqual(len(layering), 1)
 
@@ -203,13 +203,13 @@ class ImportTests(unittest.TestCase):
 
     def test_import_raw_paths_line_leading_and_inline(self) -> None:
         # Line-leading Claude @import.
-        self.assertEqual(self.scanner.import_raw_paths("@ai/x.md"), ["ai/x.md"])
+        self.assertEqual(self.scanner.import_raw_paths("@context/x.md"), ["context/x.md"])
         # Inline within prose (the cross-harness form from issue #84).
         self.assertEqual(
             self.scanner.import_raw_paths(
-                "IMPORTANT: this workspace declares pieces in @ai/x.md that matter."
+                "IMPORTANT: this workspace declares pieces in @context/x.md that matter."
             ),
-            ["ai/x.md"],
+            ["context/x.md"],
         )
         # Inline relative path with a trailing sentence period.
         self.assertEqual(self.scanner.import_raw_paths("see @../sib/y.md."), ["../sib/y.md"])
@@ -220,10 +220,10 @@ class ImportTests(unittest.TestCase):
 
     def test_import_raw_paths_trims_brackets_and_quotes(self) -> None:
         # Parenthesized and markdown-link inline references.
-        self.assertEqual(self.scanner.import_raw_paths("see (@ai/x.md)"), ["ai/x.md"])
-        self.assertEqual(self.scanner.import_raw_paths("[link](@ai/x.md)"), ["ai/x.md"])
+        self.assertEqual(self.scanner.import_raw_paths("see (@context/x.md)"), ["context/x.md"])
+        self.assertEqual(self.scanner.import_raw_paths("[link](@context/x.md)"), ["context/x.md"])
         # Quoted reference with trailing period.
-        self.assertEqual(self.scanner.import_raw_paths('read "@ai/x.md".'), ["ai/x.md"])
+        self.assertEqual(self.scanner.import_raw_paths('read "@context/x.md".'), ["context/x.md"])
 
     def test_import_raw_paths_multiple_per_line(self) -> None:
         self.assertEqual(

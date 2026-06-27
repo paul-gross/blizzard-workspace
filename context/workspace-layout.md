@@ -8,7 +8,7 @@ This workspace manages **multiple project repositories** as peers. All repos are
 ./                              workspace branch - this is where you are
 ├── CLAUDE.md                   # Workspace instructions
 ├── CLAUDE.winter.md            # Installed-extension block (@-imported from CLAUDE.md)
-├── ai/                         # Workspace documentation
+├── context/                         # Workspace documentation
 │   ├── workspace-layout.md     # This file
 │   ├── worktree-ops.md         # Git commands for this topology
 │   ├── winter-cli/             # CLI command reference + setup guide
@@ -50,7 +50,7 @@ All development happens in feature worktrees (e.g., `./alpha/<repo-name>/`).
 
 ## Inherited docs at the workspace root
 
-Many files at the workspace root — most `ai/` docs, `CLAUDE.md`, and others — are **not authored here**. They are inherited copies carried in from an upstream project repo (chiefly the `winter` tool) by the shared-lineage rebase: the workspace sits one customization commit on top of `winter/master`, so everything that commit doesn't own arrives from upstream and travels downstream automatically on the next sync.
+Many files at the workspace root — most `context/` docs, `CLAUDE.md`, and others — are **not authored here**. They are inherited copies carried in from an upstream project repo (chiefly the `winter` tool) by the shared-lineage rebase: the workspace sits one customization commit on top of `winter/master`, so everything that commit doesn't own arrives from upstream and travels downstream automatically on the next sync.
 
 **Before editing any root file, check whether it is an inherited copy.** If it is, fix it at the source repo (in that repo's feature env) and let the sync carry it down — never hand-edit the downstream copy. The next rebase clobbers the edit (if upstream touched the same lines) or silently diverges (if it didn't), so a downstream hand-edit disappears or drifts back without warning.
 

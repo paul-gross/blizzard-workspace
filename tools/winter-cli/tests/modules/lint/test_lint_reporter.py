@@ -37,7 +37,7 @@ def test_stream_groups_by_source_and_renders_file_line() -> None:
             check="path-notation",
             status=LintStatus.fail,
             message="bad ref",
-            file="ai/x.md",
+            file="context/x.md",
             line=12,
             remediation="use the prefix",
         )
@@ -47,7 +47,7 @@ def test_stream_groups_by_source_and_renders_file_line() -> None:
     out = "\n".join(click.lines)
     assert "lint scope: repo: app" in out
     assert "[wln]" in out
-    assert "path-notation ai/x.md:12 — bad ref" in out
+    assert "path-notation context/x.md:12 — bad ref" in out
     assert "→ use the prefix" in out
     assert "1 fail" in out
 

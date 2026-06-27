@@ -5,7 +5,7 @@ This workspace uses [GitHub](https://github.com) as its primary git forge for re
 ## Tooling
 
 - **`gh`** — official GitHub CLI. Auth via `gh auth login --hostname github.com` (interactive) or `echo "<token>" | gh auth login --hostname github.com --with-token` (non-interactive). Token is stored in the OS keyring.
-- **`/wg-issue`** — drafts and files a GitHub issue in the [AI-native format](../.winter/ext/github/ai/issue-format.md).
+- **`/wg-issue`** — drafts and files a GitHub issue in the [AI-native format](../.winter/ext/github/context/issue-format.md).
 - **GitHub API** — reached via `gh api <path>` for operations the CLI doesn't expose directly (bulk relabeling, comment edits, repo-setting migrations). No separate token plumbing — `gh api` reuses the same auth context.
 
 ## Labels
@@ -29,7 +29,7 @@ Every `paul-gross/winter*` repo carries the same canonical label set. Two famili
 
 ### Filing
 
-Use `/wg-issue`. The skill drafts from conversation context, confirms the target repo, probes existing labels, and files via `gh issue create`. Format spec: [issue-format.md](../.winter/ext/github/ai/issue-format.md).
+Use `/wg-issue`. The skill drafts from conversation context, confirms the target repo, probes existing labels, and files via `gh issue create`. Format spec: [issue-format.md](../.winter/ext/github/context/issue-format.md).
 
 ### Closing
 

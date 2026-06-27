@@ -16,7 +16,7 @@ from winter_cli.modules.workspace.models import (
 _SINGLETON_PATHS: dict[SingletonType, tuple[str, ...]] = {
     SingletonType.workspace: (),
     SingletonType.product: ("product",),
-    SingletonType.harness: ("ai", "harness"),
+    SingletonType.harness: ("context", "harness"),
 }
 
 

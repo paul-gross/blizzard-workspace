@@ -105,7 +105,7 @@ The workspace includes a CLI (for agent use) and a TUI dashboard (for human use)
 winter dashboard
 ```
 
-Requires `mise` (dependencies are managed automatically). See `ai/winter-cli/index.md` for the full command reference, including [configurable dashboard keybindings](ai/winter-cli/usage/dashboard.md#keybindings) (remap any action, with Neovim-style chord sequences).
+Requires `mise` (dependencies are managed automatically). See `context/winter-cli/index.md` for the full command reference, including [configurable dashboard keybindings](context/winter-cli/usage/dashboard.md#keybindings) (remap any action, with Neovim-style chord sequences).
 
 ## 🧭 Principles
 

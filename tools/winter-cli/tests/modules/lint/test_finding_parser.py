@@ -8,14 +8,14 @@ SOURCE = "wln"
 
 def test_parses_each_ndjson_line_with_location() -> None:
     stdout = (
-        '{"check": "path-notation", "status": "fail", "message": "bad ref", "file": "ai/x.md", "line": 12}\n'
+        '{"check": "path-notation", "status": "fail", "message": "bad ref", "file": "context/x.md", "line": 12}\n'
         '{"check": "frontmatter", "status": "warn", "message": "missing model"}\n'
     )
     findings = parse_lint_output(SOURCE, stdout, "", 0)
 
     assert [f.check for f in findings] == ["path-notation", "frontmatter"]
     assert findings[0].status == LintStatus.fail
-    assert findings[0].file == "ai/x.md"
+    assert findings[0].file == "context/x.md"
     assert findings[0].line == 12
     assert findings[1].status == LintStatus.warn
     assert findings[1].file is None

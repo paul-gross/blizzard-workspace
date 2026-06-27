@@ -23,7 +23,7 @@ This skill operates on the **workspace branch only**. It does **not** touch feat
 
 ## Big picture
 
-A workspace is the framework (`winter/<branch>`) plus its own customizations, carried as a small history on top of it — see [ai/workspace-layout.md](./ai/workspace-layout.md) for the lineage model (the "one customization commit on top of `winter/master`" shape and the `git show winter/master:<path>` inherited-vs-owned test). There are **two strategies** for taking framework updates, and a given workspace uses one consistently:
+A workspace is the framework (`winter/<branch>`) plus its own customizations, carried as a small history on top of it — see [context/workspace-layout.md](./context/workspace-layout.md) for the lineage model (the "one customization commit on top of `winter/master`" shape and the `git show winter/master:<path>` inherited-vs-owned test). There are **two strategies** for taking framework updates, and a given workspace uses one consistently:
 
 - **Rebase strategy** — the workspace is a small stack of customization commits replayed onto `winter/<branch>` each update, kept as a clean "N commits above winter" shape. Best for a personal/solo workspace.
 - **Merge strategy** — `winter/<branch>` is merged in periodically, accumulating merge commits but never rewriting the workspace's history. Best for a shared or already-published workspace branch.

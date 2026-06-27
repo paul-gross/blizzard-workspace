@@ -94,12 +94,12 @@ def test_load_reads_shared_config() -> None:
 def test_load_maps_workspace_doctor_and_lint_scripts() -> None:
     config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
     fs = FakeFilesystem(files={config_path: ""})
-    svc = _service(fs, {config_path: {"doctor": "ai/doctor.sh", "lint": "ai/lint.sh"}})
+    svc = _service(fs, {config_path: {"doctor": "context/doctor.sh", "lint": "context/lint.sh"}})
 
     config = svc.load()
 
-    assert config.doctor == "ai/doctor.sh"
-    assert config.lint == ["ai/lint.sh"]
+    assert config.doctor == "context/doctor.sh"
+    assert config.lint == ["context/lint.sh"]
 
 
 def test_load_maps_service_orchestrator() -> None:
@@ -148,11 +148,11 @@ def test_load_empty_prefix_treated_as_none() -> None:
 def test_load_accepts_lint_as_a_list() -> None:
     config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
     fs = FakeFilesystem(files={config_path: ""})
-    svc = _service(fs, {config_path: {"lint": ["ai/a.sh", "ai/b.sh"]}})
+    svc = _service(fs, {config_path: {"lint": ["context/a.sh", "context/b.sh"]}})
 
     config = svc.load()
 
-    assert config.lint == ["ai/a.sh", "ai/b.sh"]
+    assert config.lint == ["context/a.sh", "context/b.sh"]
 
 
 def test_load_merges_local_overlay() -> None:
@@ -191,7 +191,7 @@ def test_load_picks_up_singletons_present_on_disk() -> None:
     fs = FakeFilesystem(
         files={
             config_path: "",
-            WORKSPACE_ROOT / "ai" / "harness" / ".git": "",  # treated as exists()
+            WORKSPACE_ROOT / "context" / "harness" / ".git": "",  # treated as exists()
         },
         directories=[WORKSPACE_ROOT / "product"],
     )

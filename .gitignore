@@ -11,5 +11,5 @@
 /CLAUDE.local.md
 
 # Machine-specific winter-service-tmux overrides (overlaid on setup-tmux.sh)
-/ai/project/setup-tmux.local.sh
-/ai/project/workflow.local.sh
+/context/project/setup-tmux.local.sh
+/context/project/workflow.local.sh

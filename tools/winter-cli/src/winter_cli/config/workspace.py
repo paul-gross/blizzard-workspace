@@ -84,7 +84,7 @@ class WorkspaceConfigService:
 
     Depends on Protocol seams for I/O: `IWorkspaceLocator` for root discovery,
     `IConfigFileReader` for TOML parsing, and `IFilesystemReader` for the
-    singleton-detection probes (`product/`, `ai/harness/.git`).
+    singleton-detection probes (`product/`, `context/harness/.git`).
     """
 
     def __init__(
@@ -108,7 +108,7 @@ class WorkspaceConfigService:
         ]
         if self._fs.is_dir(workspace_root / "product"):
             singletons.append(SingletonRepository(name="product", type=SingletonType.product))
-        if self._fs.exists(workspace_root / "ai" / "harness" / ".git"):
+        if self._fs.exists(workspace_root / "context" / "harness" / ".git"):
             singletons.append(SingletonRepository(name="harness", type=SingletonType.harness))
 
         project_repos: list[ProjectRepositoryConfig] = []

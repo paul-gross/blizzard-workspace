@@ -22,7 +22,7 @@ Required fields: `name` (string) and `status` (one of `pass` / `warn` / `fail`).
 The workspace itself can contribute a probe script that runs between the core probes and each extension's probes. Declare it as a top-level field in `.winter/config.toml`:
 
 ```toml
-doctor = "ai/project/doctor.sh"
+doctor = "context/project/doctor.sh"
 ```
 
 The path is **relative to the workspace root** and must point to an executable file. The probe runs with cwd at the workspace root and `WINTER_WORKSPACE_DIR` set. Use it for project-specific checks that don't belong in any extension — database reachable, `.env` populated, secrets present, build toolchain installed.

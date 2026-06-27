@@ -51,15 +51,15 @@ def test_claude_symlinks_probe_returns_none_when_directories_absent() -> None:
 
 
 def test_claude_symlinks_probe_passes_when_all_symlinks_resolve() -> None:
-    agent_target = WORKSPACE_ROOT / "ai" / "harness" / "agents" / "code-reviewer.md"
-    skill_target = WORKSPACE_ROOT / "ai" / "harness" / "skills" / "verify"
+    agent_target = WORKSPACE_ROOT / "context" / "harness" / "agents" / "code-reviewer.md"
+    skill_target = WORKSPACE_ROOT / "context" / "harness" / "skills" / "verify"
     skill_marker = skill_target / "SKILL.md"
     fs = FakeFilesystem(
         files={agent_target: "...", skill_marker: "..."},
         directories={CLAUDE_AGENTS, CLAUDE_SKILLS, skill_target},
         symlinks={
-            CLAUDE_AGENTS / "wh-code-reviewer.md": Path("../../ai/harness/agents/code-reviewer.md"),
-            CLAUDE_SKILLS / "wh-verify": Path("../../ai/harness/skills/verify"),
+            CLAUDE_AGENTS / "wh-code-reviewer.md": Path("../../context/harness/agents/code-reviewer.md"),
+            CLAUDE_SKILLS / "wh-verify": Path("../../context/harness/skills/verify"),
         },
     )
     svc = _build_service(fs)
@@ -77,9 +77,9 @@ def test_claude_symlinks_probe_fails_and_names_every_orphan() -> None:
         directories={CLAUDE_AGENTS, CLAUDE_SKILLS},
         symlinks={
             CLAUDE_AGENTS / "wf-agentic-development-manager.md": Path(
-                "../../ai/workflow/agents/agentic-development-manager.md"
+                "../../context/workflow/agents/agentic-development-manager.md"
             ),
-            CLAUDE_SKILLS / "wf-old-skill": Path("../../ai/workflow/skills/old-skill"),
+            CLAUDE_SKILLS / "wf-old-skill": Path("../../context/workflow/skills/old-skill"),
         },
     )
     svc = _build_service(fs)
@@ -111,14 +111,14 @@ def test_claude_symlinks_probe_flags_broken_codex_skill_symlink() -> None:
 
 def test_claude_symlinks_probe_ignores_regular_files_and_dirs() -> None:
     """Plain README.md / regular subdirs under .claude/ must not register as orphans."""
-    valid_target = WORKSPACE_ROOT / "ai" / "harness" / "agents" / "code-reviewer.md"
+    valid_target = WORKSPACE_ROOT / "context" / "harness" / "agents" / "code-reviewer.md"
     readme = CLAUDE_AGENTS / "README.md"
     plain_subdir = CLAUDE_AGENTS / "docs"
     fs = FakeFilesystem(
         files={valid_target: "...", readme: "extension-installed notes"},
         directories={CLAUDE_AGENTS, plain_subdir},
         symlinks={
-            CLAUDE_AGENTS / "wh-code-reviewer.md": Path("../../ai/harness/agents/code-reviewer.md"),
+            CLAUDE_AGENTS / "wh-code-reviewer.md": Path("../../context/harness/agents/code-reviewer.md"),
         },
     )
     svc = _build_service(fs)

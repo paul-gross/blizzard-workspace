@@ -9,7 +9,7 @@ from winter_cli.modules.doctor.models import ProbeStatus
 from winter_cli.modules.doctor.workspace_probe_service import WORKSPACE_SOURCE, WorkspaceProbeService
 
 WORKSPACE_ROOT = Path("/ws")
-SCRIPT_PATH = WORKSPACE_ROOT / "ai" / "project" / "doctor.sh"
+SCRIPT_PATH = WORKSPACE_ROOT / "context" / "project" / "doctor.sh"
 
 
 def _build_config(doctor: str | None) -> WorkspaceConfig:
@@ -23,7 +23,7 @@ def _build_config(doctor: str | None) -> WorkspaceConfig:
 
 def _build_service(
     *,
-    doctor: str | None = "ai/project/doctor.sh",
+    doctor: str | None = "context/project/doctor.sh",
     fs_files: dict[Path, str] | None = None,
     fs_executables: set[Path] | None = None,
     run_response: SubprocessResult | None = None,
@@ -65,7 +65,7 @@ def test_parses_ndjson_lines_into_probe_results() -> None:
 def test_missing_script_surfaces_as_fail() -> None:
     fs = FakeFilesystem(files={}, directories={WORKSPACE_ROOT})
     svc = WorkspaceProbeService(
-        config=_build_config("ai/project/doctor.sh"),
+        config=_build_config("context/project/doctor.sh"),
         fs=fs,
         subprocess_runner=FakeSubprocessRunner(),
     )

@@ -16,8 +16,8 @@ session_prefix = "my-project"   # tmux session prefix
 main_branch = "main"            # workspace-default main branch (per-repo override on each repo entry)
 adopt_extensions = "winter"     # how aggressively standalone repos contribute skills/agents — see extensions.md
 prefix = "myprefix"             # optional; namespace for workspace-authored skills — see below
-doctor = "ai/project/doctor.sh" # optional workspace-level `winter doctor` probe — see doctor.md
-lint = "ai/project/lint.sh"     # optional workspace-level `winter lint` check(s) — see lint.md
+doctor = "context/project/doctor.sh" # optional workspace-level `winter doctor` probe — see doctor.md
+lint = "context/project/lint.sh"     # optional workspace-level `winter lint` check(s) — see lint.md
 
 [capabilities]                  # bind capability slots to provider extensions — see capabilities.md
 service = "winter-service-tmux"

@@ -21,7 +21,7 @@ The three built-in core checks are:
 A lint script follows the **same NDJSON contract as a doctor probe** (see [doctor.md](./doctor.md#probe-output-contract)) with two additions per object — `check` (the field name; `name` is also accepted as an alias, so an existing doctor probe can be repointed at lint with minimal change) and optional `file` / `line` location fields:
 
 ```json
-{"check": "path-notation", "status": "fail", "message": "non-canonical ref `../harness`", "file": "ai/index.md", "line": 12, "remediation": "Use the `winter-harness:` prefix."}
+{"check": "path-notation", "status": "fail", "message": "non-canonical ref `../harness`", "file": "context/index.md", "line": 12, "remediation": "Use the `winter-harness:` prefix."}
 {"check": "agent-frontmatter", "status": "warn", "message": "missing `model`", "file": ".claude/agents/wf-developer.md"}
 ```
 
@@ -47,8 +47,8 @@ On top of the doctor probe's env (`WINTER_WORKSPACE_DIR`, and for extension scri
 The workspace contributes a lint script via a top-level field in `.winter/config.toml`, symmetric with the workspace doctor probe:
 
 ```toml
-lint = "ai/project/lint.sh"             # single script
-lint = ["ai/project/lint.sh", "ai/project/lint_docs.sh"]   # or a list
+lint = "context/project/lint.sh"             # single script
+lint = ["context/project/lint.sh", "context/project/lint_docs.sh"]   # or a list
 ```
 
 `lint` accepts a single path or a list; a bare string is coerced to a one-element list. Paths are **relative to the workspace root** and must point to executable files. They run first, before extension checks, with cwd at the workspace root, and their findings appear under a `[project]` source group. Use them for checks this specific workspace owns. Ecosystem-general checks meant to travel between workspaces belong in an installed extension instead (the `lint` field below) — e.g. a dedicated `winter-lint` extension hosting the cross-cutting checks no single domain extension owns.

@@ -2,7 +2,7 @@
 
 ## What it is
 
-`workspace:/ai/project/contributing.md` defines what happens after work in a feature worktree is complete — how code gets from a Greek letter branch into the project's mainline and delivered.
+`workspace:/context/project/contributing.md` defines what happens after work in a feature worktree is complete — how code gets from a Greek letter branch into the project's mainline and delivered.
 
 ## Why it exists
 
@@ -63,7 +63,7 @@ Capture per-repo differences if they exist.
 
 ### Output
 
-Write the result to `workspace:/ai/project/contributing.md`. Structure it with clear sections that an agent can reference quickly:
+Write the result to `workspace:/context/project/contributing.md`. Structure it with clear sections that an agent can reference quickly:
 - Commit message format (with examples)
 - Pre-commit checks (exact commands)
 - Delivery steps (exact commands or tool invocations)

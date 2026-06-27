@@ -8,13 +8,13 @@ from pydantic import BaseModel, Field
 
 class SingletonType(enum.Enum):
     workspace = "workspace"
-    """The workspace repo itself — contains .winter/, ai/, workflow scripts."""
+    """The workspace repo itself — contains .winter/, context/, workflow scripts."""
 
     product = "product"
     """The product branch worktree — orphan branch for plans and TODOs."""
 
     harness = "harness"
-    """The agentic harness repo — cross-repo documentation at ai/harness/."""
+    """The agentic harness repo — cross-repo documentation at context/harness/."""
 
 
 class AdoptExtensions(enum.Enum):

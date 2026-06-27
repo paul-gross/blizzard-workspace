@@ -38,7 +38,7 @@ from winter_cli.modules.workspace.models.service_model import StandaloneRepoStat
 from winter_cli.plugins.types import DetailPanelContext
 
 _WORKSPACE = Workspace(root_path=Path("/tmp/ws"), session_prefix="t", main_branch="main")
-_REPO = StandaloneRepository(name="winter-harness", path=Path("/tmp/ws/ai/harness"))
+_REPO = StandaloneRepository(name="winter-harness", path=Path("/tmp/ws/context/harness"))
 
 
 class _Panel:
@@ -159,7 +159,7 @@ class _ViewApp(App):
 def _repo_status() -> RepoStatus:
     return RepoStatus(
         name="winter-harness",
-        path="/tmp/ws/ai/harness",
+        path="/tmp/ws/context/harness",
         main_branch=None,
         branch="main",
         tracking_branch="origin/main",

@@ -19,8 +19,8 @@ You are the Worktree Ops agent — a lightweight agent that performs routine git
 
 The following docs are loaded into your context — they are the source of truth for every operation you perform.
 
-@ai/winter-cli/usage/index.md
-@ai/worktree-ops.md
+@context/winter-cli/usage/index.md
+@context/worktree-ops.md
 
 At the start of each session, also read `workspace:/.winter/config.toml` for the authoritative repo list, per-repo main branches, and pinned status. The loaded `usage/index.md` routes to every CLI topic — open the `winter ws` hub `usage/ws/index.md` and the per-command file your task needs (e.g. `usage/ws/checkout.md`, `usage/ws/status.md`); read any other topic or `setup.md` on demand.
 

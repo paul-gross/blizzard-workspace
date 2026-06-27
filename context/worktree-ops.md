@@ -57,7 +57,7 @@ To bring the environment to a working state, run:
 winter provision <name>
 ```
 
-This installs dependencies, provisions resources (databases, queues, buckets), and loads seed data using `[[provision.*]]` handlers declared in `.winter/config.toml` and installed extension `winter-ext.toml` files. See [usage/provision.md](./winter-cli/usage/provision.md) for the full command reference. For any project-specific readiness steps not yet migrated to `[[provision.*]]` handlers, also follow `workspace:/ai/project/project-setup.md`.
+This installs dependencies, provisions resources (databases, queues, buckets), and loads seed data using `[[provision.*]]` handlers declared in `.winter/config.toml` and installed extension `winter-ext.toml` files. See [usage/provision.md](./winter-cli/usage/provision.md) for the full command reference. For any project-specific readiness steps not yet migrated to `[[provision.*]]` handlers, also follow `workspace:/context/project/project-setup.md`.
 
 Raw equivalent, per repo:
 
@@ -80,7 +80,7 @@ git -C "./<name>/<repo-name>" push -u origin <name>:<feature-branch>
 
 **If the recorded feature branch is empty when the user asks to push**, do not guess — ask the user which remote branch they want to push to. Once they provide one, run `winter ws connect` before pushing.
 
-**Before pushing**, ask the user: "Want me to run pre-release checks (lint, format, tests) on the changed repos before pushing?" If a project repo documents pre-release checks in its `CONTRIBUTING.md` or `ai/`, run them for every repo with changes and fix any issues before pushing.
+**Before pushing**, ask the user: "Want me to run pre-release checks (lint, format, tests) on the changed repos before pushing?" If a project repo documents pre-release checks in its `CONTRIBUTING.md` or `context/`, run them for every repo with changes and fix any issues before pushing.
 
 Pinned repos are skipped during connect/disconnect (no feature branch tracking to set/unset) and excluded from `push` by default. See the [Pinned repos](#pinned-repos) section for how to include them.
 

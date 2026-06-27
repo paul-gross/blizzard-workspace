@@ -56,7 +56,7 @@
         "resolved_layout": {
           "type": "string",
           "enum": ["repos-as-rows", "repos-as-columns", "list"],
-          "description": "Concrete layout the configured value resolves to for the current workspace shape; equals configured_layout unless it is \"auto\", which resolves via the same heuristic the dashboard TUI grid uses (documented in ai/winter-cli/usage/dashboard.md)."
+          "description": "Concrete layout the configured value resolves to for the current workspace shape; equals configured_layout unless it is \"auto\", which resolves via the same heuristic the dashboard TUI grid uses (documented in context/winter-cli/usage/dashboard.md)."
         }
       }
     },

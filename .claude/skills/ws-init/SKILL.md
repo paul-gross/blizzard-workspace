@@ -8,7 +8,7 @@ Bring the workspace, a single feature environment, or a single project repo to t
 
 `/ws-init` is the "I just cloned this — make it work" path. It only *applies* declared config; it never *changes* config. Anything that would require a configuration decision (declaring a new repo, setting workspace remote, choosing git identity) belongs in `/ws-setup`, not here.
 
-The skill is a thin wrapper over `winter ws init`. It picks the right form, layers in per-environment post-init from `workspace:/ai/project/project-setup.md`, and halts cleanly on any of the precondition or runtime failures enumerated in the **Non-interactivity contract** below. For the underlying primitives, start at the CLI hub [ai/winter-cli/index.md](./ai/winter-cli/index.md), then read the specific topic [ai/winter-cli/usage/ws/init.md](./ai/winter-cli/usage/ws/init.md) — plus [ai/worktree-ops.md](./ai/worktree-ops.md).
+The skill is a thin wrapper over `winter ws init`. It picks the right form, layers in per-environment post-init from `workspace:/context/project/project-setup.md`, and halts cleanly on any of the precondition or runtime failures enumerated in the **Non-interactivity contract** below. For the underlying primitives, start at the CLI hub [context/winter-cli/index.md](./context/winter-cli/index.md), then read the specific topic [context/winter-cli/usage/ws/init.md](./context/winter-cli/usage/ws/init.md) — plus [context/worktree-ops.md](./context/worktree-ops.md).
 
 ## Preflight
 
@@ -56,11 +56,11 @@ If `./<env>/` doesn't already exist, this creates it (per-repo worktrees on bran
 
 If the CLI exits non-zero, stop and surface the per-repo errors — don't fall through to the post-init step on a half-built env.
 
-Then, if `workspace:/ai/project/project-setup.md` exists, apply its post-init steps to `<env>`. Read the file and follow its instructions for this environment — it typically provisions per-environment databases, generates project-specific env files (e.g. `.env.local`), or runs seed scripts. If a step describes state that's already present (e.g. a generated file that already exists with the right content), report it as `already-applied` and move on rather than re-running.
+Then, if `workspace:/context/project/project-setup.md` exists, apply its post-init steps to `<env>`. Read the file and follow its instructions for this environment — it typically provisions per-environment databases, generates project-specific env files (e.g. `.env.local`), or runs seed scripts. If a step describes state that's already present (e.g. a generated file that already exists with the right content), report it as `already-applied` and move on rather than re-running.
 
 **`project-setup.md` is assumed agent-runnable without prompts.** If a step would require user input (a missing secret, a decision the config doesn't cover), surface that as a halt with the specific gap rather than asking the question. The non-interactivity contract extends to the post-init pass.
 
-If `workspace:/ai/project/project-setup.md` doesn't exist, skip the post-init step and note that in the report — don't treat it as an error.
+If `workspace:/context/project/project-setup.md` doesn't exist, skip the post-init step and note that in the report — don't treat it as an error.
 
 Report what changed: directories created vs. already present, hooks fired, per-step post-init results (`applied`, `already-applied`, `skipped (not present)` when the file is absent, or `halted (needs <gap>)` for an interactivity gap).
 

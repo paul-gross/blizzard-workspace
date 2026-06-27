@@ -110,7 +110,7 @@ class StreamServiceReporter:
             f"error: orchestrator at {entrypoint} (prefix: {prefix!r}) "
             f"does not emit the structured status document required by the `winter service` contract "
             f"— ensure the extension is up to date. "
-            f"Schema: ai/winter-cli/usage/service.md#status-wire-contract\n"
+            f"Schema: context/winter-cli/usage/service.md#status-wire-contract\n"
             f"Parse detail: {detail}",
             err=True,
         )
@@ -200,7 +200,7 @@ class JsonServiceReporter:
             f"error: orchestrator at {entrypoint} (prefix: {prefix!r}) "
             f"does not emit the structured status document required by the `winter service` contract "
             f"— ensure the extension is up to date. "
-            f"Schema: ai/winter-cli/usage/service.md#status-wire-contract\n"
+            f"Schema: context/winter-cli/usage/service.md#status-wire-contract\n"
             f"Parse detail: {detail}",
             err=True,
         )

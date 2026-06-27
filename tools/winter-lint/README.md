@@ -11,7 +11,7 @@ inversion. This check catches both.
 
 ## What counts as a reference
 
-- A path-notation reference `<context>:/path` (e.g. `winter-product:/ai/todos.md`). <!-- winter-lint:example -->
+- A path-notation reference `<context>:/path` (e.g. `winter-product:/context/todos.md`). <!-- winter-lint:example -->
 - A Claude `@import` whose target escapes the module's own directory.
 
 ## Rules
@@ -114,7 +114,7 @@ locates this script relative to the winter-cli source tree (its sibling
 `tools/winter-lint/` directory), runs it over the selected scope with the
 standard lint env (`WINTER_LINT_SCOPE`, `WINTER_LINT_PATHS`, `WINTER_CLI`, …),
 and aggregates its NDJSON findings under the `[core]` source group. See
-`workspace:/ai/winter-cli/configuration/lint.md` ("Built-in core checks").
+`workspace:/context/winter-cli/configuration/lint.md` ("Built-in core checks").
 
 It can also be run directly:
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 # Anti-drift guard: service.md contract section must agree with service-v1.toml.
 #
 # This test parses the "Orchestrator contract" section of
-# ai/winter-cli/usage/service.md and asserts that every fact the spec declares
+# context/winter-cli/usage/service.md and asserts that every fact the spec declares
 # (actions, exit codes, always-present env vars) is present and consistent in
 # the doc.  The spec is authoritative; the doc must agree with it.
 #
@@ -17,9 +17,9 @@ import pytest
 from winter_cli.core.internal.tomllib_config_file_reader import TomllibConfigFileReader
 from winter_cli.modules.capability.spec_loader import SpecLoader
 
-# Resolve the doc relative to this file: tests/ → tools/winter-cli/ → winter/ → ai/
+# Resolve the doc relative to this file: tests/ → tools/winter-cli/ → winter/ → context/
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # gamma/winter/
-_SERVICE_DOC = _REPO_ROOT / "ai" / "winter-cli" / "usage" / "service.md"
+_SERVICE_DOC = _REPO_ROOT / "context" / "winter-cli" / "usage" / "service.md"
 
 _SPEC_SLOT = "service"
 _SPEC_VERSION = "v1"

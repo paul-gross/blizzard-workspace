@@ -26,8 +26,8 @@ This is a guided walkthrough, not a script. Your job is to teach the user how th
 ## Prerequisites
 
 Before running this skill:
-- Read [ai/workspace-layout.md](./ai/workspace-layout.md) to understand the workspace topology and directory layout
-- Read [ai/worktree-ops.md](./ai/worktree-ops.md) to understand the exact git commands for this topology
+- Read [context/workspace-layout.md](./context/workspace-layout.md) to understand the workspace topology and directory layout
+- Read [context/worktree-ops.md](./context/worktree-ops.md) to understand the exact git commands for this topology
 
 ## Opening preamble (always send first)
 
@@ -182,15 +182,15 @@ Report what was cloned vs. skipped (read the CLI output and summarize), then con
 
 ### 5. Create project integration directory
 
-**Explain first:** "Creating `workspace:/ai/project/` — this is where project-specific markdown lives: contributing rules, development checklists, architecture notes, anything the workspace and its agents should know about your projects. It lives here in the workspace, *not* in the project repos themselves — the project repos know nothing about winter. Agents look here first when answering project questions. This folder is intended to be committed: it's the glue layer between winter and your application source code, so anything you want future agents (or teammates) to know about your projects belongs here, versioned alongside the workspace."
+**Explain first:** "Creating `workspace:/context/project/` — this is where project-specific markdown lives: contributing rules, development checklists, architecture notes, anything the workspace and its agents should know about your projects. It lives here in the workspace, *not* in the project repos themselves — the project repos know nothing about winter. Agents look here first when answering project questions. This folder is intended to be committed: it's the glue layer between winter and your application source code, so anything you want future agents (or teammates) to know about your projects belongs here, versioned alongside the workspace."
 
 Tell the user: "Creating the directory..."
 
 ```bash
-mkdir -p ./ai/project
+mkdir -p ./context/project
 ```
 
-Confirm: "Created `workspace:/ai/project/`."
+Confirm: "Created `workspace:/context/project/`."
 
 Then add a forward-looking hint:
 
@@ -198,14 +198,14 @@ Then add a forward-looking hint:
 
 ### 6. Set up project-setup.md (optional)
 
-**Explain first:** "Now an optional but recommended setup: project-setup.md. **Best done before creating any feature environment.** It captures your application-specific setup: installing dependencies, generating env files, provisioning per-worktree databases, building artifacts, anything else needed to bring a fresh worktree to a runnable state. The output is two artifacts: per-repo `cmd` lists and `git_excludes` added to `.winter/config.toml`, and a new `workspace:/ai/project/project-setup.md`. Setting this up now means feature environments are runnable from the moment they're created."
+**Explain first:** "Now an optional but recommended setup: project-setup.md. **Best done before creating any feature environment.** It captures your application-specific setup: installing dependencies, generating env files, provisioning per-worktree databases, building artifacts, anything else needed to bring a fresh worktree to a runnable state. The output is two artifacts: per-repo `cmd` lists and `git_excludes` added to `.winter/config.toml`, and a new `workspace:/context/project/project-setup.md`. Setting this up now means feature environments are runnable from the moment they're created."
 
 Ask **one** question:
 
 **"Want to set up project-setup.md now?"**
 
 - "no" or "later": continue.
-- "yes": follow [ai/setup-project-setup.md](./ai/setup-project-setup.md) — that guide produces the two artifacts. After it's finished, tell the user: "Now applying the new config to all existing worktrees so the `cmd` list runs everywhere..." and run:
+- "yes": follow [context/setup-project-setup.md](./context/setup-project-setup.md) — that guide produces the two artifacts. After it's finished, tell the user: "Now applying the new config to all existing worktrees so the `cmd` list runs everywhere..." and run:
   ```bash
   winter ws init --all
   ```
@@ -253,7 +253,7 @@ Ask **one** question:
 **"Set up contributing.md now?"**
 
 - "no" or "later": continue.
-- "yes": follow [ai/contributing-setup.md](./ai/contributing-setup.md) to work with the user.
+- "yes": follow [context/contributing-setup.md](./context/contributing-setup.md) to work with the user.
 
 ### Final report
 

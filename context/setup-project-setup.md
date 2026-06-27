@@ -2,7 +2,7 @@
 
 ## What it is
 
-`workspace:/ai/project/project-setup.md` is a reproducible recipe for initializing any new feature environment. When an agent creates a new feature environment (e.g., `gamma/`), it follows `workspace:/ai/project/project-setup.md` to create environment files, set up databases, seed data, and do whatever else `winter ws init` doesn't already cover.
+`workspace:/context/project/project-setup.md` is a reproducible recipe for initializing any new feature environment. When an agent creates a new feature environment (e.g., `gamma/`), it follows `workspace:/context/project/project-setup.md` to create environment files, set up databases, seed data, and do whatever else `winter ws init` doesn't already cover.
 
 ## Why it exists
 
@@ -43,7 +43,7 @@ Offer the user two approaches: *"I can research your codebase and figure out the
 
 **If the user prefers a guided approach**, walk through each area below with focused questions.
 
-Either way, synthesize the answers — some go into `.winter/config.toml`, some go into `ai/project/project-setup.md`.
+Either way, synthesize the answers — some go into `.winter/config.toml`, some go into `context/project/project-setup.md`.
 
 ### 1. Dependencies → `[[provision.dependency]]` or `[[project_repository]].cmd` in `.winter/config.toml`
 
@@ -166,7 +166,7 @@ For each one, set `pinned = true` on its `[[project_repository]]` entry. `winter
 Two or three artifacts:
 
 1. **`.winter/config.toml`** — enriched with trust/bootstrap `cmd` entries, `[[provision.*]]` handlers for dependency/resource/data steps that fit the handler model, plain-pattern `git_excludes`, and `pinned` flags. Keep it boring; if in doubt, leave it out.
-2. **`workspace:/ai/project/project-setup.md`** — numbered steps for everything else: conditional installs, env file generation with port offsets, database creation/migration, seed data, post-init build steps, and verification steps not yet migrated to handlers. Use variables like `<letter>` and `<index>` where environment-specific values are needed, and explain how to derive them.
+2. **`workspace:/context/project/project-setup.md`** — numbered steps for everything else: conditional installs, env file generation with port offsets, database creation/migration, seed data, post-init build steps, and verification steps not yet migrated to handlers. Use variables like `<letter>` and `<index>` where environment-specific values are needed, and explain how to derive them.
 3. *(optional)* **Handler scripts** under an agreed path (e.g. `scripts/`) — the scripts referenced by `[[provision.*]]` `apply`/`destroy`/`reset` fields.
 
 This guide stops at writing the artifacts. Applying the changes to existing environments and running the setup against an environment is the caller's responsibility (see the ws-setup skill).

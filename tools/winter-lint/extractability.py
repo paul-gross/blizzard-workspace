@@ -65,8 +65,8 @@ PRUNE_DIRS = frozenset({".git", ".venv", "node_modules", "__pycache__", ".mypy_c
 _REF_RE = re.compile(r"(?<![A-Za-z0-9_./-])([a-z][a-z0-9-]*):/")
 
 # Claude `@import` — anywhere in a line and more than once per line, since Claude
-# resolves @path imports both line-leading (`@ai/x.md`) and inline within prose
-# (`...declared in @ai/x.md that...`). The lookbehind keeps us off `user@host`-
+# resolves @path imports both line-leading (`@context/x.md`) and inline within prose
+# (`...declared in @context/x.md that...`). The lookbehind keeps us off `user@host`-
 # style mid-token matches; the path-shaped guard in `import_target_modules` drops
 # `@param`-style mentions.
 _IMPORT_RE = re.compile(r"(?<![A-Za-z0-9_])@([^\s`]+)")
@@ -187,8 +187,8 @@ class ReferenceScanner:
     def import_raw_paths(self, line: str) -> list[str]:
         """Relative paths referenced by a line's Claude `@import`s (may repeat).
 
-        Matches every `@import` on the line — line-leading (`@ai/x.md`) or inline
-        within prose (`...declared in @ai/x.md that...`), including more than one
+        Matches every `@import` on the line — line-leading (`@context/x.md`) or inline
+        within prose (`...declared in @context/x.md that...`), including more than one
         per line, mirroring how Claude resolves @path imports anywhere in
         CLAUDE.md. Trailing prose/markdown punctuation (`_IMPORT_TRIM`) is
         trimmed; the path-shaped guard in `import_target_modules` drops
