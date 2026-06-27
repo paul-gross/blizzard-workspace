@@ -161,3 +161,188 @@ def test_find_broken_symlinks_under_codex_skills(workspace_config: WorkspaceConf
     assert len(broken) == 1
     assert broken[0].path == codex_skills / "ext-removed"
     assert broken[0].safe_to_remove is True
+
+
+# ---------------------------------------------------------------------------
+# _find_orphan_agent_copies
+# ---------------------------------------------------------------------------
+
+# A minimal exclude file block for the "old-ext" extension.
+# Written by ExtensionExcludeService with prefix "old" when the extension
+# was last active; the repo has since been removed from config.
+_EXCLUDE_WITH_OLD_EXT = """\
+# >>> old-ext (managed by winter)
+/old-ext/
+.claude/skills/old-*
+.codex/skills/old-*
+.opencode/skill/old-*
+.claude/agents/old-*
+.codex/agents/old-*
+.opencode/agent/old-*
+# <<< old-ext
+"""
+
+_EXCLUDE_WITH_KEPT_EXT = """\
+# >>> kept-ext (managed by winter)
+/kept-ext/
+.claude/skills/kept-*
+.codex/skills/kept-*
+.opencode/skill/kept-*
+.claude/agents/kept-*
+.codex/agents/kept-*
+.opencode/agent/kept-*
+# <<< kept-ext
+"""
+
+
+def _write_exclude(fs: FakeFilesystem, workspace_root: Path, content: str) -> None:
+    exclude_path = workspace_root / ".git" / "info" / "exclude"
+    fs.files[exclude_path] = content
+    for parent in exclude_path.parents:
+        fs.directories.add(parent)
+
+
+def test_find_orphan_agent_copies_claude(workspace_config: WorkspaceConfig) -> None:
+    """A <prefix>-* file in .claude/agents whose extension is removed → orphan_agent_copy."""
+    claude_agents = WORKSPACE_ROOT / ".claude" / "agents"
+    orphan_file = claude_agents / "old-reviewer.md"
+
+    fs = FakeFilesystem(
+        directories=[PROJECTS_DIR, claude_agents],
+        files={orphan_file: "# old agent"},
+    )
+    _write_exclude(fs, WORKSPACE_ROOT, _EXCLUDE_WITH_OLD_EXT)
+    svc = _service(workspace_config, fs)
+
+    orphans = svc.find_orphans()
+    agent_orphans = [o for o in orphans if o.kind == "orphan_agent_copy"]
+    assert len(agent_orphans) == 1
+    assert agent_orphans[0].path == orphan_file
+    assert agent_orphans[0].safe_to_remove is True
+    assert agent_orphans[0].notes == ""
+
+
+def test_find_orphan_agent_copies_codex(workspace_config: WorkspaceConfig) -> None:
+    """A <prefix>-* file in .codex/agents whose extension is removed → orphan_agent_copy."""
+    codex_agents = WORKSPACE_ROOT / ".codex" / "agents"
+    orphan_file = codex_agents / "old-reviewer.toml"
+
+    fs = FakeFilesystem(
+        directories=[PROJECTS_DIR, codex_agents],
+        files={orphan_file: 'name = "reviewer"\n'},
+    )
+    _write_exclude(fs, WORKSPACE_ROOT, _EXCLUDE_WITH_OLD_EXT)
+    svc = _service(workspace_config, fs)
+
+    orphans = svc.find_orphans()
+    agent_orphans = [o for o in orphans if o.kind == "orphan_agent_copy"]
+    assert any(o.path == orphan_file for o in agent_orphans)
+    assert all(o.safe_to_remove for o in agent_orphans)
+
+
+def test_find_orphan_agent_copies_opencode(workspace_config: WorkspaceConfig) -> None:
+    """A <prefix>-* file in .opencode/agent whose extension is removed → orphan_agent_copy."""
+    opencode_agents = WORKSPACE_ROOT / ".opencode" / "agent"
+    orphan_file = opencode_agents / "old-reviewer.md"
+
+    fs = FakeFilesystem(
+        directories=[PROJECTS_DIR, opencode_agents],
+        files={orphan_file: "# old opencode agent"},
+    )
+    _write_exclude(fs, WORKSPACE_ROOT, _EXCLUDE_WITH_OLD_EXT)
+    svc = _service(workspace_config, fs)
+
+    orphans = svc.find_orphans()
+    agent_orphans = [o for o in orphans if o.kind == "orphan_agent_copy"]
+    assert any(o.path == orphan_file for o in agent_orphans)
+
+
+def test_find_orphan_agent_copies_all_three_vendors(workspace_config: WorkspaceConfig) -> None:
+    """Copies across all three vendor dirs are reported when the extension is removed."""
+    claude_agents = WORKSPACE_ROOT / ".claude" / "agents"
+    codex_agents = WORKSPACE_ROOT / ".codex" / "agents"
+    opencode_agents = WORKSPACE_ROOT / ".opencode" / "agent"
+
+    claude_file = claude_agents / "old-reviewer.md"
+    codex_file = codex_agents / "old-reviewer.toml"
+    oc_file = opencode_agents / "old-reviewer.md"
+
+    fs = FakeFilesystem(
+        directories=[PROJECTS_DIR, claude_agents, codex_agents, opencode_agents],
+        files={
+            claude_file: "# claude",
+            codex_file: "# codex",
+            oc_file: "# opencode",
+        },
+    )
+    _write_exclude(fs, WORKSPACE_ROOT, _EXCLUDE_WITH_OLD_EXT)
+    svc = _service(workspace_config, fs)
+
+    orphans = svc.find_orphans()
+    agent_orphans = [o for o in orphans if o.kind == "orphan_agent_copy"]
+    assert len(agent_orphans) == 3
+    paths = {o.path for o in agent_orphans}
+    assert claude_file in paths
+    assert codex_file in paths
+    assert oc_file in paths
+
+
+def test_find_orphan_agent_copies_skips_live_extension(workspace_config: WorkspaceConfig) -> None:
+    """Agent copies for an extension still in config are NOT flagged as orphans."""
+    from winter_cli.config.models import StandaloneRepositoryConfig
+
+    claude_agents = WORKSPACE_ROOT / ".claude" / "agents"
+    kept_file = claude_agents / "kept-reviewer.md"
+
+    fs = FakeFilesystem(
+        directories=[PROJECTS_DIR, claude_agents],
+        files={kept_file: "# kept"},
+    )
+    _write_exclude(fs, WORKSPACE_ROOT, _EXCLUDE_WITH_KEPT_EXT)
+
+    # Build a config where "kept-ext" IS a live standalone repo.
+    config_with_live_ext = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        session_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        standalone_repos=[StandaloneRepositoryConfig(name="kept-ext")],
+    )
+    svc = _service(config_with_live_ext, fs)
+    orphans = svc.find_orphans()
+    agent_orphans = [o for o in orphans if o.kind == "orphan_agent_copy"]
+    # "kept-ext" is live → its copies must NOT be flagged.
+    assert not any(o.path == kept_file for o in agent_orphans), (
+        f"Live extension copy wrongly flagged: {[o.path for o in agent_orphans]}"
+    )
+
+
+def test_find_orphan_agent_copies_no_exclude_file(workspace_config: WorkspaceConfig) -> None:
+    """With no exclude file, _find_orphan_agent_copies returns nothing."""
+    fs = FakeFilesystem(directories=[PROJECTS_DIR])
+    svc = _service(workspace_config, fs)
+    orphans = svc.find_orphans()
+    agent_orphans = [o for o in orphans if o.kind == "orphan_agent_copy"]
+    assert agent_orphans == []
+
+
+def test_remove_orphan_agent_copy(workspace_config: WorkspaceConfig) -> None:
+    """remove_orphan() deletes a safe orphan_agent_copy file."""
+    claude_agents = WORKSPACE_ROOT / ".claude" / "agents"
+    orphan_file = claude_agents / "old-reviewer.md"
+
+    fs = FakeFilesystem(
+        directories=[PROJECTS_DIR, claude_agents],
+        files={orphan_file: "# old"},
+    )
+    _write_exclude(fs, WORKSPACE_ROOT, _EXCLUDE_WITH_OLD_EXT)
+    svc = _service(workspace_config, fs)
+
+    orphans = svc.find_orphans()
+    agent_orphans = [o for o in orphans if o.kind == "orphan_agent_copy"]
+    assert len(agent_orphans) >= 1
+
+    # Remove the claude copy.
+    target = next(o for o in agent_orphans if o.path == orphan_file)
+    svc.remove_orphan(target)
+    assert not fs.is_file(orphan_file)

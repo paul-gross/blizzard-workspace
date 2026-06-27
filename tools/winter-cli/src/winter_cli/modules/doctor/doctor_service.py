@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from winter_cli.modules.doctor.agent_probe_service import AgentProbeService
 from winter_cli.modules.doctor.capability_probe_service import CapabilityProbeService
 from winter_cli.modules.doctor.core_probe_service import CoreProbeService
 from winter_cli.modules.doctor.doctor_reporter import IDoctorReporter
@@ -43,6 +44,7 @@ class DoctorService:
         port_probe_svc: PortProbeService | None = None,
         provision_manifest_probe_svc: ProvisionManifestProbeService | None = None,
         skill_probe_svc: SkillProbeService | None = None,
+        agent_probe_svc: AgentProbeService | None = None,
     ) -> None:
         self._core_probe_svc = core_probe_svc
         self._workspace_probe_svc = workspace_probe_svc
@@ -52,6 +54,7 @@ class DoctorService:
         self._port_probe_svc = port_probe_svc
         self._provision_manifest_probe_svc = provision_manifest_probe_svc
         self._skill_probe_svc = skill_probe_svc
+        self._agent_probe_svc = agent_probe_svc
 
     def run(self, reporter: IDoctorReporter) -> DoctorSummary:
         reporter.started()
@@ -83,6 +86,12 @@ class DoctorService:
         if self._skill_probe_svc is not None:
             standalone_repos = self._repo_factory.get_standalone_repos()
             for result in self._skill_probe_svc.run(standalone_repos):
+                reporter.probe_result(result)
+                results.append(result)
+
+        if self._agent_probe_svc is not None:
+            standalone_repos = self._repo_factory.get_standalone_repos()
+            for result in self._agent_probe_svc.run(standalone_repos):
                 reporter.probe_result(result)
                 results.append(result)
 

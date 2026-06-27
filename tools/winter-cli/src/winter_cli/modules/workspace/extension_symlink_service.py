@@ -13,7 +13,6 @@ from winter_cli.modules.workspace.extension_skill_install import (
     CopySkillStrategy,
     InstallSkillStrategy,
     SkillFrontmatterGuard,
-    SymlinkInstaller,
     SymlinkSkillStrategy,
 )
 from winter_cli.modules.workspace.init_reporter import IInitReporter
@@ -23,19 +22,19 @@ logger = logging.getLogger(__name__)
 
 
 class ExtensionSymlinkService:
-    """Installs per-vendor `<prefix>-*` skills and `.claude/agents/<prefix>-*` symlinks for an extension repo.
+    """Installs per-vendor `<prefix>-*` skills for an extension repo.
 
-    For each standalone repo, decides whether it should contribute skills/agents
+    For each standalone repo, decides whether it should contribute skills
     (per `adopt_extensions` mode and the presence of `winter-ext.toml`),
     validates SKILL.md frontmatter conforms to the prefix-by-directory
-    convention, and installs per-entry skills and agents.
+    convention, and installs per-entry skills.
 
     Skills are projected into every `CodeAgentVendor`'s skills dir using the
     install strategy that vendor's `skill_install` capability selects (symlink
-    for ClaudeCode/Codex, copy for OpenCode) — see
-    `extension_skill_install.py`. Agents are Claude-only flat `.md` symlinks
-    under `.claude/agents/<prefix>-<name>`, installed via the shared symlink
-    primitives in that same module.
+    for ClaudeCode/Codex, copy for OpenCode) — see `extension_skill_install.py`.
+
+    Agent installation (flat ``.md``-only rendered copies) is handled separately
+    by ``ExtensionAgentService`` and is not part of this service's responsibility.
 
     Error-handling shape: `process` is the wrap site. Leaves raise
     `RepoError` / `OSError`; one try/except at the boundary routes the
@@ -72,7 +71,6 @@ class ExtensionSymlinkService:
         try:
             manifest = self._manifest_loader.load(repo, manifest_path if manifest_present else None)
             skills_root = self._resolve_existing_dir(repo.path, manifest.skills_dirs)
-            agents_root = self._resolve_existing_dir(repo.path, manifest.agents_dirs)
 
             self._validate_frontmatter(repo, skills_root, reporter, strict=mode == AdoptExtensions.winter)
 
@@ -84,6 +82,9 @@ class ExtensionSymlinkService:
             # and does NOT traverse symlinked directories, so a symlink there would be
             # invisible to it; the copy lives only under `.opencode/skill`, which no
             # other harness reads, so there's no double-loading.
+            #
+            # Agent installation is handled separately by ExtensionAgentService, which
+            # renders canonical agent files into per-vendor copies rather than symlinks.
             skill_names: list[str] = []
             for vendor in CodeAgentVendor:
                 target_root = self._config.workspace_root / vendor.skills_subpath
@@ -92,33 +93,13 @@ class ExtensionSymlinkService:
                     target_root=target_root,
                     prefix=manifest.prefix,
                 )
-
-            # Agents are flat .md files (one per agent). Directories are
-            # reserved for the nested-agent convention and must carry an
-            # AGENT.md marker; bare doc directories (e.g. `agents/docs/`) and
-            # `README.md` files at the agents root are skipped. Agents stay
-            # Claude-only symlinks for now (no per-vendor abstraction).
-            symlinks = SymlinkInstaller(self._fs)
-            agents_target = self._config.workspace_root / ".claude" / "agents"
-            agent_links = symlinks.install_entries(
-                source_root=agents_root,
-                target_root=agents_target,
-                prefix=manifest.prefix,
-                kind="agent",
-                include_dirs=True,
-                include_files=True,
-                file_suffix=".md",
-                exclude_filenames=("README.md",),
-                require_marker_file="AGENT.md",
-            )
-            symlinks.prune_stale(agents_target, manifest.prefix, set(agent_links), kind="agent")
         except (RepoError, OSError) as exc:
             logger.warning("process symlinks: failed for %s — %s", repo.name, exc)
             reporter.repo_error(repo.name, str(exc))
             return False
 
-        if skill_names or agent_links:
-            detail = f"prefix={manifest.prefix} skills={len(skill_names)} agents={len(agent_links)}"
+        if skill_names:
+            detail = f"prefix={manifest.prefix} skills={len(skill_names)}"
             reporter.repo_action(repo.name, str(repo.path), "extension_installed", detail)
 
         return True

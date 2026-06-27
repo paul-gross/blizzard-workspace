@@ -105,6 +105,8 @@ class ExtensionExcludeService:
                         f".codex/skills/{prefix}-*",
                         f".opencode/skill/{prefix}-*",
                         f".claude/agents/{prefix}-*",
+                        f".codex/agents/{prefix}-*",
+                        f".opencode/agent/{prefix}-*",
                     ]
                 )
             lines.append(end)

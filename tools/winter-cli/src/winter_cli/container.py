@@ -19,6 +19,7 @@ from winter_cli.core.internal.click_cli_output_service import ClickCliOutputServ
 from winter_cli.core.internal.local_filesystem import LocalFilesystem
 from winter_cli.core.internal.local_subprocess_runner import LocalSubprocessRunner
 from winter_cli.core.internal.tomllib_config_file_reader import TomllibConfigFileReader
+from winter_cli.modules.workspace.agent_install import ExtensionAgentService
 
 # NB: the doctor, lint, graph, and tui (textual) command trees are deliberately
 # NOT imported at module top — see `_lazy` below. They are pulled in on first
@@ -249,6 +250,13 @@ class Container(containers.DeclarativeContainer):
         manifest_loader=extension_manifest_loader,
     )
 
+    extension_agent_svc = providers.Singleton(
+        ExtensionAgentService,
+        config=workspace_config,
+        fs=fs,
+        manifest_loader=extension_manifest_loader,
+    )
+
     extension_hook_svc = providers.Singleton(
         ExtensionHookService,
         config=workspace_config,
@@ -305,6 +313,7 @@ class Container(containers.DeclarativeContainer):
         config=workspace_config,
         repo_factory=repo_factory,
         extension_symlink_svc=extension_symlink_svc,
+        extension_agent_svc=extension_agent_svc,
         extension_hook_svc=extension_hook_svc,
         extension_exclude_svc=extension_exclude_svc,
         extension_claudemd_svc=extension_claudemd_svc,
@@ -484,6 +493,13 @@ class Container(containers.DeclarativeContainer):
         manifest_loader=extension_manifest_loader,
     )
 
+    agent_probe_svc = providers.Factory(
+        _lazy("winter_cli.modules.doctor.agent_probe_service:AgentProbeService"),
+        config=workspace_config,
+        fs=fs,
+        manifest_loader=extension_manifest_loader,
+    )
+
     doctor_svc = providers.Factory(
         _lazy("winter_cli.modules.doctor.doctor_service:DoctorService"),
         core_probe_svc=core_probe_svc,
@@ -494,6 +510,7 @@ class Container(containers.DeclarativeContainer):
         port_probe_svc=port_probe_svc,
         provision_manifest_probe_svc=provision_manifest_probe_svc,
         skill_probe_svc=skill_probe_svc,
+        agent_probe_svc=agent_probe_svc,
     )
 
     stream_doctor_reporter = providers.Factory(

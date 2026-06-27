@@ -81,7 +81,10 @@ def _seed_extension(
     return StandaloneRepository(name=name, path=ext_path)
 
 
-def test_process_symlinks_skills_and_agents(workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter) -> None:
+def test_process_symlinks_skills_across_vendors(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """Skills are projected into all three vendor dirs; agents are handled separately."""
     fs = FakeFilesystem()
     config_files: dict[Path, dict] = {}
     ext = _seed_extension(fs, config_files)
@@ -106,12 +109,8 @@ def test_process_symlinks_skills_and_agents(workspace_config: WorkspaceConfig, i
     assert not fs.is_symlink(opencode_skill_dir)
     assert fs.is_file(opencode_skill_dir / "SKILL.md")
 
-    # Agents are Claude-only: no .codex/agents projection.
-    assert not fs.is_symlink(WORKSPACE_ROOT / ".codex" / "agents" / "my-ext-reviewer.md")
-
-    # Agent symlink created under .claude/agents/<prefix>-<filename>
-    agent_link = WORKSPACE_ROOT / ".claude" / "agents" / "my-ext-reviewer.md"
-    assert fs.is_symlink(agent_link)
+    # Agent installation is handled by ExtensionAgentService, not here.
+    assert not fs.is_symlink(WORKSPACE_ROOT / ".claude" / "agents" / "my-ext-reviewer.md")
 
     actions = [(a[0], a[2]) for a in init_reporter.actions]
     assert ("my-ext", "extension_installed") in actions
@@ -162,10 +161,10 @@ def test_process_rejects_skill_md_with_name_frontmatter(
     assert any("name: override-name" in msg for msg in error_messages)
 
 
-def test_process_skips_readme_and_docs_subdir_in_agents(
+def test_process_installs_skills_regardless_of_agents_dir_content(
     workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
 ) -> None:
-    """`agents/README.md` and `agents/docs/` (no AGENT.md) must not get symlinked."""
+    """Skills are installed even when the agents dir contains README.md and subdirs."""
     fs = FakeFilesystem()
     config_files: dict[Path, dict] = {}
     ext = _seed_extension(fs, config_files)
@@ -178,16 +177,16 @@ def test_process_skips_readme_and_docs_subdir_in_agents(
 
     assert svc.process(ext, init_reporter) is True
 
-    agents_target = WORKSPACE_ROOT / ".claude" / "agents"
-    assert fs.is_symlink(agents_target / "my-ext-reviewer.md")
-    assert not fs.is_symlink(agents_target / "my-ext-README.md")
-    assert not fs.is_symlink(agents_target / "my-ext-docs")
+    # Skill still installed despite noisy agents dir.
+    assert fs.is_symlink(WORKSPACE_ROOT / ".claude" / "skills" / "my-ext-do-thing")
+    # Agent dir is not touched by the symlink service.
+    assert not fs.is_symlink(WORKSPACE_ROOT / ".claude" / "agents" / "my-ext-reviewer.md")
 
 
-def test_process_symlinks_nested_agent_directory_with_marker(
+def test_process_installs_skills_when_agents_dir_has_nested_dirs(
     workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
 ) -> None:
-    """Directories carrying `AGENT.md` are nested agents and get a directory symlink."""
+    """Skills are installed correctly even when the agents dir contains nested subdirs."""
     fs = FakeFilesystem()
     config_files: dict[Path, dict] = {}
     ext = _seed_extension(fs, config_files)
@@ -197,33 +196,41 @@ def test_process_symlinks_nested_agent_directory_with_marker(
     svc = _service(workspace_config, fs, config_files)
 
     assert svc.process(ext, init_reporter) is True
-    assert fs.is_symlink(WORKSPACE_ROOT / ".claude" / "agents" / "my-ext-nested")
+    # Skill is installed; agent dirs are not touched by the symlink service.
+    assert fs.is_symlink(WORKSPACE_ROOT / ".claude" / "skills" / "my-ext-do-thing")
+    assert not fs.is_symlink(WORKSPACE_ROOT / ".claude" / "agents" / "my-ext-nested")
 
 
-def test_process_prunes_stale_prefixed_symlinks(
+def test_process_prunes_stale_skill_symlinks(
     workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
 ) -> None:
-    """A `<prefix>-*` symlink whose source entry no longer exists is removed.
+    """A `<prefix>-*` skill symlink whose source dir no longer exists is removed.
 
     Captures the historical `wf-blizzard` case: a directory symlink left
-    behind after the source `agents/blizzard/` was deleted upstream.
+    behind after the source `skills/old-skill/` was deleted upstream.
     Symlinks owned by a different prefix must survive.
     """
     fs = FakeFilesystem()
     config_files: dict[Path, dict] = {}
     ext = _seed_extension(fs, config_files)
 
-    agents_target = WORKSPACE_ROOT / ".claude" / "agents"
-    fs.directories.add(agents_target)
-    fs.symlinks[agents_target / "my-ext-blizzard"] = Path("../../my-ext/agents/blizzard")
-    fs.symlinks[agents_target / "other-ext-keep.md"] = Path("../../other-ext/agents/keep.md")
+    skills_target = WORKSPACE_ROOT / ".claude" / "skills"
+    fs.directories.add(skills_target)
+    fs.symlinks[skills_target / "my-ext-old-skill"] = Path("../../my-ext/skills/old-skill")
+    fs.symlinks[skills_target / "other-ext-keep"] = Path("../../other-ext/skills/keep")
+    for p in [skills_target / "my-ext-old-skill", skills_target / "other-ext-keep"]:
+        for parent in p.parents:
+            fs.directories.add(parent)
 
     svc = _service(workspace_config, fs, config_files)
 
     assert svc.process(ext, init_reporter) is True
-    assert not fs.is_symlink(agents_target / "my-ext-blizzard")
-    assert fs.is_symlink(agents_target / "other-ext-keep.md")
-    assert fs.is_symlink(agents_target / "my-ext-reviewer.md")
+    # Stale prefix symlink pruned.
+    assert not fs.is_symlink(skills_target / "my-ext-old-skill")
+    # Different-prefix symlink untouched.
+    assert fs.is_symlink(skills_target / "other-ext-keep")
+    # New skill installed.
+    assert fs.is_symlink(skills_target / "my-ext-do-thing")
 
 
 def test_process_wrap_catches_manifest_read_error(

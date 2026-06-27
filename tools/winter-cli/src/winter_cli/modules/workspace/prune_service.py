@@ -5,7 +5,7 @@ import logging
 import re
 from pathlib import Path
 
-from winter_cli.config.models import WorkspaceConfig
+from winter_cli.config.models import CodeAgentVendor, WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
 from winter_cli.modules.workspace.git_repository import IGitRepository
@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 
 _BLOCK_BEGIN_RE = re.compile(r"^# >>> ([^/]+?) \(managed by winter\)$")
 _BLOCK_PATH_RE = re.compile(r"^/(.+?)/?$")
+
+# Matches exclude-block lines like ".claude/agents/wf-*" or ".opencode/agent/winter-workflow-*".
+# Group 1: relative dir path (e.g. ".claude/agents"), Group 2: prefix (e.g. "wf").
+_AGENT_COPY_GLOB_RE = re.compile(r"^([^/]+/[^/]+)/(.+)-\*$")
+
+# Workspace-relative paths of the vendor agent dirs; matches CodeAgentVendor.agents_subpath.
+_VENDOR_AGENT_DIRS: frozenset[str] = frozenset(v.agents_subpath for v in CodeAgentVendor)
 
 
 @dataclasses.dataclass
@@ -56,6 +63,7 @@ class PruneService:
         orphans.extend(self._find_orphan_project_clones())
         orphans.extend(self._find_orphan_standalone_clones())
         orphans.extend(self._find_broken_symlinks())
+        orphans.extend(self._find_orphan_agent_copies())
         logger.info("find_orphans done: %d orphan(s)", len(orphans))
         return orphans
 
@@ -156,6 +164,71 @@ class PruneService:
                             notes="",
                         )
                     )
+        return orphans
+
+    def _find_orphan_agent_copies(self) -> list[PruneOrphan]:
+        """Find rendered agent copies whose source extension is no longer in the config.
+
+        Reads the ``.git/info/exclude`` file's managed blocks.  For each block
+        whose extension name is NOT in the current set of standalone repos, the
+        agent glob lines (e.g. ``.claude/agents/{prefix}-*``) are parsed to
+        find the prefix, and any matching files in the vendor agents dirs are
+        reported as orphaned copies safe to remove.
+
+        This handles the *extension-removed-from-config* case.  The
+        *individual-agent-deleted-from-live-extension* case is handled by
+        ``ExtensionAgentService._prune`` on the next ``winter ws init`` run,
+        and is separately flagged as "orphaned copy" by ``AgentProbeService``.
+        """
+        exclude_path = self._config.workspace_root / ".git" / "info" / "exclude"
+        if not self._fs.exists(exclude_path):
+            return []
+        try:
+            content = self._fs.read_text(exclude_path)
+        except OSError:
+            return []
+
+        eligible = {repo.name for repo in self._repo_factory.get_standalone_repos()}
+        orphans: list[PruneOrphan] = []
+        seen_paths: set[Path] = set()
+
+        for block_name, block_lines in self._iter_managed_blocks(content):
+            if block_name in eligible:
+                continue
+            # This extension's block is orphaned — look for its agent copies.
+            for line in block_lines:
+                line = line.strip()
+                m = _AGENT_COPY_GLOB_RE.match(line)
+                if not m:
+                    continue
+                rel_dir = m.group(1)
+                prefix = m.group(2)
+                if rel_dir not in _VENDOR_AGENT_DIRS:
+                    continue
+                agent_dir = self._config.workspace_root / rel_dir
+                if not self._fs.is_dir(agent_dir):
+                    continue
+                prefix_with_dash = f"{prefix}-"
+                try:
+                    for entry in sorted(self._fs.iterdir(agent_dir)):
+                        if not entry.name.startswith(prefix_with_dash):
+                            continue
+                        if not self._fs.is_file(entry):
+                            continue
+                        if entry in seen_paths:
+                            continue
+                        seen_paths.add(entry)
+                        orphans.append(
+                            PruneOrphan(
+                                kind="orphan_agent_copy",
+                                path=entry,
+                                safe_to_remove=True,
+                                notes="",
+                            )
+                        )
+                except OSError:
+                    continue
+
         return orphans
 
     @staticmethod

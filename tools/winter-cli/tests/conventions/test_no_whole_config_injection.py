@@ -55,6 +55,7 @@ ALLOWED_FILES = frozenset(
         "modules/workspace/init_service.py",
         "modules/workspace/destroy_service.py",
         "modules/workspace/prune_service.py",
+        "modules/workspace/agent_install.py",  # workspace-lifecycle carve-out: renders canonical agents into per-vendor copies for every extension
         "modules/workspace/extension_symlink_service.py",
         "modules/workspace/extension_hook_service.py",
         "modules/workspace/extension_exclude_service.py",
@@ -66,6 +67,7 @@ ALLOWED_FILES = frozenset(
         "modules/doctor/extension_probe_service.py",
         "modules/doctor/port_probe_service.py",  # doctor probe service — validates port-config invariant and registry drift (lifecycle carve-out: walks every declared env)
         "modules/doctor/skill_probe_service.py",  # doctor probe service — checks per-vendor skill discoverability across all extensions (lifecycle carve-out: walks every declared extension and every CodeAgentVendor)
+        "modules/doctor/agent_probe_service.py",  # doctor probe service — checks per-vendor agent copy staleness across all extensions (lifecycle carve-out: walks every declared extension and every CodeAgentVendor)
         # Provision manifest probe service — doctor probe that reads provision_raw
         # and walks every extension's winter-ext.toml for [[provision.*]] validation.
         "modules/provision/manifest_probe_service.py",

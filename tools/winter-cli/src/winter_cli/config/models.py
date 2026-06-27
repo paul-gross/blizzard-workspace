@@ -5,6 +5,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from winter_cli.modules.workspace.agent_transform.models import AgentFormat
+
 
 class SingletonType(enum.Enum):
     workspace = "workspace"
@@ -41,29 +43,62 @@ class SkillInstall(enum.Enum):
 
 
 class CodeAgentVendor(enum.Enum):
-    """A code-agent tool that winter projects extension skills into.
+    """A code-agent tool that winter projects extension skills and agents into.
 
     Each member carries the workspace-relative directory its skills live in
-    (`skills_subpath`) and the `SkillInstall` strategy it requires
-    (`skill_install`), so strategy selection is data-driven off the vendor —
-    adding a vendor is a data change, not a new control-flow branch.
+    (`skills_subpath`), the `SkillInstall` strategy it requires
+    (`skill_install`), the workspace-relative directory its agent copies live
+    in (`agents_subpath`), the `AgentFormat` used to render agent files
+    (`agent_format`), and the canonical `vendor_label` string used as the
+    override-block key in canonical agent frontmatter (e.g. ``claude:``,
+    ``codex:``, ``opencode:``).  Strategy selection is data-driven off the
+    vendor — adding a vendor is a data change, not a new control-flow branch.
 
-    This enum is the branch-by-abstraction seam reused by future per-vendor
-    work (e.g. agent installation), but skill installation keys only off
-    `skill_install`.
+    ``vendor_label`` is the single source of truth for the vendor-name strings
+    that appear in ``MODEL_TIER_IDS`` keys and in agent frontmatter override
+    blocks.  The canonical parser derives its ``_VENDOR_LABELS`` set from this
+    attribute so the two never drift.
     """
 
-    ClaudeCode = ("claude-code", ".claude/skills", SkillInstall.symlink)
-    Codex = ("codex", ".codex/skills", SkillInstall.symlink)
-    OpenCode = ("opencode", ".opencode/skill", SkillInstall.copy)
+    ClaudeCode = (
+        "claude-code",
+        ".claude/skills",
+        SkillInstall.symlink,
+        ".claude/agents",
+        AgentFormat.claude_md,
+        "claude",
+    )
+    Codex = ("codex", ".codex/skills", SkillInstall.symlink, ".codex/agents", AgentFormat.codex_toml, "codex")
+    OpenCode = (
+        "opencode",
+        ".opencode/skill",
+        SkillInstall.copy,
+        ".opencode/agent",
+        AgentFormat.opencode_md,
+        "opencode",
+    )
 
     skills_subpath: str
     skill_install: SkillInstall
+    agents_subpath: str
+    agent_format: AgentFormat
+    vendor_label: str
 
-    def __init__(self, label: str, skills_subpath: str, skill_install: SkillInstall) -> None:
+    def __init__(
+        self,
+        label: str,
+        skills_subpath: str,
+        skill_install: SkillInstall,
+        agents_subpath: str,
+        agent_format: AgentFormat,
+        vendor_label: str,
+    ) -> None:
         self._value_ = label
         self.skills_subpath = skills_subpath
         self.skill_install = skill_install
+        self.agents_subpath = agents_subpath
+        self.agent_format = agent_format
+        self.vendor_label = vendor_label
 
 
 class DashboardLayout(enum.Enum):

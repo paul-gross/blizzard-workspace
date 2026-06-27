@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from winter_cli.container import Container
+from winter_cli.modules.workspace.agent_install import ExtensionAgentService
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
@@ -38,6 +39,7 @@ def test_container_resolves_every_top_level_service(container: Container) -> Non
     assert isinstance(container.prune_svc(), PruneService)
     assert isinstance(container.drift_warning_svc(), DriftWarningService)
     assert isinstance(container.extension_symlink_svc(), ExtensionSymlinkService)
+    assert isinstance(container.extension_agent_svc(), ExtensionAgentService)
     assert isinstance(container.extension_hook_svc(), ExtensionHookService)
     assert isinstance(container.extension_exclude_svc(), ExtensionExcludeService)
     assert isinstance(container.extension_claudemd_svc(), ExtensionClaudemdService)

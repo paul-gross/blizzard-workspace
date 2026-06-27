@@ -8,6 +8,7 @@ from pathlib import Path
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.core.subprocess_runner import ISubprocessRunner
+from winter_cli.modules.workspace.agent_install import ExtensionAgentService
 from winter_cli.modules.workspace.config_lock_repository import IConfigLockRepository
 from winter_cli.modules.workspace.env_index import EnvIndexAllocator
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
@@ -79,6 +80,7 @@ class InitService:
         registry: IEnvIndexRegistry,
         config_lock_repo: IConfigLockRepository | None = None,
         workspace_skill_svc: WorkspaceSkillService | None = None,
+        extension_agent_svc: ExtensionAgentService | None = None,
     ) -> None:
         self._config = config
         self._repo_factory = repo_factory
@@ -92,6 +94,7 @@ class InitService:
         self._git_ops = git_ops
         self._config_lock_repo = config_lock_repo
         self._workspace_skill_svc = workspace_skill_svc
+        self._extension_agent_svc = extension_agent_svc
         self._registry = registry
 
     # ── Public API ────────────────────────────────────────────────────────
@@ -318,7 +321,10 @@ class InitService:
             reporter.repo_error(label, str(exc))
             return False
 
-        return self._extension_symlink_svc.process(repo, reporter)
+        ok = self._extension_symlink_svc.process(repo, reporter)
+        if self._extension_agent_svc is not None:
+            ok &= self._extension_agent_svc.process(repo, reporter)
+        return ok
 
     # ── Standalone pin ────────────────────────────────────────────────────
 

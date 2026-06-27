@@ -42,10 +42,9 @@ class SymlinkInstaller:
         (`<prefix>-<filename>`), so a `.md` extension is preserved.
 
         `exclude_filenames` skips matching file entries by exact basename — used to
-        keep `README.md` out of the installed agent set. `require_marker_file`
+        keep `README.md` out of the installed skill set. `require_marker_file`
         restricts directory entries to those containing that marker file (e.g.
-        `SKILL.md`, `AGENT.md`), so doc-only subdirectories don't masquerade as
-        skills or nested agents.
+        `SKILL.md`), so doc-only subdirectories don't masquerade as skills.
 
         Returns the list of created/existing symlink names. Empty when `source_root`
         is None or doesn't exist. Raises `RepoError` on conflict or I/O failure.
@@ -119,7 +118,7 @@ class SymlinkInstaller:
             historical `wf-blizzard` after the source `agents/blizzard/`
             directory went away);
           - the source entry still exists but is now filtered out by the
-            install pass (README.md, AGENT.md-less directories).
+            install pass (README.md-only or SKILL.md-less directories).
 
         Only symlinks whose name starts with `f"{prefix}-"` are considered —
         each extension owns its prefix, so this won't touch other extensions'
