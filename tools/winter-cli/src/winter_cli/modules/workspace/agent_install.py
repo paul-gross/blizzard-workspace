@@ -90,7 +90,7 @@ class ExtensionAgentService:
 
                     try:
                         text = self._fs.read_text(entry)
-                        agent = PARSER.parse(text)
+                        agent = PARSER.parse(text, default_name=entry.stem)
                     except RepoError as exc:
                         logger.warning(
                             "process agents: %s — parse error for %s: %s",

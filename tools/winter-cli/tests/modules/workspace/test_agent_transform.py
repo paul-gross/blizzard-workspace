@@ -215,10 +215,28 @@ def test_parse_raises_on_malformed_yaml() -> None:
 
 
 def test_parse_raises_on_missing_name() -> None:
-    """Absent 'name' field raises RepoError."""
+    """Absent 'name' field with no filename fallback raises RepoError."""
     text = "---\ndescription: No name here.\n---\n\nBody.\n"
     with pytest.raises(RepoError, match="name"):
         _PARSER.parse(text)
+
+
+def test_parse_falls_back_to_default_name_when_name_absent() -> None:
+    """An agent that omits 'name' adopts the filename-stem fallback rather than failing.
+
+    Lets a vanilla / not-yet-migrated agent project (identity = filename) instead
+    of being silently dropped at init.
+    """
+    text = "---\ndescription: No name in frontmatter.\n---\n\nBody.\n"
+    agent = _PARSER.parse(text, default_name="app-runner")
+    assert agent.name == "app-runner"
+
+
+def test_parse_explicit_name_wins_over_default_name() -> None:
+    """A declared 'name' takes precedence over the filename-stem fallback."""
+    text = "---\nname: declared\ndescription: d\n---\n\nBody.\n"
+    agent = _PARSER.parse(text, default_name="from-filename")
+    assert agent.name == "declared"
 
 
 def test_parse_raises_on_missing_description() -> None:

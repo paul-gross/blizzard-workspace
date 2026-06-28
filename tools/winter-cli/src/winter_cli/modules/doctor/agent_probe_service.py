@@ -201,7 +201,7 @@ class AgentProbeService:
 
             try:
                 text = self._fs.read_text(entry)
-                agent = PARSER.parse(text)
+                agent = PARSER.parse(text, default_name=entry.stem)
             except RepoError as exc:
                 logger.warning(
                     "agent probe: %s — parse error for %s: %s",
@@ -313,7 +313,7 @@ class AgentProbeService:
                     continue
                 try:
                     text = self._fs.read_text(entry)
-                    agent = PARSER.parse(text)
+                    agent = PARSER.parse(text, default_name=entry.stem)
                 except RepoError:
                     continue
                 name_to_prefixes.setdefault(agent.name, []).append(manifest.prefix)

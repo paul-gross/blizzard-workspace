@@ -31,14 +31,23 @@ class CanonicalAgentParser:
     Maybe-type to detect failures.
     """
 
-    def parse(self, text: str) -> CanonicalAgent:
+    def parse(self, text: str, *, default_name: str | None = None) -> CanonicalAgent:
         """Parse ``text`` (full canonical agent file content) and return a ``CanonicalAgent``.
+
+        ``default_name`` is the fallback used when the frontmatter omits ``name``
+        — callers pass the source file's stem (e.g. ``app-runner`` for
+        ``app-runner.md``). This lets a vanilla or not-yet-migrated agent that
+        declares no ``name`` still project (its identity becomes the filename),
+        the same way OpenCode derives identity from the filename, rather than
+        being silently dropped. When ``name`` is absent and no ``default_name``
+        is given, a ``RepoError`` is still raised.
 
         Raises ``RepoError`` when:
         - The file does not begin with a ``---`` frontmatter block.
         - The frontmatter block is not closed.
         - The frontmatter YAML is syntactically invalid.
-        - Required fields (``name``, ``description``) are absent or empty.
+        - ``name`` is absent and no ``default_name`` fallback was provided.
+        - ``description`` is absent or empty.
         - ``model`` is present but not a recognised ``ModelTier`` value.
         """
         frontmatter_text, body = self._split_frontmatter(text)
@@ -53,7 +62,7 @@ class CanonicalAgentParser:
                 f"got {type(data).__name__ if data is not None else 'null'}"
             )
 
-        name = self._require_str(data, "name", context="canonical agent")
+        name = self._resolve_name(data, default_name)
         description = self._require_str(data, "description", context=f"canonical agent {name!r}")
 
         model_tier = self._parse_model_tier(name, data.get("model", "sonnet"))
@@ -104,6 +113,23 @@ class CanonicalAgentParser:
         body_lines = lines[closing_idx + 1 :]
         body = "\n".join(body_lines).lstrip("\n")
         return frontmatter, body
+
+    @staticmethod
+    def _resolve_name(data: dict, default_name: str | None) -> str:
+        """Return the agent ``name`` — frontmatter value, else the filename fallback.
+
+        A present ``name`` must be a non-empty string. When absent, fall back to
+        ``default_name`` (the source filename stem); only when no fallback is
+        available is this a ``RepoError``.
+        """
+        value = data.get("name")
+        if value:
+            if not isinstance(value, str):
+                raise RepoError(f"canonical agent field 'name' must be a string, got {type(value).__name__}")
+            return value
+        if default_name:
+            return default_name
+        raise RepoError("canonical agent frontmatter missing required field: 'name'")
 
     @staticmethod
     def _require_str(data: dict, field: str, *, context: str) -> str:
