@@ -13,4 +13,5 @@ The `winter` command is a workspace-level tool for managing worktrees and reposi
 | [Resilience & drift](./resilience.md) | …you hit a flaky-network retry, a hung remote git call, or a config↔filesystem drift warning, and want the cross-cutting behavior behind it. |
 | [Install winter](./setup.md) | …you're installing the `winter` CLI into a workspace. |
 | [Configuration](./configuration/index.md) | …you're editing `.winter/config.toml` — repositories, ports, extensions, capabilities, provision handlers, doctor/lint. The per-concept hub for the whole configuration surface. |
+| [Contracts](./contracts/service-orchestrator.md) | …you're writing or conforming an extension that winter dispatches to — the implementer-facing provider protocols (currently the service orchestrator). |
 | [Root flags](./root-flags.md) | …you need `--verbose`, `--version`, `--service-orchestrator`, or `WINTER_LOG_LEVEL` — the global flags that apply to every command. |

@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-# Anti-drift guard: service.md contract section must agree with service-v1.toml.
+# Anti-drift guard: the orchestrator contract doc must agree with service-v1.toml.
 #
-# This test parses the "Orchestrator contract" section of
-# context/winter-cli/usage/service.md and asserts that every fact the spec declares
-# (actions, exit codes, always-present env vars) is present and consistent in
-# the doc.  The spec is authoritative; the doc must agree with it.
+# This test parses context/winter-cli/contracts/service-orchestrator.md and asserts
+# that every fact the spec declares (actions, exit codes, always-present env vars) is
+# present and consistent in the doc.  The spec is authoritative; the doc must agree.
 #
-# If someone edits service-v1.toml or service.md out of agreement this test
+# If someone edits service-v1.toml or the contract doc out of agreement this test
 # fails, making drift visible at CI time rather than at the reader's desk.
 import re
 from pathlib import Path
@@ -18,8 +17,10 @@ from winter_cli.core.internal.tomllib_config_file_reader import TomllibConfigFil
 from winter_cli.modules.capability.spec_loader import SpecLoader
 
 # Resolve the doc relative to this file: tests/ → tools/winter-cli/ → winter/ → context/
-_REPO_ROOT = Path(__file__).parent.parent.parent.parent  # gamma/winter/
-_SERVICE_DOC = _REPO_ROOT / "context" / "winter-cli" / "usage" / "service.md"
+_REPO_ROOT = Path(__file__).parent.parent.parent.parent  # <env>/winter/
+_CONTRACT_DOC = (
+    _REPO_ROOT / "context" / "winter-cli" / "contracts" / "service-orchestrator.md"
+)
 
 _SPEC_SLOT = "service"
 _SPEC_VERSION = "v1"
@@ -31,21 +32,14 @@ def _real_spec():
 
 
 def _doc_text() -> str:
-    if not _SERVICE_DOC.exists():
-        pytest.fail(f"service.md not found at {_SERVICE_DOC}")
-    return _SERVICE_DOC.read_text()
+    if not _CONTRACT_DOC.exists():
+        pytest.fail(f"service-orchestrator.md not found at {_CONTRACT_DOC}")
+    return _CONTRACT_DOC.read_text()
 
 
 def _contract_section(doc: str) -> str:
-    """Extract the text from '## Orchestrator contract' to the next '## ' heading."""
-    match = re.search(r"^## Orchestrator contract\b", doc, re.MULTILINE)
-    if not match:
-        pytest.fail("service.md has no '## Orchestrator contract' section")
-    start = match.start()
-    # Find the next ## heading after the contract section.
-    next_heading = re.search(r"^## ", doc[match.end() :], re.MULTILINE)
-    end = (match.end() + next_heading.start()) if next_heading else len(doc)
-    return doc[start:end]
+    """The entire contract doc is the orchestrator contract."""
+    return doc
 
 
 # ── action names ─────────────────────────────────────────────────────────────

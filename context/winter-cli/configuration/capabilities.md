@@ -52,4 +52,4 @@ The legacy keys `service_orchestrator` (config) and `orchestrate_services` (mani
 
 ### Entrypoint contract
 
-The full implementer-facing contract — uniform argv rule, per-action env vars, NDJSON wire format for `logs`, structured JSON status document (schema, shape-stability rule, and graceful-degradation behavior) for `status`, `describe` action for multi-provider ownership, plain-line and table render formats, idempotent backstop filters, tail-with-follow limitation, and exit codes — lives in [../usage/service.md#orchestrator-contract](../usage/service.md#orchestrator-contract). A third-party orchestrator can conform without reading winter's source.
+The implementer-facing contract a bound provider conforms to — how winter invokes the entrypoint, the environment it injects, the stdout wire formats it must emit, how winter renders them, and the exit codes — is owned by [../contracts/service-orchestrator.md](../contracts/service-orchestrator.md). A third-party orchestrator can conform to it without reading winter's source.

@@ -9,7 +9,7 @@ Every `winter` command group and usage topic, one file each. Read this index, th
 | [Workspace & env commands](./ws/index.md) | …you need to create, inspect, sync, or tear down feature environments and their worktrees — `init`, `status`, `fetch`/`pull`/`push`/`merge`, `connect`, `checkout`, `destroy`, and the rest of the `winter ws` family. |
 | [Repository commands](./repo.md) | …you need to add, remove, or list the repositories the workspace tracks. |
 | [Dashboard & keybindings](./dashboard.md) | …you want the interactive status TUI, or need to read or remap its keybindings. |
-| [Service orchestration](./service.md) | …you need to start, stop, or inspect a feature env's services — or you're implementing the orchestrator contract. |
+| [Service orchestration](./service.md) | …you need to start, stop, or inspect a feature env's services, including across multiple bound providers. |
 | [Doctor](./doctor.md) | …you need to determine the correctness and health of the winter workspace configuration itself. |
 | [Lint](./lint.md) | …you need to check the workspace against its documented conventions, or wire up a new lint check. |
 | [Graph](./graph.md) | …you need the module dependency graph, or to consume it as JSON from a lint check. |

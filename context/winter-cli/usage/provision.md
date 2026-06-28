@@ -54,129 +54,7 @@ Authors guarantee idempotency; winter tracks no state between runs.
 
 ## Manifest schema
 
-Handlers are declared in both the workspace config and extension manifests using the same shape.
-
-### Workspace config (`.winter/config.toml`)
-
-```toml
-[[provision.dependency]]
-scope = "feature-worktree"
-# Single inline command (string form):
-apply = "uv sync && mise trust"
-
-[[provision.resource]]
-scope            = "workspace"
-# Array form — commands run in order; stop at first non-zero exit:
-apply            = ["createdb myapp", "psql myapp -f schema.sql"]
-destroy          = "dropdb --if-exists myapp"
-required_services = ["workspace/postgres"]
-
-[[provision.data]]
-scope            = "feature-environment"
-apply            = "$WINTER_WORKSPACE_DIR/.winter/config/provision/seed.sh"
-reset            = "$WINTER_WORKSPACE_DIR/.winter/config/provision/reseed.sh"
-required_services = ["workspace/postgres"]
-```
-
-### Extension manifest (`winter-ext.toml`)
-
-Extensions declare the same shape under `[[provision.*]]` in their `winter-ext.toml`:
-
-```toml
-[[provision.dependency]]
-scope = "feature-worktree"
-apply = "npm ci"
-
-[[provision.resource]]
-scope   = "workspace"
-apply   = ["createdb myapp_ext", "psql myapp_ext -f schema.sql"]
-destroy = "dropdb --if-exists myapp_ext"
-```
-
-### Per-entry fields
-
-| Field | Required | Meaning |
-|-------|----------|---------|
-| `scope` | yes | Where the handler runs (see Scope and ordering below). One of `workspace`, `feature-environment`, `feature-worktree`. |
-| `apply` | yes | Inline shell command (string) or list of inline shell commands (array), run via `sh -c`. |
-| `destroy` | no | Inline shell command (string) or list (array) run by `--destroy`. If absent, `--destroy` warns and no-ops. |
-| `reset` | no | Inline shell command (string) or list (array) run by `--reset`. If absent, winter composes destroy + apply when both exist; otherwise warns and degrades to re-apply. |
-| `required_services` | no | Services that must be running before this handler executes (valid only on `resource` and `data` — rejected on `dependency`). See Service check below. |
-| `project` | no | Project repo name (must be a declared `[[project_repository]]`). Valid only on `feature-environment` scope. When set, the handler's cwd is `<workspace>/<env>/<project>/` instead of the env root. See Project field below. |
-
-**Sub-targets:** `dependency`, `resource`, `data`. Unknown sub-target keys (e.g. `[[provision.custom]]`) are rejected. Unknown per-entry keys are also rejected.
-
-### Command execution semantics
-
-Each command (string or each element of an array) runs via `sh -c "<command>"`. This means:
-
-- Shell constructs work: `&&`, `||`, pipes (`|`), `$VAR` expansion, globs, and subshells.
-- **Array elements run in declaration order.** Execution within a scope stops at the first non-zero exit; that exit code is the handler's result for that scope.
-- For `feature-worktree` scope the full command sequence runs once per project worktree; each worktree is an independent execution (a failure in one worktree does not automatically skip others — the service layer owns that policy).
-- There is no path-escape guard, no `is_file` check, and no executable-bit check. To invoke a script, write it as a command and locate it via an environment variable (see below).
-
-### Environment variables
-
-All handlers receive `WINTER_WORKSPACE_DIR` plus the three extension-identity vars. `feature-environment` and `feature-worktree` handlers additionally receive the env-var trio:
-
-| Var | Meaning |
-|-----|---------|
-| `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root |
-| `WINTER_EXT_DIR` | Absolute path to the extension repo (workspace root for project-source handlers) |
-| `WINTER_EXT_PREFIX` | The extension's resolved symlink prefix (`"project"` for project-source handlers) |
-| `WINTER_EXT_CONFIG_DIR` | Absolute path to the extension's writable config directory |
-| `WINTER_ENV` | The env name (`alpha`, `beta`, …) — feature-environment/feature-worktree only |
-| `WINTER_ENV_INDEX` | The persisted port-offset index for this env — feature-environment/feature-worktree only |
-| `WINTER_PORT_BASE` | `base_port + ports_per_env * WINTER_ENV_INDEX` — feature-environment/feature-worktree only |
-
-`workspace`-scope handlers receive the four base vars above but not the trio (same pattern as `on_workspace_reconcile` hooks — see [configuration/extensions.md](../configuration/extensions.md#hook-env-var-contract)).
-
-### Project field
-
-`project` targets a `feature-environment` handler at a specific repo worktree rather than the env root. Use it when the handler's tooling lives in one repo (e.g. a migration runner, a seed script) and you want a validated cwd rather than hand-rolling `cd <repo>` inside the inline command.
-
-```toml
-[[provision.data]]
-scope   = "feature-environment"
-project = "web"
-apply   = "bundle exec rails db:seed"
-```
-
-**Rules:**
-
-- `project` is only valid on `feature-environment` scope. Declaring it on `workspace` or `feature-worktree` is a `ConfigError` at parse time and a `[provision]` doctor finding.
-- The value must be the exact name of a declared `[[project_repository]]`. An undeclared name is a `ConfigError` at parse time and a `[provision]` doctor finding.
-- If `project` is set and the named worktree does not exist in the target env at provision time, `winter provision` **aborts with a hard error** naming the missing project and env. There is no skip-with-warning fallback — use `winter ws init <env>` to create the worktree first.
-- `--dry-run` / `--json` plan output shows the resolved `project` value in the plan event so you can verify the target before running.
-
-### Validation
-
-The following values are rejected at parse time (`ConfigError`) and flagged by the doctor `[provision]` probe:
-
-- An empty string (`""`)
-- An empty list (`[]`)
-- A list containing any non-string or empty-string element
-- A value that is neither a string nor a list
-- `project` on `workspace` or `feature-worktree` scope
-- `project` naming a repo not declared in `[[project_repository]]`
-
-### BREAKING CHANGE — migration from script paths
-
-**Previous contract:** `apply`, `destroy`, and `reset` accepted a path to an executable script, resolved relative to the declaring directory (workspace root or extension root).
-
-**New contract:** these fields accept an **inline shell command** (string) or a **list of inline shell commands** (array). There is no path resolution — the value is passed directly to `sh -c`.
-
-**To migrate:** replace any script-path value with a command that invokes the script via `$WINTER_WORKSPACE_DIR` (or `$WINTER_EXT_DIR` for extension handlers):
-
-```toml
-# Before (old — no longer valid):
-apply = "scripts/install-deps.sh"
-
-# After (new — invoke the script as a command):
-apply = "$WINTER_WORKSPACE_DIR/.winter/config/provision/install-deps.sh"
-```
-
-Because the value runs via `sh -c "<command>"`, a bare path to a script must be executable (`chmod +x`); alternatively, invoke it through an interpreter (e.g. `sh $WINTER_WORKSPACE_DIR/.winter/config/provision/install-deps.sh`) to avoid that requirement.
+The `[[provision.*]]` shape an author declares — per-entry fields, the string/array command forms, scope semantics (working directory and injected environment), the `project` field, and the parse-time validation rules — is owned by [configuration/provision.md](../configuration/provision.md). This page covers running the handlers it declares.
 
 ## Scope and ordering
 
@@ -202,29 +80,7 @@ feature-environment (config) → feature-environment (extensions) →
 feature-worktree (config) → feature-worktree (extensions)
 ```
 
-### Working directory by scope
-
-| Scope | Working directory | Notes |
-|-------|-------------------|-------|
-| `workspace` | workspace root | `<workspace>/` |
-| `feature-environment` | env root | `<workspace>/<env>/` — or `<workspace>/<env>/<project>/` when `project` is set |
-| `feature-worktree` | per-repo worktree | `<workspace>/<env>/<repo>/` — runs ONCE PER PROJECT WORKTREE in the env |
-
-### Environment variables
-
-All handlers receive `WINTER_WORKSPACE_DIR` plus the three extension-identity vars (`WINTER_EXT_DIR`, `WINTER_EXT_PREFIX`, `WINTER_EXT_CONFIG_DIR`). `feature-environment` and `feature-worktree` handlers additionally receive the env-var trio:
-
-| Var | Meaning |
-|-----|---------|
-| `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root |
-| `WINTER_EXT_DIR` | Absolute path to the extension repo (workspace root for project-source handlers) |
-| `WINTER_EXT_PREFIX` | The extension's resolved symlink prefix (`"project"` for project-source handlers) |
-| `WINTER_EXT_CONFIG_DIR` | Absolute path to the extension's writable config directory |
-| `WINTER_ENV` | The env name (`alpha`, `beta`, …) — feature-environment/feature-worktree only |
-| `WINTER_ENV_INDEX` | The persisted port-offset index for this env — feature-environment/feature-worktree only |
-| `WINTER_PORT_BASE` | `base_port + ports_per_env * WINTER_ENV_INDEX` — feature-environment/feature-worktree only |
-
-`workspace`-scope handlers receive the four base vars above but not the trio (same pattern as `on_workspace_reconcile` hooks — see [configuration/extensions.md](../configuration/extensions.md#hook-env-var-contract)).
+The working directory and the environment variables each scope's handler receives are part of the manifest contract — see [configuration/provision.md#scope-working-directory-and-environment](../configuration/provision.md#scope-working-directory-and-environment).
 
 ## Service check (`required_services`)
 
@@ -297,14 +153,6 @@ A `required_services` token must be scoped as `workspace/<service>` or `<current
 
 ## Doctor probe
 
-`winter doctor` includes a built-in `[provision]` probe that validates every declared `[[provision.*]]` manifest entry — from both `.winter/config.toml` and installed extension `winter-ext.toml` files. It reports one finding per bad entry without aborting other doctor checks:
-
-- `scope` is a known value (`workspace`, `feature-environment`, `feature-worktree`)
-- `apply` is present and is a non-empty string or a non-empty list of non-empty strings
-- `destroy` and `reset`, when present, are each a non-empty string or a non-empty list of non-empty strings
-- `required_services` is only declared on `resource` or `data` (not `dependency`)
-- `project`, when present, is only declared on `feature-environment` scope
-- `project`, when present, names a declared `[[project_repository]]`
-- No unknown keys are present
+`winter doctor` includes a built-in `[provision]` probe that validates every declared `[[provision.*]]` manifest entry — from both `.winter/config.toml` and installed extension `winter-ext.toml` files — against the manifest rules in [configuration/provision.md](../configuration/provision.md#validation) (the per-entry field shapes, scope and `project` constraints, and unknown-key rejection). It reports one finding per bad entry without aborting other doctor checks.
 
 See [doctor.md](./doctor.md) for the full doctor probe contract.

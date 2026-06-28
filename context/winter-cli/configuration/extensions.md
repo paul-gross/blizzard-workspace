@@ -52,7 +52,7 @@ target  = "2.0"                 # provider-specific routing key (required by the
 - `ports` is an optional list of integer port numbers the service listens on; used by status rendering.
 - `image` is optional; used by container-based providers.
 
-The extension's `[[service]]` entries are aggregated by `winter service up` alongside any `[[service]]` entries in the workspace's `.winter/config.toml`, deduplication is enforced by name, and the result is written to a temporary TOML file whose path is injected into each provider subprocess as `WINTER_SERVICE_MANIFEST`. See [../usage/service.md](../usage/service.md#per-action-env-var-winter_service_manifest) for the full manifest format and consume-or-ignore rule.
+The extension's `[[service]]` entries are aggregated by `winter service up` alongside any `[[service]]` entries in the workspace's `.winter/config.toml`, deduplication is enforced by name, and the result is written to a temporary TOML file whose path is injected into each provider subprocess as `WINTER_SERVICE_MANIFEST`. See [../contracts/service-orchestrator.md](../contracts/service-orchestrator.md#per-action-env-var-winter_service_manifest) for the full manifest format and consume-or-ignore rule.
 
 `requires` declares the other winter modules this one references and therefore needs when installed on its own. Each entry is a module name — the `<context>` half of a `<context>:/path` reference. It is the data `winter graph` aggregates and the module-extractability lint check validates references against.
 
