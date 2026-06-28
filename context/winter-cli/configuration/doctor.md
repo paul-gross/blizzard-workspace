@@ -2,6 +2,12 @@
 
 `winter doctor` (see [../usage/doctor.md](../usage/doctor.md)) aggregates probe results from three sources: built-in core checks in winter-cli, an optional workspace-level probe, and one probe per installed extension. The workspace and extension probes are opt-in shell scripts that follow the same output contract.
 
+## Built-in core probes
+
+These ship with winter-cli and run on every `winter doctor` — no `.winter/config.toml` registration needed. They run first, before the workspace and extension probes, and their results appear under a `[core]` source group. [usage/doctor.md](../usage/doctor.md) lists the full set; the one called out below has non-obvious drift semantics worth documenting.
+
+- **AGENTS.md shim** — verifies that the workspace-root `CLAUDE.md` is a valid one-line shim pointing at `AGENTS.md`. The probe `fail`s (blocking `winter doctor` exit 0) on any drift: `CLAUDE.md` exists but `AGENTS.md` does not, `AGENTS.md` exists but `CLAUDE.md` does not, or `CLAUDE.md`'s stripped content is anything other than `@AGENTS.md`. The probe stays silent (emits nothing) when neither file exists — a workspace that has not yet adopted the AGENTS.md layout is not flagged.
+
 ## Probe output contract
 
 Every probe script emits **NDJSON to stdout**, one object per line:

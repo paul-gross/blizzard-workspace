@@ -58,10 +58,13 @@ def default_extractability_script_path() -> Path:
 class FileSizeLintCheck:
     """Checks agent-facing markdown files against configurable byte-size thresholds.
 
-    Files in the auto-injected ``@import`` graph (rooted at ``CLAUDE.md`` and
-    ``CLAUDE.winter.md`` in the workspace root) are held to the tighter
-    ``injected_bytes`` threshold; all other ``.md`` files in scope are checked
-    against the looser ``reference_bytes`` threshold.
+    Files in the auto-injected ``@import`` graph (rooted at ``AGENTS.md``,
+    ``AGENTS.winter.md``, and the committed ``CLAUDE.md`` shim in the workspace
+    root) are held to the tighter ``injected_bytes`` threshold; all other ``.md``
+    files in scope are checked against the looser ``reference_bytes`` threshold.
+
+    The traversal deduplicates by resolved path so files reachable via both
+    ``CLAUDE.md → AGENTS.md`` and directly as ``AGENTS.md`` are counted once.
 
     Measurement is by UTF-8 byte length (``len(text.encode())``), not token
     count, so the check is tokenizer-independent and fast.
@@ -106,17 +109,22 @@ class FileSizeLintCheck:
     # ── internals ────────────────────────────────────────────────────────────
 
     def _resolve_injected_set(self) -> set[Path]:
-        """Transitively resolve the @import graph from CLAUDE.md and CLAUDE.winter.md.
+        """Transitively resolve the @import graph from the workspace-root injection roots.
 
-        Starts from the two workspace-root injection roots, follows every
-        ``@<path>`` import found in each file (line-leading or inline within
-        prose), and returns the set of resolved absolute ``Path`` objects that
-        are actually present on disk.  Missing files are silently skipped so a
-        broken import doesn't abort the check.
+        Starts from three workspace-root roots — ``AGENTS.md``,
+        ``AGENTS.winter.md`` (generated extension manifest), and ``CLAUDE.md``
+        (the committed one-line ``@AGENTS.md`` shim) — follows every ``@<path>``
+        import found in each file (line-leading or inline within prose), and
+        returns the set of resolved absolute ``Path`` objects that are actually
+        present on disk.  Missing files are silently skipped so a broken import
+        doesn't abort the check.  The visited set deduplicates by resolved path,
+        so a file reachable via both ``CLAUDE.md → AGENTS.md`` and directly as
+        ``AGENTS.md`` is counted exactly once.
         """
         roots = [
+            self._workspace_root / "AGENTS.md",
+            self._workspace_root / "AGENTS.winter.md",
             self._workspace_root / "CLAUDE.md",
-            self._workspace_root / "CLAUDE.winter.md",
         ]
         visited: set[Path] = set()
         queue: list[Path] = [r.resolve() for r in roots if r.exists()]

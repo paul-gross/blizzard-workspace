@@ -60,6 +60,9 @@ class CoreProbeService:
         claude_symlinks = self._probe_claude_symlinks()
         if claude_symlinks is not None:
             results.append(claude_symlinks)
+        agents_shim = self._probe_agents_shim()
+        if agents_shim is not None:
+            results.append(agents_shim)
         return results
 
     # ── git ───────────────────────────────────────────────────────────────
@@ -298,6 +301,62 @@ class CoreProbeService:
             name="extension symlinks",
             status=ProbeStatus.pass_,
             message="no orphaned symlinks",
+        )
+
+    # ── AGENTS.md / CLAUDE.md shim health ────────────────────────────────
+
+    def _probe_agents_shim(self) -> ProbeResult | None:
+        """Detect drift between AGENTS.md (canonical body) and CLAUDE.md (@AGENTS.md shim).
+
+        Returns None when neither file is present — an un-migrated or non-winter
+        workspace should not be flagged. Both files must exist and CLAUDE.md must
+        reduce to the single import ``@AGENTS.md`` for the probe to pass.
+        """
+        claude = self._config.workspace_root / "CLAUDE.md"
+        agents = self._config.workspace_root / "AGENTS.md"
+        claude_exists = self._fs.is_file(claude)
+        agents_exists = self._fs.is_file(agents)
+
+        if not claude_exists and not agents_exists:
+            return None
+
+        name = "AGENTS.md shim"
+
+        if claude_exists and not agents_exists:
+            return ProbeResult(
+                source=CORE_SOURCE,
+                name=name,
+                status=ProbeStatus.fail,
+                message="CLAUDE.md exists but AGENTS.md is missing",
+                remediation=(
+                    "Create AGENTS.md with the canonical body and reduce CLAUDE.md to a single `@AGENTS.md` import."
+                ),
+            )
+        if agents_exists and not claude_exists:
+            return ProbeResult(
+                source=CORE_SOURCE,
+                name=name,
+                status=ProbeStatus.fail,
+                message="AGENTS.md exists but CLAUDE.md is missing",
+                remediation=(
+                    "Create CLAUDE.md containing a single `@AGENTS.md` import so Claude Code retains its entry point."
+                ),
+            )
+        # Both exist — verify CLAUDE.md is exactly the @AGENTS.md shim.
+        content = self._fs.read_text(claude)
+        if content.strip() != "@AGENTS.md":
+            return ProbeResult(
+                source=CORE_SOURCE,
+                name=name,
+                status=ProbeStatus.fail,
+                message="CLAUDE.md is not the @AGENTS.md shim (body has drifted back or shim points elsewhere)",
+                remediation="Reduce CLAUDE.md to a single `@AGENTS.md` import and move its body into AGENTS.md.",
+            )
+        return ProbeResult(
+            source=CORE_SOURCE,
+            name=name,
+            status=ProbeStatus.pass_,
+            message="CLAUDE.md is the @AGENTS.md shim",
         )
 
     def _read_branch(self, worktree_path: Path) -> str | None:

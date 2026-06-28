@@ -30,7 +30,7 @@ from winter_cli.modules.workspace.destroy_service import DestroyService
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
-from winter_cli.modules.workspace.extension_claudemd_service import ExtensionClaudemdService
+from winter_cli.modules.workspace.extension_agentsmd_service import ExtensionAgentsMdService
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
 from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
 from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
@@ -273,8 +273,8 @@ class Container(containers.DeclarativeContainer):
         manifest_loader=extension_manifest_loader,
     )
 
-    extension_claudemd_svc = providers.Singleton(
-        ExtensionClaudemdService,
+    extension_agentsmd_svc = providers.Singleton(
+        ExtensionAgentsMdService,
         config=workspace_config,
         fs=fs,
     )
@@ -316,7 +316,7 @@ class Container(containers.DeclarativeContainer):
         extension_agent_svc=extension_agent_svc,
         extension_hook_svc=extension_hook_svc,
         extension_exclude_svc=extension_exclude_svc,
-        extension_claudemd_svc=extension_claudemd_svc,
+        extension_agentsmd_svc=extension_agentsmd_svc,
         fs=fs,
         subprocess_runner=subprocess_runner,
         git_repo=git_repo,

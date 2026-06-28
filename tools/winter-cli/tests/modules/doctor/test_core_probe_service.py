@@ -142,3 +142,109 @@ def test_claude_symlinks_probe_runs_when_only_one_subdir_present() -> None:
     assert result is not None
     assert result.status == ProbeStatus.fail
     assert ".claude/agents/wf-gone.md" in result.message
+
+
+# ── _probe_agents_shim ────────────────────────────────────────────────────────
+
+CLAUDE_MD = WORKSPACE_ROOT / "CLAUDE.md"
+AGENTS_MD = WORKSPACE_ROOT / "AGENTS.md"
+
+
+def test_agents_shim_probe_returns_none_when_neither_file_exists() -> None:
+    fs = FakeFilesystem(directories={WORKSPACE_ROOT})
+    svc = _build_service(fs)
+
+    assert svc._probe_agents_shim() is None
+
+
+def test_agents_shim_probe_passes_when_both_exist_and_claude_is_shim() -> None:
+    fs = FakeFilesystem(
+        files={
+            CLAUDE_MD: "@AGENTS.md",
+            AGENTS_MD: "# canonical body\n",
+        }
+    )
+    svc = _build_service(fs)
+
+    result = svc._probe_agents_shim()
+
+    assert result is not None
+    assert result.status == ProbeStatus.pass_
+    assert result.source == CORE_SOURCE
+    assert result.name == "AGENTS.md shim"
+
+
+def test_agents_shim_probe_passes_with_trailing_newline_in_shim() -> None:
+    """Shim content with a trailing newline should still count as the correct shim."""
+    fs = FakeFilesystem(
+        files={
+            CLAUDE_MD: "@AGENTS.md\n",
+            AGENTS_MD: "# canonical body\n",
+        }
+    )
+    svc = _build_service(fs)
+
+    result = svc._probe_agents_shim()
+
+    assert result is not None
+    assert result.status == ProbeStatus.pass_
+
+
+def test_agents_shim_probe_fails_when_claude_has_real_body() -> None:
+    """CLAUDE.md containing real documentation content is the core drift case."""
+    fs = FakeFilesystem(
+        files={
+            CLAUDE_MD: "# CLAUDE.md\nThis is the real documentation body.\n",
+            AGENTS_MD: "# canonical body\n",
+        }
+    )
+    svc = _build_service(fs)
+
+    result = svc._probe_agents_shim()
+
+    assert result is not None
+    assert result.status == ProbeStatus.fail
+    assert result.remediation is not None
+    assert "AGENTS.md" in result.remediation
+
+
+def test_agents_shim_probe_fails_when_agents_md_missing_but_claude_present() -> None:
+    fs = FakeFilesystem(files={CLAUDE_MD: "@AGENTS.md\n"})
+    svc = _build_service(fs)
+
+    result = svc._probe_agents_shim()
+
+    assert result is not None
+    assert result.status == ProbeStatus.fail
+    assert "AGENTS.md is missing" in result.message
+    assert result.remediation is not None
+
+
+def test_agents_shim_probe_fails_when_claude_md_missing_but_agents_present() -> None:
+    fs = FakeFilesystem(files={AGENTS_MD: "# canonical body\n"})
+    svc = _build_service(fs)
+
+    result = svc._probe_agents_shim()
+
+    assert result is not None
+    assert result.status == ProbeStatus.fail
+    assert "CLAUDE.md is missing" in result.message
+    assert result.remediation is not None
+
+
+def test_agents_shim_probe_fails_when_shim_points_at_wrong_target() -> None:
+    """Shim that imports @OTHER.md instead of @AGENTS.md must be flagged."""
+    fs = FakeFilesystem(
+        files={
+            CLAUDE_MD: "@OTHER.md\n",
+            AGENTS_MD: "# canonical body\n",
+        }
+    )
+    svc = _build_service(fs)
+
+    result = svc._probe_agents_shim()
+
+    assert result is not None
+    assert result.status == ProbeStatus.fail
+    assert result.remediation is not None
+    assert "@AGENTS.md" in result.remediation

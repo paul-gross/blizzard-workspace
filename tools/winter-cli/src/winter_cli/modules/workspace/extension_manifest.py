@@ -17,12 +17,16 @@ HOOK_ON_ENV_INIT = "on_env_init"
 HOOK_ON_ENV_DESTROY = "on_env_destroy"
 HOOK_ON_WORKSPACE_RECONCILE = "on_workspace_reconcile"
 
-CLAUDEMD_BLOCK_NAME = "winter-extensions"
-CLAUDEMD_INDEX_FILENAME = "index.md"
+EXTENSION_BLOCK_NAME = "winter-extensions"
+EXTENSION_INDEX_FILENAME = "index.md"
 
-# Workspaces commit a stable `# Winter Extensions` section in CLAUDE.md that
-# imports `@CLAUDE.winter.md`; this CLI only writes the imported file. The
-# file is gitignored so init runs don't dirty the workspace.
+# Workspaces commit a stable `# Winter Extensions` section in AGENTS.md (or
+# CLAUDE.md for backward-compat) that imports `@AGENTS.winter.md`; this CLI
+# only writes the imported file. It is gitignored so init runs don't dirty
+# the workspace.
+AGENTS_WINTER_FILENAME = "AGENTS.winter.md"
+# Retained for migration-cleanup deletion of stale files written by older
+# versions of winter that also generated a paired CLAUDE.winter.md shim.
 CLAUDEMD_WINTER_FILENAME = "CLAUDE.winter.md"
 
 

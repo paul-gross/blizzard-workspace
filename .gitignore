@@ -4,11 +4,11 @@
 # Machine-local env-index registry — never committed (tracks index assignments per machine)
 /.winter/state.toml
 
-# Auto-managed by `winter ws init` — extension list imported from CLAUDE.md
-/CLAUDE.winter.md
+# Auto-managed by `winter ws init` — extension list imported from AGENTS.md
+/AGENTS.winter.md
 
-# User/machine-specific Claude Code overrides imported from CLAUDE.md
-/CLAUDE.local.md
+# User/machine-specific overrides imported from AGENTS.md
+/AGENTS.local.md
 
 # Machine-specific winter-service-tmux overrides (overlaid on setup-tmux.sh)
 /context/project/setup-tmux.local.sh

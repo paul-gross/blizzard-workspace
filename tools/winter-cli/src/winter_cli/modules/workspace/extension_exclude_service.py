@@ -6,8 +6,8 @@ import re
 from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.modules.workspace.extension_manifest import (
-    CLAUDEMD_BLOCK_NAME,
     EXT_MANIFEST,
+    EXTENSION_BLOCK_NAME,
     ExtensionManifestLoader,
 )
 from winter_cli.modules.workspace.init_reporter import IInitReporter
@@ -82,7 +82,7 @@ class ExtensionExcludeService:
                 self._fs.write_text(exclude_path, new_content_for_config)
         except OSError as exc:
             logger.warning("finalize_excludes: write failed at %s — %s", exclude_path, exc)
-            reporter.repo_error(CLAUDEMD_BLOCK_NAME, f".git/info/exclude — {exc}")
+            reporter.repo_error(EXTENSION_BLOCK_NAME, f".git/info/exclude — {exc}")
             return False
 
         if self._config.adopt_extensions == AdoptExtensions.none:
@@ -127,12 +127,12 @@ class ExtensionExcludeService:
             self._fs.write_text(exclude_path, new_content)
         except OSError as exc:
             logger.warning("finalize_excludes: write failed at %s — %s", exclude_path, exc)
-            reporter.repo_error(CLAUDEMD_BLOCK_NAME, f".git/info/exclude — {exc}")
+            reporter.repo_error(EXTENSION_BLOCK_NAME, f".git/info/exclude — {exc}")
             return False
 
         detail = ", ".join(sorted(eligible_names)) if eligible_names else "cleared"
         reporter.repo_action(
-            CLAUDEMD_BLOCK_NAME,
+            EXTENSION_BLOCK_NAME,
             str(exclude_path),
             "workspace_excludes_updated",
             detail,

@@ -288,8 +288,8 @@ class FileSizeLintConfig(BaseModel):
 
     The check measures every ``.md`` file in scope and compares it to one of
     two thresholds: the tighter ``injected_bytes`` threshold for files that
-    appear in the auto-injected ``@import`` graph (roots: workspace
-    ``CLAUDE.md`` and ``CLAUDE.winter.md``), and the looser
+    appear in the auto-injected ``@import`` graph (roots: ``AGENTS.md``,
+    ``AGENTS.winter.md``, and the committed ``CLAUDE.md`` shim), and the looser
     ``reference_bytes`` threshold for all other agent-facing markdown.
 
     Default values are calibrated to the ~1.5 k-token target from issue #96

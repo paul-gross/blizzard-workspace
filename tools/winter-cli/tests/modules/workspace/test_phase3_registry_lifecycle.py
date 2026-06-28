@@ -34,7 +34,7 @@ from winter_cli.core.internal.local_filesystem import LocalFilesystem
 from winter_cli.modules.workspace.destroy_service import DestroyService
 from winter_cli.modules.workspace.env_index import resolve_env_index
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
-from winter_cli.modules.workspace.extension_claudemd_service import ExtensionClaudemdService
+from winter_cli.modules.workspace.extension_agentsmd_service import ExtensionAgentsMdService
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
 from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
 from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
@@ -119,7 +119,7 @@ def _init_service(
             fs=fs,
             manifest_loader=manifest_loader,
         ),
-        extension_claudemd_svc=ExtensionClaudemdService(
+        extension_agentsmd_svc=ExtensionAgentsMdService(
             config=workspace_config,
             fs=fs,
         ),

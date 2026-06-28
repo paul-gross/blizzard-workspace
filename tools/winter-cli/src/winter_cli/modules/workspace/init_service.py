@@ -12,7 +12,7 @@ from winter_cli.modules.workspace.agent_install import ExtensionAgentService
 from winter_cli.modules.workspace.config_lock_repository import IConfigLockRepository
 from winter_cli.modules.workspace.env_index import EnvIndexAllocator
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
-from winter_cli.modules.workspace.extension_claudemd_service import ExtensionClaudemdService
+from winter_cli.modules.workspace.extension_agentsmd_service import ExtensionAgentsMdService
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
 from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
 from winter_cli.modules.workspace.extension_symlink_service import ExtensionSymlinkService
@@ -72,7 +72,7 @@ class InitService:
         extension_symlink_svc: ExtensionSymlinkService,
         extension_hook_svc: ExtensionHookService,
         extension_exclude_svc: ExtensionExcludeService,
-        extension_claudemd_svc: ExtensionClaudemdService,
+        extension_agentsmd_svc: ExtensionAgentsMdService,
         fs: IFilesystemWriter,
         subprocess_runner: ISubprocessRunner,
         git_repo: IGitRepository,
@@ -87,7 +87,7 @@ class InitService:
         self._extension_symlink_svc = extension_symlink_svc
         self._extension_hook_svc = extension_hook_svc
         self._extension_exclude_svc = extension_exclude_svc
-        self._extension_claudemd_svc = extension_claudemd_svc
+        self._extension_agentsmd_svc = extension_agentsmd_svc
         self._fs = fs
         self._subprocess = subprocess_runner
         self._git_repo = git_repo
@@ -137,7 +137,7 @@ class InitService:
         # Per-repo reconcile may have failed for some, but cloned-and-present
         # extensions still belong in both managed sections.
         present_repos = [r for r in repos if self._fs.exists(r.path)]
-        if not self._extension_claudemd_svc.finalize_claudemd(present_repos, reporter):
+        if not self._extension_agentsmd_svc.finalize_agentsmd(present_repos, reporter):
             success = False
         if not self._extension_exclude_svc.finalize_excludes(present_repos, reporter):
             success = False

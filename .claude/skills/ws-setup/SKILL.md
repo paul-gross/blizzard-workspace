@@ -194,7 +194,7 @@ Confirm: "Created `workspace:/context/project/`."
 
 Then add a forward-looking hint:
 
-> "If your project's agentic harness (agents, skills, project-specific docs) grows substantial, you can later extract it into its own repo and pull it back in as a winter extension — declared in `.winter/config.toml` as a `[[standalone_repository]]`. That keeps it versioned independently and reusable across workspaces, while still surfacing its agents/skills here via the auto-managed `# Winter Extensions` section in CLAUDE.md. Not something to do now — just good to know."
+> "If your project's agentic harness (agents, skills, project-specific docs) grows substantial, you can later extract it into its own repo and pull it back in as a winter extension — declared in `.winter/config.toml` as a `[[standalone_repository]]`. That keeps it versioned independently and reusable across workspaces, while still surfacing its agents/skills here via the auto-managed `# Winter Extensions` section in AGENTS.md. Not something to do now — just good to know."
 
 ### 6. Set up project-setup.md (optional)
 
@@ -230,7 +230,7 @@ Ask **one** question:
 
 **Explain first:** "Each winter extension can contribute its own setup workflow that needs to run before feature environments work properly (e.g. `winter-service-tmux` needs you to define which services to run via `./up`/`./down`). I'll go through every installed extension and check whether it has a 'Feature environment setup steps' section in its `index.md`. Extensions without one get skipped."
 
-Look at `workspace:/CLAUDE.winter.md` — that file (imported by the `# Winter Extensions` section in `workspace:/CLAUDE.md`) lists every installed extension. If `CLAUDE.winter.md` doesn't exist, no extensions are installed and this step is a no-op. Tell the user: "Installed extensions: `<list>`."
+Look at `workspace:/AGENTS.winter.md` — that file (imported by the `# Winter Extensions` section in `workspace:/AGENTS.md`) lists every installed extension. If `AGENTS.winter.md` doesn't exist, no extensions are installed and this step is a no-op. Tell the user: "Installed extensions: `<list>`."
 
 Then, for each extension **one at a time**:
 

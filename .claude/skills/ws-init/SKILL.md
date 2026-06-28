@@ -40,7 +40,7 @@ Run the catch-all reconcile:
 winter ws init --all
 ```
 
-This clones any missing project repos into `projects/`, ensures every declared standalone repo is cloned at its `path`, re-applies git identity / `cmd` / `git_excludes` everywhere, re-processes each standalone extension (rewriting `CLAUDE.winter.md` and the managed `<prefix>-*` symlinks in `.claude/`), and re-runs `winter ws init <env>` for every existing feature environment directory (which fires each extension's `on_env_init` hook again).
+This clones any missing project repos into `projects/`, ensures every declared standalone repo is cloned at its `path`, re-applies git identity / `cmd` / `git_excludes` everywhere, re-processes each standalone extension (rewriting `AGENTS.winter.md` plus the managed `<prefix>-*` symlinks in `.claude/`), and re-runs `winter ws init <env>` for every existing feature environment directory (which fires each extension's `on_env_init` hook again).
 
 After it completes, surface the salient lines from the CLI's per-step output: what was cloned, what was already present, which envs were touched, any extension hooks that ran. If the CLI exits non-zero, stop and surface the failing per-repo errors — don't keep going.
 
@@ -72,7 +72,7 @@ Reconcile a single declared project (or standalone) repo. The CLI doesn't expose
 winter ws init
 ```
 
-Same as workspace mode without `--all` — reconciles every source checkout (projects + standalones) and skips the per-env pass. Idempotent across all repos, so it's safe to run to satisfy a single-repo request. Note that this also re-processes standalone extensions (rewriting `CLAUDE.winter.md` and `.claude/` symlinks); that's a no-op when nothing has changed but worth mentioning so the user isn't surprised that the extension wiring may be touched.
+Same as workspace mode without `--all` — reconciles every source checkout (projects + standalones) and skips the per-env pass. Idempotent across all repos, so it's safe to run to satisfy a single-repo request. Note that this also re-processes standalone extensions (rewriting `AGENTS.winter.md` plus `.claude/` symlinks); that's a no-op when nothing has changed but worth mentioning so the user isn't surprised that the extension wiring may be touched.
 
 If the CLI exits non-zero, stop and surface the per-repo errors.
 

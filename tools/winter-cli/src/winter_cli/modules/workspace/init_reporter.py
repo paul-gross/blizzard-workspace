@@ -62,8 +62,12 @@ class StreamReporter:
             self._echo(f"[{repo}] extension warning: {detail}", err=True)
         elif action == "workspace_excludes_updated":
             self._echo(f"[{repo}] workspace excludes updated: {detail}")
-        elif action == "claudemd_updated":
-            self._echo(f"[{repo}] CLAUDE.md updated: {detail}")
+        elif action == "agents_winter_updated":
+            self._echo(f"[{repo}] AGENTS.winter.md updated: {detail}")
+        elif action == "agents_winter_removed":
+            self._echo(f"[{repo}] AGENTS.winter.md removed: {detail}")
+        elif action == "claude_winter_stale_removed":
+            self._echo(f"[{repo}] CLAUDE.winter.md removed at {location} (stale — migration cleanup)")
         elif action == "worktree_removed":
             suffix = f" ({detail})" if detail else ""
             self._echo(f"[{repo}] worktree removed at {location}{suffix}")

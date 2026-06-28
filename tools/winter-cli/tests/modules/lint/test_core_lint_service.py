@@ -186,3 +186,74 @@ def test_threshold_override_via_config(tmp_ws: Path) -> None:
     assert len(findings) == 1
     assert findings[0].check == FILE_SIZE_CHECK
     assert findings[0].status == LintStatus.fail
+
+
+def test_agents_md_root_imports_are_injected(tmp_ws: Path) -> None:
+    """Files @imported from AGENTS.md are included in the injected set."""
+    agents_md = tmp_ws / "AGENTS.md"
+    context_index = tmp_ws / "context" / "index.md"
+    context_index.parent.mkdir(parents=True)
+
+    # context/index.md is over the injected threshold but under reference.
+    oversized_content = "x" * 7000
+    context_index.write_bytes(oversized_content.encode())
+
+    agents_md.write_text("See @context/index.md for details.\n")
+
+    check = FileSizeLintCheck(tmp_ws, FileSizeLintConfig(injected_bytes=6000, reference_bytes=12000))
+    scope = LintScope(kind=LintScopeKind.all, label="all", paths=[tmp_ws])
+    findings = check.check(scope)
+
+    injected_findings = [f for f in findings if f.check == FILE_SIZE_CHECK and "context/index.md" in (f.file or "")]
+    assert injected_findings, f"Expected a finding for context/index.md via AGENTS.md root; got {findings}"
+    assert "injected" in injected_findings[0].message
+
+
+def test_agents_winter_md_root_imports_are_injected(tmp_ws: Path) -> None:
+    """Files @imported from AGENTS.winter.md are included in the injected set."""
+    agents_winter_md = tmp_ws / "AGENTS.winter.md"
+    ext_index = tmp_ws / "ext" / "info.md"
+    ext_index.parent.mkdir(parents=True)
+
+    oversized_content = "y" * 7000
+    ext_index.write_bytes(oversized_content.encode())
+
+    agents_winter_md.write_text("Extension context: @ext/info.md\n")
+
+    check = FileSizeLintCheck(tmp_ws, FileSizeLintConfig(injected_bytes=6000, reference_bytes=12000))
+    scope = LintScope(kind=LintScopeKind.all, label="all", paths=[tmp_ws])
+    findings = check.check(scope)
+
+    injected_findings = [f for f in findings if f.check == FILE_SIZE_CHECK and "ext/info.md" in (f.file or "")]
+    assert injected_findings, f"Expected a finding for ext/info.md via AGENTS.winter.md root; got {findings}"
+    assert "injected" in injected_findings[0].message
+
+
+def test_dedup_when_claude_md_shims_to_agents_md(tmp_ws: Path) -> None:
+    """A file reachable via both CLAUDE.md → AGENTS.md and directly as AGENTS.md is counted once.
+
+    Simulates the post-migration layout where CLAUDE.md is a shim containing
+    ``@AGENTS.md``.  Any file imported by AGENTS.md that exceeds the injected
+    threshold should produce exactly one finding, not two.
+    """
+    agents_md = tmp_ws / "AGENTS.md"
+    claude_md = tmp_ws / "CLAUDE.md"
+    shared_doc = tmp_ws / "context" / "shared.md"
+    shared_doc.parent.mkdir(parents=True)
+
+    oversized_content = "z" * 7000
+    shared_doc.write_bytes(oversized_content.encode())
+
+    # AGENTS.md imports the shared doc directly.
+    agents_md.write_text("See @context/shared.md for details.\n")
+    # CLAUDE.md is a shim that @imports AGENTS.md, making shared.md reachable via two paths.
+    claude_md.write_text("@AGENTS.md\n")
+
+    check = FileSizeLintCheck(tmp_ws, FileSizeLintConfig(injected_bytes=6000, reference_bytes=12000))
+    scope = LintScope(kind=LintScopeKind.all, label="all", paths=[tmp_ws])
+    findings = check.check(scope)
+
+    shared_findings = [f for f in findings if f.check == FILE_SIZE_CHECK and "context/shared.md" in (f.file or "")]
+    assert len(shared_findings) == 1, (
+        f"Expected exactly one finding for context/shared.md (dedup); got {len(shared_findings)}: {shared_findings}"
+    )

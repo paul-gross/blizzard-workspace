@@ -52,6 +52,21 @@ user.email = "john.doe@example.com"
 
 The overlay uses the same schema as the shared config. Keys in the overlay override the shared config key-by-key. The `[git]` identity is applied to every repo winter-cli manages during `winter ws init`.
 
+## Workspace-root file shape
+
+`winter ws init` generates and manages exactly one workspace-root file for agent context — `AGENTS.winter.md` — alongside the committed pair the workspace author controls and an optional hand-authored `AGENTS.local.md` (winter never writes the latter):
+
+| File | Committed? | Content | Gitignored? |
+|------|-----------|---------|-------------|
+| `AGENTS.md` | yes | Canonical workspace instructions body | no |
+| `CLAUDE.md` | yes | One-line shim: `@AGENTS.md` | no |
+| `AGENTS.winter.md` | no | Generated extension manifest (body) | yes |
+| `AGENTS.local.md` | no | User-local body (hand-authored) | yes |
+
+`AGENTS.md` is the canonical entry point for every agent harness that supports multi-file context injection. `CLAUDE.md` is a thin committed shim (`@AGENTS.md`) that keeps Claude Code discovering context without any config changes. Claude resolves the rest of the `@import` graph (`AGENTS.winter.md`, `AGENTS.local.md`, `context/…`) transitively from that entry point, so no per-file Claude shims are needed.
+
+The `winter doctor` core probe "AGENTS.md shim" enforces that the committed `CLAUDE.md` is always exactly `@AGENTS.md` — see [doctor.md](./doctor.md#built-in-core-probes).
+
 ## State registry
 
 `.winter/state.toml` is a machine-local, gitignored file (not a config file) that winter manages automatically. It records the **env name → assigned index** mapping written by `winter ws init` and cleared by `winter ws destroy`. You never edit it by hand.

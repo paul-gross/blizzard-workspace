@@ -5,7 +5,7 @@ from winter_cli.modules.workspace.agent_install import ExtensionAgentService
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
-from winter_cli.modules.workspace.extension_claudemd_service import ExtensionClaudemdService
+from winter_cli.modules.workspace.extension_agentsmd_service import ExtensionAgentsMdService
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
 from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
 from winter_cli.modules.workspace.extension_symlink_service import ExtensionSymlinkService
@@ -42,7 +42,7 @@ def test_container_resolves_every_top_level_service(container: Container) -> Non
     assert isinstance(container.extension_agent_svc(), ExtensionAgentService)
     assert isinstance(container.extension_hook_svc(), ExtensionHookService)
     assert isinstance(container.extension_exclude_svc(), ExtensionExcludeService)
-    assert isinstance(container.extension_claudemd_svc(), ExtensionClaudemdService)
+    assert isinstance(container.extension_agentsmd_svc(), ExtensionAgentsMdService)
 
 
 def test_container_resolves_service_handler(container: Container) -> None:

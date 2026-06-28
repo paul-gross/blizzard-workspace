@@ -18,9 +18,7 @@ from winter_cli.modules.capability.spec_loader import SpecLoader
 
 # Resolve the doc relative to this file: tests/ → tools/winter-cli/ → winter/ → context/
 _REPO_ROOT = Path(__file__).parent.parent.parent.parent  # <env>/winter/
-_CONTRACT_DOC = (
-    _REPO_ROOT / "context" / "winter-cli" / "contracts" / "service-orchestrator.md"
-)
+_CONTRACT_DOC = _REPO_ROOT / "context" / "winter-cli" / "contracts" / "service-orchestrator.md"
 
 _SPEC_SLOT = "service"
 _SPEC_VERSION = "v1"

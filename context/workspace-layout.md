@@ -6,8 +6,10 @@ This workspace manages **multiple project repositories** as peers. All repos are
 
 ```
 ./                              workspace branch - this is where you are
-├── CLAUDE.md                   # Workspace instructions
-├── CLAUDE.winter.md            # Installed-extension block (@-imported from CLAUDE.md)
+├── AGENTS.md                   # Workspace instructions (canonical body)
+├── CLAUDE.md                   # Committed shim: @AGENTS.md (keeps Claude Code working)
+├── AGENTS.winter.md            # Generated extension manifest (gitignored)
+├── AGENTS.local.md             # User-local body (hand-authored, gitignored)
 ├── context/                         # Workspace documentation
 │   ├── workspace-layout.md     # This file
 │   ├── worktree-ops.md         # Git commands for this topology
@@ -41,6 +43,8 @@ This workspace manages **multiple project repositories** as peers. All repos are
 
 > **Workspace root identity.** The workspace root is the single directory holding **`.winter/config.toml`**. A feature env's `<env>/.winter/` (created by winter-service-tmux to hold `logs/<svc>.log` and per-env state) has no `config.toml` and is never a root — winter-cli's locator walks past it to the real root.
 
+> **Workspace-root file shape.** The tree above shows the four agent-context files at the workspace root. For the authoritative table — what each file contains, whether it is committed or gitignored, and the rationale — see [context/winter-cli/configuration/config-files.md § Workspace-root file shape](./winter-cli/configuration/config-files.md#workspace-root-file-shape).
+
 ## Source Checkouts
 
 The following directories are source checkouts — **never work in these directly**:
@@ -50,7 +54,7 @@ All development happens in feature worktrees (e.g., `./alpha/<repo-name>/`).
 
 ## Inherited docs at the workspace root
 
-Many files at the workspace root — most `context/` docs, `CLAUDE.md`, and others — are **not authored here**. They are inherited copies carried in from an upstream project repo (chiefly the `winter` tool) by the shared-lineage rebase: the workspace sits one customization commit on top of `winter/master`, so everything that commit doesn't own arrives from upstream and travels downstream automatically on the next sync.
+Many files at the workspace root — most `context/` docs, `AGENTS.md`, and others — are **not authored here**. They are inherited copies carried in from an upstream project repo (chiefly the `winter` tool) by the shared-lineage rebase: the workspace sits one customization commit on top of `winter/master`, so everything that commit doesn't own arrives from upstream and travels downstream automatically on the next sync.
 
 **Before editing any root file, check whether it is an inherited copy.** If it is, fix it at the source repo (in that repo's feature env) and let the sync carry it down — never hand-edit the downstream copy. The next rebase clobbers the edit (if upstream touched the same lines) or silently diverges (if it didn't), so a downstream hand-edit disappears or drifts back without warning.
 
@@ -109,5 +113,5 @@ Paths use a `<context>:<path>` prefix to clarify which repo/branch a file lives 
 1. **Never work in source checkouts directly** — use feature environments for all code changes (see the [Source Checkouts](#source-checkouts) section for which directories are source checkouts)
 2. **Local branch = Greek letter, remote branch = feature name** — each env's worktrees use a Greek-letter branch locally (e.g., `alpha`). The remote feature branch (e.g., `feature/basic-addon`) is a separate name configured via tracking. See [worktree-ops.md](./worktree-ops.md) for how to connect an env to a remote feature branch.
 3. **Confirm before working** — always verify which env to work in
-4. **Always spawn subagents from the workspace root** — subagents and teammates must be created while the working directory is the workspace root. Spawning from a project subdirectory causes the subagent to lose workspace context including this CLAUDE.md, agent definitions, and skills.
+4. **Always spawn subagents from the workspace root** — subagents and teammates must be created while the working directory is the workspace root. Spawning from a project subdirectory causes the subagent to lose workspace context including `AGENTS.md`, agent definitions, and skills.
 5. **Follow the project's contributing conventions when completing work** — see [project/contributing.md](./project/contributing.md). If that file doesn't exist, guide the user to establish one documenting how completed work should be merged, pushed, and delivered for their specific projects.
