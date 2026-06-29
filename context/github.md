@@ -35,7 +35,7 @@ Use `/wg-issue`. The skill drafts from conversation context, confirms the target
 
 Two ways:
 
-1. **From a commit** — include `Fixes #N` (or `Closes #N`) in the commit message body. GitHub auto-closes when the commit lands on the default branch. For cross-repo references, use `paul-gross/<repo>#N` (e.g. `Closes paul-gross/winter-github#7`).
+1. **From a commit** — include `Fixes #N` (or `Closes #N`) in the commit message body. GitHub auto-closes when the commit lands on the default branch. A bare `#N` resolves against **the repo the commit lands in**, not the repo the issue was filed in — and work here often lands in a different repo than the one tracking it (e.g. a `winter-workflow` issue fixed in `winter-harness`), so a bare `#N` silently links, and may close, the wrong issue while the real one stays open. Confirm which repo the issue lives in; when it isn't the commit's repo, scope the reference as `paul-gross/<repo>#N` — `Closes paul-gross/winter-workflow#21` to close it (cross-repo auto-close works given push access) or `Refs paul-gross/winter-workflow#21` to link without closing.
 2. **Manually via gh** — `gh issue close <N> --repo paul-gross/<repo>`. Use when work merged without a fix-ref, or when abandoning the issue.
 
 Don't close silently in the web UI — commit references leave a paper trail. Leave a brief closing comment if the linked commit doesn't make context obvious.
