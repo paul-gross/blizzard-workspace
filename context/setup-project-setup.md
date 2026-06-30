@@ -41,7 +41,7 @@ Rule of thumb:
 
 Offer the user two approaches: *"I can research your codebase and figure out the setup requirements automatically, or you can walk me through it. Which do you prefer?"*
 
-**If researching automatically:** Spawn an Opus subagent to explore the project repos. The subagent searches for package managers, dockerfiles, docker-compose files, env templates (`.env.example`, `.env.sample`), migration scripts, README setup sections, and existing documentation. Using a subagent keeps the research out of the main setup context — we only care about the findings. The subagent reports back a structured summary of what it found, and you present those findings to the user for confirmation before writing.
+**If researching automatically:** Spawn an Opus-class (or equivalent) subagent to explore the project repos. The subagent searches for package managers, dockerfiles, docker-compose files, env templates (`.env.example`, `.env.sample`), migration scripts, README setup sections, and existing documentation. Using a subagent keeps the research out of the main setup context — we only care about the findings. The subagent reports back a structured summary of what it found, and you present those findings to the user for confirmation before writing.
 
 **If the user prefers a guided approach**, walk through each area below with focused questions.
 
@@ -82,8 +82,8 @@ If the install needs branching, env-dependent decisions, or post-install steps t
 Ask: *"Does the project need environment files (e.g., `.env`)? What variables are required?"*
 
 Probe for:
-- Base ports for each service (web server, API, database, etc.)
-- How ports should be offset per environment (alpha=+1, beta=+2, etc.)
+- The services that need a port (web server, API, database, etc.)
+- The per-service offset of each within the env's port window (`web=+0`, `api=+1`, `db=+2`, …) — winter already gives each env its own window, so you offset *per service*, never per environment
 - Database connection strings — do they need per-environment database names?
 - API keys or secrets — can they be shared across environments or do they need to be unique?
 - Any other per-environment config (Redis prefix, S3 bucket, etc.)
@@ -110,9 +110,9 @@ DATABASE_URL  = "postgres://localhost:${DB_PORT}/myapp-${WINTER_ENV}"  # reuses 
 
 This means every new environment gets the right ports automatically, without any manual step in `project-setup.md`. Use `[env.workspace.vars]` for variables tied to shared workspace services (use `${WINTER_WORKSPACE_PORT_BASE+N}` there, since `WINTER_PORT_BASE` is absent at workspace scope). Use this for any variable derived from the managed base vars or from an earlier band entry. Only variables that depend on state winter doesn't know (secrets, externally provisioned values) need to be documented in `project-setup.md` instead.
 
-**Allocate ports as `${WINTER_PORT_BASE+N}`, never `${WINTER_ENV_INDEX+<literal port>}`.** `WINTER_PORT_BASE` is the start of this env's reserved port window (`base_port + index * ports_per_env`), and `N` is a small per-service offset *within* that window — so `WEB`, `API`, `DB` become `WINTER_PORT_BASE+0`, `+1`, `+2`, landing inside the env's own block and never colliding with another env. `WINTER_ENV_INDEX` is only the env's small ordinal (alpha=1, beta=2, …); adding it to a literal base port (`${WINTER_ENV_INDEX+4200}` → alpha=4201, beta=4202) puts adjacent envs one port apart and overflows each env's window. That older "base + greek-index" scheme is obsolete — do not emit it.
+**Allocate ports as `${WINTER_PORT_BASE+N}`.** `WINTER_PORT_BASE` is the start of this env's reserved port window (`base_port + index * ports_per_env`), and `N` is a small per-service offset *within* that window — so `WEB`, `API`, `DB` become `WINTER_PORT_BASE+0`, `+1`, `+2`, landing inside the env's own block and never colliding with another env.
 
-**There is no `.winter.env` file.** Per-env variables live entirely in `[env.feature.vars]` / `[env.workspace.vars]` and are injected at runtime; winter does not read or write any `.winter.env`. Do not generate one, reference one, or add one to `git_excludes`.
+Per-env variables live entirely in `[env.feature.vars]` / `[env.workspace.vars]` and are injected at runtime.
 
 To inspect the computed vars for a given env:
 
@@ -150,36 +150,24 @@ Probe for:
 
 Database creation and migration are natural candidates for `[[provision.resource]]` and `[[provision.data]]` handlers — idempotent scripts that create the per-env database and run migrations. If you haven't migrated to handlers yet, document these steps in `project-setup.md` as per-environment orchestration.
 
-### 4. Build steps → usually `project-setup.md`
-
-Ask: *"Are there any build or codegen steps needed before the project can run? (e.g., `npm run build`, code generation, compiling protos)"*
-
-Default to `project-setup.md`. Only append a build step to a repo's `cmd` list if it's a single command with no dependencies on env files, ports, or the environment's database — same rule as section 1.
-
-### 5. Seed data → `[[provision.data]]` or `project-setup.md`
+### 4. Seed data → `[[provision.data]]` or `project-setup.md`
 
 Ask: *"Does the project need seed data or initial state to be useful? (e.g., fixtures, migrations with default data, creating admin users)"*
 
 Seed data is a natural candidate for a `[[provision.data]]` handler — a re-runnable, wipe-and-reload script. If you haven't migrated to handlers yet, document these steps in `project-setup.md` as per-environment orchestration.
 
-### 6. Verification → `project-setup.md`
+### 5. Verification → `project-setup.md`
 
 Ask: *"How can we verify that setup worked? Is there a health check, test suite, or command that confirms things are ready?"*
 
 Final step of `project-setup.md`.
 
-### 7. Pinned repos → `[[project_repository]].pinned`
-
-Ask: *"Are any of these repos shared tooling that should always track `origin/main` instead of being branched per-feature? (e.g., a CLI tool, mock services)"*
-
-For each one, set `pinned = true` on its `[[project_repository]]` entry. `winter ws init <letter>` skips feature branching for pinned repos and just keeps them on the main branch.
-
 ### Output
 
 Two or three artifacts:
 
-1. **`.winter/config.toml`** — enriched with trust/bootstrap `cmd` entries, `[[provision.*]]` handlers (commands inlined in `apply`, per section 1) for dependency/resource/data steps that fit the handler model, plain-pattern `git_excludes`, and `pinned` flags. Keep it boring; if in doubt, leave it out.
-2. **`workspace:/context/project/project-setup.md`** — numbered steps for setup not covered by config or handlers: conditional installs, env file generation with port offsets, database creation/migration, seed data, post-init build steps, and verification steps not yet migrated to handlers. Use variables like `<letter>` and `<index>` where environment-specific values are needed, and explain how to derive them. Stay within the setup-only scope from [What it is](#what-it-is) — no "how to run" content, and defer command-expressible steps to handlers. Author it as prose with **no manual line wrapping** — one sentence or paragraph per physical line, never reflowed to a fixed column — so later one-word edits don't reflow the whole paragraph and bury the real change in churn.
-3. *(rare)* **Handler scripts** under an agreed path (e.g. `scripts/`) — only for `[[provision.*]]` steps too multi-step or conditional to inline in `apply`. Inline simple commands directly (section 1); don't default to a script file.
+1. **`.winter/config.toml`** — enriched with trust/bootstrap `cmd` entries, `[[provision.*]]` handlers (commands inlined in `apply`, per section 1) for dependency/resource/data steps that fit the handler model, and plain-pattern `git_excludes`. Keep it boring; if in doubt, leave it out.
+2. **`workspace:/context/project/project-setup.md`** — numbered steps for setup not covered by config or handlers: conditional installs, env file generation with port offsets, database creation/migration, seed data, and verification steps not yet migrated to handlers. Use variables like `<letter>` and `<index>` where environment-specific values are needed, and explain how to derive them. Stay within the setup-only scope from [What it is](#what-it-is) — no "how to run" content, and defer command-expressible steps to handlers. Author it as prose with **no manual line wrapping** — one sentence or paragraph per physical line, never reflowed to a fixed column — so later one-word edits don't reflow the whole paragraph and bury the real change in churn.
+3. *(last resort)* **Handler scripts** under `.winter/scripts/` — only for `[[provision.*]]` steps too multi-step or conditional to inline in `apply`. Inline simple commands directly (section 1); a script file is the last resort, not the default.
 
 This guide stops at writing the artifacts. Applying the changes to existing environments and running the setup against an environment is the caller's responsibility (see the ws-setup skill).

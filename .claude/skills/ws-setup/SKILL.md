@@ -9,6 +9,22 @@ This skill is an interactive walkthrough that sets up and configures a winter wo
 
 **Idempotent:** safe to re-run at any time. Before each step, check the current state of the workspace. If the step is already done, **say so explicitly** ("your workspace remote is already configured — skipping") and move on. Don't silent skip.
 
+## Arguments
+
+This skill accepts optional arguments that **scope** the run and **pre-seed** answers. With no arguments, run the full walkthrough start to finish. With arguments, parse them **first — before the opening preamble** — and classify each whitespace-separated token into one of three kinds. Tokens can be combined; a single invocation may carry several of each kind.
+
+1. **Git URL** — anything that looks like a clone URL (`git@host:owner/repo.git`, `https://…/repo.git`, `ssh://…`, or a bare `host/owner/repo`). These are the **default project repositories**: they pre-fill the answer to the **Declare project repos** step. When you reach that step, tell the user you're using the URL(s) from the arguments and run its add flow with each URL pre-filled — still detecting each repo's default branch and confirming the derived name — instead of asking "what's the clone URL?". Multiple URLs → multiple repos.
+
+2. **Installed extension name** — a token matching an extension listed in `workspace:/AGENTS.winter.md` (e.g. `winter-service-tmux`). This **scopes the run to extension setup only**: skip every other step (assume the workspace is already set up) and run just the **Run feature-environment setup steps from installed extensions** step, restricted to the named extension(s). If several extensions are named, walk each in turn.
+
+3. **Area of focus / specific step** — a step name or topic (e.g. `remote`, `repos`, `identity`, `project settings`, `feature env` / `alpha`, `contributing`). This **scopes the run to just that step** (or steps): do the matching step(s) and skip the rest.
+
+**Combining the kinds:**
+- The set of step-scoping tokens (kinds 2 and 3) defines *which* steps run. If any are present, run only those steps and skip the rest; if none are present, all steps are in scope.
+- Git URLs (kind 1) only seed the **Declare project repos** step's default — they don't by themselves narrow the run. A git URL alone → full walkthrough with that repo pre-filled. A git URL plus `repos` → just the repo step, pre-filled. A git URL plus an extension name → the repo step (because URLs imply it) plus that extension's setup.
+
+When the run is scoped, still honor idempotency (check current state before acting) and the pacing rules below, and finish with the **Final report** covering only what was in scope.
+
 ## How to run this skill
 
 This is a guided walkthrough, not a script. Your job is to teach the user how their workspace is wired together while configuring it. Be verbose, be explicit, and be patient.
@@ -35,6 +51,8 @@ Before doing anything, send a short orientation message, then continue straight 
 
 > "I'll walk you through setting up your winter workspace. Stop me or ask questions at any time."
 
+If the run is **scoped by arguments** (see [Arguments](#arguments)), adjust this orientation to name the scoped work instead of promising the full walkthrough — e.g. "You've pointed me at `winter-service-tmux`, so I'll just run its feature-environment setup and skip the rest." then begin that work.
+
 Don't wait for a "go" signal — just begin.
 
 ## Steps
@@ -58,7 +76,13 @@ Then continue to the next step.
 
 **"Have you already created a fork or empty repo (e.g. on GitHub/GitLab) to push this workspace to?"**
 
-- If **no**: tell the user to go create one and paste the URL when ready. Stop and wait — don't ask anything else this turn.
+- If **no**: don't block on it. Tell the user the workspace works fine as a local-only repo, and that they can wire up a remote later whenever they're ready — by creating an empty repo on GitHub/GitLab and running:
+  ```bash
+  git remote rename origin winter
+  git remote add origin <their-fork-url>
+  git push -u origin workspace
+  ```
+  Then continue to the next step.
 - If **yes**: ask the next question on the next turn — **"What's the URL?"**
 
 Once they provide the URL, tell them what's about to happen:
@@ -114,7 +138,7 @@ Read `.winter/config.toml` and check existing `[[project_repository]]` entries.
    url = "<user-provided-url>"
    main_branch = "<detected-branch>"
    ```
-   Always write `main_branch` explicitly, even when it's `main` — it makes the config self-describing and resilient to future upstream HEAD changes. No `cmd`, `pinned`, `alias`, or `git_excludes` here — those come later.
+   Always write `main_branch` explicitly, even when it's `main` — it makes the config self-describing and resilient to future upstream HEAD changes. No `cmd` or `git_excludes` here — those come later, with project settings.
 
    Confirm: "Added `<name>` (default branch `<branch>`)."
 
@@ -196,33 +220,35 @@ Then add a forward-looking hint:
 
 > "If your project's agentic harness (agents, skills, project-specific docs) grows substantial, you can later extract it into its own repo and pull it back in as a winter extension — declared in `.winter/config.toml` as a `[[standalone_repository]]`. That keeps it versioned independently and reusable across workspaces, while still surfacing its agents/skills here via the auto-managed `# Winter Extensions` section in AGENTS.md. Not something to do now — just good to know."
 
-### 6. Set up project-setup.md (optional)
+### 6. Set up project settings (optional)
 
-**Explain first:** "Now an optional but recommended setup: project-setup.md. **Best done before creating any feature environment.** It captures your application-specific setup: installing dependencies, generating env files, provisioning per-worktree databases, building artifacts, anything else needed to bring a fresh worktree to a runnable state. The output is two artifacts: per-repo `cmd` lists and `git_excludes` added to `.winter/config.toml`, and a new `workspace:/context/project/project-setup.md`. Setting this up now means feature environments are runnable from the moment they're created."
+**Explain first:** "Now an optional but recommended setup: your project settings — the application-specific configuration that makes feature environments runnable from the moment they're created. **Best done before creating any feature environment.** It has two parts: (1) **`.winter/config.toml` settings** — per-env variables in `[env.feature.vars]` / `[env.workspace.vars]` (ports and any derived values, declared once and computed automatically for every environment), plus the procedural setup winter runs for you: `[[provision.*]]` handlers (install dependencies, provision databases, seed data), per-repo `cmd` trust/bootstrap steps, and `git_excludes` for generated artifacts; and (2) **project-setup.md** — `workspace:/context/project/project-setup.md`, the *residual, agentic* setup steps that can't be expressed procedurally: conditional, multi-step, or environment-specific work (like env-file generation) that doesn't fit a handler. Setting these up now means feature environments are runnable from the moment they're created."
 
 Ask **one** question:
 
-**"Want to set up project-setup.md now?"**
+**"Want to set up project settings now?"**
 
 - "no" or "later": continue.
-- "yes": follow [context/setup-project-setup.md](./context/setup-project-setup.md) — that guide produces the two artifacts. After it's finished, tell the user: "Now applying the new config to all existing worktrees so the `cmd` list runs everywhere..." and run:
+- "yes": follow [context/setup-project-setup.md](./context/setup-project-setup.md) — that guide produces both parts. After it's finished, tell the user: "Now applying the new config to all existing worktrees so the `cmd` list runs everywhere..." and run:
   ```bash
   winter ws init --all
   ```
   This reruns each repo's `cmd` list and writes any new `git_excludes` into every clone (source checkouts and feature worktrees). Report what changed.
 
-### 7. Create the alpha feature environment (optional)
+### 7. Create the first feature environment (optional)
 
-**Explain first:** "Feature environments are where actual development happens. By convention the first one is named `alpha`. The Greek-letter naming isn't arbitrary — it's how each environment gets a stable, memorable, never-colliding block of 100 ports: alpha → 4100s, beta → 4200s, gamma → 4300s, and so on. Greek letters have fixed indices 1–24 reserved up front. Arbitrary names (like `feature-foo`) work too — they get a hashed index in a separate range, so they never collide with Greek letters, but they *can* collide with other arbitrary names (rare in practice, but possible if you run several ad-hoc envs at once). For predictability, prefer the next available Greek letter. `winter ws init alpha` creates the `alpha/` directory, makes a per-repo worktree on branch `alpha` (cut from each repo's `main_branch`), copies the git identity, writes git-excludes, runs each repo's `cmd` list (so any project-setup commands from the previous step apply automatically), allocates a stable env index for port assignment, and runs every installed extension's `on_env_init` hook. Environment variables (`WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, and any `[env.workspace.vars]` / `[env.feature.vars]` entries) are computed at runtime — source them with `source <(winter env alpha)` or let `winter service up` inject them automatically."
+**Check first:** Read `env_aliases` in `.winter/config.toml`. That key declares the workspace's fixed-index environment names; it defaults to the first ten Greek letters (`alpha`…`kappa`). If the user has customized it, use *their* names throughout this step — call the first declared alias `<first-env>` below, and substitute their names wherever the explanation uses Greek letters. If the key is unset or still the default, `<first-env>` is `alpha` and the Greek-letter wording stands as written.
+
+**Explain first:** "Feature environments are where actual development happens. By convention the first one is named `<first-env>`. The fixed-index naming isn't arbitrary — it's how each environment gets a stable, memorable, never-colliding block of ports: each alias has a reserved index, and the port band is `base_port + index * ports_per_env`. With the defaults (`base_port = 4000`, `ports_per_env = 20`) the very first band — index 0, 4000–4019 — is reserved for **workspace-level shared services** (`WINTER_WORKSPACE_PORT_BASE`), so feature envs start at index 1: `alpha` at 4020–4039, `beta` at 4040–4059, `gamma` at 4060–4079, and so on (both keys are configurable in `.winter/config.toml`). The names come from `env_aliases` in `.winter/config.toml` (Greek letters by default). Arbitrary names (like `feature-foo`) work too — they hash into a separate index band, and on a hash collision winter linear-probes to the next free slot in that band, so they never collide with the aliases *or with each other*; allocation only fails if the whole band is exhausted. For predictability, prefer the next available alias. `winter ws init <first-env>` creates the `<first-env>/` directory, makes a per-repo worktree on branch `<first-env>` (cut from each repo's `main_branch`), copies the git identity, writes git-excludes, runs each repo's `cmd` list (so any project-setup commands from the previous step apply automatically), allocates a stable env index for port assignment, and runs every installed extension's `on_env_init` hook. Environment variables are computed at runtime — source them with `source <(winter env <first-env>)` or let `winter service up` inject them automatically."
 
 Ask **one** question:
 
-**"Create the alpha feature environment now?"**
+**"Create the `<first-env>` feature environment now?"**
 
 - "no": continue.
-- "yes": tell them "Running `winter ws init alpha`..." then run:
+- "yes": tell them "Running `winter ws init <first-env>`..." then run:
   ```bash
-  winter ws init alpha
+  winter ws init <first-env>
   ```
   Report the result — directories created, branches cut, commands run, hooks fired.
 
@@ -258,7 +284,7 @@ Ask **one** question:
 ### Final report
 
 Summarize everything that happened in a single message:
-- Workspace remote: configured / already set up
+- Workspace remote: configured / already set up / deferred (local-only, wire up later)
 - Repos declared and cloned: `<list>`
 - Git identity strategy: workspace-specific / global / unchanged
 - Standalone extensions: `<list>` (cloned / already existed)
