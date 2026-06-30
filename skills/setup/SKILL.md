@@ -1,5 +1,4 @@
 ---
-name: ws-setup
 description: Idempotent setup and configuration of a winter workspace to connect and interact with a set of application repositories — safe to re-run any time
 ---
 

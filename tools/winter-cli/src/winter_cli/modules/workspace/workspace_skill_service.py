@@ -12,30 +12,42 @@ from winter_cli.modules.workspace.extension_skill_install import (
     SymlinkSkillStrategy,
 )
 from winter_cli.modules.workspace.init_reporter import IInitReporter
+from winter_cli.modules.workspace.internal.managed_block import (
+    GITIGNORE_BEGIN,
+    GITIGNORE_END,
+    replace_or_append_block,
+)
 from winter_cli.modules.workspace.models import RepoError
 
 logger = logging.getLogger(__name__)
 
-WORKSPACE_SKILLS_DIR = "skills"
+_EXCLUDE_BLOCK_NAME = "winter-workspace/workspace-skills"
 
 
 class WorkspaceSkillService:
-    """Installs workspace-owned skills from workspace_root/skills/ into per-vendor skill dirs.
+    """Installs workspace-owned skills from workspace_root/<skills_dir>/ into per-vendor skill dirs.
 
-    When `prefix` is set in `.winter/config.toml`, reads every skill directory
-    (a directory containing `SKILL.md`) under `workspace_root/skills/` and
-    projects them into every code-agent vendor's skills directory using the
-    same per-vendor install strategies as extension skills:
+    Reads every skill directory (a directory containing `SKILL.md`) under
+    `workspace_root/<skills_dir>/` and projects them into every code-agent
+    vendor's skills directory using the per-vendor install strategies:
     - Symlink for ClaudeCode (.claude/skills) and Codex (.codex/skills)
     - Real-directory copy for OpenCode (.opencode/skill)
 
-    Stale `<prefix>-*` entries (from a previous run where a skill was renamed
-    or removed) are pruned on each reconcile pass, matching extension behavior.
-    This includes the case where the whole `skills/` directory is deleted — the
-    strategies receive `source_root=None` and prune any remaining `<prefix>-*`
-    links or copies.
+    Naming rule: a source directory named exactly `<prefix>` projects as the
+    bare prefix (e.g. `skills/ws/` → `ws`); all others project as
+    `<prefix>-<dirname>` (e.g. `skills/init/` → `ws-init`).
 
-    No-op when `prefix` is absent from config.
+    Stale `<prefix>-*` and bare `<prefix>` entries (from a previous run where
+    a skill was renamed or removed) are pruned on each reconcile pass, matching
+    extension behavior. This includes the case where the whole `<skills_dir>/`
+    directory is deleted — the strategies receive `source_root=None` and prune
+    any remaining `<prefix>-*` links or copies.
+
+    A managed git-exclude block is written to `.git/info/exclude` so the
+    generated vendor entries are never accidentally committed.
+
+    Projection is always-on: `prefix` defaults to `"ws"` and `skills_dir`
+    defaults to `"skills"`.
     """
 
     def __init__(self, config: WorkspaceConfig, fs: IFilesystemWriter) -> None:
@@ -50,11 +62,7 @@ class WorkspaceSkillService:
         violation.
         """
         prefix = self._config.skill_prefix
-        if prefix is None:
-            logger.debug("workspace skills: no prefix configured, skipping")
-            return True
-
-        skills_root = self._config.workspace_root / WORKSPACE_SKILLS_DIR
+        skills_root = self._config.workspace_root / self._config.skills_dir
         source_root: Path | None = skills_root if self._fs.is_dir(skills_root) else None
         if source_root is None:
             logger.debug("workspace skills: %s absent, pruning stale entries", skills_root)
@@ -83,6 +91,9 @@ class WorkspaceSkillService:
             reporter.repo_error("workspace", f"workspace skills — {exc}")
             return False
 
+        if not self._write_excludes(prefix, reporter):
+            return False
+
         if skill_names:
             detail = f"prefix={prefix} skills={len(skill_names)}"
             reporter.repo_action(
@@ -98,3 +109,36 @@ class WorkspaceSkillService:
         if vendor.skill_install is SkillInstall.copy:
             return CopySkillStrategy(self._fs, vendor)
         return SymlinkSkillStrategy(self._fs)
+
+    def _write_excludes(self, prefix: str, reporter: IInitReporter) -> bool:
+        """Write a managed exclude block for all three vendor skill dirs."""
+        exclude_path = self._config.workspace_root / ".git" / "info" / "exclude"
+        if not self._fs.exists(self._config.workspace_root / ".git"):
+            return True
+
+        begin = GITIGNORE_BEGIN.format(name=_EXCLUDE_BLOCK_NAME)
+        end = GITIGNORE_END.format(name=_EXCLUDE_BLOCK_NAME)
+        lines = [
+            begin,
+            f".claude/skills/{prefix}-*",
+            f".claude/skills/{prefix}",
+            f".codex/skills/{prefix}-*",
+            f".codex/skills/{prefix}",
+            f".opencode/skill/{prefix}-*",
+            f".opencode/skill/{prefix}",
+            end,
+        ]
+
+        try:
+            existing = self._fs.read_text(exclude_path) if self._fs.exists(exclude_path) else ""
+            new_content = replace_or_append_block(existing, begin, end, lines)
+            if new_content == existing:
+                return True
+            self._fs.mkdir(exclude_path.parent, parents=True, exist_ok=True)
+            self._fs.write_text(exclude_path, new_content)
+        except OSError as exc:
+            logger.warning("workspace skills: exclude write failed — %s", exc)
+            reporter.repo_error("workspace", f"workspace skills .git/info/exclude — {exc}")
+            return False
+
+        return True

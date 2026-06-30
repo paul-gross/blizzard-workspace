@@ -1,5 +1,4 @@
 ---
-name: ws-push
 description: Push local commits from a feature environment, a standalone repo, or the workspace branch to its recorded upstream
 allowed-tools: Bash, Read, AskUserQuestion
 ---

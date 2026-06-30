@@ -16,21 +16,30 @@ SKILL_SOURCE = "skills"
 
 
 class SkillProbeService:
-    """Doctor probe that checks per-vendor skill discoverability for all extensions.
+    """Doctor probe that checks per-vendor skill discoverability for workspace and extension skills.
 
-    For each installed extension and each ``CodeAgentVendor``, verifies that the
-    projected ``<prefix>-*`` entries under the vendor's skills directory are in
-    sync with their source:
+    For each code-agent vendor, verifies that the projected skill entries under
+    the vendor's skills directory are in sync with their source:
 
-    - **Symlink vendors** (ClaudeCode, Codex) — every ``<prefix>-*`` symlink
-      resolves to an existing source directory containing ``SKILL.md`` (no
-      broken links).
-    - **Copy vendors** (OpenCode) — every ``<prefix>-*`` copy exists and its
-      content hash matches the live source (no stale copies). Uses the SAME
-      hash logic as ``CopySkillStrategy`` so the probe and the installer share
-      one source of truth.
-    - **All vendors** — no orphaned ``<prefix>-*`` entries whose source is gone;
-      the projected set matches the source skill set.
+    - **Symlink vendors** (ClaudeCode, Codex) — every projected symlink resolves
+      to an existing source directory containing ``SKILL.md`` (no broken links).
+    - **Copy vendors** (OpenCode) — every projected copy exists and its content
+      hash matches the live source (no stale copies). Uses the SAME hash logic
+      as ``CopySkillStrategy`` so the probe and the installer share one source
+      of truth.
+    - **All vendors** — no orphaned entries whose source is gone; the projected
+      set matches the source skill set.
+
+    Two probe families run per vendor:
+
+    1. **Workspace skill probe** (``workspace skill discoverability: <vendor>``) —
+       checks the unified workspace skill projection from ``<skills_dir>/`` using
+       the configured ``prefix`` (default ``ws``). Runs unconditionally,
+       independent of ``adopt_extensions``.
+
+    2. **Extension skill probe** (``skill discoverability: <vendor>``) — checks
+       skills contributed by installed standalone extensions. Runs only when
+       ``adopt_extensions != none``.
 
     This is REPORT-ONLY: the probe never mutates or re-syncs. Drift is a
     WARNING, not a hard failure. Run ``winter ws init`` to repair.
@@ -53,15 +62,116 @@ class SkillProbeService:
         self._manifest_loader = manifest_loader
 
     def run(self, standalone_repos: list[StandaloneRepository]) -> list[ProbeResult]:
-        if self._config.adopt_extensions == AdoptExtensions.none:
-            return []
+        results: list[ProbeResult] = []
+
+        # Workspace skill probe runs unconditionally for all vendors.
+        results.extend(self._probe_workspace_skills())
+
+        if self._config.adopt_extensions != AdoptExtensions.none:
+            for vendor in CodeAgentVendor:
+                results.extend(self._probe_vendor(vendor, standalone_repos))
+
+        return results
+
+    # ── Workspace skill probe ─────────────────────────────────────────────
+
+    def _probe_workspace_skills(self) -> list[ProbeResult]:
+        """Emit one probe result per vendor for workspace skill projections.
+
+        Reads from ``workspace_root/<skills_dir>/`` and checks projected entries
+        in each vendor's skills directory using the configured prefix. The
+        dir==prefix naming rule is applied: a source dir named exactly ``prefix``
+        projects as the bare prefix; others project as ``<prefix>-<dirname>``.
+        """
+        prefix = self._config.skill_prefix
+        source_root = self._config.workspace_root / self._config.skills_dir
+
+        expected: dict[str, Path] = {}
+        if self._fs.is_dir(source_root):
+            try:
+                for entry in self._fs.iterdir(source_root):
+                    if not self._fs.is_dir(entry):
+                        continue
+                    if not self._fs.is_file(entry / "SKILL.md"):
+                        continue
+                    projected = prefix if entry.name == prefix else f"{prefix}-{entry.name}"
+                    expected[projected] = entry
+            except OSError:
+                pass
 
         results: list[ProbeResult] = []
         for vendor in CodeAgentVendor:
-            results.extend(self._probe_vendor(vendor, standalone_repos))
+            results.append(self._probe_vendor_workspace_skills(vendor, prefix, expected))
         return results
 
-    # ── Per-vendor probe ──────────────────────────────────────────────────
+    def _probe_vendor_workspace_skills(
+        self,
+        vendor: CodeAgentVendor,
+        prefix: str,
+        expected: dict[str, Path],
+    ) -> ProbeResult:
+        """Check workspace skill discoverability for one vendor and return a ProbeResult."""
+        label = f"workspace skill discoverability: {vendor.value}"
+        n = len(expected)
+
+        actual = self._actual_workspace_skills(vendor, prefix)
+
+        if not expected and not actual:
+            return ProbeResult(
+                source=SKILL_SOURCE,
+                name=label,
+                status=ProbeStatus.pass_,
+                message="0 workspace skill(s) in sync",
+            )
+
+        issues: list[str] = []
+
+        for name, source_dir in sorted(expected.items()):
+            if name not in actual:
+                issues.append(f"missing: {name} (source exists, not projected)")
+                continue
+            issue = self._check_entry(vendor, name, actual[name], source_dir)
+            if issue:
+                issues.append(issue)
+
+        for name in sorted(actual):
+            if name not in expected:
+                issues.append(f"orphaned: {name} (no live source)")
+
+        if issues:
+            return ProbeResult(
+                source=SKILL_SOURCE,
+                name=label,
+                status=ProbeStatus.warn,
+                message="; ".join(issues),
+                remediation="Run `winter ws init` to sync workspace skill projections.",
+            )
+        return ProbeResult(
+            source=SKILL_SOURCE,
+            name=label,
+            status=ProbeStatus.pass_,
+            message=f"{n} workspace skill(s) in sync",
+        )
+
+    def _actual_workspace_skills(self, vendor: CodeAgentVendor, prefix: str) -> dict[str, Path]:
+        """Return ``{name: path}`` for workspace-prefix entries in the vendor skills dir."""
+        skills_dir = self._config.workspace_root / vendor.skills_subpath
+        if not self._fs.is_dir(skills_dir):
+            return {}
+        prefix_with_dash = f"{prefix}-"
+        result: dict[str, Path] = {}
+        try:
+            entries = self._fs.iterdir(skills_dir)
+        except OSError:
+            return result
+        for entry in entries:
+            if not (self._fs.is_symlink(entry) or self._fs.is_dir(entry)):
+                continue
+            if entry.name.startswith(prefix_with_dash) or entry.name == prefix:
+                result[entry.name] = entry
+        return result
+
+    # ── Per-vendor probe (extension skills) ──────────────────────────────
 
     def _probe_vendor(self, vendor: CodeAgentVendor, standalone_repos: list[StandaloneRepository]) -> list[ProbeResult]:
         """Check all extensions for one vendor and emit one probe result."""
@@ -77,7 +187,7 @@ class SkillProbeService:
                 known_prefixes.add(prefix)
 
         # Collect the actual set of <prefix>-* entries currently in skills_dir,
-        # scoped only to known extension prefixes so first-party skills (e.g.
+        # scoped only to known extension prefixes so workspace skills (e.g.
         # ws-init, ws-push) are never falsely flagged as orphans.
         actual: dict[str, Path] = self._actual_skills(skills_dir, known_prefixes)
 
@@ -174,7 +284,7 @@ class SkillProbeService:
 
         Only entries whose name starts with ``<known_prefix>-`` (for any known
         extension prefix) are included. Entries that don't match any known extension
-        prefix are outside this probe's jurisdiction (e.g. first-party ``ws-*``
+        prefix are outside this probe's jurisdiction (e.g. workspace ``ws-*``
         skills) and are silently skipped rather than reported as orphans.
         """
         if not self._fs.is_dir(skills_dir):

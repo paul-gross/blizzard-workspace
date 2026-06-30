@@ -8,6 +8,10 @@ These ship with winter-cli and run on every `winter doctor` — no `.winter/conf
 
 - **AGENTS.md shim** — verifies that the workspace-root `CLAUDE.md` is a valid one-line shim pointing at `AGENTS.md`. The probe `fail`s (blocking `winter doctor` exit 0) on any drift: `CLAUDE.md` exists but `AGENTS.md` does not, `AGENTS.md` exists but `CLAUDE.md` does not, or `CLAUDE.md`'s stripped content is anything other than `@AGENTS.md`. The probe stays silent (emits nothing) when neither file exists — a workspace that has not yet adopted the AGENTS.md layout is not flagged.
 
+## Workspace skill discoverability probes
+
+The **`workspace skill discoverability: <vendor>`** probe family runs unconditionally on every `winter doctor` — independent of `adopt_extensions` or any config opt-in. One probe runs per code-agent vendor (ClaudeCode, Codex, OpenCode). Each probe checks that the workspace skills under `<skills_dir>/` are projected into the corresponding vendor skill directory; a mismatch (missing or stale projection) emits a `warn` result recommending `winter ws init`. These probes surface under the `[skills]` source group, not `[core]`.
+
 ## Probe output contract
 
 Every probe script emits **NDJSON to stdout**, one object per line:

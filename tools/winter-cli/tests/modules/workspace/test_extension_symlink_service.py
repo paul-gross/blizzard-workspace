@@ -417,3 +417,53 @@ def test_symlink_strategy_does_not_transform_skill_frontmatter() -> None:
     assert names == ["wf-do-thing"]
     assert fs.is_symlink(target_root / "wf-do-thing")
     assert fs.read_text(source_root / "do-thing" / "SKILL.md") == "---\ndescription: x\n---\n# do-thing\n"
+
+
+# ── Bare-prefix rule: extension-skill projection is unaffected ────────────────
+# The dir==prefix→bare rule in SymlinkInstaller and CopySkillStrategy is shared
+# with workspace-skill projection. These tests confirm extension-skill projection
+# behaves correctly under both cases of the rule.
+
+
+def test_extension_skill_dir_not_prefix_projects_with_dash() -> None:
+    """An extension skill dir whose name differs from the prefix projects as <prefix>-<dirname>.
+
+    The bare-prefix rule (dir==prefix→bare) must not affect ordinary extension
+    skills whose directory name does not equal the extension's prefix.
+    """
+    fs = FakeFilesystem()
+    source_root = WORKSPACE_ROOT / "wf-ext" / "skills"
+    _seed_source_skill(fs, source_root, "do-thing", "---\ndescription: x\n---\n")
+    target_root = WORKSPACE_ROOT / ".claude" / "skills"
+
+    names = SymlinkSkillStrategy(fs).install(
+        source_root=source_root,
+        target_root=target_root,
+        prefix="wf",
+    )
+
+    assert names == ["wf-do-thing"]
+    assert fs.is_symlink(target_root / "wf-do-thing")
+    assert not fs.exists(target_root / "wf"), "bare 'wf' entry must not be created"
+
+
+def test_extension_skill_dir_equal_to_prefix_projects_bare() -> None:
+    """An extension skill dir whose name equals the prefix projects as the bare prefix.
+
+    For example, an extension with prefix 'wf' that has a skill dir named 'wf/'
+    projects as bare 'wf', not 'wf-wf'.
+    """
+    fs = FakeFilesystem()
+    source_root = WORKSPACE_ROOT / "wf-ext" / "skills"
+    _seed_source_skill(fs, source_root, "wf", "---\ndescription: x\n---\n")
+    target_root = WORKSPACE_ROOT / ".claude" / "skills"
+
+    names = SymlinkSkillStrategy(fs).install(
+        source_root=source_root,
+        target_root=target_root,
+        prefix="wf",
+    )
+
+    assert names == ["wf"]
+    assert fs.is_symlink(target_root / "wf")
+    assert not fs.exists(target_root / "wf-wf"), "double-prefixed 'wf-wf' must not be created"

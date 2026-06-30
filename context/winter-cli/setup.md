@@ -12,30 +12,28 @@ This copies the `winter` wrapper to `~/.local/bin/`. The wrapper auto-discovers 
 
 ## Bootstrap order
 
-On a fresh clone, run the skills in this order:
+On a fresh clone, run in this order:
 
 1. **Install the CLI** — `./tools/winter-cli/install.sh`
-2. **Run `/ws-setup`** — clones repos, wires worktrees, and performs first-time workspace setup. `/ws-setup` is a winter-core skill committed to the repo and available immediately after cloning.
-3. **Run `winter ws init`** — reconciles the workspace against the config on subsequent runs
+2. **Run `winter ws init`** — reconciles the CLI against `.winter/config.toml` and projects workspace skills into all three vendor skill directories (ClaudeCode, Codex, OpenCode). This must run **before** any `ws-*` skill is invocable on any harness.
+3. **Run `/ws-setup`** — clones repos, wires worktrees, and performs first-time workspace setup.
 
-The core skills (`/ws-setup`, `/ws-init`, and others) are committed to `.claude/skills/` and are available immediately on a fresh clone — no projection step is needed to access them.
+### Workspace skills (projection)
 
-### Workspace-authored skills (projection)
+`winter ws init` projects every skill directory under `workspace_root/<skills_dir>/` into per-vendor skill directories. This is always-on — no config key is required to enable it. The default `prefix` is `ws` and the default `skills_dir` is `skills`, so a fresh workspace with a `skills/` directory is automatically projected on `winter ws init`.
 
-In addition to the committed core skills, the CLI supports *workspace-authored skills* — skills you write in a `skills/` directory at the workspace root and project into per-vendor skill directories via `winter ws init`. This is an opt-in feature controlled by the top-level `prefix` key in `.winter/config.toml`. See [configuration/config-files.md](./configuration/config-files.md#workspace-skill-prefix) for the key reference.
+Naming rule: a skill directory whose name equals the prefix (e.g. `skills/ws/`) projects as the bare prefix (`ws`); all other directories project as `<prefix>-<dirname>` (e.g. `skills/init/` → `ws-init`).
 
-**Precondition for skill projection:** The workspace `skills/` directory must exist and contain your authored skill directories. The committed `.claude/skills/<prefix>-*` entries (if any) must be `git rm`-ed before setting `prefix`, or `winter ws init` will error with a symlink collision (`path exists and is not a symlink`). Relocate skills into `workspace_root/skills/` and remove the committed dirs first.
+With the defaults (`prefix = "ws"`, `skills_dir = "skills"`) and a `skills/my-skill/SKILL.md` at the workspace root, `winter ws init` creates:
 
-With `prefix = "myprefix"` and a `skills/my-skill/SKILL.md` in the workspace root, `winter ws init` creates:
+- `.claude/skills/ws-my-skill` (symlink, for ClaudeCode)
+- `.codex/skills/ws-my-skill` (symlink, for Codex)
+- `.opencode/skill/ws-my-skill/` (copy, for OpenCode)
 
-- `.claude/skills/myprefix-my-skill` (symlink, for ClaudeCode)
-- `.codex/skills/myprefix-my-skill` (symlink, for Codex)
-- `.opencode/skill/myprefix-my-skill/` (copy, for OpenCode)
+These projected entries are generated artifacts that `winter ws init` writes; they are git-excluded automatically via a managed block in `.git/info/exclude`.
 
-These projected entries are generated artifacts that `winter ws init` writes and are not committed to the workspace repo.
+**`SKILL.md` constraint:** Workspace skill files must not set a `name:` frontmatter key — the projected directory name is the authoritative identity. `winter ws init` rejects any skill directory whose `SKILL.md` declares `name:`.
 
-When `prefix` is absent, workspace skill projection is skipped entirely.
+### Workspace skill prefix and skills_dir
 
-### Workspace skill prefix
-
-The top-level `prefix` key in `.winter/config.toml` names the namespace used for projected workspace skills. See [configuration/config-files.md](./configuration/config-files.md#workspace-skill-prefix) for full details and disambiguation from the per-`[[standalone_repository]]` `prefix` field.
+The top-level `prefix` and `skills_dir` keys in `.winter/config.toml` control the workspace skill namespace and source directory. See [configuration/config-files.md](./configuration/config-files.md#workspace-skill-prefix) for full details and disambiguation from the per-`[[standalone_repository]]` `prefix` field.

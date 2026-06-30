@@ -135,22 +135,49 @@ def test_load_maps_top_level_prefix_to_skill_prefix() -> None:
     assert svc.load().skill_prefix == "ws"
 
 
-def test_load_skill_prefix_defaults_to_none() -> None:
-    """skill_prefix is None when the top-level `prefix` key is absent."""
+def test_load_skill_prefix_defaults_to_ws() -> None:
+    """skill_prefix defaults to 'ws' when the top-level `prefix` key is absent."""
     config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
     fs = FakeFilesystem(files={config_path: ""})
     svc = _service(fs, {config_path: {}})
 
-    assert svc.load().skill_prefix is None
+    assert svc.load().skill_prefix == "ws"
 
 
-def test_load_empty_prefix_treated_as_none() -> None:
-    """An empty string `prefix` is treated as absent (no workspace skills)."""
+def test_load_empty_prefix_defaults_to_ws() -> None:
+    """An empty string `prefix` falls back to the default 'ws'."""
     config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
     fs = FakeFilesystem(files={config_path: ""})
     svc = _service(fs, {config_path: {"prefix": ""}})
 
-    assert svc.load().skill_prefix is None
+    assert svc.load().skill_prefix == "ws"
+
+
+def test_load_skills_dir_defaults_to_skills() -> None:
+    """skills_dir defaults to 'skills' when the top-level `skills_dir` key is absent."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {}})
+
+    assert svc.load().skills_dir == "skills"
+
+
+def test_load_skills_dir_override() -> None:
+    """Top-level `skills_dir` key overrides the default."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {"skills_dir": "my-skills"}})
+
+    assert svc.load().skills_dir == "my-skills"
+
+
+def test_load_empty_skills_dir_defaults_to_skills() -> None:
+    """An empty string `skills_dir` falls back to the default 'skills'."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {"skills_dir": ""}})
+
+    assert svc.load().skills_dir == "skills"
 
 
 def test_load_accepts_lint_as_a_list() -> None:

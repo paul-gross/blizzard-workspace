@@ -6,8 +6,9 @@ Covers:
   3. Stale copy — copy vendor (OpenCode) flags a content-hash mismatch as WARN.
   4. Orphaned entry — a projected entry whose source is gone, for any vendor.
   5. Missing projection — a source skill with no projected entry.
-  6. adopt_extensions = none — returns no results.
+  6. adopt_extensions = none — extension probes are skipped; workspace skill probes still run.
   7. Winter mode + no manifest — extension skipped silently.
+  8. Workspace skill probe — skills/ source checked across all three vendors.
 """
 
 from __future__ import annotations
@@ -29,6 +30,9 @@ WORKSPACE_ROOT = Path("/ws")
 CLAUDE_SKILLS = WORKSPACE_ROOT / ".claude" / "skills"
 CODEX_SKILLS = WORKSPACE_ROOT / ".codex" / "skills"
 OPENCODE_SKILLS = WORKSPACE_ROOT / ".opencode" / "skill"
+
+# Workspace skills source directory
+SKILLS_DIR = WORKSPACE_ROOT / "skills"
 
 # Extension source layout
 EXT_ROOT = WORKSPACE_ROOT / "winter-workflow"
@@ -95,7 +99,7 @@ class TestHealthyState:
         repo = _repo()
 
         results = svc.run([repo])
-        claude_result = next(r for r in results if "claude-code" in r.name)
+        claude_result = next(r for r in results if "claude-code" in r.name and "workspace skill" not in r.name)
         assert claude_result.status == ProbeStatus.pass_
         assert claude_result.source == SKILL_SOURCE
 
@@ -131,7 +135,7 @@ class TestHealthyState:
         repo = _repo()
 
         results = svc.run([repo])
-        oc_result = next(r for r in results if "opencode" in r.name)
+        oc_result = next(r for r in results if "opencode" in r.name and "workspace skill" not in r.name)
         assert oc_result.status == ProbeStatus.pass_
 
     def test_no_extensions_all_pass(self) -> None:
@@ -143,14 +147,15 @@ class TestHealthyState:
         assert results, "expected results for each vendor"
         assert all(r.status == ProbeStatus.pass_ for r in results)
 
-    def test_one_result_per_vendor(self) -> None:
-        """run() emits exactly one result per CodeAgentVendor."""
+    def test_two_results_per_vendor(self) -> None:
+        """run() emits one extension result and one workspace skill result per vendor."""
         fs = FakeFilesystem(directories={WORKSPACE_ROOT})
         svc = _svc(_config(), fs)
 
         results = svc.run([])
         vendor_count = len(list(CodeAgentVendor))
-        assert len(results) == vendor_count
+        # Extension probe: one per vendor. Workspace skill probe: one per vendor.
+        assert len(results) == vendor_count * 2
 
 
 # ---------------------------------------------------------------------------
@@ -174,7 +179,7 @@ class TestBrokenSymlink:
         repo = _repo()
 
         results = svc.run([repo])
-        claude_result = next(r for r in results if "claude-code" in r.name)
+        claude_result = next(r for r in results if "claude-code" in r.name and "workspace skill" not in r.name)
         assert claude_result.status == ProbeStatus.warn
         assert "broken symlink" in claude_result.message
         assert "winter-workflow-glacier" in claude_result.message
@@ -196,7 +201,7 @@ class TestBrokenSymlink:
         repo = _repo()
 
         results = svc.run([repo])
-        codex_result = next(r for r in results if "codex" in r.name)
+        codex_result = next(r for r in results if "codex" in r.name and "workspace skill" not in r.name)
         assert codex_result.status == ProbeStatus.warn
         assert "broken symlink" in codex_result.message
 
@@ -231,7 +236,7 @@ class TestStaleCopy:
         repo = _repo()
 
         results = svc.run([repo])
-        oc_result = next(r for r in results if "opencode" in r.name)
+        oc_result = next(r for r in results if "opencode" in r.name and "workspace skill" not in r.name)
         assert oc_result.status == ProbeStatus.warn
         assert "stale copy" in oc_result.message
         assert "winter-workflow-do-thing" in oc_result.message
@@ -256,7 +261,7 @@ class TestStaleCopy:
         repo = _repo()
 
         results = svc.run([repo])
-        oc_result = next(r for r in results if "opencode" in r.name)
+        oc_result = next(r for r in results if "opencode" in r.name and "workspace skill" not in r.name)
         assert oc_result.status == ProbeStatus.warn
         assert "missing" in oc_result.message
 
@@ -282,7 +287,7 @@ class TestOrphanedEntry:
         repo = _repo()
 
         results = svc.run([repo])
-        claude_result = next(r for r in results if "claude-code" in r.name)
+        claude_result = next(r for r in results if "claude-code" in r.name and "workspace skill" not in r.name)
         assert claude_result.status == ProbeStatus.warn
         assert "orphaned" in claude_result.message
 
@@ -305,7 +310,7 @@ class TestOrphanedEntry:
         repo = _repo()
 
         results = svc.run([repo])
-        oc_result = next(r for r in results if "opencode" in r.name)
+        oc_result = next(r for r in results if "opencode" in r.name and "workspace skill" not in r.name)
         assert oc_result.status == ProbeStatus.warn
         assert "orphaned" in oc_result.message
 
@@ -334,7 +339,7 @@ class TestMissingProjection:
         repo = _repo()
 
         results = svc.run([repo])
-        claude_result = next(r for r in results if "claude-code" in r.name)
+        claude_result = next(r for r in results if "claude-code" in r.name and "workspace skill" not in r.name)
         assert claude_result.status == ProbeStatus.warn
         assert "missing" in claude_result.message
 
@@ -345,13 +350,20 @@ class TestMissingProjection:
 
 
 class TestAdoptExtensionsNone:
-    def test_returns_empty_when_adopt_none(self) -> None:
-        """When adopt_extensions=none, no probe results are emitted."""
+    def test_only_workspace_skill_probes_when_adopt_none(self) -> None:
+        """When adopt_extensions=none, extension probes are skipped but workspace skill probes run.
+
+        Workspace skill probes are independent of adopt_extensions because they check
+        workspace-owned skills from skills/, not extension-contributed skills.
+        """
         fs = FakeFilesystem(directories={WORKSPACE_ROOT})
         svc = _svc(_config(adopt_extensions=AdoptExtensions.none), fs)
 
         results = svc.run([_repo()])
-        assert results == []
+        vendor_count = len(list(CodeAgentVendor))
+        assert len(results) == vendor_count, "expected one workspace skill result per vendor"
+        assert all(r.status == ProbeStatus.pass_ for r in results)
+        assert all("workspace skill discoverability" in r.name for r in results)
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +418,7 @@ class TestCustomPrefix:
         repo = _repo(prefix="wf")
 
         results = svc.run([repo])
-        claude_result = next(r for r in results if "claude-code" in r.name)
+        claude_result = next(r for r in results if "claude-code" in r.name and "workspace skill" not in r.name)
         assert claude_result.status == ProbeStatus.pass_
 
 
@@ -447,8 +459,155 @@ class TestFirstPartySkillsNotOrphaned:
         repo = _repo()
 
         results = svc.run([repo])
-        claude_result = next(r for r in results if "claude-code" in r.name)
+        # Filter to extension probe results (not workspace skill probes).
+        extension_results = [r for r in results if "workspace skill" not in r.name]
+        claude_result = next(r for r in extension_results if "claude-code" in r.name)
         # The ws-* entries must not cause an orphan warning.
         assert claude_result.status == ProbeStatus.pass_, (
             f"Expected PASS but got {claude_result.status}: {claude_result.message}"
         )
+
+
+# ---------------------------------------------------------------------------
+# 10. Workspace skill probe
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceSkillProbe:
+    """Tests for the workspace skill discoverability probe in SkillProbeService.
+
+    The probe reads from workspace_root/skills/ (unprefixed source dirs such as
+    'ws', 'init', 'fetch') and checks all three vendors for projected entries:
+    - ClaudeCode: symlinks under .claude/skills/
+    - Codex: symlinks under .codex/skills/
+    - OpenCode: copies under .opencode/skill/
+    The dir==prefix naming rule applies: skills/ws/ → ws (bare), skills/init/ → ws-init.
+    """
+
+    def _seed_source_skill(self, fs: FakeFilesystem, dirname: str, body: str = "# skill") -> None:
+        """Plant a skill dir under workspace_root/skills/<dirname>/SKILL.md."""
+        skill_dir = SKILLS_DIR / dirname
+        skill_md = skill_dir / "SKILL.md"
+        fs.directories.add(skill_dir)
+        fs.files[skill_md] = body
+        for parent in skill_dir.parents:
+            fs.directories.add(parent)
+
+    def test_workspace_skill_probes_always_emitted(self) -> None:
+        """One workspace skill probe result per vendor is always emitted (even with no extensions)."""
+        fs = FakeFilesystem(directories={WORKSPACE_ROOT})
+        svc = _svc(_config(), fs)
+
+        results = svc.run([])
+        ws_results = [r for r in results if "workspace skill discoverability" in r.name]
+        assert len(ws_results) == len(list(CodeAgentVendor))
+
+    def test_no_workspace_skills_all_pass(self) -> None:
+        """When skills/ is absent or empty, all workspace skill probes pass."""
+        fs = FakeFilesystem(directories={WORKSPACE_ROOT})
+        svc = _svc(_config(), fs)
+
+        results = svc.run([])
+        ws_results = [r for r in results if "workspace skill discoverability" in r.name]
+        assert all(r.status == ProbeStatus.pass_ for r in ws_results)
+
+    def test_claudecode_passes_when_source_skills_projected(self) -> None:
+        """ClaudeCode workspace skill probe passes when source skills are projected as symlinks."""
+        fs = FakeFilesystem(directories={WORKSPACE_ROOT})
+        # Source: skills/setup and skills/init (unprefixed dirs)
+        self._seed_source_skill(fs, "setup")
+        self._seed_source_skill(fs, "init")
+        # Projected symlinks in .claude/skills/ (ws-setup, ws-init)
+        fs.directories.add(CLAUDE_SKILLS)
+        fs.symlinks[CLAUDE_SKILLS / "ws-setup"] = Path("../../skills/setup")
+        fs.symlinks[CLAUDE_SKILLS / "ws-init"] = Path("../../skills/init")
+        svc = _svc(_config(), fs)
+
+        results = svc.run([])
+        ws_claude = next(r for r in results if "workspace skill discoverability" in r.name and "claude-code" in r.name)
+        assert ws_claude.status == ProbeStatus.pass_
+        assert "2 workspace skill(s)" in ws_claude.message
+
+    def test_codex_passes_when_symlinks_present(self) -> None:
+        """Codex workspace skill probe passes when ws-* symlinks exist and resolve."""
+        fs = FakeFilesystem(directories={WORKSPACE_ROOT})
+        self._seed_source_skill(fs, "setup")
+        # Projected symlink in .codex/skills/.
+        link = CODEX_SKILLS / "ws-setup"
+        target = Path("../../skills/setup")
+        fs.directories.add(CODEX_SKILLS)
+        fs.symlinks[link] = target
+        svc = _svc(_config(), fs)
+
+        results = svc.run([])
+        ws_codex = next(r for r in results if "workspace skill discoverability" in r.name and "codex" in r.name)
+        assert ws_codex.status == ProbeStatus.pass_
+
+    def test_codex_warns_when_symlink_missing(self) -> None:
+        """Codex workspace skill probe WARNs when a projected ws-* symlink is absent."""
+        fs = FakeFilesystem(directories={WORKSPACE_ROOT})
+        self._seed_source_skill(fs, "setup")
+        # No symlink in .codex/skills/.
+        svc = _svc(_config(), fs)
+
+        results = svc.run([])
+        ws_codex = next(r for r in results if "workspace skill discoverability" in r.name and "codex" in r.name)
+        assert ws_codex.status == ProbeStatus.warn
+        assert "missing" in ws_codex.message
+        assert ws_codex.remediation is not None
+        assert "winter ws init" in ws_codex.remediation
+
+    def test_opencode_passes_when_copies_current(self) -> None:
+        """OpenCode workspace skill probe passes when ws-* copies are present and content matches."""
+        # Source: skills/setup/SKILL.md
+        source_content = "# ws-setup"
+        # Dest: .opencode/skill/ws-setup/SKILL.md (with name: frontmatter injected by installer)
+        dest_content = "---\nname: ws-setup\n---\n\n# ws-setup"
+        source_dir = SKILLS_DIR / "setup"
+        source_md = source_dir / "SKILL.md"
+        dest_dir = OPENCODE_SKILLS / "ws-setup"
+        dest_md = dest_dir / "SKILL.md"
+
+        fs = FakeFilesystem(
+            files={source_md: source_content, dest_md: dest_content},
+            directories={WORKSPACE_ROOT, SKILLS_DIR, source_dir, OPENCODE_SKILLS, dest_dir},
+        )
+        svc = _svc(_config(), fs)
+
+        results = svc.run([])
+        ws_oc = next(r for r in results if "workspace skill discoverability" in r.name and "opencode" in r.name)
+        assert ws_oc.status == ProbeStatus.pass_
+
+    def test_opencode_warns_when_copy_missing(self) -> None:
+        """OpenCode workspace skill probe WARNs when a projected ws-* copy is absent."""
+        fs = FakeFilesystem(directories={WORKSPACE_ROOT})
+        self._seed_source_skill(fs, "setup")
+        svc = _svc(_config(), fs)
+
+        results = svc.run([])
+        ws_oc = next(r for r in results if "workspace skill discoverability" in r.name and "opencode" in r.name)
+        assert ws_oc.status == ProbeStatus.warn
+        assert "missing" in ws_oc.message
+
+    def test_workspace_probe_independent_of_adopt_extensions_none(self) -> None:
+        """Workspace skill probe runs even when adopt_extensions=none."""
+        fs = FakeFilesystem(directories={WORKSPACE_ROOT})
+        svc = _svc(_config(adopt_extensions=AdoptExtensions.none), fs)
+
+        results = svc.run([])
+        ws_results = [r for r in results if "workspace skill discoverability" in r.name]
+        assert len(ws_results) == len(list(CodeAgentVendor))
+
+    def test_bare_prefix_skill_probed_correctly(self) -> None:
+        """skills/ws/ (dirname == prefix) projects as bare 'ws' and is checked correctly."""
+        fs = FakeFilesystem(directories={WORKSPACE_ROOT})
+        self._seed_source_skill(fs, "ws")  # dir name == prefix → bare projection
+        # Seed the bare symlink in .codex/skills/
+        fs.directories.add(CODEX_SKILLS)
+        fs.symlinks[CODEX_SKILLS / "ws"] = Path("../../skills/ws")
+        svc = _svc(_config(), fs)
+
+        results = svc.run([])
+        ws_codex = next(r for r in results if "workspace skill discoverability" in r.name and "codex" in r.name)
+        # Bare 'ws' symlink resolves and source has SKILL.md → PASS
+        assert ws_codex.status == ProbeStatus.pass_

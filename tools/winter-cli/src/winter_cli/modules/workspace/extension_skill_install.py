@@ -61,7 +61,9 @@ class SymlinkInstaller:
                     continue
                 if require_marker_file is not None and not self._fs.is_file(entry / require_marker_file):
                     continue
-                link_name = f"{prefix}-{entry.name}"
+                # Bare-prefix rule: dir named exactly <prefix> → bare; others → <prefix>-<dirname>.
+                # Intentionally shared with CopySkillStrategy.install.
+                link_name = prefix if entry.name == prefix else f"{prefix}-{entry.name}"
             elif self._fs.is_file(entry):
                 if not include_files:
                     continue
@@ -131,7 +133,7 @@ class SymlinkInstaller:
         for entry in sorted(self._fs.iterdir(target_root)):
             if not self._fs.is_symlink(entry):
                 continue
-            if not entry.name.startswith(prefix_with_dash):
+            if not (entry.name.startswith(prefix_with_dash) or entry.name == prefix):
                 continue
             if entry.name in live_names:
                 continue
@@ -212,7 +214,9 @@ class CopySkillStrategy:
                     continue
                 if not self._fs.is_file(entry / "SKILL.md"):
                     continue
-                name = f"{prefix}-{entry.name}"
+                # Bare-prefix rule: dir named exactly <prefix> → bare; others → <prefix>-<dirname>.
+                # Intentionally shared with SymlinkInstaller.install_entries.
+                name = prefix if entry.name == prefix else f"{prefix}-{entry.name}"
                 self._sync(entry, target_root / name, skill_name=name)
                 installed.append(name)
 
@@ -252,14 +256,14 @@ class CopySkillStrategy:
             self._fs.write_text(skill_md, transformed)
 
     def _prune(self, target_root: Path, prefix: str, live_names: set[str]) -> None:
-        """Remove `<prefix>-*` destination directories with no live source."""
+        """Remove `<prefix>-*` and bare `<prefix>` destination directories with no live source."""
         if not self._fs.is_dir(target_root):
             return
         prefix_with_dash = f"{prefix}-"
         for entry in sorted(self._fs.iterdir(target_root)):
             if not self._fs.is_dir(entry):
                 continue
-            if not entry.name.startswith(prefix_with_dash):
+            if not (entry.name.startswith(prefix_with_dash) or entry.name == prefix):
                 continue
             if entry.name in live_names:
                 continue

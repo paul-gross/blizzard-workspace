@@ -513,17 +513,28 @@ class WorkspaceConfig(BaseModel):
     dashboard: DashboardConfig = Field(default_factory=DashboardConfig)
     """Dashboard layout configuration from the `[tui.dashboard]` table."""
 
-    skill_prefix: str | None = None
-    """Workspace-owned skill prefix for workspace_root/skills/ projection.
+    skill_prefix: str = "ws"
+    """Workspace-owned skill prefix for workspace skills projection.
 
-    When set, `winter ws init` projects skills under `workspace_root/skills/` into
-    every code-agent vendor's skills directory using the per-vendor install strategies
-    (symlink for ClaudeCode/Codex, copy for OpenCode). Stale `<prefix>-*` entries
-    are pruned on each reconcile pass.
+    `winter ws init` projects every skill directory under `workspace_root/<skills_dir>/`
+    into every code-agent vendor's skills directory using the per-vendor install
+    strategies (symlink for ClaudeCode/Codex, copy for OpenCode). Stale
+    `<prefix>-*` entries are pruned on each reconcile pass.
 
-    Maps to the top-level `prefix` key in `.winter/config.toml`. When absent,
-    the `workspace_root/skills/` directory is not projected into any vendor
-    skills directory.
+    Projection naming: a source directory named exactly `<prefix>` projects as-is
+    (bare prefix, e.g. `skills/ws/` → `ws`); all other directories project as
+    `<prefix>-<dirname>` (e.g. `skills/init/` → `ws-init`).
+
+    Maps to the top-level `prefix` key in `.winter/config.toml`. Defaults to `"ws"`
+    when absent, making workspace skill projection always-on.
+    """
+
+    skills_dir: str = "skills"
+    """Relative path (from workspace root) of the workspace skills source directory.
+
+    `winter ws init` reads skill directories from `workspace_root/<skills_dir>/`.
+    Maps to the top-level `skills_dir` key in `.winter/config.toml`. Defaults to
+    `"skills"` when absent.
     """
 
     provision_raw: dict = Field(default_factory=dict)

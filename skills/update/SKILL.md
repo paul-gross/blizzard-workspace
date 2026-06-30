@@ -1,5 +1,4 @@
 ---
-name: ws-update
 description: Integrate upstream winter framework updates from the winter remote into the workspace branch
 argument-hint: "[rebase|merge]"
 allowed-tools: Bash, Read, Edit, AskUserQuestion
@@ -166,7 +165,7 @@ Ask via `AskUserQuestion`, explaining the ambiguity:
 
 > "The rebase-vs-merge choice is ambiguous to an agent — a rebase leaves no signal in the history, so I had to ask. I can record rebase as this workspace's default by editing this skill, so future `/ws-update` runs rebase automatically instead of asking. Future agents would then carry the convention forward. Update the skill?"
 
-- **Yes** → edit this skill file (`.claude/skills/ws-update/SKILL.md`): in **Step 4**, rewrite the **`0` — ambiguous** bullet so it defaults to rebase without prompting — replace its "there's **no default — ask** … whether to **rebase** or **merge** …" with something like "**default to rebase** — the recorded convention for this workspace; integrate by rebase without asking." Leave the `≥1` merge-confirmed bullet untouched. Then tell the user the skill is now modified and they should commit that change to carry the convention forward — it's a workspace customization, separate from the framework update you just integrated.
+- **Yes** → edit the canonical skill source (`workspace:/skills/update/SKILL.md`): in **Step 4**, rewrite the **`0` — ambiguous** bullet so it defaults to rebase without prompting — replace its "there's **no default — ask** … whether to **rebase** or **merge** …" with something like "**default to rebase** — the recorded convention for this workspace; integrate by rebase without asking." Leave the `≥1` merge-confirmed bullet untouched. Then tell the user the skill is now modified and they should commit that change to carry the convention forward — it's a workspace customization, separate from the framework update you just integrated. Note: `.claude/skills/ws-update/` is a generated projection that `winter ws init` manages and git-excludes; the canonical source is `workspace:/skills/update/SKILL.md`.
 - **No** → leave the skill unchanged; you'll ask again next time.
 
 ## Step 7 — Verify the tree is clean

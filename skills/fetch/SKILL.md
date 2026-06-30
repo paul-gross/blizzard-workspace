@@ -1,5 +1,4 @@
 ---
-name: ws-fetch
 description: Fetch refs from origin for a feature environment, a standalone repo, or the workspace branch
 allowed-tools: Bash, Read
 ---

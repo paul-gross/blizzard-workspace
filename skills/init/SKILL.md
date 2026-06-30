@@ -1,5 +1,4 @@
 ---
-name: ws-init
 description: Non-interactive idempotent reconcile of the workspace, a feature environment, or a project repo against .winter/config.toml
 allowed-tools: Bash, Read
 ---

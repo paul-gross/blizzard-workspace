@@ -17,9 +17,14 @@ This workspace manages **multiple project repositories** as peers. All repos are
 │   ├── setup-project-setup.md  # Walkthrough for authoring project-setup.md
 │   ├── contributing-setup.md   # Walkthrough for authoring contributing.md
 │   └── project/                # Project-specific integration config (contributing.md, plus any extension config)
-├── .claude/                    # Workspace-level agents, skills, and settings
+├── skills/                     # Canonical workspace skills source dir (author skills here)
+├── .claude/                    # Workspace-level agents, skills, and settings (generated projections are git-ignored)
 │   ├── agents/                 # Top-level .md files plus <prefix>-* symlinks from extensions
-│   └── skills/                 # Top-level skill dirs plus <prefix>-* symlinks from extensions
+│   └── skills/                 # Generated: <prefix>-* symlinks from extensions and workspace skills (git-ignored)
+├── .codex/
+│   └── skills/                 # Generated: <prefix>-* symlinks for Codex (git-ignored)
+├── .opencode/
+│   └── skill/                  # Generated: <prefix>-* real-directory copies for OpenCode (git-ignored)
 ├── .winter/                    # Workspace-level winter config and installed extensions
 │   ├── config.toml             # Repo declarations (project + standalone)
 │   ├── config.local.toml       # Optional local override (gitignored)
