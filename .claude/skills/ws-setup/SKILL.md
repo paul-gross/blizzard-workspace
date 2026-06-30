@@ -11,19 +11,23 @@ This skill is an interactive walkthrough that sets up and configures a winter wo
 
 ## Arguments
 
-This skill accepts optional arguments that **scope** the run and **pre-seed** answers. With no arguments, run the full walkthrough start to finish. With arguments, parse them **first — before the opening preamble** — and classify each whitespace-separated token into one of three kinds. Tokens can be combined; a single invocation may carry several of each kind.
+This skill accepts optional arguments that **scope** the run and **pre-seed** answers. With no arguments, run the full walkthrough start to finish. With arguments, parse them **first — before the opening preamble** — and classify each whitespace-separated token into one of two roles. Tokens can be combined; a single invocation may carry tokens of both roles.
 
-1. **Git URL** — anything that looks like a clone URL (`git@host:owner/repo.git`, `https://…/repo.git`, `ssh://…`, or a bare `host/owner/repo`). These are the **default project repositories**: they pre-fill the answer to the **Declare project repos** step. When you reach that step, tell the user you're using the URL(s) from the arguments and run its add flow with each URL pre-filled — still detecting each repo's default branch and confirming the derived name — instead of asking "what's the clone URL?". Multiple URLs → multiple repos.
+**Seeds — pre-fill a step's answer.** A seed names a *value* — not a step. When you reach its target step, run that step with the value already supplied instead of asking for it. The full detect-and-fill walkthrough still runs start to finish — every foundational piece (workspace remote, declared repos, git identity, cloned repos, project settings) is detected and offered as usual. Two seed types:
 
-2. **Installed extension name** — a token matching an extension listed in `workspace:/AGENTS.winter.md` (e.g. `winter-service-tmux`). This **scopes the run to extension setup only**: skip every other step (assume the workspace is already set up) and run just the **Run feature-environment setup steps from installed extensions** step, restricted to the named extension(s). If several extensions are named, walk each in turn.
+- **Git URL** — anything that looks like a clone URL (`git@host:owner/repo.git`, `https://…/repo.git`, `ssh://…`, or a bare `host/owner/repo`). Seeds the **Declare project repos** step: when you reach that step, tell the user you're using the URL(s) from the arguments and run its add flow with each URL pre-filled — still detecting each repo's default branch and confirming the derived name — instead of asking "what's the clone URL?". Multiple URLs → multiple repos.
 
-3. **Area of focus / specific step** — a step name or topic (e.g. `remote`, `repos`, `identity`, `project settings`, `feature env` / `alpha`, `contributing`). This **scopes the run to just that step** (or steps): do the matching step(s) and skip the rest.
+- **Extension name** — a token naming a winter extension (e.g. `winter-service-tmux`). Match it two ways, because an extension the user wants to set up may not be installed yet: against the installed extensions listed in `workspace:/AGENTS.winter.md`, **and** — for one that isn't installed — against any `winter-*` git repository already checked out in the workspace but not yet registered (standalone extensions are cloned at the workspace root or a configured `path`, per [context/workspace-layout.md](./context/workspace-layout.md)). A not-yet-installed orchestrator the user has cloned but not wired up still counts. If the named extension is a service orchestrator — installed or not — pre-target it in the **Configure service orchestration** step (which installs it if needed); otherwise pre-target it in the **Run feature-environment setup steps from installed extensions** step. The full detect-and-fill walkthrough still runs start to finish around it.
 
-**Combining the kinds:**
-- The set of step-scoping tokens (kinds 2 and 3) defines *which* steps run. If any are present, run only those steps and skip the rest; if none are present, all steps are in scope.
-- Git URLs (kind 1) only seed the **Declare project repos** step's default — they don't by themselves narrow the run. A git URL alone → full walkthrough with that repo pre-filled. A git URL plus `repos` → just the repo step, pre-filled. A git URL plus an extension name → the repo step (because URLs imply it) plus that extension's setup.
+**Step/area requests — the only thing that narrows.** Narrowing happens **only** when arguments explicitly name one or more steps or areas of this walkthrough. Recognized names: `remote`, `repos`, `identity`, `project settings`, `feature env` / `alpha`, `services` / `service orchestration`, `contributing`. An "only"/"just" qualifier is welcome but not required — naming a step is the request. When one or more step/area requests are present, run **only** the requested steps (plus any step a seed pulls into scope) and skip the rest.
 
-When the run is scoped, still honor idempotency (check current state before acting) and the pacing rules below, and finish with the **Final report** covering only what was in scope.
+**Matcher disambiguation:** a full `winter-service-*` extension name (e.g. `winter-service-tmux`) is a **seed**; the bare keyword `services` or `service orchestration` is the **narrowing request**. Never treat `winter-service-tmux` as the `services` step keyword.
+
+**Putting it together:**
+- No tokens, or **seeds only** → **full walkthrough** with seeded steps pre-filled. (A git URL alone → full walkthrough, repos step pre-filled. `winter-service-tmux` alone → full walkthrough with tmux pre-targeted in the service step — not a jump to extension-only setup.)
+- **One or more step/area requests** → **narrowed** run of just those steps; seeds still apply to their own step and pull it into scope. (`<git-url>` + `repos` → just the repo step, pre-filled. `services` + `winter-service-docker` → just the service step, docker pre-targeted.)
+
+When the run is narrowed, still honor idempotency (check current state before acting) and the pacing rules below, and finish with the **Final report** covering only what was in scope.
 
 ## How to run this skill
 
@@ -51,7 +55,9 @@ Before doing anything, send a short orientation message, then continue straight 
 
 > "I'll walk you through setting up your winter workspace. Stop me or ask questions at any time."
 
-If the run is **scoped by arguments** (see [Arguments](#arguments)), adjust this orientation to name the scoped work instead of promising the full walkthrough — e.g. "You've pointed me at `winter-service-tmux`, so I'll just run its feature-environment setup and skip the rest." then begin that work.
+If the run is **narrowed by step/area requests** (see [Arguments](#arguments)), adjust this orientation to name the scoped work instead of promising the full walkthrough — e.g. "You asked for just the service-orchestration step, so I'll go straight there and skip the rest." then begin that work.
+
+If the run has **seeds only** (no step/area request), keep the full-walkthrough orientation and mention the seeded value — e.g. "I'll walk you through the full setup; I'll use the repo URL you passed when we get to declaring repos."
 
 Don't wait for a "go" signal — just begin.
 
@@ -252,25 +258,68 @@ Ask **one** question:
   ```
   Report the result — directories created, branches cut, commands run, hooks fired.
 
-### 8. Run feature-environment setup steps from installed extensions
+### 8. Configure service orchestration
 
-**Explain first:** "Each winter extension can contribute its own setup workflow that needs to run before feature environments work properly (e.g. `winter-service-tmux` needs you to define which services to run via `./up`/`./down`). I'll go through every installed extension and check whether it has a 'Feature environment setup steps' section in its `index.md`. Extensions without one get skipped."
+**Explain first:** "Winter can orchestrate your application's services — managing their lifecycle across feature environments. It uses a **multi-orchestrator model**: the `service` capability slot can bind one or more orchestrators simultaneously, and each service is owned by whichever orchestrator's manifest declares it.
+
+- **`winter-service-tmux`** — runs services as processes in tmux panes; suited to local application processes.
+- **`winter-service-docker`** — runs services as containers via `docker compose`; suited to shared infrastructure.
+
+Both can be active at once, each managing the services declared in its manifest. (Each orchestrator's specific strengths are covered later, from its own docs, when we map services to orchestrators.)"
+
+**Check first:** run `winter capabilities` to see which orchestrators are currently installed and bound to the `service` slot:
+
+```bash
+winter capabilities
+```
+
+This command is read-only and always exits 0. Tell the user what you found — for example: "No service orchestrator is currently installed" or "`winter-service-tmux` is already bound to the `service` slot."
+
+Ask **one** multi-select question:
+
+**"Which service orchestrators would you like to install? (You can choose one, both, or neither. Already-installed ones are shown for context.)
+  - `winter-service-tmux` — tmux pane-based management for local application services [already installed / not installed]
+  - `winter-service-docker` — docker compose-based container management for shared infrastructure [already installed / not installed]
+  - Specify my own service orchestration extension (explicit URL) — provide a git URL for a third-party extension that implements winter's `service` capability
+  - None — nothing to add right now"**
+
+This choice **only ever adds** orchestrators: choosing one that is not yet installed will install it; not choosing an already-installed orchestrator leaves it unchanged (removal is out of scope for this step).
+
+**Honor seeds:** if an orchestrator was seeded via the skill's arguments (an extension name, per [Arguments](#arguments)), pre-select it in the multi-select and say so — e.g. "You pointed me at `winter-service-docker`, so it's pre-selected below; adjust if you like." This is how a seeded orchestrator gets pre-targeted in this step.
+
+- If the user chooses **none** and **no** orchestrator is currently installed: tell them "No service orchestration to configure — you can add it later by running `/ws-setup services`." Then continue to the next step.
+- If the user chooses **none** and one or more orchestrators **are** already installed: ask **one** question — **"Do you want to walk through configuring services for the already-installed orchestrator(s)?"**
+  - If **no**: continue to the next step.
+  - If **yes**: tell them "Now I'll walk you through configuring your service orchestration." Then follow [context/setup-service-orchestration.md](./context/setup-service-orchestration.md).
+- If the user chooses **Specify my own**: ask **one** question — **"What's the git URL of the orchestrator extension?"** Once given, tell them "Now I'll walk you through installing and configuring your service orchestration." Then follow [context/setup-service-orchestration.md](./context/setup-service-orchestration.md), passing the URL as a custom orchestrator to install.
+- If the user chooses **one or more** of the built-in orchestrators: tell them "Now I'll walk you through installing and configuring your service orchestration." Then follow [context/setup-service-orchestration.md](./context/setup-service-orchestration.md).
+
+### 9. Run feature-environment setup steps from installed extensions
+
+**Explain first:** "Service orchestration was handled in the previous step. This step covers any *other* installed extensions that contribute their own feature-environment setup workflow — for example, a code-quality extension that needs to register linting hooks, or a codegen extension that needs to set up generated-file exclusions. To avoid running service-orchestrator setup twice, this step uses `winter capabilities` as the source of truth and excludes any extension bound to the `service` slot."
 
 Look at `workspace:/AGENTS.winter.md` — that file (imported by the `# Winter Extensions` section in `workspace:/AGENTS.md`) lists every installed extension. If `AGENTS.winter.md` doesn't exist, no extensions are installed and this step is a no-op. Tell the user: "Installed extensions: `<list>`."
 
-Then, for each extension **one at a time**:
+**Identify service providers to skip:** run `winter capabilities` to determine which extensions are bound to the `service` slot. Any extension listed there is excluded from the loop below — its setup was handled in the previous step.
+
+```bash
+winter capabilities
+```
+
+Then, for each extension that **is not bound to the `service` capability**, **one at a time**:
 
 1. Tell the user: "Checking `<ext-name>`..."
-2. Read that extension's `index.md` (the path shown in the block, e.g. `./winter-service-tmux/index.md`).
+2. Read that extension's `index.md` (the path shown in the block, e.g. `./winter-harness/index.md`).
 3. If the extension has a **"Feature environment setup steps"** section, tell the user what setup it needs and walk them through whatever it describes — typically that's another linked markdown guide. Treat each extension's walkthrough as its own mini-walkthrough: keep the same explain → ask → execute → confirm pattern, one question per turn.
 4. If no such section exists, tell the user "No feature-environment setup needed for `<ext-name>`." and move to the next extension.
 
-Examples of extensions that contribute feature-environment setup steps:
-- `winter-service-tmux` — walks you through its service config so `./up`/`./down`/`./status` know which services to run.
+Examples of non-service extensions that may contribute feature-environment setup steps:
+- A linter or code-quality extension — might need hooks registered in every worktree.
+- A codegen extension — might need generated-file exclusions written.
 
-If no extensions are installed, or none declare feature-environment setup steps, tell the user "No extension setup needed." and continue.
+If no non-service extensions are installed, or none declare feature-environment setup steps, tell the user "No additional extension setup needed." and continue.
 
-### 9. Set up contributing.md (optional)
+### 10. Set up contributing.md (optional)
 
 **Explain first:** "Last setup item: contributing.md. This file defines how completed work is delivered: PRs, merge strategy, linting, commit conventions. Agents read it when wrapping up work on a worktree, so without it they have to guess at your conventions. Optional, but recommended if you have any preferences about how commits or PRs should look."
 
@@ -289,6 +338,7 @@ Summarize everything that happened in a single message:
 - Git identity strategy: workspace-specific / global / unchanged
 - Standalone extensions: `<list>` (cloned / already existed)
 - Alpha feature environment: created / skipped / already existed
+- Service orchestration: orchestrators installed + services mapped (`db→docker, api→tmux, …`) / unchanged / none installed
 - Integration files: project-setup.md / contributing.md (created / skipped / already existed)
 - Any manual steps still pending
 
