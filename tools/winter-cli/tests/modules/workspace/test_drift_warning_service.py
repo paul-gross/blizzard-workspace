@@ -20,14 +20,14 @@ PROJECTS_DIR = WORKSPACE_ROOT / "projects"
 
 @pytest.fixture
 def workspace() -> Workspace:
-    return Workspace(root_path=WORKSPACE_ROOT, session_prefix="t", main_branch="main")
+    return Workspace(root_path=WORKSPACE_ROOT, service_prefix="t", main_branch="main")
 
 
 @pytest.fixture
 def repo_factory() -> RepositoryFactory:
     config = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[

@@ -41,7 +41,7 @@ class _InMemoryRegistry:
 def workspace_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
     )
@@ -281,6 +281,9 @@ def test_run_workspace_reconcile_hook_env_contains_workspace_trio(
     assert env["WINTER_EXT_DIR"] == str(ext_path)
     assert env["WINTER_EXT_PREFIX"] == "my-ext"
 
+    # WINTER_SERVICE_PREFIX is workspace-invariant — always present, every hook.
+    assert env["WINTER_SERVICE_PREFIX"] == workspace_config.service_prefix
+
     # Workspace (index 0) port base is present for workspace-scoped hooks too.
     assert env["WINTER_WORKSPACE_PORT_BASE"] == str(workspace_config.port_base_for_index(0))
 
@@ -411,7 +414,7 @@ def test_run_workspace_reconcile_hook_skipped_when_adopt_extensions_none(
     """adopt_extensions=none means no hooks fire; service returns True."""
     cfg = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.none,
     )
@@ -543,7 +546,7 @@ def test_hook_port_base_matches_registry_persisted_index(
     # Custom port config to make the check non-trivial.
     cfg = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         base_port=5000,

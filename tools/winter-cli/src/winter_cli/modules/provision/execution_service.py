@@ -224,6 +224,7 @@ class ProvisionExecutionService:
                 ext_dir=workspace_root,
                 prefix=PROJECT_SOURCE,
                 config_dir=config_dir,
+                service_prefix=self._config.service_prefix,
             )
             return workspace_root, base_env
 
@@ -250,6 +251,7 @@ class ProvisionExecutionService:
             ext_dir=ext_repo.path,
             prefix=manifest.prefix,
             config_dir=config_dir,
+            service_prefix=self._config.service_prefix,
         )
         return ext_repo.path, base_env
 

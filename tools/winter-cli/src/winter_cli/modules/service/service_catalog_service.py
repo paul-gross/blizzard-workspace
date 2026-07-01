@@ -132,9 +132,11 @@ class ServiceCatalogService:
         self,
         subprocess_runner: ISubprocessRunner,
         workspace_root: Path,
+        service_prefix: str,
     ) -> None:
         self._runner = subprocess_runner
         self._workspace_root = workspace_root
+        self._service_prefix = service_prefix
 
     def build(self, providers: list[ResolvedCapability]) -> ServiceCatalog:
         """Invoke each provider and return the merged catalog."""
@@ -166,7 +168,7 @@ class ServiceCatalogService:
         malformed JSON) so unknown providers are silently skipped.
         """
         cmd = [str(provider.entrypoint), "catalog"]
-        env = build_provider_env(provider, self._workspace_root)
+        env = build_provider_env(provider, self._workspace_root, self._service_prefix)
         try:
             result = self._runner.run(cmd, cwd=self._workspace_root, env=env)
         except OSError as exc:

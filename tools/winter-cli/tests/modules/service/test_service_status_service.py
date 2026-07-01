@@ -93,7 +93,7 @@ class _FakeEnvIndexRegistry:
 def _ws_config(base_port: int = 4000, ports_per_env: int = 20) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WS,
-        session_prefix="test",
+        service_prefix="test",
         main_branch="main",
         base_port=base_port,
         ports_per_env=ports_per_env,
@@ -140,6 +140,7 @@ def _svc(
         subprocess_runner=actual_runner,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix="winter",
     )
     matrix_svc = ServiceStatusMatrixService(
         subprocess_runner=actual_runner,
@@ -148,6 +149,7 @@ def _svc(
         status_parser=StatusDocumentParser(),
         env_index_registry=_FakeEnvIndexRegistry(assignments),
         workspace_root=WS,
+        service_prefix="winter",
     )
     return ServiceStatusService(
         orchestrator_resolver=resolver,

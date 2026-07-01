@@ -19,7 +19,7 @@ from winter_cli.modules.workspace.models import (
 
 
 def _workspace() -> Workspace:
-    return Workspace(root_path=Path("/ws"), session_prefix="ws", main_branch="master")
+    return Workspace(root_path=Path("/ws"), service_prefix="ws", main_branch="master")
 
 
 def _make_handler(

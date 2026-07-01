@@ -40,14 +40,14 @@ WORKSPACE_ROOT = Path("/ws")
 
 @pytest.fixture
 def workspace() -> Workspace:
-    return Workspace(root_path=WORKSPACE_ROOT, session_prefix="t", main_branch="main")
+    return Workspace(root_path=WORKSPACE_ROOT, service_prefix="t", main_branch="main")
 
 
 @pytest.fixture
 def workspace_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[
@@ -684,7 +684,7 @@ def test_collect_extensions_lists_declared_standalones_without_probing(workspace
     """
     config = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[ProjectRepositoryConfig(name="repo-a", url="git@example.com:org/repo-a.git")],
@@ -715,7 +715,7 @@ def test_collect_extensions_lists_declared_standalones_without_probing(workspace
 def _config_with_two_standalones() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[ProjectRepositoryConfig(name="repo-a", url="git@example.com:org/repo-a.git")],
@@ -904,7 +904,7 @@ def test_collect_pinned_surfaces_in_worktree_snapshot(workspace: Workspace) -> N
     """WorktreeSnapshot.pinned reflects the underlying ProjectRepository.pinned value."""
     pinned_config = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[
@@ -987,7 +987,7 @@ def test_collect_for_dashboard_probes_singletons_and_standalones(workspace: Work
     """standalone_statuses covers both implicit singletons and declared standalones."""
     config = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[ProjectRepositoryConfig(name="repo-a", url="git@example.com:org/repo-a.git")],
@@ -1066,7 +1066,7 @@ def _config_with_standalones(
     ]
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[
@@ -1198,7 +1198,7 @@ def test_dashboard_auto_one_repo_resolves_to_list(workspace: Workspace) -> None:
     """auto boundary: a 1-repo workspace resolves to list regardless of env count."""
     config = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[ProjectRepositoryConfig(name="repo-a", url="git@example.com:org/repo-a.git")],

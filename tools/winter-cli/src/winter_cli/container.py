@@ -160,7 +160,7 @@ class Container(containers.DeclarativeContainer):
     workspace = providers.Singleton(
         repo_repo.provided.get_workspace.call(
             workspace_config.provided.workspace_root,
-            workspace_config.provided.session_prefix,
+            workspace_config.provided.service_prefix,
             workspace_config.provided.main_branch,
             workspace_config.provided.base_port,
             workspace_config.provided.ports_per_env,
@@ -613,6 +613,7 @@ class Container(containers.DeclarativeContainer):
         subprocess_runner=subprocess_runner,
         describe_parser=service_describe_parser,
         workspace_root=workspace_config.provided.workspace_root,
+        service_prefix=workspace_config.provided.service_prefix,
     )
 
     service_manifest_collector_svc = providers.Factory(
@@ -628,6 +629,7 @@ class Container(containers.DeclarativeContainer):
         _lazy("winter_cli.modules.service.service_catalog_service:ServiceCatalogService"),
         subprocess_runner=subprocess_runner,
         workspace_root=workspace_config.provided.workspace_root,
+        service_prefix=workspace_config.provided.service_prefix,
     )
 
     stream_service_reporter = providers.Factory(
@@ -646,6 +648,7 @@ class Container(containers.DeclarativeContainer):
         _lazy("winter_cli.modules.service.service_fan_out_service:ServiceFanOutService"),
         subprocess_runner=subprocess_runner,
         workspace_root=workspace_config.provided.workspace_root,
+        service_prefix=workspace_config.provided.service_prefix,
         manifest_collector=service_manifest_collector_svc,
         env_provisioner=env_provisioner,
         reporter=stream_service_reporter,
@@ -658,6 +661,7 @@ class Container(containers.DeclarativeContainer):
         fan_out_service=service_fan_out_svc,
         describe_service=service_describe_svc,
         workspace_root=workspace_config.provided.workspace_root,
+        service_prefix=workspace_config.provided.service_prefix,
         reporter=stream_service_reporter,
     )
 
@@ -667,6 +671,7 @@ class Container(containers.DeclarativeContainer):
         orchestrator_resolver=service_orchestrator_resolver,
         describe_service=service_describe_svc,
         workspace_root=workspace_config.provided.workspace_root,
+        service_prefix=workspace_config.provided.service_prefix,
     )
 
     service_status_matrix_svc = providers.Factory(
@@ -677,6 +682,7 @@ class Container(containers.DeclarativeContainer):
         status_parser=status_document_parser,
         env_index_registry=env_index_registry,
         workspace_root=workspace_config.provided.workspace_root,
+        service_prefix=workspace_config.provided.service_prefix,
     )
 
     service_status_svc = providers.Factory(
@@ -785,6 +791,7 @@ class Container(containers.DeclarativeContainer):
         file_size_config=workspace_config.provided.file_size_lint,
         orchestrator_resolver=service_orchestrator_resolver,
         catalog_service=service_catalog_svc,
+        service_prefix=workspace_config.provided.service_prefix,
     )
 
     workspace_lint_svc = providers.Factory(

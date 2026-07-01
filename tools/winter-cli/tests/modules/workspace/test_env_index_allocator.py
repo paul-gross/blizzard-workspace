@@ -401,7 +401,7 @@ class TestDoctorDoesNotFlagHashBandBoundaryIndex:
 
         cfg = WorkspaceConfig(
             workspace_root=Path("/ws"),
-            session_prefix="t",
+            service_prefix="t",
             main_branch="main",
             env_aliases=aliases,
             envs_per_workspace=envs_per_workspace,
@@ -434,7 +434,7 @@ class TestDoctorDoesNotFlagHashBandBoundaryIndex:
 
         cfg = WorkspaceConfig(
             workspace_root=Path("/ws"),
-            session_prefix="t",
+            service_prefix="t",
             main_branch="main",
             env_aliases=aliases,
             envs_per_workspace=10,

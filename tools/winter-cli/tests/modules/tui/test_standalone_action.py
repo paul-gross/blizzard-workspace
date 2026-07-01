@@ -41,7 +41,7 @@ from winter_cli.plugins.types import (
     TuiAction,
 )
 
-_WORKSPACE = Workspace(root_path=Path("/tmp/ws"), session_prefix="t", main_branch="main")
+_WORKSPACE = Workspace(root_path=Path("/tmp/ws"), service_prefix="t", main_branch="main")
 _REPO = StandaloneRepository(name="winter-harness", path=Path("/tmp/ws/context/harness"))
 
 

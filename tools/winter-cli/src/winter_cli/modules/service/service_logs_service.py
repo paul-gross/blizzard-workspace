@@ -23,8 +23,8 @@ class ServiceLogsService:
     ``winter service logs``' own surface: ``--tail <N|all>`` (always), ``--since``/
     ``--until`` with the already-resolved RFC3339 values (omitted when empty), and the
     bare ``--follow`` / ``--timestamps`` flags (emitted only when true). Like every
-    dispatch it also exports ``WINTER_WORKSPACE_DIR``, ``WINTER_EXT_DIR``, and
-    ``WINTER_EXT_PREFIX``.
+    dispatch it also exports ``WINTER_WORKSPACE_DIR``, ``WINTER_EXT_DIR``,
+    ``WINTER_EXT_PREFIX``, and ``WINTER_SERVICE_PREFIX``.
     The orchestrator's stdout is read as NDJSON; each line must carry an ``env`` field
     in addition to ``svc``/``msg``; winter applies a segment-aware backstop filter
     matching ``<env>/<svc>`` against the requested patterns, then applies time/tail
@@ -52,11 +52,13 @@ class ServiceLogsService:
         orchestrator_resolver: ServiceOrchestratorResolver,
         describe_service: ServiceDescribeService,
         workspace_root: Path,
+        service_prefix: str,
     ) -> None:
         self._subprocess_runner = subprocess_runner
         self._orchestrator_resolver = orchestrator_resolver
         self._describe_service = describe_service
         self._workspace_root = workspace_root
+        self._service_prefix = service_prefix
 
     def stream(self, options: LogOptions, reporter: IServiceReporter) -> int:
         """Run the orchestrator logs entrypoint and stream rendered output to stdout."""
@@ -184,6 +186,7 @@ class ServiceLogsService:
             ext_dir=provider.ext_dir,
             prefix=provider.prefix,
             config_dir=provider.config_dir,
+            service_prefix=self._service_prefix,
         )
 
         own_processor = processor is None

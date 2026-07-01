@@ -41,14 +41,14 @@ WORKSPACE_ROOT = Path("/ws")
 
 @pytest.fixture
 def workspace() -> Workspace:
-    return Workspace(root_path=WORKSPACE_ROOT, session_prefix="t", main_branch="main")
+    return Workspace(root_path=WORKSPACE_ROOT, service_prefix="t", main_branch="main")
 
 
 @pytest.fixture
 def workspace_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[
@@ -286,7 +286,7 @@ def test_fetch_all_fast_forwards_source_checkouts_via_sync_ff_only(
     its local main; doing it here is what keeps `winter ws init`'s branch base
     current.
     """
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     env_worktrees, repo = _make_env_with_worktree(workspace, tmp_path)
     repo_repo = _SpyWriteRepoRepository()
     svc = _make_fetch_service(workspace, workspace_config, env_worktrees, repo_repo)
@@ -302,7 +302,7 @@ def test_fetch_all_fast_forwards_source_checkouts_via_sync_ff_only(
 
 def test_fetch_all_propagates_sync_ff_only_commit_count(workspace_config: WorkspaceConfig, tmp_path: Path) -> None:
     """The commit count `sync_ff_only` returns surfaces on the per-repo outcome."""
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     env_worktrees, _ = _make_env_with_worktree(workspace, tmp_path)
     repo_repo = _SpyWriteRepoRepository(commits=4)
     svc = _make_fetch_service(workspace, workspace_config, env_worktrees, repo_repo)
@@ -318,7 +318,7 @@ def test_fetch_all_reports_failure_when_source_checkout_diverges(
     workspace_config: WorkspaceConfig, tmp_path: Path
 ) -> None:
     """A RepoError from sync_ff_only (e.g. diverged source main) is a failed fetch."""
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     env_worktrees, _ = _make_env_with_worktree(workspace, tmp_path)
     repo_repo = _SpyWriteRepoRepository(raise_on="demo")
     svc = _make_fetch_service(workspace, workspace_config, env_worktrees, repo_repo)
@@ -450,7 +450,7 @@ def test_pull_all_mixed_env_skips_no_upstream_worktree_and_ffs_connected_one(
     worktree yields `no_upstream` (never reaches integrate); the env report
     still succeeds (no_upstream is excluded from the success calc).
     """
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     env_worktrees = _make_env_with_named_worktrees(workspace, tmp_path, ["repo-a", "repo-b"])
     repo_repo = _PullSpyWriteRepoRepository(upstreams={"repo-a": "origin/featbranch", "repo-b": None})
     svc = _make_pull_service(workspace, workspace_config, env_worktrees, repo_repo)
@@ -481,7 +481,7 @@ def test_pull_all_resolves_upstream_per_worktree_regardless_of_repo_order(
 ) -> None:
     """A connected worktree pulls from its own upstream even when the *first*
     repo has none — no demotion to `origin/<main_branch>`, no env-wide ref."""
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     # repo-a (first) has NO upstream; repo-b (later) is the connected one.
     env_worktrees = _make_env_with_named_worktrees(workspace, tmp_path, ["repo-a", "repo-b"])
     repo_repo = _PullSpyWriteRepoRepository(upstreams={"repo-a": None, "repo-b": "origin/other-feat"})
@@ -514,7 +514,7 @@ def test_pull_all_source_checkout_sync_failure_is_best_effort(
     The source-checkout sync is best-effort: a non-ff-able checkout logs a warning
     and pull continues.
     """
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     env_worktrees = _make_env_with_named_worktrees(workspace, tmp_path, ["repo-a"])
     repo_repo = _PullSpyWriteRepoRepository(
         upstreams={"repo-a": "origin/featbranch"},
@@ -598,7 +598,7 @@ def _make_standalone_workspace_config(
     """Build a WorkspaceConfig with a single standalone repo (no project repos)."""
     return WorkspaceConfig(
         workspace_root=workspace_root,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         standalone_repos=[
@@ -641,7 +641,7 @@ def test_standalone_branch_ref_advances_working_tree_and_rewrites_lock(tmp_path:
     returns fast_forwarded, get_head_commit reads the new SHA, the lock is rewritten,
     and the outcome is re_pinned with the short SHA as pin_ref.
     """
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     repo_path = tmp_path / "my-lib"
     repo_path.mkdir()
     config = _make_standalone_workspace_config(tmp_path, "my-lib", ref="main")
@@ -687,7 +687,7 @@ def test_standalone_branch_ref_advances_working_tree_and_rewrites_lock(tmp_path:
 
 def test_standalone_branch_ref_up_to_date_does_not_rewrite_lock(tmp_path: Path) -> None:
     """branch ref already up to date → integrate_standalone_to_ref returns up_to_date, no lock rewrite."""
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     repo_path = tmp_path / "my-lib"
     repo_path.mkdir()
     config = _make_standalone_workspace_config(tmp_path, "my-lib", ref="main")
@@ -721,7 +721,7 @@ def test_standalone_branch_ref_up_to_date_does_not_rewrite_lock(tmp_path: Path) 
 
 def test_standalone_tag_ref_held_no_integrate_no_lock_change(tmp_path: Path) -> None:
     """tag ref → HELD: no checkout, no lock rewrite, outcome held_pin with the tag as pin_ref."""
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     repo_path = tmp_path / "my-lib"
     repo_path.mkdir()
     config = _make_standalone_workspace_config(tmp_path, "my-lib", ref="v1.4.2")
@@ -760,7 +760,7 @@ def test_standalone_tag_ref_held_no_integrate_no_lock_change(tmp_path: Path) -> 
 
 def test_standalone_commit_ref_held_no_integrate_no_lock_change(tmp_path: Path) -> None:
     """commit SHA ref → HELD likewise: no checkout, no lock rewrite, outcome held_pin."""
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     repo_path = tmp_path / "my-lib"
     repo_path.mkdir()
     config = _make_standalone_workspace_config(tmp_path, "my-lib", ref=SHA_OLD)
@@ -792,7 +792,7 @@ def test_standalone_commit_ref_held_no_integrate_no_lock_change(tmp_path: Path) 
 
 def test_standalone_no_ref_uses_existing_integrate_path(tmp_path: Path) -> None:
     """ref is None → existing integrate_standalone behavior, no pin logic invoked."""
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     repo_path = tmp_path / "my-lib"
     repo_path.mkdir()
     config = _make_standalone_workspace_config(tmp_path, "my-lib", ref=None)
@@ -827,7 +827,7 @@ def test_fetch_standalone_tag_pin_does_not_change_head_or_lock(tmp_path: Path) -
     tree even if origin has moved. This test confirms the service calls
     fetch_standalone (network I/O) but does NOT call checkout or lock write.
     """
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     repo_path = tmp_path / "my-lib"
     repo_path.mkdir()
     config = _make_standalone_workspace_config(tmp_path, "my-lib", ref="v1.4.2")
@@ -863,7 +863,7 @@ def test_branch_repin_preserves_other_repos_lock_entries(tmp_path: Path) -> None
     Read-modify-write: only this repo's entry changes; the other-repo entry
     must appear unchanged in the written snapshot.
     """
-    workspace = Workspace(root_path=tmp_path, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
     repo_path = tmp_path / "my-lib"
     repo_path.mkdir()
     config = _make_standalone_workspace_config(tmp_path, "my-lib", ref="main")

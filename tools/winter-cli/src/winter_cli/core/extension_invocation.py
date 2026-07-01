@@ -1,9 +1,10 @@
 """Shared builder for the extension subprocess environment.
 
-``build_extension_env`` is the single point that sets the four base winter
-extension context variables on every dispatch — service, doctor, lint, hooks,
-and ext-verify all call it.  Callers merge additional action-specific vars on
-top of the returned dict.
+``build_extension_env`` is the single point that sets the five base winter
+extension context variables on every dispatch — service (every action,
+including ``restart``/``logs``/``describe``/``catalog``), doctor, lint,
+hooks, and ext-verify all call it.  Callers merge additional action-specific
+vars on top of the returned dict.
 """
 
 from __future__ import annotations
@@ -18,11 +19,12 @@ def build_extension_env(
     ext_dir: Path,
     prefix: str,
     config_dir: Path,
+    service_prefix: str,
     base: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """Return a new env dict with the four winter base extension context vars set.
+    """Return a new env dict with the five winter base extension context vars set.
 
-    Starts from ``base`` (defaults to ``os.environ``) and overlays the four
+    Starts from ``base`` (defaults to ``os.environ``) and overlays the five
     always-present variables.  Callers receive a fresh copy — the original is
     never mutated.
 
@@ -32,6 +34,11 @@ def build_extension_env(
     ``prefix``          resolved symlink prefix for this extension.
     ``config_dir``      absolute path to this extension's writable config/asset
                         directory (default ``<ws>/.winter/config/<name>/``).
+    ``service_prefix``  resolved workspace service-namespace prefix
+                        (``WorkspaceConfig.service_prefix``). Workspace-invariant
+                        — the same value at every scope and for every action — so
+                        it belongs alongside the other always-present vars rather
+                        than the scope vars.
     ``base``            optional starting dict; when None, ``os.environ`` is used.
     """
     merged = dict(base if base is not None else os.environ)
@@ -39,4 +46,5 @@ def build_extension_env(
     merged["WINTER_EXT_DIR"] = str(ext_dir)
     merged["WINTER_EXT_PREFIX"] = prefix
     merged["WINTER_EXT_CONFIG_DIR"] = str(config_dir)
+    merged["WINTER_SERVICE_PREFIX"] = service_prefix
     return merged

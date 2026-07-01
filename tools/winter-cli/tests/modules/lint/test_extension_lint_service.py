@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.conftest import FakeConfigFileReader, FakeFilesystem, FakeSubprocessRunner
+from tests.conftest import FakeConfigFileReader, FakeFilesystem, FakeSubprocessRunner, make_workspace_config
 from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
 from winter_cli.core.subprocess_runner import SubprocessResult
 from winter_cli.modules.lint.extension_lint_service import ExtensionLintService
@@ -18,12 +18,7 @@ SCOPE = LintScope(kind=LintScopeKind.all, label="all", paths=[WORKSPACE_ROOT])
 
 
 def _build_config(adopt: AdoptExtensions = AdoptExtensions.winter) -> WorkspaceConfig:
-    return WorkspaceConfig(
-        workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
-        main_branch="main",
-        adopt_extensions=adopt,
-    )
+    return make_workspace_config(workspace_root=WORKSPACE_ROOT, adopt_extensions=adopt)
 
 
 def _build_service(

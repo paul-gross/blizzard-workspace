@@ -109,6 +109,7 @@ class ExtensionProbeService:
             ext_dir=repo.path,
             prefix=manifest.prefix,
             config_dir=config_dir,
+            service_prefix=self._config.service_prefix,
         )
         try:
             result = self._subprocess.run(

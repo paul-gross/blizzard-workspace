@@ -49,6 +49,7 @@ def _svc(runner: FakeSubprocessRunner | None = None) -> ServiceDescribeService:
         subprocess_runner=runner or FakeSubprocessRunner(),
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix="winter",
     )
 
 
@@ -196,7 +197,7 @@ def test_two_providers_describe_called_for_each() -> None:
 
 
 def test_two_providers_describe_sets_env_vars() -> None:
-    """describe dispatch injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX."""
+    """describe dispatch injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, WINTER_SERVICE_PREFIX."""
     pa = _provider("provider-a", ENTRYPOINT_A, EXT_A)
     pb = _provider("provider-b", ENTRYPOINT_B, EXT_B)
 
@@ -213,6 +214,7 @@ def test_two_providers_describe_sets_env_vars() -> None:
         assert "WINTER_WORKSPACE_DIR" in env
         assert "WINTER_EXT_DIR" in env
         assert "WINTER_EXT_PREFIX" in env
+        assert env["WINTER_SERVICE_PREFIX"] == "winter"
 
 
 def test_two_providers_providers_in_order_preserved() -> None:

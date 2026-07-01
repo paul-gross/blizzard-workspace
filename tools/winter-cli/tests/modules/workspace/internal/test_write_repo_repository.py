@@ -53,7 +53,7 @@ def repo(error_factory: RepoErrorFactory, git_ops: GitOpsService) -> WriteRepoRe
 
 
 def _wt(path: Path, name: str = "demo", main_branch: str = "main") -> FeatureWorktree:
-    workspace = Workspace(root_path=path.parent, session_prefix="t", main_branch=main_branch)
+    workspace = Workspace(root_path=path.parent, service_prefix="t", main_branch=main_branch)
     env = FeatureEnvironment(workspace=workspace, name="alpha", index=1, path=path.parent)
     project_repo = ProjectRepository(name=name, main_path=path, main_branch=main_branch)
     return FeatureWorktree(workspace=workspace, environment=env, repository=project_repo)

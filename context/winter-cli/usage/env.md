@@ -11,6 +11,7 @@ export WINTER_ENV=alpha
 export WINTER_ENV_INDEX=1
 export WINTER_PORT_BASE=4060
 export WINTER_WORKSPACE_PORT_BASE=4000
+export WINTER_SERVICE_PREFIX=winter
 export MY_APP_PORT=4061
 ```
 
@@ -48,6 +49,7 @@ The exact set depends on the scope:
 | `WINTER_ENV` | `workspace` |
 | `WINTER_ENV_INDEX` | `0` |
 | `WINTER_WORKSPACE_PORT_BASE` | Port-band start for index 0 |
+| `WINTER_SERVICE_PREFIX` | Resolved workspace service-orchestration namespace prefix |
 
 `WINTER_PORT_BASE` is NOT emitted for the workspace scope.
 
@@ -59,6 +61,7 @@ The exact set depends on the scope:
 | `WINTER_ENV_INDEX` | Stable index used for port allocation |
 | `WINTER_PORT_BASE` | Port-band start for this scope (`base_port + index * ports_per_env`) |
 | `WINTER_WORKSPACE_PORT_BASE` | Port-band start for index 0 (the workspace port base) |
+| `WINTER_SERVICE_PREFIX` | Resolved workspace service-orchestration namespace prefix |
 
 Followed by the band entries from `.winter/config.toml`: workspace scope shows only the workspace band (`[env.workspace.vars]`); feature scope shows both bands with the feature band (`[env.feature.vars]`) overlaid on top. See [ports-and-environments.md](../configuration/ports-and-environments.md#env-var-bands) for band ordering, collision rules, and token grammar.
 

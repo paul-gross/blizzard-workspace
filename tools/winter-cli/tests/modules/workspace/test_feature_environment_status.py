@@ -4,7 +4,7 @@ from pathlib import Path
 
 from winter_cli.modules.workspace.models import FeatureEnvironment, FeatureEnvironmentStatus, Workspace
 
-_WS = Workspace(root_path=Path("/ws"), session_prefix="t", main_branch="main")
+_WS = Workspace(root_path=Path("/ws"), service_prefix="t", main_branch="main")
 
 
 def _status(feature_branch: str | None, distinct: int) -> FeatureEnvironmentStatus:

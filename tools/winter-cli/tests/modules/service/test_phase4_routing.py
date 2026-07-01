@@ -81,7 +81,7 @@ class _FakeEnvIndexRegistry:
 def _ws_config(base_port: int = 4000, ports_per_env: int = 20) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WS,
-        session_prefix="test",
+        service_prefix="test",
         main_branch="main",
         base_port=base_port,
         ports_per_env=ports_per_env,
@@ -207,10 +207,12 @@ def _make_dispatch(
         subprocess_runner=runner,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix="winter",
     )
     fan_out = ServiceFanOutService(
         subprocess_runner=runner,
         workspace_root=WS,
+        service_prefix="winter",
     )
     return ServiceDispatchService(
         subprocess_runner=runner,
@@ -218,6 +220,7 @@ def _make_dispatch(
         fan_out_service=fan_out,
         describe_service=describe_svc,
         workspace_root=WS,
+        service_prefix="winter",
         reporter=reporter,
     )
 
@@ -231,12 +234,14 @@ def _make_logs(
         subprocess_runner=runner,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix="winter",
     )
     svc = ServiceLogsService(
         subprocess_runner=runner,
         orchestrator_resolver=resolver,
         describe_service=describe_svc,
         workspace_root=WS,
+        service_prefix="winter",
     )
     reporter = FakeServiceReporter()
     return svc, reporter
@@ -254,6 +259,7 @@ def _make_status(
         subprocess_runner=runner,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix="winter",
     )
     assignments = registry_assignments if registry_assignments is not None else {"alpha": 1}
     matrix_svc = ServiceStatusMatrixService(
@@ -263,6 +269,7 @@ def _make_status(
         status_parser=StatusDocumentParser(),
         env_index_registry=_FakeEnvIndexRegistry(assignments),
         workspace_root=WS,
+        service_prefix="winter",
     )
     svc = ServiceStatusService(
         orchestrator_resolver=resolver,
@@ -660,6 +667,7 @@ def test_status_merge_json_output_merged() -> None:
         subprocess_runner=runner,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix="winter",
     )
     matrix_svc = ServiceStatusMatrixService(
         subprocess_runner=runner,
@@ -668,6 +676,7 @@ def test_status_merge_json_output_merged() -> None:
         status_parser=StatusDocumentParser(),
         env_index_registry=_FakeEnvIndexRegistry({"alpha": 1}),
         workspace_root=WS,
+        service_prefix="winter",
     )
     svc = ServiceStatusService(
         orchestrator_resolver=resolver,
@@ -886,6 +895,7 @@ def test_override_wins_over_configured_list_for_status() -> None:
         subprocess_runner=runner2,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix="winter",
     )
     matrix_svc2 = ServiceStatusMatrixService(
         subprocess_runner=runner2,
@@ -894,6 +904,7 @@ def test_override_wins_over_configured_list_for_status() -> None:
         status_parser=StatusDocumentParser(),
         env_index_registry=_FakeEnvIndexRegistry({"alpha": 1}),
         workspace_root=WS,
+        service_prefix="winter",
     )
     status_svc2 = ServiceStatusService(
         orchestrator_resolver=override_resolver,
@@ -931,6 +942,7 @@ def test_override_wins_over_configured_list_for_up() -> None:
     fan_out = ServiceFanOutService(
         subprocess_runner=runner,
         workspace_root=WS,
+        service_prefix="winter",
     )
     dispatch_svc = ServiceDispatchService(
         subprocess_runner=runner,
@@ -940,8 +952,10 @@ def test_override_wins_over_configured_list_for_up() -> None:
             subprocess_runner=runner,
             describe_parser=DescribeResultParser(),
             workspace_root=WS,
+            service_prefix="winter",
         ),
         workspace_root=WS,
+        service_prefix="winter",
     )
 
     code = dispatch_svc.dispatch("up", ["alpha"])

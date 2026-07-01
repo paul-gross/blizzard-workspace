@@ -56,7 +56,7 @@ def _run_ok(services: list[str]) -> SubprocessResult:
 
 def _svc(run_responses: dict) -> ServiceCatalogService:
     runner = FakeSubprocessRunner(run_responses=run_responses)
-    return ServiceCatalogService(subprocess_runner=runner, workspace_root=WS)
+    return ServiceCatalogService(subprocess_runner=runner, workspace_root=WS, service_prefix="winter")
 
 
 # ── empty / no-provider cases ────────────────────────────────────────────────

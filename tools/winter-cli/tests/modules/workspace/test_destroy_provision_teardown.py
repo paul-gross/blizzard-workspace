@@ -270,7 +270,7 @@ class _FailingProvisionService:
 def _workspace_config(provision_raw: dict | None = None) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[

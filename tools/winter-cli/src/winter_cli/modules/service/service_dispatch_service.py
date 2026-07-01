@@ -28,8 +28,8 @@ class ServiceDispatchService:
 
     The orchestrator is invoked as `<entrypoint> <action> [positional...]` (argv),
     with `cwd` at the workspace root. Every dispatch exports `WINTER_WORKSPACE_DIR`,
-    `WINTER_EXT_DIR`, and `WINTER_EXT_PREFIX` (matching the doctor/lint/hook
-    dispatches).
+    `WINTER_EXT_DIR`, `WINTER_EXT_PREFIX`, and `WINTER_SERVICE_PREFIX` (matching the
+    doctor/lint/hook dispatches).
 
     For up/down the single positional is `<env>`. For restart the positionals are
     the verbatim `<env>/<service>` selection PATTERNS forwarded unchanged on argv.
@@ -47,6 +47,7 @@ class ServiceDispatchService:
         fan_out_service: ServiceFanOutService,
         describe_service: ServiceDescribeService,
         workspace_root: Path,
+        service_prefix: str,
         reporter: IServiceReporter | None = None,
     ) -> None:
         self._subprocess_runner = subprocess_runner
@@ -54,6 +55,7 @@ class ServiceDispatchService:
         self._fan_out_service = fan_out_service
         self._describe_service = describe_service
         self._workspace_root = workspace_root
+        self._service_prefix = service_prefix
         self._reporter = reporter
 
     def dispatch(self, action: str, positionals: list[str]) -> int:
@@ -75,7 +77,7 @@ class ServiceDispatchService:
         # single-provider path via the orchestrator resolver.
         resolved = self._orchestrator_resolver.resolve()
         cmd = [str(resolved.entrypoint), action, *positionals]
-        merged = build_provider_env(resolved, self._workspace_root)
+        merged = build_provider_env(resolved, self._workspace_root, self._service_prefix)
         return self._subprocess_runner.call(cmd, cwd=self._workspace_root, env=merged)
 
     def _dispatch_restart(self, patterns: list[str]) -> int:
@@ -141,5 +143,5 @@ class ServiceDispatchService:
 
     def _call_provider(self, provider: ResolvedCapability, action: str, positionals: list[str]) -> int:
         cmd = [str(provider.entrypoint), action, *positionals]
-        merged = build_provider_env(provider, self._workspace_root)
+        merged = build_provider_env(provider, self._workspace_root, self._service_prefix)
         return self._subprocess_runner.call(cmd, cwd=self._workspace_root, env=merged)

@@ -38,8 +38,8 @@ DATABASE_URL = "postgresql://wts:wts@localhost:${WTS_DB_PORT}/wts-${WINTER_ENV}"
 
 | Scope | Variables emitted |
 |-------|-----------------|
-| `workspace` | `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_WORKSPACE_PORT_BASE` + workspace-band entries only |
-| `<feature>` | `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE` + workspace band rendered first, then feature band on top (feature band wins key collisions) |
+| `workspace` | `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_WORKSPACE_PORT_BASE`, `WINTER_SERVICE_PREFIX` + workspace-band entries only |
+| `<feature>` | `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE`, `WINTER_SERVICE_PREFIX` + workspace band rendered first, then feature band on top (feature band wins key collisions) |
 
 A feature-band entry may reference keys already rendered from the workspace band.
 

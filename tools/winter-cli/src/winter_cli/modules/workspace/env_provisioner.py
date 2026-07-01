@@ -19,6 +19,7 @@ The returned map always contains:
     WINTER_ENV                  — scope name
     WINTER_ENV_INDEX            — allocated index as a decimal string
     WINTER_WORKSPACE_PORT_BASE  — port-band start for index 0
+    WINTER_SERVICE_PREFIX       — resolved workspace service-namespace prefix
 
 For a feature-env scope, additionally:
 
@@ -185,16 +186,25 @@ class EnvProvisionerService:
         reference to an undefined variable.
         """
         workspace_port_base = str(self._config.port_base_for_index(0))
+        # Workspace-invariant — same value at every scope. Resolved once here
+        # (single source: WorkspaceConfig.service_prefix) and reused below so it
+        # is never independently re-derived per branch.
+        service_prefix = self._config.service_prefix
 
         if scope == WORKSPACE_SCOPE:
             result: dict[str, str] = {
                 "WINTER_ENV": WORKSPACE_SCOPE,
                 "WINTER_ENV_INDEX": "0",
                 "WINTER_WORKSPACE_PORT_BASE": workspace_port_base,
+                "WINTER_SERVICE_PREFIX": service_prefix,
             }
         else:
             trio = build_env_trio(scope, self._config, self._registry)
-            result = {**trio, "WINTER_WORKSPACE_PORT_BASE": workspace_port_base}
+            result = {
+                **trio,
+                "WINTER_WORKSPACE_PORT_BASE": workspace_port_base,
+                "WINTER_SERVICE_PREFIX": service_prefix,
+            }
 
         bands = self._config.env_bands
         workspace_band = bands.workspace

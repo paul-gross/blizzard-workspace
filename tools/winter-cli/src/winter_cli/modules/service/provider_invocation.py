@@ -1,8 +1,9 @@
 """Shared helpers for provider invocation: env-dict construction and pattern matching.
 
 ``build_provider_env`` builds the WINTER_* environment dict for any provider
-subprocess call, merging the current process environment with the four
-base extension context variables (including ``WINTER_EXT_CONFIG_DIR``).
+subprocess call, merging the current process environment with the five
+base extension context variables (including ``WINTER_EXT_CONFIG_DIR`` and
+``WINTER_SERVICE_PREFIX``).
 
 ``apply_provisioned_env`` overlays a scope's computed env map onto a provider
 env dict. Used by the fan-out (up/down) and status matrix to inject scope vars
@@ -31,8 +32,8 @@ class IEnvProvisioner(Protocol):
     def compute(self, scope: str) -> dict[str, str]: ...
 
 
-def build_provider_env(provider: Any, workspace_root: Path) -> dict[str, str]:
-    """Return a copy of os.environ with WINTER_WORKSPACE_DIR/EXT_DIR/EXT_PREFIX/EXT_CONFIG_DIR set.
+def build_provider_env(provider: Any, workspace_root: Path, service_prefix: str) -> dict[str, str]:
+    """Return a copy of os.environ with WINTER_WORKSPACE_DIR/EXT_DIR/EXT_PREFIX/EXT_CONFIG_DIR/SERVICE_PREFIX set.
 
     ``provider`` must expose ``ext_dir: Path``, ``prefix: str``, and
     ``config_dir: Path``; compatible with both ``ResolvedCapability`` and
@@ -43,6 +44,7 @@ def build_provider_env(provider: Any, workspace_root: Path) -> dict[str, str]:
         ext_dir=provider.ext_dir,
         prefix=provider.prefix,
         config_dir=provider.config_dir,
+        service_prefix=service_prefix,
     )
 
 

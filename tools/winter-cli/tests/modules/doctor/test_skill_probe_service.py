@@ -47,7 +47,7 @@ EXT_SKILLS = EXT_ROOT / "skills"
 def _config(adopt_extensions: AdoptExtensions = AdoptExtensions.all) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=adopt_extensions,
     )

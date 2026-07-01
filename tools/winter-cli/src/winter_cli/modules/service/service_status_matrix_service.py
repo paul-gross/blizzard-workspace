@@ -42,7 +42,7 @@ Per-cell env injection
 ----------------------
 Each cell's provider subprocess environment is built as:
 
-    build_provider_env(provider, ws_root)          # WINTER_WORKSPACE_DIR / EXT_* vars
+    build_provider_env(provider, ws_root, service_prefix)  # WINTER_WORKSPACE_DIR / EXT_* / SERVICE_PREFIX vars
     | EnvProvisionerService.compute(scope)         # WINTER_ENV / INDEX / PORT_BASE /
                                                    # WINTER_WORKSPACE_PORT_BASE + env-band vars
 
@@ -225,6 +225,7 @@ class ServiceStatusMatrixService:
         status_parser: StatusDocumentParser,
         env_index_registry: IEnvIndexRegistry,
         workspace_root: Path,
+        service_prefix: str,
     ) -> None:
         self._subprocess_runner = subprocess_runner
         self._describe_service = describe_service
@@ -232,6 +233,7 @@ class ServiceStatusMatrixService:
         self._status_parser = status_parser
         self._env_index_registry = env_index_registry
         self._workspace_root = workspace_root
+        self._service_prefix = service_prefix
 
     def build_matrix(
         self,
@@ -461,7 +463,7 @@ class ServiceStatusMatrixService:
         # source of truth; there is no file to source.  For the workspace scope,
         # WINTER_PORT_BASE is deliberately NOT injected — the workspace band is
         # WINTER_WORKSPACE_PORT_BASE only, so the name carries one meaning everywhere.
-        base_env = build_provider_env(cell.provider, self._workspace_root)
+        base_env = build_provider_env(cell.provider, self._workspace_root, self._service_prefix)
         merged_env = {**base_env, **provisioned_env}
 
         cmd = [str(cell.provider.entrypoint), "status", cell.cell_pattern]

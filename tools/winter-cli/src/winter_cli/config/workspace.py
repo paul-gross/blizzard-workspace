@@ -211,6 +211,17 @@ class WorkspaceConfigService:
         ):
             capabilities["service"] = [merged["service_orchestrator"]]
 
+        # Legacy back-compat: session_prefix (deprecated) folds into service_prefix
+        # when no explicit service_prefix is set. Only pass each key through when it
+        # is actually present in the merged config, so `WorkspaceConfig.model_fields_set`
+        # reflects whether `service_prefix` was explicitly set — the model's own
+        # `_fold_session_prefix` validator resolves the two into a single value.
+        service_prefix_kwargs: dict[str, str] = {}
+        if isinstance(merged.get("service_prefix"), str) and merged["service_prefix"]:
+            service_prefix_kwargs["service_prefix"] = merged["service_prefix"]
+        if isinstance(merged.get("session_prefix"), str) and merged["session_prefix"]:
+            service_prefix_kwargs["session_prefix"] = merged["session_prefix"]
+
         main_branch = merged.get("main_branch") or "main"
 
         adopt_value = merged.get("adopt_extensions", "winter")
@@ -277,7 +288,7 @@ class WorkspaceConfigService:
 
         return WorkspaceConfig(
             workspace_root=workspace_root,
-            session_prefix=merged.get("session_prefix", "winter"),
+            **service_prefix_kwargs,
             main_branch=main_branch,
             git_excludes=list(merged.get("git_excludes", []) or []),
             git_identity=git_identity,

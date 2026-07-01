@@ -37,6 +37,7 @@ Usage example
 ::
 
     SPEC = MergeSpec(fields={
+        "service_prefix": ScalarField(),
         "session_prefix": ScalarField(),
         "logs": TableField(),
         "service": ArrayKeyedField(key="name"),

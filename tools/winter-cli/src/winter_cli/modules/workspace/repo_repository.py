@@ -23,7 +23,7 @@ class IReadRepoRepository(Protocol):
     def get_workspace(
         self,
         root_path: Path,
-        session_prefix: str,
+        service_prefix: str,
         main_branch: str,
         base_port: int = 4000,
         ports_per_env: int = 20,

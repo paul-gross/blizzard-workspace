@@ -29,7 +29,7 @@ def _build_service(fs: FakeFilesystem) -> CoreProbeService:
     """
     config = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
     )
     return CoreProbeService(

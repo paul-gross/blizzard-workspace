@@ -77,7 +77,7 @@ Each command (string, or each element of an array) runs via `sh -c "<command>"`.
 
 ### Environment variables
 
-All handlers receive `WINTER_WORKSPACE_DIR` plus the three extension-identity vars. `feature-environment` and `feature-worktree` handlers additionally receive the env-var trio:
+All handlers receive `WINTER_WORKSPACE_DIR` plus the four extension-identity vars. `feature-environment` and `feature-worktree` handlers additionally receive the env-var trio:
 
 | Var | Meaning |
 |-----|---------|
@@ -85,6 +85,7 @@ All handlers receive `WINTER_WORKSPACE_DIR` plus the three extension-identity va
 | `WINTER_EXT_DIR` | Absolute path to the extension repo (workspace root for project-source handlers) |
 | `WINTER_EXT_PREFIX` | The extension's resolved symlink prefix (`"project"` for project-source handlers) |
 | `WINTER_EXT_CONFIG_DIR` | Absolute path to the extension's writable config directory |
+| `WINTER_SERVICE_PREFIX` | The resolved workspace-level service-orchestration namespace prefix. Workspace-invariant — always present. |
 | `WINTER_ENV` | The env name (`alpha`, `beta`, …) — feature-environment/feature-worktree only |
 | `WINTER_ENV_INDEX` | The persisted port-offset index for this env — feature-environment/feature-worktree only |
 | `WINTER_PORT_BASE` | `base_port + ports_per_env * WINTER_ENV_INDEX` — feature-environment/feature-worktree only |

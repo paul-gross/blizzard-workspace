@@ -41,7 +41,7 @@ WORKSPACE_ROOT = Path("/ws")
 def workspace_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         git_identity=GitIdentity(name="Bot", email="bot@example.com"),
@@ -285,7 +285,7 @@ def test_run_per_repo_caps_parallelism_via_git_ops_executor(
     repo_count = GitOpsService.PARALLELISM * 2 + 1
     cfg = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         git_identity=GitIdentity(name="Bot", email="bot@example.com"),
@@ -459,7 +459,7 @@ def test_workspace_reconcile_hook_fires_once_on_reconcile_all(
 
     cfg = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         git_identity=GitIdentity(name="Bot", email="bot@example.com"),
@@ -508,7 +508,7 @@ def test_workspace_reconcile_hook_fires_once_on_no_target_path(
 
     cfg = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         git_identity=GitIdentity(name="Bot", email="bot@example.com"),
@@ -573,7 +573,7 @@ def _standalone_config(ref: str | None = None) -> WorkspaceConfig:
     """WorkspaceConfig with one standalone repo, optionally pinned to `ref`."""
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         git_identity=None,
@@ -814,7 +814,7 @@ def _two_repo_config() -> WorkspaceConfig:
     """WorkspaceConfig with two non-pinned repos (existing + newly-added)."""
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         git_identity=GitIdentity(name="Bot", email="bot@example.com"),
@@ -829,7 +829,7 @@ def _pinned_two_repo_config() -> WorkspaceConfig:
     """WorkspaceConfig with one pinned repo and one non-pinned repo."""
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         git_identity=GitIdentity(name="Bot", email="bot@example.com"),
@@ -902,7 +902,7 @@ def test_reconcile_env_leaves_repo_unconnected_when_siblings_diverge(
     """
     cfg = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         git_identity=None,

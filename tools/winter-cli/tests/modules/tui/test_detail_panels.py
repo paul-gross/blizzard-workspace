@@ -37,7 +37,7 @@ from winter_cli.modules.workspace.models import RepoCommit, RepoStatus, Standalo
 from winter_cli.modules.workspace.models.service_model import StandaloneRepoStatus
 from winter_cli.plugins.types import DetailPanelContext
 
-_WORKSPACE = Workspace(root_path=Path("/tmp/ws"), session_prefix="t", main_branch="main")
+_WORKSPACE = Workspace(root_path=Path("/tmp/ws"), service_prefix="t", main_branch="main")
 _REPO = StandaloneRepository(name="winter-harness", path=Path("/tmp/ws/context/harness"))
 
 

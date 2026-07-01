@@ -35,7 +35,7 @@ GIT_EXCLUDE = WORKSPACE_ROOT / ".git" / "info" / "exclude"
 def _config(prefix: str = "ws", skills_dir: str = "skills") -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         skill_prefix=prefix,

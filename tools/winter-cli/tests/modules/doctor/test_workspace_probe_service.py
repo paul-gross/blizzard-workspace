@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.conftest import FakeFilesystem, FakeSubprocessRunner
+from tests.conftest import FakeFilesystem, FakeSubprocessRunner, make_workspace_config
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.subprocess_runner import SubprocessResult
 from winter_cli.modules.doctor.models import ProbeStatus
@@ -13,12 +13,7 @@ SCRIPT_PATH = WORKSPACE_ROOT / "context" / "project" / "doctor.sh"
 
 
 def _build_config(doctor: str | None) -> WorkspaceConfig:
-    return WorkspaceConfig(
-        workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
-        main_branch="main",
-        doctor=doctor,
-    )
+    return make_workspace_config(workspace_root=WORKSPACE_ROOT, doctor=doctor)
 
 
 def _build_service(

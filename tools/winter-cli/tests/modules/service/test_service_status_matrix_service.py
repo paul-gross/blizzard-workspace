@@ -3,7 +3,7 @@
 Covers:
 - Multi-provider matrix enumeration: cells = providers x configured envs + workspace
 - Single-provider describe-skip: all configured envs + workspace cell, no describe call
-- Per-cell env injection: WINTER_ENV/INDEX/PORT_BASE injected + [env.vars] overlay
+- Per-cell env injection: WINTER_ENV/INDEX/PORT_BASE/SERVICE_PREFIX injected + [env.vars] overlay
 - Scope-qualified matrix filtering: gamma/web -> only gamma cells of owning provider
 - Bare env pattern filtering: gamma -> only gamma cells (all owning providers)
 - Workspace cell filtering: workspace/* -> only workspace cells
@@ -142,7 +142,7 @@ def _fake_ws_config(
 
     return WorkspaceConfig(
         workspace_root=WS,
-        session_prefix="test",
+        service_prefix="test",
         main_branch="main",
         base_port=base_port,
         ports_per_env=ports_per_env,
@@ -191,6 +191,7 @@ def _matrix_svc(
         subprocess_runner=runner,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix=ws_config.service_prefix,
     )
     return ServiceStatusMatrixService(
         subprocess_runner=runner,
@@ -199,6 +200,7 @@ def _matrix_svc(
         status_parser=StatusDocumentParser(),
         env_index_registry=reg,
         workspace_root=WS,
+        service_prefix=ws_config.service_prefix,
     )
 
 
@@ -542,6 +544,26 @@ def test_env_injection_winter_env_set_per_cell() -> None:
     idx = next(i for i, call in enumerate(runner.popen_calls) if "alpha/*" in str(call[0]))
     env = runner.popen_envs[idx]
     assert env.get("WINTER_ENV") == "alpha"
+
+
+def test_env_injection_winter_service_prefix_set_per_cell() -> None:
+    """WINTER_SERVICE_PREFIX is set to the resolved config.service_prefix in the status env."""
+    alpha_doc = _status_doc_json("alpha", port_base=4020)
+    runner = FakeSubprocessRunner(
+        popen_responses={
+            f"{ENTRYPOINT_A} status alpha/*": ([alpha_doc], 0),
+            f"{ENTRYPOINT_A} status workspace/*": ([json.dumps({"envs": []})], 0),
+        }
+    )
+    svc = _matrix_svc(runner, registry_assignments={"alpha": 1})
+    pa = _provider_a()
+
+    cells = svc.build_matrix([pa], patterns=("alpha",))
+    svc.run_matrix(cells, reporter=None)
+
+    idx = next(i for i, call in enumerate(runner.popen_calls) if "alpha/*" in str(call[0]))
+    env = runner.popen_envs[idx]
+    assert env.get("WINTER_SERVICE_PREFIX") == "test"
 
 
 def test_env_injection_winter_env_index_set_from_registry() -> None:
@@ -908,6 +930,7 @@ def _make_status_svc(
         subprocess_runner=runner,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix=ws_config.service_prefix,
     )
     matrix_svc = ServiceStatusMatrixService(
         subprocess_runner=runner,
@@ -916,6 +939,7 @@ def _make_status_svc(
         status_parser=StatusDocumentParser(),
         env_index_registry=reg,
         workspace_root=WS,
+        service_prefix=ws_config.service_prefix,
     )
     return ServiceStatusService(
         orchestrator_resolver=resolver,
@@ -1147,6 +1171,7 @@ def _real_matrix_svc(
         subprocess_runner=runner,
         describe_parser=DescribeResultParser(),
         workspace_root=ws,
+        service_prefix=ws_config.service_prefix,
     )
     matrix_svc = ServiceStatusMatrixService(
         subprocess_runner=runner,
@@ -1155,6 +1180,7 @@ def _real_matrix_svc(
         status_parser=StatusDocumentParser(),
         env_index_registry=reg,
         workspace_root=ws,
+        service_prefix=ws_config.service_prefix,
     )
     return matrix_svc, providers
 

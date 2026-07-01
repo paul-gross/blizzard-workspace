@@ -3,13 +3,17 @@ version = "v1"
 title   = "Service orchestration"
 
 # Always-present environment variables set by winter on every dispatch,
-# regardless of action. The first four form the winter base extension contract:
-# workspace context, extension identity, and writable config location.
+# regardless of action. The first five form the winter base extension contract:
+# workspace context, extension identity, writable config location, and the
+# workspace-level service-namespace prefix (workspace-invariant — the same
+# value at every scope and for every action, unlike the scope vars below).
 # Source of truth: core/extension_invocation.py::build_extension_env.
-# The next four are scope vars injected by EnvProvisionerService on up/down/status;
-# restart/logs do NOT inject scope vars into the provider process (only the four
-# base extension vars) — a tmux-style provider's services obtain their env by
-# sourcing `winter env <scope>` in their own runtime, and docker restart/logs
+# The remaining four are scope vars injected by EnvProvisionerService on
+# up/down/status only (WINTER_ENV, WINTER_ENV_INDEX, WINTER_PORT_BASE,
+# WINTER_WORKSPACE_PORT_BASE);
+# restart/logs do NOT inject scope vars into the provider process (only the five
+# base extension vars) — a tmux-style provider's services obtain their scope env
+# by sourcing `winter env <scope>` in their own runtime, and docker restart/logs
 # operate on already-provisioned resources.
 [[env_var]]
 name        = "WINTER_WORKSPACE_DIR"
@@ -26,6 +30,10 @@ description = "The resolved symlink prefix for this extension."
 [[env_var]]
 name        = "WINTER_EXT_CONFIG_DIR"
 description = "Absolute path to this extension's writable config/asset directory (default `.winter/config/<repo-name>/`); the writable counterpart to the read-only `WINTER_EXT_DIR`."
+
+[[env_var]]
+name        = "WINTER_SERVICE_PREFIX"
+description = "Resolved workspace-level service-orchestration namespace prefix; always present, on every action (including restart/logs/describe/catalog); providers derive per-env resource names (session names, compose project names, etc.) from it."
 
 [[env_var]]
 name        = "WINTER_ENV"
@@ -98,7 +106,7 @@ summary = "Stream or emit the log backlog for matched services as NDJSON on stdo
 #   --tail        always emitted, carrying the resolved count string (N or all).
 #   --since/--until carry pre-normalised RFC3339 timestamps; omitted when empty.
 #   --follow/--timestamps emitted as bare flags only when true.
-# Env: logs receives only the four always-present base extension vars (not scope
+# Env: logs receives only the five always-present base extension vars (not scope
 # vars). Services obtain their scope env by sourcing `winter env <scope>` at
 # runtime; docker-style providers operate on already-provisioned resources.
 

@@ -94,7 +94,7 @@ class _FakeEnvIndexRegistry:
 def _ws_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WS,
-        session_prefix="test",
+        service_prefix="test",
         main_branch="main",
         base_port=4000,
         ports_per_env=20,
@@ -135,12 +135,14 @@ def _handler(runner: FakeSubprocessRunner, click: Any = None) -> ServiceHandler:
         subprocess_runner=runner,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix="winter",
     )
     click_obj = click or ClickRecorder()
     cli_output = ClickCliOutputService()
     fan_out = ServiceFanOutService(
         subprocess_runner=runner,
         workspace_root=WS,
+        service_prefix="winter",
     )
     dispatch = ServiceDispatchService(
         subprocess_runner=runner,
@@ -148,12 +150,14 @@ def _handler(runner: FakeSubprocessRunner, click: Any = None) -> ServiceHandler:
         fan_out_service=fan_out,
         describe_service=describe_svc,
         workspace_root=WS,
+        service_prefix="winter",
     )
     logs = ServiceLogsService(
         subprocess_runner=runner,
         orchestrator_resolver=res,
         describe_service=describe_svc,
         workspace_root=WS,
+        service_prefix="winter",
     )
     matrix = ServiceStatusMatrixService(
         subprocess_runner=runner,
@@ -162,6 +166,7 @@ def _handler(runner: FakeSubprocessRunner, click: Any = None) -> ServiceHandler:
         status_parser=StatusDocumentParser(),
         env_index_registry=_FakeEnvIndexRegistry({"alpha": 1}),
         workspace_root=WS,
+        service_prefix="winter",
     )
     status = ServiceStatusService(
         orchestrator_resolver=res,
@@ -393,7 +398,7 @@ def test_handler_run_logs_exits_nonzero_on_orchestrator_error() -> None:
 
 
 def test_handler_run_logs_sets_workspace_context_env_vars() -> None:
-    """Logs stream injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, and cwd."""
+    """Logs stream injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, WINTER_SERVICE_PREFIX, and cwd."""
     runner = FakeSubprocessRunner(popen_responses={f"{ENTRYPOINT} logs alpha/api --tail 200": ([], 0)})
     _handler(runner, ClickRecorder()).run_logs(_default_log_options(patterns=("alpha/api",)))
     assert len(runner.popen_calls) == 1
@@ -403,6 +408,7 @@ def test_handler_run_logs_sets_workspace_context_env_vars() -> None:
     assert env["WINTER_WORKSPACE_DIR"] == str(WS)
     assert env["WINTER_EXT_DIR"] == str(WS / "winter-service-tmux")
     assert env["WINTER_EXT_PREFIX"] == "winter-service-tmux"
+    assert env["WINTER_SERVICE_PREFIX"] == "winter"
 
 
 def test_handler_run_logs_patterns_on_argv_not_env_var() -> None:

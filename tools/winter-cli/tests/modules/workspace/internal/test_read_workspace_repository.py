@@ -62,7 +62,7 @@ def test_resolve_env_index_for_non_greek_is_deterministic() -> None:
 def test_get_environments_discovers_greek_dirs_with_known_repos(
     monkeypatch: pytest.MonkeyPatch, repo: ReadWorkspaceRepository
 ) -> None:
-    workspace = Workspace(root_path=_ROOT, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=_ROOT, service_prefix="t", main_branch="main")
 
     # alpha/ and gamma/ contain "demo"; delta/ contains only "other".
     def _is_dir(self: Path) -> bool:
@@ -99,7 +99,7 @@ def test_get_environment_status_reads_feature_branch_from_tracking(
     monkeypatch: pytest.MonkeyPatch, repo: ReadWorkspaceRepository
 ) -> None:
     git_mock = _fake_git_repo(monkeypatch)
-    workspace = Workspace(root_path=_ROOT, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=_ROOT, service_prefix="t", main_branch="main")
     worktree_path = _ROOT / "alpha" / "demo"
 
     # The adapter checks (worktree_path / ".git").exists()
@@ -119,7 +119,7 @@ def test_get_environment_status_returns_none_when_no_tracking(
     monkeypatch: pytest.MonkeyPatch, repo: ReadWorkspaceRepository
 ) -> None:
     git_mock = _fake_git_repo(monkeypatch)
-    workspace = Workspace(root_path=_ROOT, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=_ROOT, service_prefix="t", main_branch="main")
     worktree_path = _ROOT / "alpha" / "demo"
 
     monkeypatch.setattr(Path, "exists", lambda self: self == worktree_path / ".git")
@@ -142,7 +142,7 @@ def test_get_environment_status_counts_distinct_remotes_across_worktrees(
 ) -> None:
     """Two non-pinned worktrees on different branches → primary is the first, distinct count is 2."""
     git_mock = _fake_git_repo(monkeypatch)
-    workspace = Workspace(root_path=_ROOT, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=_ROOT, service_prefix="t", main_branch="main")
 
     monkeypatch.setattr(Path, "exists", lambda self: self.name == ".git")
 
@@ -168,7 +168,7 @@ def test_get_environment_status_shared_branch_counts_one_distinct_remote(
 ) -> None:
     """Two non-pinned worktrees on the *same* branch → a single distinct remote (no `+N`)."""
     git_mock = _fake_git_repo(monkeypatch)
-    workspace = Workspace(root_path=_ROOT, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=_ROOT, service_prefix="t", main_branch="main")
 
     monkeypatch.setattr(Path, "exists", lambda self: self.name == ".git")
 
@@ -193,7 +193,7 @@ def test_get_environment_status_primary_is_first_connected_repo(
 ) -> None:
     """When the leading non-pinned repo is disconnected, the primary is the next connected one."""
     git_mock = _fake_git_repo(monkeypatch)
-    workspace = Workspace(root_path=_ROOT, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=_ROOT, service_prefix="t", main_branch="main")
 
     monkeypatch.setattr(Path, "exists", lambda self: self.name == ".git")
 
@@ -220,7 +220,7 @@ def test_get_environment_status_excludes_pinned_from_distinct_count(
 ) -> None:
     """A pinned repo tracks main and is never read — it doesn't inflate the distinct count."""
     git_mock = _fake_git_repo(monkeypatch)
-    workspace = Workspace(root_path=_ROOT, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=_ROOT, service_prefix="t", main_branch="main")
 
     monkeypatch.setattr(Path, "exists", lambda self: self.name == ".git")
 

@@ -17,7 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from tests.conftest import FakeConfigFileReader, FakeFilesystem, FakeInitReporter
+from tests.conftest import FakeConfigFileReader, FakeFilesystem, FakeInitReporter, make_workspace_config
 from winter_cli.config.models import AdoptExtensions, CodeAgentVendor, WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.doctor.agent_probe_service import AGENT_SOURCE, AgentProbeService
@@ -65,12 +65,7 @@ You are a planner.
 
 
 def _config(adopt_extensions: AdoptExtensions = AdoptExtensions.all) -> WorkspaceConfig:
-    return WorkspaceConfig(
-        workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
-        main_branch="main",
-        adopt_extensions=adopt_extensions,
-    )
+    return make_workspace_config(workspace_root=WORKSPACE_ROOT, adopt_extensions=adopt_extensions)
 
 
 def _manifest_loader(

@@ -117,10 +117,12 @@ class ServiceDescribeService:
         subprocess_runner: ISubprocessRunner,
         describe_parser: DescribeResultParser,
         workspace_root: Path,
+        service_prefix: str,
     ) -> None:
         self._subprocess_runner = subprocess_runner
         self._describe_parser = describe_parser
         self._workspace_root = workspace_root
+        self._service_prefix = service_prefix
 
     def build(
         self,
@@ -152,7 +154,7 @@ class ServiceDescribeService:
         index: dict[str, ResolvedCapability] = {}
         for provider in providers:
             cmd = [str(provider.entrypoint), "describe"]
-            merged = build_provider_env(provider, self._workspace_root)
+            merged = build_provider_env(provider, self._workspace_root, self._service_prefix)
 
             result = self._subprocess_runner.run(cmd, cwd=self._workspace_root, env=merged)
             try:

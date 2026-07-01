@@ -12,7 +12,7 @@ It also manages a third file, `.winter/state.toml`, automatically (see [State re
 The committed workspace config. Its top-level scalar keys:
 
 ```toml
-session_prefix = "my-project"   # tmux session prefix
+service_prefix = "my-project"   # workspace service-orchestration namespace
 main_branch = "main"            # workspace-default main branch (per-repo override on each repo entry)
 adopt_extensions = "winter"     # how aggressively standalone repos contribute skills/agents — see extensions.md
 prefix = "ws"                   # workspace skill namespace (default "ws") — see below
@@ -24,7 +24,7 @@ lint = "context/project/lint.sh"     # optional workspace-level `winter lint` ch
 service = "winter-service-tmux"
 ```
 
-- **`session_prefix`** — tmux session prefix.
+- **`service_prefix`** — the workspace-level service-orchestration namespace prefix, default `"winter"`. Overridable in `config.local.toml` so distinct checkouts of the same workspace can run separate namespaces. Folds in the deprecated `session_prefix` key for back-compat — no removal planned — but new workspaces should set `service_prefix` directly. Surfaces to service providers as `WINTER_SERVICE_PREFIX` — see [contracts/service-orchestrator.md](../contracts/service-orchestrator.md) for injection semantics.
 - **`main_branch`** — the workspace-default main branch. Each repo entry can override it with its own `main_branch`.
 - **`adopt_extensions`** — controls when winter processes a standalone repo's skills and agents. Full mode table in [extensions.md](./extensions.md#adopt_extensions-modes).
 - **`prefix`** — top-level skill namespace for workspace skills. Defaults to `"ws"`. `winter ws init` reads every skill directory under `workspace_root/<skills_dir>/` and projects it into per-vendor skill directories (`.claude/skills/<prefix>`, `.claude/skills/<prefix>-*`, `.codex/skills/<prefix>`, `.codex/skills/<prefix>-*`, `.opencode/skill/<prefix>`, `.opencode/skill/<prefix>-*`). Projection is always-on — the default `"ws"` prefix is applied even when `prefix` is absent from the config file. Must be distinct from any `[[standalone_repository]]` `prefix` value (both prune `<prefix>-*` and bare `<prefix>` entries in the same skill directories). See [setup.md — workspace skills](../setup.md#workspace-skills-projection) for details.

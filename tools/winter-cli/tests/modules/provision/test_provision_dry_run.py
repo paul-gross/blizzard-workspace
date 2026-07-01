@@ -192,7 +192,7 @@ class _FakeReporter:
 def _make_config(provision_raw: dict | None = None) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         provision_raw=provision_raw or {},
@@ -880,7 +880,7 @@ def test_dry_run_plan_handler_includes_project_when_set() -> None:
     # parse_provision needs project_names; inject via project_repos.
     config_with_project = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         provision_raw={"data": [{"scope": "feature-environment", "apply": "scripts/seed.sh", "project": "web"}]},
@@ -943,7 +943,7 @@ def test_dry_run_json_plan_handler_includes_project_field() -> None:
 
     config_with_project = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         provision_raw={"data": [{"scope": "feature-environment", "apply": "scripts/seed.sh", "project": "api"}]},

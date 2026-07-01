@@ -22,7 +22,7 @@ def _build_config(
 ) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=adopt,
         provision_raw=provision_raw or {},
@@ -621,7 +621,7 @@ def _build_config_with_repos(
 ) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         provision_raw=provision_raw,

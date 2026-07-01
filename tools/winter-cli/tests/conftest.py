@@ -21,6 +21,25 @@ from winter_cli.modules.workspace.models import RepoError
 from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
 
 
+def make_workspace_config(**overrides: Any) -> WorkspaceConfig:
+    """Build a `WorkspaceConfig` with sane required-field defaults for tests.
+
+    Tests that just need *a* config object (not one exercising any particular
+    field) can call this instead of repeating the full constructor. Supplies
+    `workspace_root` and `main_branch` — a required field it is easy to forget
+    when hand-rolling a `WorkspaceConfig` — plus a default `service_prefix`.
+    Pass keyword overrides to customize any field, e.g.
+    `make_workspace_config(doctor="context/project/doctor.sh")`.
+    """
+    defaults: dict[str, Any] = {
+        "workspace_root": Path("/ws"),
+        "service_prefix": "t",
+        "main_branch": "main",
+    }
+    defaults.update(overrides)
+    return WorkspaceConfig(**defaults)
+
+
 @pytest.fixture
 def tmp_workspace_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Materialize a minimal `.winter/` workspace at tmp_path and chdir into it.
@@ -70,7 +89,7 @@ def workspace_config(tmp_workspace_root: Path) -> WorkspaceConfig:
     """
     return WorkspaceConfig(
         workspace_root=tmp_workspace_root,
-        session_prefix="test",
+        service_prefix="test",
         main_branch="main",
         git_excludes=[],
         git_identity=None,

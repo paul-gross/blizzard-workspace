@@ -232,6 +232,7 @@ class ExtensionHookService:
             ext_dir=repo.path,
             prefix=manifest.prefix,
             config_dir=config_dir,
+            service_prefix=self._config.service_prefix,
         )
         # Workspace (index 0) port base — the band reserved for workspace-scope
         # services. Workspace-global, so it is exposed to every hook (env-init,

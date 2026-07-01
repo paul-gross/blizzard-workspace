@@ -50,7 +50,7 @@ def _make_module(name: str, *, config_received: list[dict]) -> ModuleType:
 
 @pytest.fixture
 def workspace() -> Workspace:
-    return Workspace(root_path=WORKSPACE_ROOT, session_prefix="t", main_branch="main")
+    return Workspace(root_path=WORKSPACE_ROOT, service_prefix="t", main_branch="main")
 
 
 class _StubPanel:

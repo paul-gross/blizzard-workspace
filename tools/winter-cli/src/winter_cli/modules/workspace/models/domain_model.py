@@ -26,7 +26,7 @@ class Workspace:
     """The workspace as a whole — high-level attributes that span all environments and repositories."""
 
     root_path: Path
-    session_prefix: str
+    service_prefix: str
     main_branch: str
     base_port: int = 4000
     """Start of this workspace's port band. Per-env port base = base_port + index * ports_per_env."""

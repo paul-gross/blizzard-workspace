@@ -21,6 +21,7 @@ from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST, Extens
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
 
 WS = Path("/ws")
+SERVICE_PREFIX = "winter"
 
 
 class _StubRepoFactory:
@@ -78,6 +79,7 @@ def _fan_out_svc(runner: FakeSubprocessRunner) -> ServiceFanOutService:
     return ServiceFanOutService(
         subprocess_runner=runner,
         workspace_root=WS,
+        service_prefix=SERVICE_PREFIX,
     )
 
 
@@ -88,6 +90,7 @@ def _service(runner: FakeSubprocessRunner | None = None) -> ServiceDispatchServi
         subprocess_runner=_runner,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix=SERVICE_PREFIX,
     )
     return ServiceDispatchService(
         subprocess_runner=_runner,
@@ -95,6 +98,7 @@ def _service(runner: FakeSubprocessRunner | None = None) -> ServiceDispatchServi
         fan_out_service=_fan_out_svc(_runner),
         describe_service=describe_svc,
         workspace_root=WS,
+        service_prefix=SERVICE_PREFIX,
     )
 
 
@@ -123,6 +127,19 @@ def test_dispatch_restart_with_patterns_passes_them_on_argv() -> None:
     env = runner.call_envs[0]
     assert "WINTER_SERVICE_NAME" not in env
     assert "WINTER_SERVICE_PATTERNS" not in env
+
+
+def test_dispatch_restart_sets_workspace_context_env_vars() -> None:
+    """restart dispatch (single-provider short-circuit) still receives the base extension
+    vars, including WINTER_SERVICE_PREFIX — it is workspace-invariant, not a scope var
+    withheld from restart/logs."""
+    runner = FakeSubprocessRunner()
+    _service(runner).dispatch("restart", ["alpha/api"])
+    env = runner.call_envs[0]
+    assert env["WINTER_WORKSPACE_DIR"] == str(WS)
+    assert env["WINTER_EXT_DIR"] == str(WS / "winter-service-tmux")
+    assert env["WINTER_EXT_PREFIX"] == "winter-service-tmux"
+    assert env["WINTER_SERVICE_PREFIX"] == SERVICE_PREFIX
 
 
 def test_dispatch_status_with_patterns_passes_them_on_argv() -> None:
@@ -157,7 +174,7 @@ def test_dispatch_passes_exit_code_through_unmodified() -> None:
 
 
 def test_dispatch_sets_workspace_context_env_vars() -> None:
-    """Dispatch injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, and cwd."""
+    """Dispatch injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, WINTER_SERVICE_PREFIX, and cwd."""
     runner = FakeSubprocessRunner()
     _service(runner).dispatch("up", ["alpha"])
     # call_envs[0] is the up call env.
@@ -166,6 +183,7 @@ def test_dispatch_sets_workspace_context_env_vars() -> None:
     assert env["WINTER_WORKSPACE_DIR"] == str(WS)
     assert env["WINTER_EXT_DIR"] == str(WS / "winter-service-tmux")
     assert env["WINTER_EXT_PREFIX"] == "winter-service-tmux"
+    assert env["WINTER_SERVICE_PREFIX"] == SERVICE_PREFIX
     assert runner.call_calls[0][1] == WS
 
 
@@ -223,6 +241,7 @@ def _service_for_error(
         subprocess_runner=runner,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix=SERVICE_PREFIX,
     )
     return ServiceDispatchService(
         subprocess_runner=runner,
@@ -230,6 +249,7 @@ def _service_for_error(
         fan_out_service=_fan_out_svc(runner),
         describe_service=describe_svc,
         workspace_root=WS,
+        service_prefix=SERVICE_PREFIX,
     )
 
 

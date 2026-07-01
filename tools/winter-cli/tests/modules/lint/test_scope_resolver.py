@@ -23,7 +23,7 @@ WS = Path("/ws")
 def _config(*, project: tuple[str, ...] = ("app",), standalone: tuple[str, ...] = ("ext",)) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WS,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         project_repos=[ProjectRepositoryConfig(name=n, url=f"git@x:o/{n}.git") for n in project],
         standalone_repos=[StandaloneRepositoryConfig(name=n, url=f"git@x:o/{n}.git", path=n) for n in standalone],
@@ -32,7 +32,7 @@ def _config(*, project: tuple[str, ...] = ("app",), standalone: tuple[str, ...] 
 
 class _FakeRepoRepo:
     def get_workspace(self, root: Path, prefix: str, main: str) -> Workspace:
-        return Workspace(root_path=root, session_prefix=prefix, main_branch=main)
+        return Workspace(root_path=root, service_prefix=prefix, main_branch=main)
 
 
 class _FakeWorktreeRepo:

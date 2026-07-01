@@ -180,7 +180,7 @@ class _FakeReporter:
 def _make_config(provision_raw: dict | None = None) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         provision_raw=provision_raw or {},
@@ -1128,7 +1128,7 @@ def test_workspace_config_load_does_not_raise_on_malformed_provision() -> None:
     # WorkspaceConfig stores provision_raw without parsing
     config = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         provision_raw={"unknown_subtarget": [{"scope": "workspace", "apply": "scripts/apply.sh"}]},

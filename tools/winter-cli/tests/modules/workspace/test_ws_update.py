@@ -61,7 +61,7 @@ def _make_workspace_config(
 ) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=workspace_root,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         standalone_repos=standalone_configs,
@@ -160,7 +160,7 @@ def _make_update_service(
         repo_repo=repo_repo,  # type: ignore[arg-type]
     )
     git_ops = GitOpsService(RepoErrorFactory(), sleep=lambda _: None, jitter=lambda: 0.0)
-    workspace = Workspace(root_path=workspace_root, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=workspace_root, service_prefix="t", main_branch="main")
     return WorkspaceSyncService(
         env_status_svc=env_status_svc,
         worktree_repo=fake_worktree_repo,  # type: ignore[arg-type]

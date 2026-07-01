@@ -24,7 +24,7 @@ LOCAL_CONFIG = WORKSPACE_ROOT / ".winter" / "config.local.toml"
 def workspace_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="test",
+        service_prefix="test",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
     )

@@ -218,6 +218,7 @@ class CoreLintService:
         file_size_config: FileSizeLintConfig | None = None,
         orchestrator_resolver: object | None = None,
         catalog_service: ServiceCatalogService | None = None,
+        service_prefix: str = "winter",
     ) -> None:
         self._workspace_root = workspace_root
         self._fs = fs
@@ -226,6 +227,7 @@ class CoreLintService:
         self._script_path = script_path
         self._orchestrator_resolver = orchestrator_resolver
         self._catalog_service = catalog_service
+        self._service_prefix = service_prefix
         self._file_size_check = FileSizeLintCheck(
             workspace_root,
             file_size_config if file_size_config is not None else FileSizeLintConfig(),
@@ -305,7 +307,7 @@ class CoreLintService:
         catalog_svc = (
             self._catalog_service
             if self._catalog_service is not None
-            else ServiceCatalogService(self._subprocess, self._workspace_root)
+            else ServiceCatalogService(self._subprocess, self._workspace_root, self._service_prefix)
         )
         check = RequiredServicesLintCheck(
             workspace_root=self._workspace_root,

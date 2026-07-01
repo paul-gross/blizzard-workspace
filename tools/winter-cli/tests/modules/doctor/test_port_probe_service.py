@@ -16,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from tests.conftest import FakeFilesystem
+from tests.conftest import FakeFilesystem, make_workspace_config
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.doctor.models import ProbeStatus
@@ -56,10 +56,8 @@ def _config(
     env_aliases: list[str] | None = None,
     envs_per_workspace: int = 48,
 ) -> WorkspaceConfig:
-    return WorkspaceConfig(
+    return make_workspace_config(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
-        main_branch="main",
         env_aliases=env_aliases if env_aliases is not None else ["alpha", "beta"],
         envs_per_workspace=envs_per_workspace,
     )

@@ -160,7 +160,7 @@ class LintScopeResolver:
         try:
             workspace = self._repo_repo.get_workspace(
                 self._config.workspace_root,
-                self._config.session_prefix,
+                self._config.service_prefix,
                 self._config.main_branch,
             )
             return self._worktree_repo.get_environments(workspace, project_repos)

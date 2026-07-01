@@ -12,6 +12,8 @@ Coverage:
 - Two-provider down: continues past failure; returns first non-zero.
 - Two-provider down: returns 0 when all succeed.
 - Env vars are injected correctly for each provider.
+- Provisioned scope env vars (including WINTER_SERVICE_PREFIX) are merged into
+  both up and down subprocess env when an env_provisioner is present.
 """
 
 from __future__ import annotations
@@ -63,6 +65,7 @@ def _make_fan_out(runner: FakeSubprocessRunner) -> ServiceFanOutService:
     return ServiceFanOutService(
         subprocess_runner=runner,
         workspace_root=WS,
+        service_prefix="winter",
     )
 
 
@@ -220,7 +223,7 @@ def test_two_provider_down_all_succeed_returns_zero() -> None:
 
 
 def test_up_injects_provider_env_vars() -> None:
-    """Fan-out up injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX per provider."""
+    """Fan-out up injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, WINTER_SERVICE_PREFIX per provider."""
     pa = _pa()
     runner = FakeSubprocessRunner()
     svc = _make_fan_out(runner)
@@ -232,10 +235,11 @@ def test_up_injects_provider_env_vars() -> None:
     assert call_env["WINTER_WORKSPACE_DIR"] == str(WS)
     assert call_env["WINTER_EXT_DIR"] == str(EXT_A)
     assert call_env["WINTER_EXT_PREFIX"] == "provider-a"
+    assert call_env["WINTER_SERVICE_PREFIX"] == "winter"
 
 
 def test_down_injects_provider_env_vars() -> None:
-    """Fan-out down injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX per provider."""
+    """Fan-out down injects WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, WINTER_SERVICE_PREFIX per provider."""
     pb = _pb()
     runner = FakeSubprocessRunner()
     svc = _make_fan_out(runner)
@@ -247,6 +251,7 @@ def test_down_injects_provider_env_vars() -> None:
     assert call_env["WINTER_WORKSPACE_DIR"] == str(WS)
     assert call_env["WINTER_EXT_DIR"] == str(EXT_B)
     assert call_env["WINTER_EXT_PREFIX"] == "provider-b"
+    assert call_env["WINTER_SERVICE_PREFIX"] == "winter"
 
 
 def test_up_injects_provisioned_env_vars_when_provisioner_present() -> None:
@@ -257,6 +262,7 @@ def test_up_injects_provisioned_env_vars_when_provisioner_present() -> None:
             return {
                 "WINTER_ENV": scope,
                 "WINTER_PORT_BASE": "4060",
+                "WINTER_SERVICE_PREFIX": "myproj",
                 "DATABASE_URL": f"postgres://localhost/myapp_{scope}",
             }
 
@@ -265,6 +271,7 @@ def test_up_injects_provisioned_env_vars_when_provisioner_present() -> None:
     svc = ServiceFanOutService(
         subprocess_runner=runner,
         workspace_root=WS,
+        service_prefix="winter",
         env_provisioner=_FakeProvisioner(),
     )
 
@@ -274,6 +281,38 @@ def test_up_injects_provisioned_env_vars_when_provisioner_present() -> None:
     call_env = runner.call_envs[0]
     assert call_env["WINTER_ENV"] == "alpha"
     assert call_env["WINTER_PORT_BASE"] == "4060"
+    assert call_env["WINTER_SERVICE_PREFIX"] == "myproj"
+    assert call_env["DATABASE_URL"] == "postgres://localhost/myapp_alpha"
+
+
+def test_down_injects_provisioned_env_vars_when_provisioner_present() -> None:
+    """When an env_provisioner is present, its computed vars are merged into the down subprocess env."""
+
+    class _FakeProvisioner:
+        def compute(self, scope: str) -> dict[str, str]:
+            return {
+                "WINTER_ENV": scope,
+                "WINTER_PORT_BASE": "4060",
+                "WINTER_SERVICE_PREFIX": "myproj",
+                "DATABASE_URL": f"postgres://localhost/myapp_{scope}",
+            }
+
+    pb = _pb()
+    runner = FakeSubprocessRunner()
+    svc = ServiceFanOutService(
+        subprocess_runner=runner,
+        workspace_root=WS,
+        service_prefix="winter",
+        env_provisioner=_FakeProvisioner(),
+    )
+
+    svc.down("alpha", [pb])
+
+    assert len(runner.call_envs) == 1
+    call_env = runner.call_envs[0]
+    assert call_env["WINTER_ENV"] == "alpha"
+    assert call_env["WINTER_PORT_BASE"] == "4060"
+    assert call_env["WINTER_SERVICE_PREFIX"] == "myproj"
     assert call_env["DATABASE_URL"] == "postgres://localhost/myapp_alpha"
 
 
@@ -315,6 +354,7 @@ def test_up_workspace_scope_injects_workspace_band_only() -> None:
     svc = ServiceFanOutService(
         subprocess_runner=runner,
         workspace_root=WS,
+        service_prefix="winter",
         env_provisioner=_BandProvisioner(),
     )
 
@@ -346,6 +386,7 @@ def test_up_feature_scope_injects_both_bands_feature_wins_collision() -> None:
     svc = ServiceFanOutService(
         subprocess_runner=runner,
         workspace_root=WS,
+        service_prefix="winter",
         env_provisioner=_BandProvisioner(),
     )
 
@@ -377,6 +418,7 @@ def test_provision_error_does_not_raise_on_up_or_down() -> None:
     svc = ServiceFanOutService(
         subprocess_runner=runner,
         workspace_root=WS,
+        service_prefix="winter",
         env_provisioner=_ErrorProvisioner(),
         reporter=reporter,  # type: ignore[arg-type]
     )

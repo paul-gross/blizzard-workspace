@@ -349,14 +349,14 @@ class ReadRepoRepository:
     def get_workspace(
         self,
         root_path: Path,
-        session_prefix: str,
+        service_prefix: str,
         main_branch: str,
         base_port: int = 4000,
         ports_per_env: int = 20,
     ) -> Workspace:
         return Workspace(
             root_path=root_path,
-            session_prefix=session_prefix,
+            service_prefix=service_prefix,
             main_branch=main_branch,
             base_port=base_port,
             ports_per_env=ports_per_env,

@@ -60,7 +60,7 @@ def _project(path: Path, name: str = "demo") -> ProjectRepository:
 
 
 def _wt(path: Path, name: str = "demo") -> FeatureWorktree:
-    workspace = Workspace(root_path=path.parent, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=path.parent, service_prefix="t", main_branch="main")
     env = FeatureEnvironment(workspace=workspace, name="alpha", index=1, path=path.parent)
     return FeatureWorktree(workspace=workspace, environment=env, repository=_project(path, name))
 

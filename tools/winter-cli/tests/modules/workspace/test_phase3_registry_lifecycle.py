@@ -82,7 +82,7 @@ class _InMemoryRegistry:
 def _default_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         git_identity=GitIdentity(name="Bot", email="bot@example.com"),
@@ -162,7 +162,7 @@ def _project(name: str) -> ProjectRepository:
 
 
 def _workspace() -> Workspace:
-    return Workspace(root_path=WORKSPACE_ROOT, session_prefix="t", main_branch="main")
+    return Workspace(root_path=WORKSPACE_ROOT, service_prefix="t", main_branch="main")
 
 
 # ---------------------------------------------------------------------------

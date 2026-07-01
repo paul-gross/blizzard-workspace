@@ -69,12 +69,14 @@ class ServiceFanOutService:
         self,
         subprocess_runner: ISubprocessRunner,
         workspace_root: Path,
+        service_prefix: str,
         manifest_collector: ServiceManifestCollectorService | None = None,
         env_provisioner: IEnvProvisioner | None = None,
         reporter: IServiceReporter | None = None,
     ) -> None:
         self._subprocess_runner = subprocess_runner
         self._workspace_root = workspace_root
+        self._service_prefix = service_prefix
         self._manifest_collector = manifest_collector
         self._env_provisioner = env_provisioner
         self._reporter = reporter
@@ -145,7 +147,7 @@ class ServiceFanOutService:
         extra_env: dict[str, str],
     ) -> int:
         cmd = [str(provider.entrypoint), action, *positionals]
-        merged = build_provider_env(provider, self._workspace_root)
+        merged = build_provider_env(provider, self._workspace_root, self._service_prefix)
         merged = apply_provisioned_env(merged, provisioned_env)
         if extra_env:
             merged = {**merged, **extra_env}

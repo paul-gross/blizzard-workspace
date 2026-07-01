@@ -62,7 +62,7 @@ def _commit(r: git.Repo, file_name: str, content: str, message: str) -> str:
 
 
 def _wt_from_repo(path: Path, name: str = "demo") -> FeatureWorktree:
-    workspace = Workspace(root_path=path.parent, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=path.parent, service_prefix="t", main_branch="main")
     env = FeatureEnvironment(workspace=workspace, name="alpha", index=1, path=path.parent)
     project_repo = ProjectRepository(name=name, main_path=path, main_branch="main")
     return FeatureWorktree(workspace=workspace, environment=env, repository=project_repo)

@@ -56,5 +56,6 @@ The probe's **cwd is the workspace root**. Probes are workspace-scoped, not per-
 | `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root. |
 | `WINTER_EXT_DIR` | Absolute path to this extension's clone. |
 | `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension. |
+| `WINTER_SERVICE_PREFIX` | The resolved workspace-level service-orchestration namespace prefix. Workspace-invariant — always present. |
 
 Results appear under a `[<ext-prefix>]` source group, one block per installed extension that contributes probes.

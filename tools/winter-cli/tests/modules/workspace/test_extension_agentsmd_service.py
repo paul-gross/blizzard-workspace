@@ -20,7 +20,7 @@ WORKSPACE_ROOT = Path("/ws")
 def workspace_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
     )
@@ -91,7 +91,7 @@ def test_finalize_agentsmd_removes_stale_claude_winter_md_when_adoption_disabled
     """Migration cleanup runs even when extension adoption is disabled."""
     config = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.none,
     )

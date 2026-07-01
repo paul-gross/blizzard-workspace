@@ -61,6 +61,7 @@ def _config(
     ports_per_env: int = 20,
     workspace_vars: dict[str, str] | None = None,
     feature_vars: dict[str, str] | None = None,
+    service_prefix: str | None = None,
 ) -> WorkspaceConfig:
     kwargs: dict = {
         "workspace_root": WORKSPACE_ROOT,
@@ -76,6 +77,8 @@ def _config(
             workspace=workspace_vars or {},
             feature=feature_vars or {},
         )
+    if service_prefix is not None:
+        kwargs["service_prefix"] = service_prefix
     return WorkspaceConfig(**kwargs)
 
 
@@ -85,12 +88,14 @@ def _svc(
     ports_per_env: int = 20,
     workspace_vars: dict[str, str] | None = None,
     feature_vars: dict[str, str] | None = None,
+    service_prefix: str | None = None,
 ) -> EnvProvisionerService:
     cfg = _config(
         base_port=base_port,
         ports_per_env=ports_per_env,
         workspace_vars=workspace_vars,
         feature_vars=feature_vars,
+        service_prefix=service_prefix,
     )
     reg = _InMemoryRegistry(assignments)
     return EnvProvisionerService(config=cfg, registry=reg)
@@ -127,6 +132,11 @@ class TestFeatureEnvScope:
         result = _svc(assignments={"alpha": 1}, base_port=4000, ports_per_env=20).compute("alpha")
         assert result["WINTER_WORKSPACE_PORT_BASE"] == "4000"
 
+    def test_winter_service_prefix_matches_config(self) -> None:
+        """WINTER_SERVICE_PREFIX equals the resolved config.service_prefix for a feature scope."""
+        result = _svc(assignments={"alpha": 1}, service_prefix="myproj").compute("alpha")
+        assert result["WINTER_SERVICE_PREFIX"] == "myproj"
+
     def test_persisted_index_used_over_formula(self) -> None:
         """A non-alias env with a persisted index uses that index, not the hash formula."""
         # "myenv" is not in env_aliases; persist index 15 out-of-band.
@@ -158,6 +168,11 @@ class TestWorkspaceScope:
         """WINTER_PORT_BASE is NOT in the workspace scope result — workspace only gets WINTER_WORKSPACE_PORT_BASE."""
         result = _svc(base_port=4000, ports_per_env=20).compute("workspace")
         assert "WINTER_PORT_BASE" not in result
+
+    def test_winter_service_prefix_matches_config(self) -> None:
+        """WINTER_SERVICE_PREFIX equals the resolved config.service_prefix for the workspace scope."""
+        result = _svc(service_prefix="myproj").compute("workspace")
+        assert result["WINTER_SERVICE_PREFIX"] == "myproj"
 
 
 # ---------------------------------------------------------------------------
@@ -197,12 +212,13 @@ class TestWorkspaceBandSelection:
             ).compute("workspace")
 
     def test_workspace_scope_empty_bands_returns_base_vars_only(self) -> None:
-        """Absent bands for workspace scope: only the three WINTER_* base vars."""
+        """Absent bands for workspace scope: only the four WINTER_* base vars."""
         result = _svc().compute("workspace")
         assert set(result.keys()) == {
             "WINTER_ENV",
             "WINTER_ENV_INDEX",
             "WINTER_WORKSPACE_PORT_BASE",
+            "WINTER_SERVICE_PREFIX",
         }
 
 
@@ -314,13 +330,14 @@ class TestFeatureBandSelection:
         assert result["FEAT_KEY"] == "feat-val"
 
     def test_feature_scope_empty_bands_returns_base_vars_only(self) -> None:
-        """Absent bands for feature scope: only the four WINTER_* base vars."""
+        """Absent bands for feature scope: only the five WINTER_* base vars."""
         result = _svc(assignments={"alpha": 1}, feature_vars=None).compute("alpha")
         assert set(result.keys()) == {
             "WINTER_ENV",
             "WINTER_ENV_INDEX",
             "WINTER_PORT_BASE",
             "WINTER_WORKSPACE_PORT_BASE",
+            "WINTER_SERVICE_PREFIX",
         }
 
 
@@ -419,13 +436,14 @@ class TestEnvVarsRendering:
         assert result["LITERAL"] == "no-token"
 
     def test_no_env_vars_table_returns_base_vars_only(self) -> None:
-        """Absent bands return only the four base WINTER_* vars."""
+        """Absent bands return only the five base WINTER_* vars."""
         result = _svc(assignments={"alpha": 1}, feature_vars=None).compute("alpha")
         assert set(result.keys()) == {
             "WINTER_ENV",
             "WINTER_ENV_INDEX",
             "WINTER_PORT_BASE",
             "WINTER_WORKSPACE_PORT_BASE",
+            "WINTER_SERVICE_PREFIX",
         }
 
     def test_workspace_scope_env_vars(self) -> None:

@@ -31,7 +31,7 @@ DEMO_MAIN = WORKSPACE_ROOT / "projects" / "demo"
 def workspace_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[

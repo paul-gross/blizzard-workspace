@@ -394,6 +394,93 @@ def test_capabilities_empty_when_neither_key_present() -> None:
     assert svc.load().capabilities == {}
 
 
+# ── service_prefix / session_prefix fold ─────────────────────────────────────
+
+
+def test_service_prefix_defaults_to_winter_when_no_key_set() -> None:
+    """Neither service_prefix nor legacy session_prefix set → default 'winter'."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {}})
+
+    assert svc.load().service_prefix == "winter"
+
+
+def test_service_prefix_aliased_from_legacy_session_prefix() -> None:
+    """Legacy session_prefix key folds into service_prefix when service_prefix is unset."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {"session_prefix": "mp"}})
+
+    assert svc.load().service_prefix == "mp"
+
+
+def test_service_prefix_explicit_wins_over_legacy_session_prefix() -> None:
+    """When service_prefix is set, the legacy session_prefix key is ignored."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "service_prefix": "x",
+                "session_prefix": "y",
+            }
+        },
+    )
+
+    assert svc.load().service_prefix == "x"
+
+
+def test_service_prefix_local_overlay_overrides_base() -> None:
+    """config.local.toml service_prefix overrides config.toml service_prefix."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: "", local_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {"service_prefix": "a"},
+            local_path: {"service_prefix": "b"},
+        },
+    )
+
+    assert svc.load().service_prefix == "b"
+
+
+def test_service_prefix_local_overlay_overrides_legacy_only_base() -> None:
+    """config.local.toml service_prefix overrides a base that only sets legacy session_prefix."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: "", local_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {"session_prefix": "a"},
+            local_path: {"service_prefix": "b"},
+        },
+    )
+
+    assert svc.load().service_prefix == "b"
+
+
+def test_workspace_config_model_folds_session_prefix_directly() -> None:
+    """WorkspaceConfig(session_prefix=...) itself resolves service_prefix — not just the loader.
+
+    The fold now lives on the model as a `model_validator`, so constructing the
+    model directly (as tests and scripts do) can no longer produce the
+    inconsistent "unfolded" state where `service_prefix` still reads the class
+    default while `session_prefix` carries the real value.
+    """
+    config = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        main_branch="main",
+        session_prefix="mp",
+    )
+
+    assert config.service_prefix == "mp"
+
+
 # ── port allocation config knobs ─────────────────────────────────────────────
 
 
@@ -1062,7 +1149,7 @@ def test_space_ignores_non_string_kind_values() -> None:
 def _config_with_space(space: SpaceConfig) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="winter",
+        service_prefix="winter",
         main_branch="master",
         space=space,
     )

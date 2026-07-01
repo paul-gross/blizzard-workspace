@@ -28,6 +28,7 @@ WS = Path("/ws")
 EXT = WS / "winter-service-tmux"
 ENTRYPOINT = EXT / "workflow/logs"
 PREFIX = "winter-service-tmux"
+SERVICE_PREFIX = "winter"
 
 
 def _cmd_key(
@@ -122,12 +123,14 @@ def _svc(
         subprocess_runner=_runner,
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix=SERVICE_PREFIX,
     )
     return ServiceLogsService(
         subprocess_runner=_runner,
         orchestrator_resolver=res,
         describe_service=describe_svc,
         workspace_root=WS,
+        service_prefix=SERVICE_PREFIX,
     )
 
 
@@ -176,7 +179,12 @@ def test_stream_no_winter_log_env_vars_injected(monkeypatch: pytest.MonkeyPatch)
 
 
 def test_stream_sets_workspace_context_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
-    """WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, and WINTER_EXT_PREFIX are always injected."""
+    """WINTER_WORKSPACE_DIR, WINTER_EXT_DIR, WINTER_EXT_PREFIX, and WINTER_SERVICE_PREFIX are always injected.
+
+    ``logs`` is one of the dispatch surfaces that only ever receives the base
+    extension vars (never the scope vars) — WINTER_SERVICE_PREFIX must still be
+    present here since it is workspace-invariant, not a scope var.
+    """
     monkeypatch.setenv("WINTER_TEST_CANARY", "canary")
     runner = FakeSubprocessRunner(popen_responses={CMD_KEY: ([], 0)})
     _svc(runner).stream(_opts(), _reporter())
@@ -185,6 +193,7 @@ def test_stream_sets_workspace_context_env_vars(monkeypatch: pytest.MonkeyPatch)
     assert env["WINTER_WORKSPACE_DIR"] == str(WS)
     assert env["WINTER_EXT_DIR"] == str(EXT)
     assert env["WINTER_EXT_PREFIX"] == PREFIX
+    assert env["WINTER_SERVICE_PREFIX"] == SERVICE_PREFIX
 
 
 def test_stream_inherits_parent_environment(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -344,12 +353,14 @@ def test_stream_returns_130_on_keyboard_interrupt_during_iteration() -> None:
         subprocess_runner=FakeSubprocessRunner(),
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix=SERVICE_PREFIX,
     )
     svc = ServiceLogsService(
         subprocess_runner=interrupt_runner,
         orchestrator_resolver=res,
         describe_service=describe_svc,
         workspace_root=WS,
+        service_prefix=SERVICE_PREFIX,
     )
     assert svc.stream(_opts(), _reporter()) == 130
 
@@ -362,12 +373,14 @@ def test_stream_returns_130_on_keyboard_interrupt_at_popen() -> None:
         subprocess_runner=FakeSubprocessRunner(),
         describe_parser=DescribeResultParser(),
         workspace_root=WS,
+        service_prefix=SERVICE_PREFIX,
     )
     svc = ServiceLogsService(
         subprocess_runner=interrupt_runner,
         orchestrator_resolver=res,
         describe_service=describe_svc,
         workspace_root=WS,
+        service_prefix=SERVICE_PREFIX,
     )
     assert svc.stream(_opts(), _reporter()) == 130
 

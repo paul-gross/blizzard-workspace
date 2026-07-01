@@ -80,6 +80,7 @@ class ExtensionLintService:
             ext_dir=repo.path,
             prefix=manifest.prefix,
             config_dir=config_dir,
+            service_prefix=self._config.service_prefix,
         )
         env[WINTER_CLI_VAR] = self._winter_cli_path
         env.update(lint_scope_env(scope))

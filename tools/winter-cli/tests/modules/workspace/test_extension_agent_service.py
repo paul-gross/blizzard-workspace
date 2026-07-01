@@ -61,7 +61,7 @@ You are a helper.
 def _config(adopt_extensions: AdoptExtensions = AdoptExtensions.winter) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=adopt_extensions,
     )

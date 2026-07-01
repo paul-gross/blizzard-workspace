@@ -21,7 +21,7 @@ WORKSPACE_ROOT = Path("/ws")
 
 @pytest.fixture
 def workspace() -> Workspace:
-    return Workspace(root_path=WORKSPACE_ROOT, session_prefix="t", main_branch="main")
+    return Workspace(root_path=WORKSPACE_ROOT, service_prefix="t", main_branch="main")
 
 
 class FakeWriteRepoRepository:

@@ -21,7 +21,7 @@ WORKSPACE_ROOT = Path("/ws")
 def workspace_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
     )
@@ -31,7 +31,7 @@ def workspace_config() -> WorkspaceConfig:
 def workspace_config_none() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.none,
     )

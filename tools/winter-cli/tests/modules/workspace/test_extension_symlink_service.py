@@ -22,7 +22,7 @@ WORKSPACE_ROOT = Path("/ws")
 def workspace_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
     )
@@ -119,7 +119,7 @@ def test_process_symlinks_skills_across_vendors(
 def test_process_skips_when_adopt_mode_is_none(init_reporter: FakeInitReporter) -> None:
     config = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.none,
     )

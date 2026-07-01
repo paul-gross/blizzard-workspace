@@ -38,7 +38,7 @@ from winter_cli.modules.workspace.models.service_model import (
     WorktreeRepoStatus,
 )
 
-_WORKSPACE = Workspace(root_path=Path("/tmp/ws"), session_prefix="t", main_branch="main")
+_WORKSPACE = Workspace(root_path=Path("/tmp/ws"), service_prefix="t", main_branch="main")
 
 
 def _env(name: str, index: int) -> FeatureEnvironment:

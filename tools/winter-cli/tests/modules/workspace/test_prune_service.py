@@ -27,7 +27,7 @@ PROJECTS_DIR = WORKSPACE_ROOT / "projects"
 def workspace_config() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         project_repos=[
@@ -303,7 +303,7 @@ def test_find_orphan_agent_copies_skips_live_extension(workspace_config: Workspa
     # Build a config where "kept-ext" IS a live standalone repo.
     config_with_live_ext = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         standalone_repos=[StandaloneRepositoryConfig(name="kept-ext")],

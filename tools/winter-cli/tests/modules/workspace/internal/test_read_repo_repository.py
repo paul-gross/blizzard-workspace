@@ -60,7 +60,7 @@ def repo() -> ReadRepoRepository:
 
 
 def _worktree(name: str = "demo", branch: str = "alpha") -> FeatureWorktree:
-    workspace = Workspace(root_path=_ROOT, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=_ROOT, service_prefix="t", main_branch="main")
     env = FeatureEnvironment(workspace=workspace, name=branch, index=1, path=_ALPHA_PATH)
     project = ProjectRepository(name=name, main_path=_ALPHA_PATH / name, main_branch="main")
     return FeatureWorktree(workspace=workspace, environment=env, repository=project)
@@ -424,7 +424,7 @@ def test_get_diff_for_uncommitted_returns_text_and_stats(
 def test_get_workspace_constructs_domain_object(repo: ReadRepoRepository) -> None:
     workspace = repo.get_workspace(_ROOT, "test", "main")
     assert workspace.root_path == _ROOT
-    assert workspace.session_prefix == "test"
+    assert workspace.service_prefix == "test"
     assert workspace.main_branch == "main"
 
 
@@ -687,7 +687,7 @@ def test_real_worktree_status_reports_branch(tmp_path: Path, repo: ReadRepoRepos
     _init_repo(tmp_path, default_branch="alpha")
     _commit(tmp_path, "f.txt", "1\n", "init")
     _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
-    workspace = Workspace(root_path=tmp_path.parent, session_prefix="t", main_branch="main")
+    workspace = Workspace(root_path=tmp_path.parent, service_prefix="t", main_branch="main")
     env = FeatureEnvironment(workspace=workspace, name="alpha", index=1, path=tmp_path.parent)
     project = ProjectRepository(name=tmp_path.name, main_path=tmp_path, main_branch="main")
     wt = FeatureWorktree(workspace=workspace, environment=env, repository=project)

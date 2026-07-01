@@ -80,7 +80,7 @@ def _make_config(
 ) -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         base_port=base_port,
@@ -189,6 +189,7 @@ def test_workspace_scope_apply_base_env_no_env_trio() -> None:
 
     env = subprocess.popen_envs[0]
     assert env["WINTER_WORKSPACE_DIR"] == str(WORKSPACE_ROOT)
+    assert env["WINTER_SERVICE_PREFIX"] == config.service_prefix
     assert "WINTER_ENV" not in env
     assert "WINTER_ENV_INDEX" not in env
     assert "WINTER_PORT_BASE" not in env
@@ -637,7 +638,7 @@ def test_extension_source_env_vars_set_correctly() -> None:
 
     config = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
-        session_prefix="t",
+        service_prefix="t",
         main_branch="main",
         adopt_extensions=AdoptExtensions.winter,
         standalone_repos=[
@@ -667,6 +668,7 @@ def test_extension_source_env_vars_set_correctly() -> None:
     env = subprocess.popen_envs[0]
     assert env["WINTER_EXT_DIR"] == str(WORKSPACE_ROOT / "my-ext")
     assert env["WINTER_EXT_PREFIX"] == "my-ext"
+    assert env["WINTER_SERVICE_PREFIX"] == config.service_prefix
 
 
 def test_unknown_extension_source_produces_error() -> None:

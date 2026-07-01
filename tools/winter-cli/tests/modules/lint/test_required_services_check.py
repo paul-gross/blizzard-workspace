@@ -69,7 +69,7 @@ def _make_check(
         else:
             runner = FakeSubprocessRunner()
 
-    catalog_svc = ServiceCatalogService(subprocess_runner=runner, workspace_root=tmp_ws)
+    catalog_svc = ServiceCatalogService(subprocess_runner=runner, workspace_root=tmp_ws, service_prefix="winter")
     return RequiredServicesLintCheck(workspace_root=tmp_ws, catalog_service=catalog_svc, providers=providers)
 
 
@@ -252,7 +252,7 @@ def test_multi_provider_merge_resolves_refs(tmp_path: Path) -> None:
             f"{EP_B} catalog": _run_ok(["*/api"]),
         }
     )
-    catalog_svc = ServiceCatalogService(subprocess_runner=runner, workspace_root=tmp_path)
+    catalog_svc = ServiceCatalogService(subprocess_runner=runner, workspace_root=tmp_path, service_prefix="winter")
 
     _write_config(
         tmp_path,
@@ -290,7 +290,7 @@ required_services = ["workspace/postgres"]
     )
     # No providers
     runner = FakeSubprocessRunner()
-    catalog_svc = ServiceCatalogService(subprocess_runner=runner, workspace_root=tmp_path)
+    catalog_svc = ServiceCatalogService(subprocess_runner=runner, workspace_root=tmp_path, service_prefix="winter")
     check = RequiredServicesLintCheck(workspace_root=tmp_path, catalog_service=catalog_svc, providers=[])
     findings = check.check(SCOPE)
     assert len(findings) == 1
