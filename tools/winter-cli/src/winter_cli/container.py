@@ -20,6 +20,7 @@ from winter_cli.core.internal.local_filesystem import LocalFilesystem
 from winter_cli.core.internal.local_subprocess_runner import LocalSubprocessRunner
 from winter_cli.core.internal.tomllib_config_file_reader import TomllibConfigFileReader
 from winter_cli.modules.workspace.agent_install import ExtensionAgentService
+from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
 
 # NB: the doctor, lint, graph, and tui (textual) command trees are deliberately
 # NOT imported at module top — see `_lazy` below. They are pulled in on first
@@ -243,6 +244,12 @@ class Container(containers.DeclarativeContainer):
         config_file_reader=config_file_reader,
     )
 
+    canonical_agent_enumerator = providers.Singleton(
+        CanonicalAgentEnumerator,
+        fs=fs,
+        manifest_loader=extension_manifest_loader,
+    )
+
     extension_symlink_svc = providers.Singleton(
         ExtensionSymlinkService,
         config=workspace_config,
@@ -255,6 +262,7 @@ class Container(containers.DeclarativeContainer):
         config=workspace_config,
         fs=fs,
         manifest_loader=extension_manifest_loader,
+        agent_enumerator=canonical_agent_enumerator,
     )
 
     extension_hook_svc = providers.Singleton(
@@ -498,6 +506,7 @@ class Container(containers.DeclarativeContainer):
         config=workspace_config,
         fs=fs,
         manifest_loader=extension_manifest_loader,
+        agent_enumerator=canonical_agent_enumerator,
     )
 
     doctor_svc = providers.Factory(

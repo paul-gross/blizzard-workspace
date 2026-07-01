@@ -283,6 +283,75 @@ class StandaloneRepositoryConfig(BaseModel):
     `winter provision` instead."""
 
 
+class ModelTiersConfig(BaseModel):
+    """Workspace-level model-tier table overrides from ``[model_tiers]``.
+
+    Each entry maps a **tier label** to a dict of per-vendor concrete model ids.
+    Built-in tiers (``opus`` / ``sonnet`` / ``haiku``) are the base defaults; a
+    ``[model_tiers]`` entry for an existing label overrides that label's vendor
+    id(s) while unlisted vendors inherit the built-in value.  A new label
+    defines a custom tier that can be referenced anywhere a tier label is valid
+    (agent frontmatter ``model:`` field, ``[agent_model_overrides]`` values).
+
+    Set in ``.winter/config.toml``; individual tier entries can be overridden
+    or extended locally via ``.winter/config.local.toml`` (per-tier-label
+    merging so a local entry wins without wiping the shared map).
+
+    Configure as::
+
+        [model_tiers.big-thinker]
+        claude = "opus"
+        codex = "gpt-5.4"
+        opencode = "anthropic/claude-opus-4-20250514"
+
+        [model_tiers.haiku]
+        opencode = "anthropic/claude-haiku-4-20251201"  # override one vendor
+
+    See ``context/winter-cli/configuration/agents.md`` for the full reference.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    tiers: dict[str, dict[str, str]] = Field(default_factory=dict)
+    """Per-tier-label entries.  Each value is a dict of vendor label → concrete model id."""
+
+
+class AgentModelOverridesConfig(BaseModel):
+    """Workspace-level agent→model override map from ``[agent_model_overrides]``.
+
+    Keyed by canonical agent name.  Each value is either:
+
+    - A string: a tier label (built-in ``'opus'``/``'sonnet'``/``'haiku'`` or a
+      custom label defined in ``[model_tiers]``), applied to all vendors.  Must
+      exist in the effective tier table; unknown labels raise ``ConfigError`` at
+      config load time.
+    - A dict: per-vendor overrides mapping vendor label to a concrete model id
+      for that vendor only.  Keys must be valid vendor labels (``'claude'``,
+      ``'codex'``, ``'opencode'``).  Use this form for concrete model ids.
+
+    Set in ``.winter/config.toml``; individual entries can be overridden for
+    local experiments via ``.winter/config.local.toml`` (per-agent key merging
+    means local entries win without wiping the shared map).  The override
+    resolves at the top of model-resolution precedence, above the agent's own
+    per-harness ``model:`` override block and the ``MODEL_TIER_IDS`` fallback
+    table.
+
+    Configure as::
+
+        [agent_model_overrides]
+        reviewer = "haiku"                        # tier, all vendors
+        developer = { claude = "claude-opus-4-20250514" }  # concrete id, claude only
+
+    See ``context/winter-cli/configuration/agents.md`` for the full reference.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    overrides: dict[str, str | dict[str, str]] = Field(default_factory=dict)
+    """Per-agent override entries.  String values apply to all vendors; dict
+    values are per-vendor (vendor label → tier name or concrete model id)."""
+
+
 class FileSizeLintConfig(BaseModel):
     """Byte-size thresholds for the built-in agent-facing markdown file-size check.
 
@@ -566,6 +635,24 @@ class WorkspaceConfig(BaseModel):
 
     ``winter space <kind>`` resolves a directory via :meth:`space_dir`; extensions
     read it instead of hardcoding an artifact path.
+    """
+
+    model_tiers: ModelTiersConfig = Field(default_factory=ModelTiersConfig)
+    """Workspace-configurable model-tier table from ``[model_tiers]``.
+
+    Layers over the built-in ``opus``/``sonnet``/``haiku`` defaults.  An entry
+    for an existing label overrides that label's vendor id(s); a new label adds
+    a custom tier.  The resulting effective table is used for all tier
+    resolution during ``winter ws init`` and ``winter doctor``.
+    See ``ModelTiersConfig`` for the full contract.
+    """
+
+    agent_model_overrides: AgentModelOverridesConfig = Field(default_factory=AgentModelOverridesConfig)
+    """Workspace-level agent→model override map from ``[agent_model_overrides]``.
+
+    Entries resolve at the top of model-resolution precedence, above the
+    agent's own per-harness ``model:`` override block and the tier table.
+    See ``AgentModelOverridesConfig`` for the full contract.
     """
 
     def port_base_for_index(self, index: int) -> int:

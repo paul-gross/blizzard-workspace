@@ -17,6 +17,7 @@ import yaml
 from tests.conftest import FakeConfigFileReader, FakeFilesystem, FakeInitReporter
 from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
 from winter_cli.modules.workspace.agent_install import ExtensionAgentService
+from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
 from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
 from winter_cli.modules.workspace.models import StandaloneRepository
 
@@ -72,7 +73,12 @@ def _service(
     config_files: dict[Path, dict] | None = None,
 ) -> ExtensionAgentService:
     loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files or {}))
-    return ExtensionAgentService(config=config, fs=fs, manifest_loader=loader)
+    return ExtensionAgentService(
+        config=config,
+        fs=fs,
+        manifest_loader=loader,
+        agent_enumerator=CanonicalAgentEnumerator(fs=fs, manifest_loader=loader),
+    )
 
 
 def _seed_extension(
@@ -508,11 +514,12 @@ def test_sync_file_replaces_symlink_without_corrupting_source(tmp_path: Path) ->
     dest.parent.mkdir(parents=True)
     dest.symlink_to(source)  # legacy symlink-install state
 
-    # _sync_file only touches the filesystem seam; config/manifest_loader are unused here.
+    # _sync_file only touches the filesystem seam; config/manifest_loader/agent_enumerator are unused here.
     svc = ExtensionAgentService(
         config=cast(WorkspaceConfig, None),
         fs=LocalFilesystem(),
         manifest_loader=cast(ExtensionManifestLoader, None),
+        agent_enumerator=cast(CanonicalAgentEnumerator, None),
     )
     svc._sync_file(dest, "RENDERED COPY CONTENT\n")
 
@@ -522,3 +529,100 @@ def test_sync_file_replaces_symlink_without_corrupting_source(tmp_path: Path) ->
     assert not dest.is_symlink()
     assert dest.is_file()
     assert dest.read_text() == "RENDERED COPY CONTENT\n"
+
+
+# ── Bad frontmatter tier: skip-with-warning, not abort ───────────────────────
+
+
+_AGENT_BAD_TIER = """\
+---
+name: broken
+description: Broken agent with an unknown tier
+model: nonexistent-tier
+---
+Body.
+"""
+
+
+def test_process_skips_agent_with_invalid_tier_and_does_not_abort(init_reporter: FakeInitReporter) -> None:
+    """An agent with an unknown model tier is skipped with a warning; init returns True.
+
+    A second valid agent in the same extension still installs — the RepoError
+    raised at render time must NOT propagate out of process() and abort init.
+    """
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    ext = _seed_extension(
+        fs,
+        config_files,
+        agent_files={
+            "broken.md": _AGENT_BAD_TIER,
+            "reviewer.md": _CANONICAL_AGENT,
+        },
+    )
+    svc = _service(_config(), fs, config_files)
+
+    ok = svc.process(ext, init_reporter)
+
+    # process() must not abort — return True.
+    assert ok is True
+
+    # The good agent still renders for all three vendors.
+    assert fs.is_file(WORKSPACE_ROOT / ".claude" / "agents" / "wf-reviewer.md")
+    assert fs.is_file(WORKSPACE_ROOT / ".codex" / "agents" / "wf-reviewer.toml")
+    assert fs.is_file(WORKSPACE_ROOT / ".opencode" / "agent" / "wf-reviewer.md")
+
+    # The broken agent produces no output files.
+    assert not fs.is_file(WORKSPACE_ROOT / ".claude" / "agents" / "wf-broken.md")
+    assert not fs.is_file(WORKSPACE_ROOT / ".codex" / "agents" / "wf-broken.toml")
+    assert not fs.is_file(WORKSPACE_ROOT / ".opencode" / "agent" / "wf-broken.md")
+
+    # A render warning was surfaced for the broken agent.
+    render_warnings = [a for a in init_reporter.actions if a[2] == "agent_render_warning"]
+    assert render_warnings, "expected agent_render_warning for the bad-tier agent"
+    combined = " ".join(a[3] for a in render_warnings)
+    assert "nonexistent-tier" in combined
+
+
+_AGENT_PARTIAL_TIER = """\
+---
+name: partial
+description: Agent using a tier that only maps the claude vendor
+model: claude-only
+---
+Body.
+"""
+
+
+def test_process_does_not_partially_write_when_a_later_vendor_fails(init_reporter: FakeInitReporter) -> None:
+    """A render failure on one vendor must not leave the agent installed for an earlier vendor.
+
+    `CodeAgentVendor` renders claude before codex/opencode. A custom tier that
+    maps only `claude` succeeds on the first vendor and fails on the second —
+    regression coverage for the bug where the claude copy was written before
+    the codex failure aborted the per-agent loop, leaving a half-installed
+    agent (renders are computed for every vendor before anything is written).
+    """
+    from winter_cli.config.models import ModelTiersConfig
+
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    ext = _seed_extension(fs, config_files, agent_files={"partial.md": _AGENT_PARTIAL_TIER})
+    config = _config().model_copy(
+        update={"model_tiers": ModelTiersConfig(tiers={"claude-only": {"claude": "claude-opus-4-20250514"}})}
+    )
+    svc = _service(config, fs, config_files)
+
+    ok = svc.process(ext, init_reporter)
+
+    assert ok is True
+    # No vendor copy exists for the agent — not even claude, whose render
+    # succeeded before codex's failure was discovered.
+    assert not fs.is_file(WORKSPACE_ROOT / ".claude" / "agents" / "wf-partial.md")
+    assert not fs.is_file(WORKSPACE_ROOT / ".codex" / "agents" / "wf-partial.toml")
+    assert not fs.is_file(WORKSPACE_ROOT / ".opencode" / "agent" / "wf-partial.md")
+
+    render_warnings = [a for a in init_reporter.actions if a[2] == "agent_render_warning"]
+    assert render_warnings, "expected agent_render_warning for the partially-mapped tier"
+    combined = " ".join(a[3] for a in render_warnings)
+    assert "claude-only" in combined

@@ -141,6 +141,8 @@ class InitService:
             success = False
         if not self._extension_exclude_svc.finalize_excludes(present_repos, reporter):
             success = False
+        if self._extension_agent_svc is not None:
+            self._extension_agent_svc.check_unknown_overrides(present_repos, reporter)
 
         reporter.target_completed(target, success)
         return success

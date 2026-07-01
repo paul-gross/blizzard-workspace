@@ -6,7 +6,10 @@ from pathlib import Path
 
 from winter_cli.config.models import AdoptExtensions, CodeAgentVendor, WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
+from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
+from winter_cli.modules.workspace.agent_transform.model_tiers import build_effective_tier_table
 from winter_cli.modules.workspace.agent_transform.registry import PARSER, RENDERERS
+from winter_cli.modules.workspace.agent_transform.renderers import resolve_workspace_model_override
 from winter_cli.modules.workspace.extension_manifest import (
     EXT_MANIFEST,
     ExtensionManifestLoader,
@@ -51,10 +54,12 @@ class ExtensionAgentService:
         config: WorkspaceConfig,
         fs: IFilesystemWriter,
         manifest_loader: ExtensionManifestLoader,
+        agent_enumerator: CanonicalAgentEnumerator,
     ) -> None:
         self._config = config
         self._fs = fs
         self._manifest_loader = manifest_loader
+        self._agent_enumerator = agent_enumerator
 
     def process(
         self,
@@ -75,19 +80,12 @@ class ExtensionAgentService:
 
         try:
             manifest = self._manifest_loader.load(repo, manifest_path if manifest_present else None)
-            agents_root = self._resolve_existing_dir(repo.path, manifest.agents_dirs)
+            agents_root = self._agent_enumerator.resolve_agents_dir(repo.path, manifest.agents_dirs)
 
             live_names: dict[CodeAgentVendor, set[str]] = {v: set() for v in CodeAgentVendor}
 
-            if agents_root is not None and self._fs.is_dir(agents_root):
-                for entry in sorted(self._fs.iterdir(agents_root)):
-                    if not self._fs.is_file(entry):
-                        continue
-                    if not entry.name.endswith(".md"):
-                        continue
-                    if entry.name == "README.md":
-                        continue
-
+            if agents_root is not None:
+                for entry in self._agent_enumerator.iter_candidate_agent_files(agents_root):
                     try:
                         text = self._fs.read_text(entry)
                         agent = PARSER.parse(text, default_name=entry.stem)
@@ -106,11 +104,41 @@ class ExtensionAgentService:
                         )
                         continue
 
+                    effective_tier_table = build_effective_tier_table(self._config.model_tiers.tiers)
                     warn = self._make_warn(repo.name, reporter)
-                    for vendor in CodeAgentVendor:
-                        renderer = RENDERERS[vendor.agent_format]
-                        rendered = renderer.render(agent, warn=warn)
+                    # Render every vendor before writing any of them: a render
+                    # failure partway through must not leave this agent
+                    # updated for some vendors and stale for others.
+                    try:
+                        rendered_by_vendor = {
+                            vendor: RENDERERS[vendor.agent_format].render(
+                                agent,
+                                warn=warn,
+                                workspace_model_override=resolve_workspace_model_override(
+                                    self._config.agent_model_overrides.overrides,
+                                    agent.name,
+                                    vendor.vendor_label,
+                                ),
+                                effective_tier_table=effective_tier_table,
+                            )
+                            for vendor in CodeAgentVendor
+                        }
+                    except RepoError as exc:
+                        logger.warning(
+                            "process agents: %s — tier resolution error for %s: %s",
+                            repo.name,
+                            entry.name,
+                            exc,
+                        )
+                        reporter.repo_action(
+                            repo.name,
+                            str(entry),
+                            "agent_render_warning",
+                            str(exc),
+                        )
+                        continue
 
+                    for vendor, rendered in rendered_by_vendor.items():
                         target_dir = self._config.workspace_root / vendor.agents_subpath
                         self._fs.mkdir(target_dir, parents=True, exist_ok=True)
 
@@ -130,6 +158,51 @@ class ExtensionAgentService:
             reporter.repo_error(repo.name, str(exc))
             return False
 
+        return True
+
+    def check_unknown_overrides(
+        self,
+        repos: list[StandaloneRepository],
+        reporter: IInitReporter,
+    ) -> bool:
+        """Warn via ``reporter`` for any ``[agent_model_overrides]`` key that matches no installed agent.
+
+        Collects every canonical agent name across all qualifying repos (via
+        the injected ``CanonicalAgentEnumerator`` — the same traversal
+        ``AgentProbeService`` uses, so the two never disagree on which agents
+        are known) and emits a non-fatal warning for each override key that
+        names an agent that does not exist.  An override for an unknown name
+        is almost always a typo and will silently have no effect on the
+        rendered artifacts — surfacing it at ``winter ws init`` time keeps the
+        config honest without requiring a separate ``winter doctor`` run.
+
+        Returns True always; the warning does not cause init to fail.
+
+        Note: a typo'd/invalid *tier* name (as opposed to an unknown agent
+        name) is validated separately, at config-load time, by
+        ``WorkspaceConfigService`` — see ``context/winter-cli/configuration/agents.md``.
+        """
+        overrides = self._config.agent_model_overrides.overrides
+        if not overrides:
+            return True
+
+        known_names = {
+            agent.name
+            for _, agent in self._agent_enumerator.iter_known_agents(repos, mode=self._config.adopt_extensions)
+        }
+
+        unknown = sorted(name for name in overrides if name not in known_names)
+        if not unknown:
+            return True
+
+        names_str = ", ".join(f"'{n}'" for n in unknown)
+        reporter.repo_action(
+            "agent_model_overrides",
+            "",
+            "agent_override_warning",
+            f"unknown agent name(s) in [agent_model_overrides]: {names_str} "
+            "(no matching installed agent — check for a typo or remove the entry)",
+        )
         return True
 
     # ── Filesystem helpers ────────────────────────────────────────────────
@@ -181,14 +254,6 @@ class ExtensionAgentService:
                 self._fs.unlink(entry)
             except OSError as exc:
                 raise RepoError(f"prune stale agent artifact {entry.name}: {exc}") from exc
-
-    def _resolve_existing_dir(self, base: Path, candidates: tuple[str, ...]) -> Path | None:
-        """Return the first candidate directory path under ``base`` that exists."""
-        for candidate in candidates:
-            path = base / candidate
-            if self._fs.is_dir(path):
-                return path
-        return None
 
     @staticmethod
     def _make_warn(repo_name: str, reporter: IInitReporter) -> Callable[[str, str, str], None]:

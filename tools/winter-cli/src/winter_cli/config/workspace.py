@@ -5,12 +5,14 @@ from pathlib import Path
 from winter_cli.config.models import (
     _DEFAULT_ENV_ALIASES,
     AdoptExtensions,
+    AgentModelOverridesConfig,
     DashboardConfig,
     DashboardLayout,
     EnvVarBands,
     FileSizeLintConfig,
     GitIdentity,
     KeybindingsConfig,
+    ModelTiersConfig,
     ProjectRepositoryConfig,
     SingletonRepository,
     SingletonType,
@@ -23,6 +25,7 @@ from winter_cli.core.config_file import ConfigError, IConfigFileReader
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.provision.manifest import ProvisionHandler, ProvisionManifestParser
 from winter_cli.modules.service.ext_service_manifest import ExtServiceDef, ExtServiceManifestParser
+from winter_cli.modules.workspace.agent_transform.model_tiers import VENDOR_LABELS, build_effective_tier_table
 from winter_cli.util import deep_merge
 
 WINTER_DIR = ".winter"
@@ -261,6 +264,17 @@ class WorkspaceConfigService:
 
         space = self._parse_space(merged.get("space"))
 
+        model_tiers = self._parse_model_tiers(merged.get("model_tiers"))
+
+        # Build effective tier table so agent_model_overrides bare-string values
+        # can be validated against the complete set of known tier labels.
+        effective_tier_table = build_effective_tier_table(model_tiers.tiers)
+
+        agent_model_overrides = self._parse_agent_model_overrides(
+            merged.get("agent_model_overrides"),
+            effective_tier_table=effective_tier_table,
+        )
+
         return WorkspaceConfig(
             workspace_root=workspace_root,
             session_prefix=merged.get("session_prefix", "winter"),
@@ -290,6 +304,8 @@ class WorkspaceConfigService:
             service_defs_raw=service_defs_raw,
             env_bands=env_bands,
             space=space,
+            model_tiers=model_tiers,
+            agent_model_overrides=agent_model_overrides,
         )
 
     @staticmethod
@@ -431,6 +447,128 @@ class WorkspaceConfigService:
             if kinds:
                 kwargs["kinds"] = kinds
         return SpaceConfig(**kwargs)
+
+    @staticmethod
+    def _parse_model_tiers(raw: object) -> ModelTiersConfig:
+        """Parse ``[model_tiers]`` into a ``ModelTiersConfig``.
+
+        Each entry maps a tier label to a dict of vendor label → concrete model id.
+        Vendor labels must be members of ``VENDOR_LABELS``; model ids must be
+        non-empty strings.  An empty tier entry (no vendor keys) raises
+        ``ConfigError``.
+
+        Raises ``ConfigError`` on invalid value types, unknown vendor labels, or
+        empty model ids.  Tier-label validation against the effective table is
+        the caller's responsibility after merging with built-in defaults.
+        """
+        if not isinstance(raw, dict):
+            return ModelTiersConfig()
+
+        tiers: dict[str, dict[str, str]] = {}
+        for tier_label, vendor_map in raw.items():
+            label_key = str(tier_label)
+            if not isinstance(vendor_map, dict):
+                type_name = type(vendor_map).__name__ if vendor_map is not None else "null"
+                raise ConfigError(
+                    f"[model_tiers] entry {label_key!r}: "
+                    f'value must be a per-vendor table (e.g. {{claude = "...", codex = "..."}}), '
+                    f"got {type_name}"
+                )
+            per_vendor: dict[str, str] = {}
+            for vendor_label, model_id in vendor_map.items():
+                vl = str(vendor_label)
+                if vl not in VENDOR_LABELS:
+                    valid = ", ".join(repr(v) for v in sorted(VENDOR_LABELS))
+                    raise ConfigError(
+                        f"[model_tiers] entry {label_key!r}: unknown vendor label {vl!r}; valid labels: {valid}"
+                    )
+                if not isinstance(model_id, str) or not model_id:
+                    type_name = type(model_id).__name__ if model_id is not None else "null"
+                    raise ConfigError(
+                        f"[model_tiers] entry {label_key!r}, "
+                        f"vendor {vl!r}: model id must be a non-empty string, got {type_name}"
+                    )
+                per_vendor[vl] = model_id
+            if not per_vendor:
+                raise ConfigError(
+                    f"[model_tiers] entry {label_key!r}: per-vendor table must have at least one vendor entry"
+                )
+            tiers[label_key] = per_vendor
+
+        return ModelTiersConfig(tiers=tiers)
+
+    @staticmethod
+    def _parse_agent_model_overrides(
+        raw: object,
+        *,
+        effective_tier_table: dict[str, dict[str, str]] | None = None,
+    ) -> AgentModelOverridesConfig:
+        """Parse ``[agent_model_overrides]`` into an ``AgentModelOverridesConfig``.
+
+        Each entry maps an agent name to either:
+        - A string: a tier label (must exist in the effective tier table).
+        - A dict: per-vendor overrides mapping vendor label to a concrete model id.
+
+        Raises ``ConfigError`` on invalid value types, unknown vendor labels, or
+        a bare string that is not a recognised tier label.
+        Agent-name validation (unknown agent) is deferred to ``winter doctor``
+        since the known agent set is only available after extension processing.
+        """
+        if not isinstance(raw, dict):
+            return AgentModelOverridesConfig()
+
+        overrides: dict[str, str | dict[str, str]] = {}
+        for agent_name, value in raw.items():
+            agent_key = str(agent_name)
+            if isinstance(value, str):
+                if not value:
+                    raise ConfigError(
+                        f"[agent_model_overrides] entry {agent_key!r}: "
+                        f"value must be a non-empty tier label or a per-vendor table"
+                    )
+                # Validate that the bare string is a known tier label.
+                if effective_tier_table is not None and value not in effective_tier_table:
+                    valid = ", ".join(repr(t) for t in sorted(effective_tier_table))
+                    raise ConfigError(
+                        f"[agent_model_overrides] entry {agent_key!r}: "
+                        f"{value!r} is not a recognised tier label; valid tier labels: {valid}. "
+                        f"To use a concrete model id, use the per-vendor table form: "
+                        f"{{ claude = {value!r} }}"
+                    )
+                overrides[agent_key] = value
+            elif isinstance(value, dict):
+                per_vendor: dict[str, str] = {}
+                for vendor_label, model_value in value.items():
+                    vl = str(vendor_label)
+                    if vl not in VENDOR_LABELS:
+                        valid = ", ".join(repr(v) for v in sorted(VENDOR_LABELS))
+                        raise ConfigError(
+                            f"[agent_model_overrides] entry {agent_key!r}: "
+                            f"unknown vendor label {vl!r}; valid labels: {valid}"
+                        )
+                    if not isinstance(model_value, str) or not model_value:
+                        type_name = type(model_value).__name__ if model_value is not None else "null"
+                        raise ConfigError(
+                            f"[agent_model_overrides] entry {agent_key!r}, "
+                            f"vendor {vl!r}: value must be a non-empty string, "
+                            f"got {type_name}"
+                        )
+                    per_vendor[vl] = model_value
+                if not per_vendor:
+                    raise ConfigError(
+                        f"[agent_model_overrides] entry {agent_key!r}: "
+                        f"per-vendor table must have at least one vendor entry"
+                    )
+                overrides[agent_key] = per_vendor
+            else:
+                type_name = type(value).__name__ if value is not None else "null"
+                raise ConfigError(
+                    f"[agent_model_overrides] entry {agent_key!r}: "
+                    f"value must be a string (tier or model id) or a per-vendor table, "
+                    f"got {type_name}"
+                )
+
+        return AgentModelOverridesConfig(overrides=overrides)
 
     def _read_config(self, path: Path) -> dict:
         if not self._fs.is_file(path):

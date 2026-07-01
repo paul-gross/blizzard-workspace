@@ -10,8 +10,6 @@ from __future__ import annotations
 import dataclasses
 import enum
 
-from winter_cli.modules.workspace.agent_transform.model_tiers import ModelTier
-
 
 class AgentFormat(enum.Enum):
     """Supported output artifact formats."""
@@ -25,6 +23,12 @@ class AgentFormat(enum.Enum):
 class CanonicalAgent:
     """Parsed canonical agent — harness-neutral representation.
 
+    ``model_tier`` is the tier label string from the agent's ``model:`` field
+    (e.g. ``"sonnet"``, ``"haiku"``, ``"opus"``, or a workspace-defined custom
+    label like ``"big-thinker"``).  Resolution against the effective tier table
+    happens at render time, not at parse time, so custom labels are stored as
+    plain strings without enum conversion.
+
     ``tools`` carries the exact value from the frontmatter: a list of Claude
     tool-name strings, the sentinel string ``"*"`` (all tools), or ``None``
     when the field is absent. Renderers that cannot map tool lists warn and
@@ -37,10 +41,28 @@ class CanonicalAgent:
 
     name: str
     description: str
-    model_tier: ModelTier
+    model_tier: str
     tools: list[str] | str | None
     body: str
     overrides: dict[str, dict]
+
+
+@dataclasses.dataclass(frozen=True)
+class WorkspaceModelOverride:
+    """A resolved ``[agent_model_overrides]`` value, with its form preserved.
+
+    ``is_concrete`` distinguishes the two override forms so a renderer never
+    has to guess by string-matching against the tier table:
+
+    - Bare-string form (``reviewer = "haiku"``) — ``is_concrete=False``;
+      ``value`` is a tier label resolved against the effective tier table.
+    - Per-vendor inline-table form (``coder = { opencode = "haiku" }``) —
+      ``is_concrete=True``; ``value`` is a concrete model id passed through
+      verbatim even when it happens to collide with a tier label string.
+    """
+
+    value: str
+    is_concrete: bool
 
 
 @dataclasses.dataclass(frozen=True)

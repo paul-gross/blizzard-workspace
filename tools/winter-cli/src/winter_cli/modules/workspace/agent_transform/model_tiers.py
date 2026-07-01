@@ -1,9 +1,15 @@
 """Model tier enum and the canonical tier → vendor model-id lookup table.
 
-``ModelTier`` carries the three abstraction levels (opus / sonnet / haiku).
+``ModelTier`` carries the three built-in abstraction levels (opus / sonnet / haiku).
 ``MODEL_TIER_IDS`` maps ``(ModelTier, vendor_label)`` to the concrete model-id
 string each harness expects. Claude accepts tier aliases directly; Codex and
 OpenCode ids are verified against vendor documentation (see inline comments).
+
+``build_effective_tier_table`` produces the runtime tier table by merging the
+built-in defaults with workspace-configured overrides/extensions from
+``[model_tiers]`` in ``.winter/config.toml``.  All tier resolution should
+use the effective table; ``MODEL_TIER_IDS`` is the source of truth for the
+built-in defaults and for test assertions against the canonical ids.
 
 A per-harness ``model:`` key in the agent's override block wins over this
 table — callers must apply that override before (or instead of) consulting it.
@@ -15,7 +21,7 @@ import enum
 
 
 class ModelTier(enum.Enum):
-    """Three capability tiers; names match the Claude Code tier alias vocabulary."""
+    """Three built-in capability tiers; names match the Claude Code tier alias vocabulary."""
 
     opus = "opus"
     sonnet = "sonnet"
@@ -53,3 +59,36 @@ MODEL_TIER_IDS: dict[tuple[ModelTier, str], str] = {
     (ModelTier.sonnet, "opencode"): "anthropic/claude-sonnet-4-20250514",
     (ModelTier.haiku, "opencode"): "anthropic/claude-haiku-4-20250514",
 }
+
+# Built-in tier table in the dict[str, dict[str, str]] shape used by
+# ``build_effective_tier_table`` and the renderers.  Derived from
+# ``MODEL_TIER_IDS`` — the two must remain in sync.
+_BUILTIN_TIER_TABLE: dict[str, dict[str, str]] = {}
+for (_tier, _vendor), _model_id in MODEL_TIER_IDS.items():
+    _BUILTIN_TIER_TABLE.setdefault(_tier.value, {})[_vendor] = _model_id
+
+
+def build_effective_tier_table(
+    custom_tiers: dict[str, dict[str, str]],
+) -> dict[str, dict[str, str]]:
+    """Return the effective tier table: built-in defaults ⊕ workspace config.
+
+    The built-in tiers (opus / sonnet / haiku) are the base.  Entries in
+    ``custom_tiers`` (parsed from ``[model_tiers]``) layer on top:
+
+    - An entry for an **existing built-in label** overrides only the listed
+      vendor ids; unlisted vendors inherit their built-in default value.
+    - An entry for a **new label** adds a new tier; all required vendor ids
+      must be provided by the caller (validated by the config parser).
+
+    The result is a dict mapping tier label → dict[vendor_label → model_id].
+    """
+    result: dict[str, dict[str, str]] = {label: dict(vendor_ids) for label, vendor_ids in _BUILTIN_TIER_TABLE.items()}
+    for label, vendor_ids in custom_tiers.items():
+        if label in result:
+            # Built-in tier: merge per-vendor so only listed vendors are replaced.
+            result[label] = {**result[label], **vendor_ids}
+        else:
+            # New custom tier: add directly.
+            result[label] = dict(vendor_ids)
+    return result

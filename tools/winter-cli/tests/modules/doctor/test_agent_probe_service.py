@@ -23,6 +23,7 @@ from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.doctor.agent_probe_service import AGENT_SOURCE, AgentProbeService
 from winter_cli.modules.doctor.models import ProbeStatus
 from winter_cli.modules.workspace.agent_install import ExtensionAgentService
+from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
 from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
 from winter_cli.modules.workspace.models import StandaloneRepository
 
@@ -88,6 +89,7 @@ def _probe_svc(
         config=config,
         fs=cast(IFilesystemReader, fs),
         manifest_loader=loader,
+        agent_enumerator=CanonicalAgentEnumerator(fs=cast(IFilesystemReader, fs), manifest_loader=loader),
     )
 
 
@@ -97,7 +99,12 @@ def _install_svc(
     config_files: dict[Path, dict] | None = None,
 ) -> ExtensionAgentService:
     loader = _manifest_loader(config_files)
-    return ExtensionAgentService(config=config, fs=fs, manifest_loader=loader)
+    return ExtensionAgentService(
+        config=config,
+        fs=fs,
+        manifest_loader=loader,
+        agent_enumerator=CanonicalAgentEnumerator(fs=fs, manifest_loader=loader),
+    )
 
 
 def _repo(name: str = "wf", prefix: str | None = None) -> StandaloneRepository:
@@ -659,3 +666,110 @@ Body.
         results = svc.run([_repo()])
         uniqueness = [r for r in results if "uniqueness" in r.name]
         assert uniqueness == []
+
+
+# ---------------------------------------------------------------------------
+# 10. Misconfigured frontmatter tier: dedicated WARN, not "orphaned copy"
+# ---------------------------------------------------------------------------
+
+_BAD_TIER_AGENT = """\
+---
+name: reviewer
+description: Reviews code changes
+model: nonexistent-tier
+---
+You are a code reviewer.
+"""
+
+
+class TestBadFrontmatterTier:
+    def test_render_failed_tier_produces_warn_not_orphaned_copy(self) -> None:
+        """An agent with an invalid frontmatter tier: a pre-existing on-disk copy is NOT
+        classified as 'orphaned copy'; instead a dedicated WARN ProbeResult names
+        the tier/vendor (the real cause).
+
+        This guards against the regression where RepoError during render drops the
+        agent from `expected`, causing the orphan branch to misclassify the file.
+        """
+        fs = FakeFilesystem()
+        config_files: dict[Path, dict] = {}
+        ext = _seed_extension(fs, config_files, agent_files={"reviewer.md": _BAD_TIER_AGENT})
+        cfg = _config()
+
+        # Pre-plant a copy (as if a previous successful install had run before
+        # the tier was changed to an invalid value).
+        fs.directories.add(CLAUDE_AGENTS)
+        fs.files[CLAUDE_AGENTS / "wf-reviewer.md"] = "# stale copy from a prior valid install\n"
+
+        svc = _probe_svc(cfg, fs, config_files)
+        results = svc.run([ext])
+
+        # The pre-existing copy must NOT be classified as an orphan.
+        assert not any("orphaned copy" in r.message for r in results), (
+            f"Unexpected 'orphaned copy' finding: {[(r.name, r.message) for r in results if 'orphaned copy' in r.message]}"
+        )
+
+        # A dedicated WARN ProbeResult must name the invalid tier.
+        tier_warns = [r for r in results if r.status == ProbeStatus.warn and "nonexistent-tier" in r.message]
+        assert tier_warns, (
+            "expected a WARN ProbeResult naming the invalid tier 'nonexistent-tier'; "
+            f"got: {[(r.name, r.status, r.message) for r in results]}"
+        )
+
+    def test_render_failed_tier_warn_result_has_remediation(self) -> None:
+        """The dedicated tier-failure WARN ProbeResult includes a remediation hint."""
+        fs = FakeFilesystem()
+        config_files: dict[Path, dict] = {}
+        ext = _seed_extension(fs, config_files, agent_files={"reviewer.md": _BAD_TIER_AGENT})
+        cfg = _config()
+
+        svc = _probe_svc(cfg, fs, config_files)
+        results = svc.run([ext])
+
+        tier_warns = [r for r in results if r.status == ProbeStatus.warn and "nonexistent-tier" in r.message]
+        assert tier_warns
+        assert all(r.remediation is not None for r in tier_warns), "expected remediation on tier-failure WARN"
+
+    def test_render_failed_tier_valid_agents_not_affected(self) -> None:
+        """A bad-tier agent does not affect probe results for a second valid agent
+        in the same extension — the good agent's copy is still checked for staleness."""
+        valid_agent = """\
+---
+name: planner
+description: Plans tasks
+model: haiku
+---
+You are a planner.
+"""
+        fs = FakeFilesystem()
+        config_files: dict[Path, dict] = {}
+        ext = _seed_extension(
+            fs,
+            config_files,
+            agent_files={
+                "reviewer.md": _BAD_TIER_AGENT,
+                "planner.md": valid_agent,
+            },
+        )
+        cfg = _config()
+        reporter = FakeInitReporter()
+
+        # Install only the valid agent via the installer (the bad-tier agent is skipped).
+        _install_svc(cfg, fs, config_files).process(ext, reporter)
+
+        svc = _probe_svc(cfg, fs, config_files)
+        results = svc.run([ext])
+
+        # No orphaned or missing copies for the valid agent.
+        copy_issues = [
+            r
+            for r in results
+            if "agent copies:" in r.name
+            and r.status == ProbeStatus.warn
+            and ("orphaned" in r.message or "missing" in r.message)
+        ]
+        assert not copy_issues, f"Unexpected copy issues for valid agent: {[(r.name, r.message) for r in copy_issues]}"
+
+        # The bad-tier agent generates a tier-failure WARN.
+        tier_warns = [r for r in results if r.status == ProbeStatus.warn and "nonexistent-tier" in r.message]
+        assert tier_warns

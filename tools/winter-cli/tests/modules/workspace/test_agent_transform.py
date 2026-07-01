@@ -107,7 +107,7 @@ def test_parse_basic_agent() -> None:
 
     assert agent.name == "developer"
     assert agent.description == "General-purpose developer agent."
-    assert agent.model_tier == ModelTier.sonnet
+    assert agent.model_tier == "sonnet"
     assert agent.tools == ["Bash", "Read", "Write"]
     assert "You are the **Developer**." in agent.body
     assert agent.overrides == {}
@@ -165,11 +165,11 @@ def test_parse_default_model_tier_is_sonnet() -> None:
         Body.
         """)
     agent = _PARSER.parse(text)
-    assert agent.model_tier == ModelTier.sonnet
+    assert agent.model_tier == "sonnet"
 
 
 def test_parse_all_model_tiers() -> None:
-    """Each tier name parses to the corresponding ModelTier value."""
+    """Each built-in tier name parses to the corresponding tier label string."""
     for tier in ModelTier:
         text = dedent(f"""\
             ---
@@ -181,7 +181,7 @@ def test_parse_all_model_tiers() -> None:
             Body.
             """)
         agent = _PARSER.parse(text)
-        assert agent.model_tier == tier
+        assert agent.model_tier == tier.value
 
 
 def test_parse_body_extracted_correctly() -> None:
@@ -246,11 +246,17 @@ def test_parse_raises_on_missing_description() -> None:
         _PARSER.parse(text)
 
 
-def test_parse_raises_on_unknown_model_tier() -> None:
-    """An unrecognised model value raises RepoError mentioning the bad value."""
-    text = "---\nname: x\ndescription: d\nmodel: gpt-4\n---\n\nBody.\n"
-    with pytest.raises(RepoError, match="gpt-4"):
-        _PARSER.parse(text)
+def test_parse_unknown_model_tier_is_stored_as_string() -> None:
+    """An unrecognised model value is stored as a plain string; validation deferred to render.
+
+    Tier validation against the effective tier table happens at render time so
+    workspace-defined custom tier labels are accepted without the parser needing
+    to know the workspace configuration.  A typo'ed tier in frontmatter surfaces
+    as a RepoError during rendering (tested in test_resolve_model_unknown_tier).
+    """
+    text = "---\nname: x\ndescription: d\nmodel: custom-label\n---\n\nBody.\n"
+    agent = _PARSER.parse(text)
+    assert agent.model_tier == "custom-label"
 
 
 def test_parse_raises_on_invalid_tools_type() -> None:
@@ -557,13 +563,28 @@ def test_vendor_label_matches_model_tier_id_keys() -> None:
         assert v.vendor_label in key_vendors, f"{v.vendor_label!r} missing from MODEL_TIER_IDS keys"
 
 
-def test_resolve_model_unknown_tier_raises_value_error() -> None:
-    """_resolve_model raises ValueError (not bare KeyError) for unknown (tier, vendor)."""
+def test_resolve_model_unknown_vendor_raises_repo_error() -> None:
+    """_resolve_model raises RepoError when the tier has no mapping for the vendor."""
+    from winter_cli.modules.workspace.agent_transform.model_tiers import build_effective_tier_table
     from winter_cli.modules.workspace.agent_transform.renderers import _resolve_model
+    from winter_cli.modules.workspace.models import RepoError
 
     agent = _PARSER.parse("---\nname: x\ndescription: d\n---\n\nBody.\n")
-    with pytest.raises(ValueError, match="no model id"):
-        _resolve_model(agent, "unknown-vendor", {})
+    tier_table = build_effective_tier_table({})
+    with pytest.raises(RepoError, match="unknown-vendor"):
+        _resolve_model(agent, "unknown-vendor", {}, tier_table=tier_table)
+
+
+def test_resolve_model_unknown_tier_raises_repo_error() -> None:
+    """_resolve_model raises RepoError when the agent's tier label is not in the tier table."""
+    from winter_cli.modules.workspace.agent_transform.model_tiers import build_effective_tier_table
+    from winter_cli.modules.workspace.agent_transform.renderers import _resolve_model
+    from winter_cli.modules.workspace.models import RepoError
+
+    agent = _PARSER.parse("---\nname: x\ndescription: d\nmodel: typo-tier\n---\n\nBody.\n")
+    tier_table = build_effective_tier_table({})
+    with pytest.raises(RepoError, match="typo-tier"):
+        _resolve_model(agent, "claude", {}, tier_table=tier_table)
 
 
 # ── Fix D: OpenCode renderer emits mode: subagent by default ──────────────────

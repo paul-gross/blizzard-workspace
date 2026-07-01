@@ -4,13 +4,18 @@
 file (YAML frontmatter delimited by ``---``, followed by the body), validates
 required fields, and returns a ``CanonicalAgent``. Raises ``RepoError`` on
 malformed or absent frontmatter and on missing required fields.
+
+The ``model:`` field is stored as a plain string tier label.  Validation that
+the label exists in the effective tier table is deferred to render time so
+workspace-defined custom tier labels work correctly without the parser needing
+to know the workspace configuration.
 """
 
 from __future__ import annotations
 
 import yaml
 
-from winter_cli.modules.workspace.agent_transform.model_tiers import VENDOR_LABELS, ModelTier
+from winter_cli.modules.workspace.agent_transform.model_tiers import VENDOR_LABELS
 from winter_cli.modules.workspace.agent_transform.models import CanonicalAgent
 from winter_cli.modules.workspace.models import RepoError
 
@@ -48,7 +53,7 @@ class CanonicalAgentParser:
         - The frontmatter YAML is syntactically invalid.
         - ``name`` is absent and no ``default_name`` fallback was provided.
         - ``description`` is absent or empty.
-        - ``model`` is present but not a recognised ``ModelTier`` value.
+        - ``model`` is present but not a string.
         """
         frontmatter_text, body = self._split_frontmatter(text)
         try:
@@ -142,21 +147,22 @@ class CanonicalAgentParser:
         return value
 
     @staticmethod
-    def _parse_model_tier(name: str, model_raw: object) -> ModelTier:
-        """Resolve ``model_raw`` to a ``ModelTier`` or raise ``RepoError``."""
+    def _parse_model_tier(name: str, model_raw: object) -> str:
+        """Return the tier label string from ``model_raw`` or raise ``RepoError``.
+
+        The value is stored as a plain string so workspace-defined custom tier
+        labels work without enum conversion.  Validation that the label exists
+        in the effective tier table is deferred to render time.
+        """
         if model_raw is None:
-            return ModelTier.sonnet
+            return "sonnet"
         if not isinstance(model_raw, str):
             raise RepoError(
-                f"canonical agent {name!r}: 'model' must be a string tier alias, got {type(model_raw).__name__}"
+                f"canonical agent {name!r}: 'model' must be a string tier label, got {type(model_raw).__name__}"
             )
-        try:
-            return ModelTier(model_raw)
-        except ValueError:
-            valid = ", ".join(repr(t.value) for t in ModelTier)
-            raise RepoError(
-                f"canonical agent {name!r}: unknown model tier {model_raw!r}; valid values: {valid}"
-            ) from None
+        if not model_raw:
+            raise RepoError(f"canonical agent {name!r}: 'model' must be a non-empty string tier label")
+        return model_raw
 
     @staticmethod
     def _parse_tools(name: str, tools_raw: object) -> list[str] | str | None:

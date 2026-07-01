@@ -10,17 +10,25 @@ from winter_cli.config.overlay import ArrayAppendField, MergeSpec, TableField, o
 # - [git], [keybindings], [tui], [capabilities]: nested tables merge per-key so
 #   a config.local.toml can override individual sub-keys without wiping the
 #   entire table (TableField).
+# - [agent_model_overrides]: per-agent key merging so a config.local.toml can
+#   override individual agent entries without wiping the shared map (TableField).
 # - All other top-level keys default to scalar-replace (handled by MergeSpec's
 #   unspecified-key fallback), allowing config.local.toml to trim or rewrite
 #   them entirely.
 #
-# Merges five nested-table keys (git, keybindings, tui, capabilities, env) one
-# level deep via TableField; a new nested-table key needing per-key overlay must
-# be added to this spec explicitly.  For the ``env`` key this means the
-# ``[env.workspace]`` and ``[env.feature]`` sub-tables are merged per-key (so a
-# config.local.toml can add ``[env.workspace.vars]`` without wiping ``[env.feature.vars]``),
-# but each band's ``vars`` dict is replaced wholesale — there is no per-variable
-# merging within a band (same one-level limit as ``tui``/``[tui.dashboard]``).
+# Merges nested-table keys one level deep via TableField; a new nested-table key
+# needing per-key overlay must be added to this spec explicitly.  For the ``env``
+# key this means the ``[env.workspace]`` and ``[env.feature]`` sub-tables are
+# merged per-key (so a config.local.toml can add ``[env.workspace.vars]`` without
+# wiping ``[env.feature.vars]``), but each band's ``vars`` dict is replaced
+# wholesale — there is no per-variable merging within a band (same one-level
+# limit as ``tui``/``[tui.dashboard]``).
+#
+# - [model_tiers]: per-tier-label key merging so a config.local.toml can
+#   override or add individual tier entries without wiping the shared map
+#   (TableField). Within each tier entry, the vendor-id dict is replaced
+#   wholesale; per-vendor merging within a tier happens in
+#   ``build_effective_tier_table`` when overlaying onto built-in defaults.
 _WORKSPACE_CONFIG_SPEC = MergeSpec(
     fields={
         "project_repository": ArrayAppendField(),
@@ -30,6 +38,8 @@ _WORKSPACE_CONFIG_SPEC = MergeSpec(
         "tui": TableField(),
         "capabilities": TableField(),
         "env": TableField(),
+        "model_tiers": TableField(),
+        "agent_model_overrides": TableField(),
     }
 )
 
