@@ -20,11 +20,18 @@ This skill accepts optional arguments that **scope** the run and **pre-seed** an
 
 **Step/area requests — the only thing that narrows.** Narrowing happens **only** when arguments explicitly name one or more steps or areas of this walkthrough. Recognized names: `remote`, `repos`, `identity`, `project settings`, `feature env` / `alpha`, `services` / `service orchestration`, `contributing`. An "only"/"just" qualifier is welcome but not required — naming a step is the request. When one or more step/area requests are present, run **only** the requested steps (plus any step a seed pulls into scope) and skip the rest.
 
+**`services` always pulls in `project settings`.** Service orchestration needs the project's env vars and ports, so it can never run alone. A `services` / `service orchestration` request always pulls the **project settings** step into scope alongside it — as if both names had been given — with two concrete outcomes depending on state:
+
+- **Project settings not yet configured:** step 6 runs, but its three-way question is pre-answered to "environment + services" — do not re-open it as a live choice, since the user's explicit `services` request already settled it. Step 6's research covers both the settings facets and the services facet in one pass (see [`context/service-discovery.md`](./context/service-discovery.md)), and step 8 picks the discovered services up from context.
+- **Project settings already configured** (check `.winter/config.toml` / `context/project/project-setup.md` as usual): step 6 is skipped entirely (nothing new to configure there), and step 8's own discovery step ([`context/setup-service-orchestration.md`](./context/setup-service-orchestration.md) §2, "Fresh discovery") runs the services-only research pass instead — same schema, different entry point.
+
+`project settings` alone does **not** pull in `services` — it stays scoped to the environment (still asking its open three-way question) unless the user says otherwise.
+
 **Matcher disambiguation:** a full `winter-service-*` extension name (e.g. `winter-service-tmux`) is a **seed**; the bare keyword `services` or `service orchestration` is the **narrowing request**. Never treat `winter-service-tmux` as the `services` step keyword.
 
 **Putting it together:**
 - No tokens, or **seeds only** → **full walkthrough** with seeded steps pre-filled. (A git URL alone → full walkthrough, repos step pre-filled. `winter-service-tmux` alone → full walkthrough with tmux pre-targeted in the service step — not a jump to extension-only setup.)
-- **One or more step/area requests** → **narrowed** run of just those steps; seeds still apply to their own step and pull it into scope. (`<git-url>` + `repos` → just the repo step, pre-filled. `services` + `winter-service-docker` → just the service step, docker pre-targeted.)
+- **One or more step/area requests** → **narrowed** run of just those steps; seeds still apply to their own step and pull it into scope. (`<git-url>` + `repos` → just the repo step, pre-filled. `services` + `winter-service-docker` → project settings (if not already configured) plus the service step, docker pre-targeted.)
 
 When the run is narrowed, still honor idempotency (check current state before acting) and the pacing rules below, and finish with the **Final report** covering only what was in scope.
 
@@ -227,18 +234,19 @@ Then add a forward-looking hint:
 
 ### 6. Set up project settings (optional)
 
-**Explain first:** "Now an optional but recommended setup: your project settings — the application-specific configuration that makes feature environments runnable from the moment they're created. **Best done before creating any feature environment.** It has two parts: (1) **`.winter/config.toml` settings** — per-env variables in `[env.feature.vars]` / `[env.workspace.vars]` (ports and any derived values, declared once and computed automatically for every environment), plus the procedural setup winter runs for you: `[[provision.*]]` handlers (install dependencies, provision databases, seed data), per-repo `cmd` trust/bootstrap steps, and `git_excludes` for generated artifacts; and (2) **project-setup.md** — `workspace:/context/project/project-setup.md`, the *residual, agentic* setup steps that can't be expressed procedurally: conditional, multi-step, or environment-specific work (like env-file generation) that doesn't fit a handler. Setting these up now means feature environments are runnable from the moment they're created."
+**Explain first:** "Now an optional but recommended setup: your project settings — the application-specific configuration that makes feature environments runnable from the moment they're created. **Best done before creating any feature environment.** It has two parts: (1) **`.winter/config.toml` settings** — per-env variables in `[env.feature.vars]` / `[env.workspace.vars]` (ports and any derived values, declared once and computed automatically for every environment), plus the procedural setup winter runs for you: `[[provision.*]]` handlers (install dependencies, provision databases, seed data), per-repo `cmd` trust/bootstrap steps, and `git_excludes` for generated artifacts; and (2) **project-setup.md** — `workspace:/context/project/project-setup.md`, the *residual, agentic* setup steps that can't be expressed procedurally: conditional, multi-step, or environment-specific work (like env-file generation) that doesn't fit a handler. Setting these up now means feature environments are runnable from the moment they're created. This is also where **service orchestration** gets discovered, if you want it — winter running your application's services (API, frontend, workers, shared infra like a database) across feature environments. Service orchestration needs to know your project's env vars and ports, so it's researched together with the rest of your project settings, in the same pass, rather than as a separate investigation later."
 
 Ask **one** question:
 
-**"Want to set up project settings now?"**
+**"Want to set up project settings now — just the environment (dependencies, env files, databases), the environment plus service orchestration, or skip this for now?"**
 
-- "no" or "later": continue.
-- "yes": follow [context/setup-project-setup.md](./context/setup-project-setup.md) — that guide produces both parts. After it's finished, tell the user: "Now applying the new config to all existing worktrees so the `cmd` list runs everywhere..." and run:
+- "skip" / "later": continue to the next step. Record that service orchestration was **not** selected — the service-orchestration step (below) will need to research it from scratch if asked for later.
+- "environment only": tell [context/setup-project-setup.md](./context/setup-project-setup.md) that service discovery is **out of scope** for this run, then follow it — that guide produces both parts. After it's finished, tell the user: "Now applying the new config to all existing worktrees so the `cmd` list runs everywhere..." and run:
   ```bash
   winter ws init --all
   ```
-  This reruns each repo's `cmd` list and writes any new `git_excludes` into every clone (source checkouts and feature worktrees). Report what changed.
+  This reruns each repo's `cmd` list and writes any new `git_excludes` into every clone (source checkouts and feature worktrees). Report what changed. Record that service orchestration was **not** selected.
+- "environment + services": tell [context/setup-project-setup.md](./context/setup-project-setup.md) that service discovery **is in scope** for this run, then follow it — in this mode it also researches and reports the application's services (name, scope, start command, ports, and container/image wiring if the project already uses docker) in the same pass as the rest of the project settings. After it's finished, run `winter ws init --all` as above and report what changed. Record that service orchestration **was** selected, and hold onto the discovered service list and wiring findings — the service-orchestration step (below) uses them directly instead of researching again.
 
 ### 7. Create the first feature environment (optional)
 
@@ -258,6 +266,14 @@ Ask **one** question:
   Report the result — directories created, branches cut, commands run, hooks fired.
 
 ### 8. Configure service orchestration
+
+**Check first:** is this step in scope because the run was narrowed to `services` / `service orchestration` (see [Arguments](#arguments))? If so, it always proceeds — narrowing to this step **is** the request, regardless of what step 6 did or didn't do this session. Otherwise, did the project-settings step (above) record that the user chose "environment + services"? Or, on a re-run, is an orchestrator already bound to the `service` capability (`winter capabilities`)? If **none** of these is true, tell the user:
+
+> "You didn't ask for service orchestration in the project-settings step. Skipping — you can add it any time by running `/ws-setup services`, which pulls the project-settings research back in first if it's needed."
+
+Then continue to the next step, skipping the rest of this one.
+
+**Otherwise**, continue below.
 
 **Explain first:** "Winter can orchestrate your application's services — managing their lifecycle across feature environments. It uses a **multi-orchestrator model**: the `service` capability slot can bind one or more orchestrators simultaneously, and each service is owned by whichever orchestrator's manifest declares it.
 
@@ -291,7 +307,7 @@ This choice **only ever adds** orchestrators: choosing one that is not yet insta
   - If **no**: continue to the next step.
   - If **yes**: tell them "Now I'll walk you through configuring your service orchestration." Then follow [context/setup-service-orchestration.md](./context/setup-service-orchestration.md).
 - If the user chooses **Specify my own**: ask **one** question — **"What's the git URL of the orchestrator extension?"** Once given, tell them "Now I'll walk you through installing and configuring your service orchestration." Then follow [context/setup-service-orchestration.md](./context/setup-service-orchestration.md), passing the URL as a custom orchestrator to install.
-- If the user chooses **one or more** of the built-in orchestrators: tell them "Now I'll walk you through installing and configuring your service orchestration." Then follow [context/setup-service-orchestration.md](./context/setup-service-orchestration.md).
+- If the user chooses **one or more** of the built-in orchestrators: tell them "Now I'll walk you through installing and configuring your service orchestration." Then follow [context/setup-service-orchestration.md](./context/setup-service-orchestration.md). (If the project-settings step already discovered services, that guide picks them up from context automatically — you won't need to ask discovery questions again.)
 
 ### 9. Run feature-environment setup steps from installed extensions
 

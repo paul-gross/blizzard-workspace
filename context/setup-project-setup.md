@@ -10,6 +10,10 @@
 
 Each feature environment is independent — its own checkout, its own dependencies, its own ports and databases — intended to run in parallel with other feature environments on the same machine. Each environment gets a port window from its index; `winter service` injects `WINTER_PORT_BASE` and related vars into every provider subprocess at runtime (inspectable via `winter env <name>`). This is what allows multiple agents to work on different features simultaneously without interfering with each other. Without setup instructions, agents have to guess how to get things running — or ask the user every time. This file makes environment initialization fast, repeatable, and autonomous.
 
+## Caller contract
+
+This guide is invoked from the `ws-setup` skill's project-settings step. The caller tells you whether **service discovery is in scope** for this run (chosen when the user picked "environment + services" over "environment only"). When it's in scope, extend both the automatic research and the guided walkthrough to also produce the services facet (see section 6 below), in the same research pass as everything else — [`service-discovery.md`](./service-discovery.md) is the canonical definition of exactly what gets discovered per service; this guide follows that schema rather than defining its own. When it's out of scope, skip that facet entirely — the five settings facets below are unaffected either way.
+
 ## Division of responsibility: config, provision handlers, and project-setup.md
 
 `winter ws init <letter>` handles the **structural** parts that are uniform across environments:
@@ -41,7 +45,7 @@ Rule of thumb:
 
 Offer the user two approaches: *"I can research your codebase and figure out the setup requirements automatically, or you can walk me through it. Which do you prefer?"*
 
-**If researching automatically:** Spawn an Opus-class (or equivalent) subagent to explore the project repos. The subagent searches for package managers, dockerfiles, docker-compose files, env templates (`.env.example`, `.env.sample`), migration scripts, README setup sections, and existing documentation. Using a subagent keeps the research out of the main setup context — we only care about the findings. The subagent reports back a structured summary of what it found, and you present those findings to the user for confirmation before writing.
+**If researching automatically:** Spawn an Opus-class (or equivalent) subagent to explore the project repos. The subagent searches for package managers, dockerfiles, docker-compose files, env templates (`.env.example`, `.env.sample`), migration scripts, README setup sections, and existing documentation. **When service discovery is in scope**, extend the subagent's brief to also gather the services facet defined in [`service-discovery.md`](./service-discovery.md) — going deep on how the app is actually wired, including its container/image wiring if the project already uses one. Using a subagent keeps the research out of the main setup context — we only care about the findings. The subagent reports back a structured summary of what it found — the five settings facets, plus the services facet when in scope — and you present those findings to the user for confirmation before writing.
 
 **If the user prefers a guided approach**, walk through each area below with focused questions.
 
@@ -160,7 +164,25 @@ Seed data is a natural candidate for a `[[provision.data]]` handler — a re-run
 
 Ask: *"How can we verify that setup worked? Is there a health check, test suite, or command that confirms things are ready?"*
 
-Final step of `project-setup.md`.
+Final step *written into* `project-setup.md` — section 6 below runs next when service discovery is in scope; it produces a different, unwritten output (see [Output](#output)).
+
+### 6. Services (only when service discovery is in scope)
+
+Skip this section entirely if the caller told you service discovery is out of scope for this run.
+
+**Gather only — never write these facts into `project-setup.md`.** This section collects run-shaped information (start commands, ports, container wiring), which is exactly the kind of content [What it is](#what-it-is) excludes from `project-setup.md`. Everything gathered here stays in conversation context; see the unwritten fourth output in [Output](#output).
+
+Ask: *"What services need to run for the application to work? List them by name."*
+
+For each service, ask **one** question at a time: *"Is `<name>` a workspace-level service (shared once across all feature envs — e.g. a database or message broker) or a feature-environment service (runs per-env — e.g. an API server or frontend)?"*
+
+Then, for each service, resolve as much of its wiring as the project already reveals — don't interrogate the user field by field for what's discoverable. [`service-discovery.md`](./service-discovery.md) defines exactly which fields to gather (`start_command`, `port`, `container`) and where to look for each; follow that schema rather than improvising your own field list. Only ask the user directly about a service's wiring when nothing in the project reveals it.
+
+Once all services are captured, ask: *"Add another service, or move on?"* Loop until the user moves on.
+
+#### Confirm the service list
+
+Present the full list — name, scope, and whatever wiring was resolved — and ask **one** question: *"Here's what I found for your services: `<name>` (`<scope>`) — `<cmd/port/image summary>`, ... Does this look right, or anything to add or change?"* Wait for confirmation.
 
 ### Output
 
@@ -169,5 +191,7 @@ Two or three artifacts:
 1. **`.winter/config.toml`** — enriched with trust/bootstrap `cmd` entries, `[[provision.*]]` handlers (commands inlined in `apply`, per section 1) for dependency/resource/data steps that fit the handler model, and plain-pattern `git_excludes`. Keep it boring; if in doubt, leave it out.
 2. **`workspace:/context/project/project-setup.md`** — numbered steps for setup not covered by config or handlers: conditional installs, env file generation with port offsets, database creation/migration, seed data, and verification steps not yet migrated to handlers. Use variables like `<letter>` and `<index>` where environment-specific values are needed, and explain how to derive them. Stay within the setup-only scope from [What it is](#what-it-is) — no "how to run" content, and defer command-expressible steps to handlers. Author it as prose with **no manual line wrapping** — one sentence or paragraph per physical line, never reflowed to a fixed column — so later one-word edits don't reflow the whole paragraph and bury the real change in churn.
 3. *(last resort)* **Handler scripts** under `.winter/scripts/` — only for `[[provision.*]]` steps too multi-step or conditional to inline in `apply`. Inline simple commands directly (section 1); a script file is the last resort, not the default.
+
+When service discovery was in scope, the discovered service list and wiring findings are a **fourth, unwritten output**, in the schema defined by [`service-discovery.md`](./service-discovery.md) — they are not persisted into `project-setup.md` or `.winter/config.toml` (this guide's scope explicitly excludes "how to run" content). They're carried forward in conversation context to the `ws-setup` service-orchestration step, which uses them directly instead of researching again.
 
 This guide stops at writing the artifacts. Applying the changes to existing environments and running the setup against an environment is the caller's responsibility (see the ws-setup skill).

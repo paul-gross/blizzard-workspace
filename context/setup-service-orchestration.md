@@ -7,7 +7,7 @@ This guide is entered from the **Configure service orchestration** step in `/ws-
 This guide owns four things in order:
 
 1. **Install** — add any newly-chosen orchestrator as a `[[standalone_repository]]` entry in `workspace:/.winter/config.toml`, bind it to the `service` capability slot, and clone it via `winter ws init`
-2. **Discover** — identify the workspace's services (workspace-level and feature-environment) using the manifests already on disk for idempotency, then asking the user for anything new
+2. **Discover** — resolve the workspace's services (workspace-level and feature-environment): check this session's project-settings research first, then the manifests already on disk, and only ask the user (or research fresh) if neither source has them
 3. **Map** — assign each service to an orchestrator and confirm the mapping
 4. **Apply** — hand each orchestrator its assigned services and delegate their declaration and wiring to that extension's own setup guide
 
@@ -92,9 +92,15 @@ No additional installation questions. Continue to the next step.
 
 **Explain first:** "Winter organises services into two scopes. **Workspace-level** services (`scope = \"workspace\"`) run once for the entire workspace — shared infrastructure like a database or message broker that all feature environments share. **Feature-environment** services (the default `scope = \"project\"`) run per-env — the application's own processes: API server, frontend dev server, background worker. Both kinds are declared in an orchestrator's manifest (in whatever form that orchestrator uses). I need to know which services your application needs, in both scopes, before mapping them."
 
-#### Check existing manifests first (idempotency)
+#### Check what's already known, in priority order (idempotency)
 
-Before asking any discovery questions, check whether the installed orchestrators' manifests already declare services. Read the manifest for each bound orchestrator and note any services already declared.
+**1. This session's project-settings research.** If the `ws-setup` project-settings step already researched services earlier in this session — the user chose "environment + services" there — you already have the service list and wiring facts in the [`service-discovery.md`](./service-discovery.md) schema, already confirmed with the user at the end of that step. Tell the user:
+
+> "I already have your service list from the project-settings research: `<name>` (`<scope>`), `<name>` (`<scope>`). I'll use that here."
+
+It was already confirmed once; skip straight to **Step 3: Map services to orchestrators** — don't re-ask for confirmation.
+
+**2. Existing orchestrator manifests.** If services weren't already researched this session, check whether the installed orchestrators' manifests already declare services. Read the manifest for each bound orchestrator and note any services already declared.
 
 If **any manifest already declares services**, tell the user what you found and use those as the starting point:
 
@@ -107,18 +113,15 @@ Ask **one** question:
 - "proceed": skip to Step 3.
 - "add more": fall through to the discovery question below.
 
-If no manifests exist yet or none declare services, proceed directly to the discovery question.
+**3. Fresh discovery.** If neither of the above produced a service list, proceed to the discovery question.
 
 #### Discovery question
 
 Offer the user two approaches: *"I can research your project repos and figure out the services automatically, or you can walk me through them. Which do you prefer?"*
 
-**If researching automatically:** Spawn an Opus-class subagent (from the workspace root, per workspace rules) to explore the project repos. The subagent should identify:
-- Services to run: start commands (`npm run dev`, `python manage.py runserver`, `cargo run`, etc.), `Procfile`, `docker-compose.yml` files, `package.json` scripts sections, README setup sections
-- Service scope inference: shared infrastructure (databases, brokers, caches) → likely workspace-level (`scope = "workspace"`); application processes (API, web, worker) → likely feature-environment (default scope)
-- Any port bindings visible in README setup sections or env file templates (`.env.example`, `.env.sample`)
+**If researching automatically:** Spawn an Opus-class subagent (from the workspace root, per workspace rules) to explore the project repos. Give it the schema from [`service-discovery.md`](./service-discovery.md) — `name`, `scope`, `start_command`, `port`, `container` — as its brief; that doc also lists the typical evidence for each field, so don't restate it here. This is the same schema `setup-project-setup.md` §6 gathers, so this fallback-path pass (used when project settings were already configured without services) produces results indistinguishable from the primary path.
 
-Have the subagent end with a synthesis: the services to declare, each with a proposed name and scope. Cap the report under 600 words. When it reports back, present the findings to the user for confirmation before proceeding.
+Have the subagent end with a synthesis: the services to declare, each with a proposed name, scope, and whatever wiring was resolved. Cap the report under 600 words. When it reports back, present the findings to the user for confirmation before proceeding.
 
 **If the user prefers a guided approach:** ask one question per turn.
 
@@ -128,9 +131,9 @@ Have the subagent end with a synthesis: the services to declare, each with a pro
 
 #### Confirm the service list
 
-After discovery (automatic or guided), present the full list and ask **one** question:
+After discovery (from any of the three sources above), present the full list — name, scope, and whatever wiring was resolved — and ask **one** question:
 
-**"Here are the services I'll work with: `<name>` (`<scope>`), `<name>` (`<scope>`), ... Does this look right, or anything to add or change?"**
+**"Here are the services I'll work with: `<name>` (`<scope>`) — `<wiring summary if any>`, ... Does this look right, or anything to add or change?"**
 
 Wait for confirmation before continuing.
 
@@ -180,7 +183,7 @@ Ask **one** question:
 
 **Explain first:** "Now I'll hand each orchestrator the services assigned to it and follow that orchestrator's own setup guide to wire them. Declaring and wiring a service — its manifest format, ports, panes or containers, layout — is the extension's job, not this guide's."
 
-For each orchestrator in the finalized mapping, **one at a time**: read the extension's own `index.md` (find it via `workspace:/AGENTS.winter.md`) and follow its **"Feature environment setup steps"** section, passing the services assigned to it and their scopes — that section owns how this orchestrator's services are declared and wired (its manifest location, schema, and any layout/compose companions). If the extension declares no such section, tell the user it provides no setup guide and point them at its `index.md`/`README.md` to wire it manually.
+For each orchestrator in the finalized mapping, **one at a time**: read the extension's own `index.md` (find it via `workspace:/AGENTS.winter.md`) and follow its **"Feature environment setup steps"** section, passing the services assigned to it, their scopes, **and whatever wiring facts were already discovered for them** in the [`service-discovery.md`](./service-discovery.md) schema — that section owns how this orchestrator's services are declared and wired (its manifest location, schema, and any layout/compose companions), and should use the supplied facts directly instead of re-deriving them, only asking about or inferring a field that's genuinely missing. That schema does not include a health/readiness signal — every orchestrator derives or asks about that itself. If the extension declares no such section, tell the user it provides no setup guide and point them at its `index.md`/`README.md` to wire it manually.
 
 #### Confirm
 
