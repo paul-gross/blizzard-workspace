@@ -71,7 +71,6 @@ When a leaf outgrows `reference_bytes`, split the command group into its own sub
 
 These docs are loaded as source of truth by agents, so a rename or move is only done when their references move too:
 
-- The **worktree-ops agent** (`.claude/agents/worktree-ops.md`) `@`-loads [usage/index.md](./usage/index.md) and descends into the `winter ws` leaves. Keep the usage hub's routing complete and its leaf paths stable.
 - In an assembled workspace (not the standalone repo), the workspace **`AGENTS.md`** (and the `CLAUDE.md` shim that imports it) and **`context/workspace-layout.md`** name `context/winter-cli/` as the CLI command reference. A top-level restructure updates those downstream pointers in the same change.
 
 ## Reviewer checklist
