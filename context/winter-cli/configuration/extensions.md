@@ -72,7 +72,9 @@ For each subdirectory under the resolved skills root, winter installs the skill 
 - **Claude Code** (`.claude/skills/<prefix>-<dir>`) and **Codex** (`.codex/skills/<prefix>-<dir>`) get a **relative symlink** to the source.
 - **OpenCode** (`.opencode/skill/<prefix>-<dir>`) gets a **real-directory copy**. OpenCode discovers skills by globbing `skill/**/SKILL.md` and its globber does **not** traverse symlinked directories — a symlink there would be invisible to it, so the skill must be a real directory. The copy is idempotent: on each `winter ws init`, winter content-hashes the source and destination and re-copies (delete-then-copy) only on a mismatch; nothing is persisted. Stale `<prefix>-*` copies with no live source are pruned, mirroring the symlink prune.
 
-`.opencode/skill/` is read only by OpenCode, and OpenCode's read of `.claude/skills` only picks up real directories (not the symlinks there), so there is no double-loading across the symlink and copy sets. For each `.md` file or subdirectory under the resolved agents root, winter creates a symlink at `.claude/agents/<prefix>-<name>` (agents are Claude-only for now).
+`.opencode/skill/` is read only by OpenCode, and OpenCode's read of `.claude/skills` only picks up real directories (not the symlinks there), so there is no double-loading across the symlink and copy sets.
+
+For each `.md` file under the resolved agents root, winter transforms the canonical agent into a per-harness, git-excluded copy at `.claude/agents/<prefix>-<name>.md` (Claude), `.codex/agents/<prefix>-<name>.toml` (Codex), and `.opencode/agent/<prefix>-<name>.md` (OpenCode) — not a symlink. See `winter-harness:/agent-context/cross-harness-projection.md` for the transform.
 
 The workspace `.gitignore` is updated with a marker-bracketed block per extension:
 

@@ -15,7 +15,7 @@ Winter loads `.winter/config.toml` (committed) and merges `.winter/config.local.
 | [Ports & environments](./ports-and-environments.md) | …you're tuning the port band (`base_port`, `ports_per_env`, `env_aliases`), the `[env.workspace.vars]` / `[env.feature.vars]` env var bands, or need the index-reservation rules. |
 | [Dashboard & keybindings](./tui.md) | …you're setting the `winter dashboard` default layout or remapping its keys. |
 | [Provision handlers](./provision.md) | …you're declaring `[[provision.*]]` dependency / resource / data handlers. |
-| [Extensions](./extensions.md) | …you're authoring a `winter-ext.toml` — skills/agents symlinking, lifecycle hooks, and the `adopt_extensions` modes. |
+| [Extensions](./extensions.md) | …you're authoring a `winter-ext.toml` — skill symlinking, cross-harness agent projection, lifecycle hooks, and the `adopt_extensions` modes. |
 | [Agent model & tier configuration](./agents.md) | …you're setting `[agent_model_overrides]` to retarget an agent's model workspace-wide, or `[model_tiers]` to remap built-in tier vendor ids or define custom tier labels referenced from frontmatter or overrides. |
 | [Capabilities & service orchestration](./capabilities.md) | …you're binding the `service` capability slot to one or more provider extensions. |
 | [Artifact space](./space.md) | …you're setting where winter and its extensions write generated artifacts (scores, manifests, workflow docs, logs) — the `[space]` root and per-kind overrides that `winter space <kind>` resolves. |

@@ -19,11 +19,13 @@ This workspace manages **multiple project repositories** as peers. All repos are
 │   └── project/                # Project-specific integration config (contributing.md, plus any extension config)
 ├── skills/                     # Canonical workspace skills source dir (author skills here)
 ├── .claude/                    # Workspace-level agents, skills, and settings (generated projections are git-ignored)
-│   ├── agents/                 # Top-level .md files plus <prefix>-* symlinks from extensions
+│   ├── agents/                 # Top-level .md files plus <prefix>-* per-harness projected copies from extensions
 │   └── skills/                 # Generated: <prefix>-* symlinks from extensions and workspace skills (git-ignored)
 ├── .codex/
+│   ├── agents/                 # Generated: <prefix>-* per-harness projected copies (.toml) from extensions (git-ignored)
 │   └── skills/                 # Generated: <prefix>-* symlinks for Codex (git-ignored)
 ├── .opencode/
+│   ├── agent/                  # Generated: <prefix>-* per-harness projected copies from extensions (git-ignored)
 │   └── skill/                  # Generated: <prefix>-* real-directory copies for OpenCode (git-ignored)
 ├── .winter/                    # Workspace-level winter config and installed extensions
 │   ├── config.toml             # Repo declarations (project + standalone)
