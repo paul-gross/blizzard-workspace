@@ -87,6 +87,30 @@ def test_finalize_excludes_writes_one_block_per_extension(
     assert ".opencode/agent/ext-a-*" in content
 
 
+def test_finalize_excludes_writes_bare_prefix_lines_for_skills_only(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """Bare `<prefix>` lines (no `-` suffix) are written for skills, but not for agents."""
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / ".git" / "info"])
+    config_files: dict[Path, dict] = {}
+    _seed_minimal_extension(fs, config_files, "ext-a")
+    repos = [StandaloneRepository(name="ext-a", path=WORKSPACE_ROOT / "ext-a")]
+    svc = _service(workspace_config, fs, config_files)
+
+    ok = svc.finalize_excludes(repos, init_reporter)
+    assert ok is True
+
+    exclude_path = WORKSPACE_ROOT / ".git" / "info" / "exclude"
+    content = fs.files[exclude_path]
+    exact_lines = content.splitlines()
+
+    assert ".claude/skills/ext-a" in exact_lines
+    assert ".codex/skills/ext-a" in exact_lines
+    assert ".opencode/skill/ext-a" in exact_lines
+
+    assert ".claude/agents/ext-a" not in exact_lines
+
+
 # ---------------------------------------------------------------------------
 # Phase-3: winter-config block tests
 # ---------------------------------------------------------------------------

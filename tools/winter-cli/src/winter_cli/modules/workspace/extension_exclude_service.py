@@ -28,8 +28,9 @@ class ExtensionExcludeService:
     Each block is bracketed with `# >>> <name> (managed by winter)` markers
     and lists the extension repo path plus the install globs under
     `.claude/skills/`, `.codex/skills/`, `.opencode/skill/` (OpenCode's copied
-    skills), and `.claude/agents/`. Orphan blocks for extensions no longer
-    present are stripped automatically.
+    skills), and `.claude/agents/`, along with the bare `<prefix>` entry for
+    skills (covering the bare-prefix install rule). Orphan blocks for
+    extensions no longer present are stripped automatically.
     """
 
     def __init__(
@@ -102,8 +103,11 @@ class ExtensionExcludeService:
                 lines.extend(
                     [
                         f".claude/skills/{prefix}-*",
+                        f".claude/skills/{prefix}",
                         f".codex/skills/{prefix}-*",
+                        f".codex/skills/{prefix}",
                         f".opencode/skill/{prefix}-*",
+                        f".opencode/skill/{prefix}",
                         f".claude/agents/{prefix}-*",
                         f".codex/agents/{prefix}-*",
                         f".opencode/agent/{prefix}-*",
