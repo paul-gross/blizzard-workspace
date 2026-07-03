@@ -808,7 +808,7 @@ def test_provision_dry_run_with_reset_accepted_at_command_level() -> None:
 
     runner = CliRunner()
     # Should fail for missing env, not for flag combination.
-    result = runner.invoke(provision_command, ["alpha", "resource", "--reset", "--dry-run"])
+    result = runner.invoke(provision_command, ["alpha", "--stage", "resource", "--reset", "--dry-run"])
     # The command may fail due to missing container/env but NOT due to flag rejection.
     assert "--reset and --dry-run" not in (result.output or "")
     assert "mutually exclusive" not in (result.output or "")
@@ -819,7 +819,7 @@ def test_provision_dry_run_with_destroy_accepted_at_command_level() -> None:
     from winter_cli.modules.provision.command import provision_command
 
     runner = CliRunner()
-    result = runner.invoke(provision_command, ["alpha", "resource", "--destroy", "--dry-run"])
+    result = runner.invoke(provision_command, ["alpha", "--stage", "resource", "--destroy", "--dry-run"])
     assert "--destroy and --dry-run" not in (result.output or "")
     assert "mutually exclusive" not in (result.output or "")
 
@@ -829,7 +829,7 @@ def test_provision_dry_run_with_seed_accepted_at_command_level() -> None:
     from winter_cli.modules.provision.command import provision_command
 
     runner = CliRunner()
-    result = runner.invoke(provision_command, ["alpha", "resource", "--seed", "--dry-run"])
+    result = runner.invoke(provision_command, ["alpha", "--stage", "resource", "--seed", "--dry-run"])
     assert "--seed and --dry-run" not in (result.output or "")
     assert "mutually exclusive" not in (result.output or "")
 

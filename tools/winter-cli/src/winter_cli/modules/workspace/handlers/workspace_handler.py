@@ -19,8 +19,10 @@ from winter_cli.modules.workspace.models import (
     CheckoutResult,
     DiffMode,
     EnvCheckoutReport,
+    EnvDiffResult,
     EnvSnapshot,
     FeatureEnvironment,
+    FeatureEnvironmentWorktrees,
     MergeMode,
     PinnedScope,
     ProjectCheckoutSnapshot,
@@ -37,6 +39,7 @@ from winter_cli.modules.workspace.models import (
     WorktreeRepoStatus,
     WorktreeSnapshot,
 )
+from winter_cli.modules.workspace.pattern_match import has_glob, matches_any_pattern
 from winter_cli.modules.workspace.prune_service import PruneOrphan, PruneService
 from winter_cli.modules.workspace.repo_repository import IReadRepoRepository
 from winter_cli.modules.workspace.reporter_factory import ReporterFactory
@@ -127,9 +130,8 @@ class EnvUpdateParams:
 
 @dataclasses.dataclass
 class EnvDiffParams:
-    env: str
+    patterns: list[str]
     mode: DiffMode
-    repo_filter: str | None
     no_headers: bool
     output_json: bool
 
@@ -324,9 +326,9 @@ class WorkspaceHandler:
         envs, since there's no single name to resolve.
         """
         env_segments = {p.split("/", 1)[0] for p in patterns}
-        literal = {s for s in env_segments if not _has_glob(s)}
+        literal = {s for s in env_segments if not has_glob(s)}
         envs = [self._workspace_repo.get_environment(self._workspace, name) for name in sorted(literal)]
-        if any(_has_glob(s) for s in env_segments):
+        if any(has_glob(s) for s in env_segments):
             discovered = self._workspace_repo.get_environments(self._workspace, project_repos)
             envs.extend(e for e in discovered if e.name not in literal)
         return envs
@@ -786,41 +788,77 @@ class WorkspaceHandler:
             return str(path)
 
     def diff(self, params: EnvDiffParams) -> None:
-        env = self._workspace_repo.get_environment(self._workspace, params.env)
+        """Show unified diff across repos matched by `params.patterns` (defaults to '*/*').
+
+        Each pattern is a segment-aware glob over `<env>/<repo>` — the same
+        grammar `fetch`/`pull`/`push`/`status` use, resolved via
+        `_envs_for_patterns` so a literal env name still works for a
+        non-Greek env not yet discovered on disk. Every matched env's
+        matched repos are diffed and concatenated; a per-env header is only
+        printed when more than one env is in scope, so a single-target diff
+        renders exactly as before.
+        """
+        patterns = params.patterns or ["*/*"]
         project_repos = self._repo_factory.get_project_repos()
         self._drift_warning_svc.raise_warning()
-        env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-        result = self._env_status_svc.get_env_diff(env_worktrees, params.mode, repo_filter=params.repo_filter)
+        envs = self._envs_for_patterns(patterns, project_repos)
+
+        results: list[EnvDiffResult] = []
+        for env in envs:
+            env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
+            matched_worktrees = [
+                wt for wt in env_worktrees.worktrees if matches_any_pattern(env.name, wt.repository.name, patterns)
+            ]
+            if not matched_worktrees:
+                continue
+            result = self._env_status_svc.get_env_diff(
+                FeatureEnvironmentWorktrees(environment=env, worktrees=matched_worktrees),
+                params.mode,
+            )
+            if result.repos:
+                results.append(result)
 
         if params.output_json:
             data = {
-                "env": result.env,
-                "mode": result.mode.value,
-                "repos": [
+                "patterns": patterns,
+                "mode": params.mode.value,
+                "results": [
                     {
-                        "name": r.repo_name,
-                        "files_changed": r.files_changed,
-                        "insertions": r.insertions,
-                        "deletions": r.deletions,
+                        "env": r.env,
+                        "repos": [
+                            {
+                                "name": repo.repo_name,
+                                "files_changed": repo.files_changed,
+                                "insertions": repo.insertions,
+                                "deletions": repo.deletions,
+                            }
+                            for repo in r.repos
+                        ],
                     }
-                    for r in result.repos
+                    for r in results
                 ],
             }
             _echo_json(data)
             return
 
-        if not result.repos:
+        if not results:
             return
 
-        for i, repo in enumerate(result.repos):
-            if not params.no_headers:
-                if result.mode == DiffMode.branch and repo.ahead:
-                    commit_word = "commit" if repo.ahead == 1 else "commits"
-                    click.echo(f"=== {repo.repo_name} (+{repo.ahead} {commit_word}) ===")
-                else:
-                    click.echo(f"=== {repo.repo_name} ===")
-            click.echo(repo.diff_text)
-            if i < len(result.repos) - 1:
+        sectioned = len(results) > 1
+        for env_idx, result in enumerate(results):
+            if sectioned and not params.no_headers:
+                click.echo(self._cli_output_svc.style(result.env, "bold"))
+            for i, repo in enumerate(result.repos):
+                if not params.no_headers:
+                    if result.mode == DiffMode.branch and repo.ahead:
+                        commit_word = "commit" if repo.ahead == 1 else "commits"
+                        click.echo(f"=== {repo.repo_name} (+{repo.ahead} {commit_word}) ===")
+                    else:
+                        click.echo(f"=== {repo.repo_name} ===")
+                click.echo(repo.diff_text)
+                if i < len(result.repos) - 1:
+                    click.echo()
+            if sectioned and env_idx < len(results) - 1:
                 click.echo()
 
     def _render_push_report(self, report: PushReport, scope: RepoScope) -> None:
@@ -1006,11 +1044,6 @@ class WorkspaceHandler:
                 marker = "  " if o.safe_to_remove else "! "
                 click.echo(f"    {marker}{o.kind}  {o.path}")
         click.echo()
-
-
-def _has_glob(segment: str) -> bool:
-    """Whether a pattern segment contains an fnmatch wildcard (`*`, `?`, `[`)."""
-    return any(c in segment for c in "*?[")
 
 
 def compute_status_exit_code(snapshot: WorkspaceSnapshot, *, scoped: bool) -> int:

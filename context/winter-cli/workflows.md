@@ -70,7 +70,7 @@ Feature worktrees are left untouched; only remote-tracking refs and the source c
 ```bash
 winter ws diff alpha --branch          # full branch diff vs main
 winter ws diff alpha --staged          # staged changes only
-winter ws diff alpha --repo my-app     # single repo
+winter ws diff alpha/my-app            # single repo
 ```
 
 ### Reuse a feature environment for a different feature
@@ -97,6 +97,7 @@ winter ws destroy alpha                        # standard teardown (provision te
 winter ws destroy alpha --force                # bypass dirty-worktree check
 winter ws destroy alpha --strict               # abort if provision teardown or any hook exits non-zero
 winter ws destroy alpha --no-provision-teardown  # skip provision teardown; structural teardown only
+winter ws destroy alpha beta --force             # multiple envs, no confirmation prompt (scripted use)
 ```
 
 ### Clean up orphan disk state

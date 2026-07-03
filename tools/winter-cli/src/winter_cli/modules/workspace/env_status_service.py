@@ -4,8 +4,6 @@ import logging
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 
-import click
-
 from winter_cli.modules.workspace.models import (
     DiffMode,
     EnvDiffResult,
@@ -194,15 +192,9 @@ class EnvStatusService:
         self,
         env_worktrees: FeatureEnvironmentWorktrees,
         mode: DiffMode,
-        repo_filter: str | None = None,
     ) -> EnvDiffResult:
+        """Diff every worktree in `env_worktrees` (caller pre-filters by pattern/repo)."""
         worktrees = env_worktrees.worktrees
-
-        if repo_filter:
-            matched = [wt for wt in worktrees if repo_filter == wt.repository.name]
-            if not matched:
-                raise click.ClickException(f"Repo '{repo_filter}' not found")
-            worktrees = matched
 
         results: list[RepoDiffResult] = []
         for wt in worktrees:

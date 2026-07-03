@@ -1,6 +1,6 @@
-# `winter ws` fetch / pull / push / merge — patterns and scope
+# `winter ws` patterns — scope and pattern vocabulary
 
-Shared vocabulary for the four remote-sync commands. Each command's own file ([fetch](./fetch.md), [pull](./pull.md), [push](./push.md), [merge](./merge.md)) covers its deltas; this file is the single source for `PATTERNS`, scope flags, and pinned-scope rules. For the family, see the [`winter ws` hub](./index.md).
+Shared vocabulary for every `winter ws` command that takes a `PATTERNS`/`REPOS`/`SCOPE` argument — the four remote-sync commands (`fetch`, `pull`, `push`, `merge`), `connect`/`disconnect`, `update`, `status`/`diff`, and `destroy` — plus the top-level `provision` command, whose env-level pattern grammar is identical to `ws destroy`'s and so is hosted here rather than duplicated under `usage/provision.md` (its placement under `ws/` is deliberate, not a routing miss). Each command's own file ([fetch](./fetch.md), [pull](./pull.md), [push](./push.md), [merge](./merge.md), etc.) covers its own deltas; this file is the single source for `PATTERNS` grammar, scope flags, and pinned-scope rules. For the family, see the [`winter ws` hub](./index.md).
 
 All four commands accept any number of segment-aware glob `PATTERNS` over `<env>/<repo>`. A bare env name is treated as `<env>/*`. Standalone repos are reached via `--standalone` / `--all` and ignore `PATTERNS` — to operate on a single standalone repo, use raw git. `merge` takes a required `SOURCE_REF` as its first positional, then patterns trail; the other three take patterns only.
 
@@ -28,3 +28,46 @@ Pinned-scope behavior per command:
 Mutex rules: pinned-scope flags are mutually exclusive within a command (`--include-pinned` xor `--only-pinned` for push; `--exclude-pinned` xor `--only-pinned` for merge); `--standalone` xor `--all`; `--standalone` rejects PATTERNS, and on `push`/`merge` also rejects the pinned-scope flags.
 
 Pattern syntax: `*` matches any chars within a segment (does not cross `/`); `?` matches one char. Quote patterns in your shell to prevent expansion.
+
+## `winter ws status` / `winter ws diff`
+
+`status` and `diff` use the same segment-aware `<env>/<repo>` glob as the four
+commands above, but scope only to project worktrees — neither has
+`--standalone`/`--all` or a pinned-scope flag. Both default to `*/*` when no
+patterns are given.
+
+`diff` has no separate `--repo` filter — fold the repo into the pattern
+instead of combining a bare env with a flag:
+
+```bash
+winter ws diff alpha/winter        # in place of: winter ws diff alpha --repo winter
+```
+
+A glob or multiple `PATTERNS` that resolve to more than one env produce
+concatenated per-repo diff sections, one bold env header per env; a single
+matched env renders with no env header.
+
+## `winter provision` / `winter ws destroy` — env-level patterns
+
+`provision` and `destroy` operate on whole feature environments, not
+`<env>/<repo>` worktrees, so their `PATTERNS` are **bare env-name globs
+only** — a `/`-qualified pattern (`alpha/winter`) is rejected with a clear
+error rather than silently matching nothing. Both require at least one
+`PATTERN` (no implicit "all").
+
+| Invocation | Operates on |
+|------------|-------------|
+| `winter provision alpha` / `winter ws destroy alpha` | just `alpha` |
+| `winter provision alpha beta` / `winter ws destroy alpha beta` | `alpha` + `beta`, in deterministic (sorted) order |
+| `winter provision 'feature-*'` / `winter ws destroy 'feature-*'` | every env whose name matches the glob |
+
+`ws destroy` is irreversible, so a glob or more than one `PATTERN` prints the
+resolved env list and asks for confirmation before touching anything; a
+single literal `PATTERN` destroys immediately with no prompt. `--force`
+skips the confirmation (in addition to its existing meaning: bypass the
+dirty-worktree check and force `git worktree remove`).
+
+`provision`'s sub-target (`dependency` / `resource` / `data`) is a `--stage`
+option, not a second positional — a bare positional there would be
+ambiguous with the variadic `PATTERNS` list. Use `winter provision alpha
+--stage resource` to run a single stage.

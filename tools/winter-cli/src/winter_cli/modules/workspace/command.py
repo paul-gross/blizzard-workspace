@@ -25,6 +25,7 @@ from winter_cli.modules.workspace.handlers import (
     WorkspacePruneParams,
 )
 from winter_cli.modules.workspace.models import DiffMode, MergeMode, PinnedScope, PullMode, RepoScope
+from winter_cli.modules.workspace.pattern_match import validate_env_pattern
 
 
 def _resolve_scope(standalone: bool, all_flag: bool) -> RepoScope:
@@ -116,12 +117,13 @@ def ws_init(ctx: click.Context, target: str | None, all_flag: bool, output_json:
 
 
 @ws_group.command("destroy")
-@click.argument("env")
+@click.argument("patterns", nargs=-1, required=True)
 @click.option(
     "--force",
     is_flag=True,
     default=False,
-    help="Bypass dirty-worktree check and pass --force to `git worktree remove`.",
+    help="Bypass dirty-worktree check, pass --force to `git worktree remove`, "
+    "and skip the multi-env/glob confirmation prompt.",
 )
 @click.option(
     "--strict",
@@ -147,22 +149,33 @@ def ws_init(ctx: click.Context, target: str | None, all_flag: bool, output_json:
 @click.pass_context
 def ws_destroy(
     ctx: click.Context,
-    env: str,
+    patterns: tuple[str, ...],
     force: bool,
     strict: bool,
     dry_run: bool,
     no_provision_teardown: bool,
     output_json: bool,
 ):
-    """Tear down a feature env: run provision teardown, fire on_env_destroy hooks,
-    then remove every per-repo worktree and the env dir.
+    """Tear down one or more feature envs matched by PATTERNS: run provision teardown,
+    fire on_env_destroy hooks, then remove every per-repo worktree and the env dir.
+
+    Each PATTERN is a bare glob over env names — destroy operates on whole
+    envs, so unlike `ws fetch`/`ws diff`/etc. there is no `<env>/<repo>`
+    segment. At least one PATTERN is required — there is no implicit "all".
+    A single literal PATTERN destroys immediately, same as before. A glob or
+    more than one PATTERN prints the resolved env list and asks for
+    confirmation first, since teardown is irreversible; pass --force to skip
+    the prompt for scripted use.
 
     \b
       winter ws destroy alpha                          # standard teardown (includes provision teardown)
-      winter ws destroy alpha --dry-run                # print the plan; no side effects
-      winter ws destroy alpha --force                  # bypass dirty checks and force git worktree remove
-      winter ws destroy alpha --strict                 # abort if any hook exits non-zero
-      winter ws destroy alpha --no-provision-teardown  # skip provision teardown; structural teardown only
+      winter ws destroy alpha beta                      # multiple envs — prints the list, asks to confirm
+      winter ws destroy 'feature-*'                     # glob — prints the list, asks to confirm
+      winter ws destroy alpha beta --force              # skip the confirmation prompt
+      winter ws destroy alpha --dry-run                 # print the plan; no side effects
+      winter ws destroy alpha --force                   # bypass dirty checks and force git worktree remove
+      winter ws destroy alpha --strict                  # abort if any hook exits non-zero
+      winter ws destroy alpha --no-provision-teardown   # skip provision teardown; structural teardown only
 
     Provision teardown runs `data --destroy` then `resource --destroy` (in reverse of apply order)
     before extension `on_env_destroy` hooks and worktree removal. Handlers without a declared
@@ -171,11 +184,13 @@ def ws_destroy(
     Manual env removal (raw `rm -rf` plus `git worktree remove`) bypasses the
     extension hooks the same way manual env creation bypasses `on_env_init`.
     """
+    for pattern in patterns:
+        validate_env_pattern(pattern)
     container = cli_ctx(ctx).container
     handler = container.destroy_handler()
     handler.run(
         DestroyParams(
-            env=env,
+            patterns=list(patterns),
             force=force,
             strict=strict,
             dry_run=dry_run,
@@ -801,23 +816,39 @@ def ws_index(ctx: click.Context, name: str, output_json: bool):
 
 
 @ws_group.command("diff")
-@click.argument("env")
+@click.argument("patterns", nargs=-1)
 @click.option("--staged", is_flag=True, help="Show staged changes (index vs HEAD).")
 @click.option("--branch", is_flag=True, help="Show full branch diff (HEAD vs main).")
-@click.option("--repo", default=None, help="Limit to a single repo.")
 @click.option("--no-headers", is_flag=True, help="Omit repo separator headers.")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
 def ws_diff(
     ctx: click.Context,
-    env: str,
+    patterns: tuple[str, ...],
     staged: bool,
     branch: bool,
-    repo: str | None,
     no_headers: bool,
     output_json: bool,
 ):
-    """Show unified diff across all repos in a feature environment."""
+    """Show unified diff across repos matched by PATTERNS (defaults to all).
+
+    Each PATTERN is a segment-aware glob over `<env>/<repo>`, same grammar as
+    `fetch`/`pull`/`push`/`status`. Bare env names (no `/`) are treated as
+    `<env>/*`. There is no separate `--repo` filter — fold the repo into the
+    pattern instead (`winter ws diff alpha/winter` in place of the old
+    `winter ws diff alpha --repo winter`). Multiple envs (or a glob matching
+    several) produce concatenated per-repo diff sections, one env header per
+    env when more than one is in scope.
+
+    \b
+      winter ws diff                       # every env's every repo
+      winter ws diff alpha                 # alpha's repos (== 'alpha/*')
+      winter ws diff alpha/winter          # one specific repo
+      winter ws diff '*/winter'            # every env's winter repo
+      winter ws diff alpha beta            # alpha + beta, concatenated
+      winter ws diff alpha --branch        # HEAD vs main diff instead of uncommitted
+      winter ws diff alpha --json          # JSON output
+    """
     if staged and branch:
         raise click.ClickException("--staged and --branch are mutually exclusive")
 
@@ -828,13 +859,15 @@ def ws_diff(
     else:
         mode = DiffMode.uncommitted
 
+    for pattern in patterns:
+        _validate_pattern(pattern)
+
     container = cli_ctx(ctx).container
     handler = container.workspace_handler()
     handler.diff(
         EnvDiffParams(
-            env=env,
+            patterns=list(patterns),
             mode=mode,
-            repo_filter=repo,
             no_headers=no_headers,
             output_json=output_json,
         )

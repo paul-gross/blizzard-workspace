@@ -6,17 +6,21 @@ For the hub and the rest of the command surface, see [../index.md](../index.md).
 # Full chain — runs dependency → resource → data in order
 winter provision alpha
 
-# Sub-targets — run one stage only
-winter provision alpha dependency             # install/check dependencies
-winter provision alpha resource               # create resources (databases, message-queue vhosts, buckets)
-winter provision alpha data                   # load baseline state (idempotent)
+# Multiple envs / glob — PATTERNS is a bare env-name glob, at least one required
+winter provision alpha beta                   # full chain, two envs, deterministic order
+winter provision 'feature-*'                  # full chain, every env matching the glob
 
-# Action flags — always require an explicit sub-target
-winter provision alpha resource --reset       # destroy + recreate resources
-winter provision alpha resource --destroy     # destroy resources only
-winter provision alpha resource --seed        # create resources, then run data
-winter provision alpha data --reset           # destroy + recreate data
-winter provision alpha data --destroy         # delete data only
+# Sub-targets — run one stage only, via --stage (not a second positional)
+winter provision alpha --stage dependency     # install/check dependencies
+winter provision alpha --stage resource       # create resources (databases, message-queue vhosts, buckets)
+winter provision alpha --stage data           # load baseline state (idempotent)
+
+# Action flags — always require an explicit --stage
+winter provision alpha --stage resource --reset       # destroy + recreate resources
+winter provision alpha --stage resource --destroy     # destroy resources only
+winter provision alpha --stage resource --seed        # create resources, then run data
+winter provision alpha --stage data --reset           # destroy + recreate data
+winter provision alpha --stage data --destroy         # delete data only
 
 # Global flags
 winter provision alpha --no-service-check     # skip the required_services check entirely
@@ -25,7 +29,9 @@ winter provision alpha --dry-run              # print plan; no commands run, no 
 winter provision alpha --dry-run --json       # structured plan as NDJSON (see below)
 ```
 
-`winter provision` owns **feature-environment readiness** as a re-runnable lifecycle, decoupled from `winter ws init`. It reads `[[provision.*]]` handlers declared in the workspace config (`.winter/config.toml`) and in each installed extension's `winter-ext.toml`, and runs them in a defined order against the named env.
+`winter provision` owns **feature-environment readiness** as a re-runnable lifecycle, decoupled from `winter ws init`. It reads `[[provision.*]]` handlers declared in the workspace config (`.winter/config.toml`) and in each installed extension's `winter-ext.toml`, and runs them in a defined order against every env `PATTERNS` matches.
+
+`PATTERNS` is a **bare env-name glob** (see [patterns.md](./ws/patterns.md#winter-provision--winter-ws-destroy--env-level-patterns) for the shared grammar with `winter ws destroy`) — a `/`-qualified pattern is rejected, since provision operates on a whole env, not an `<env>/<repo>` worktree. At least one `PATTERN` is required. The sub-target is selected with `--stage`, not a positional — a bare positional after a variadic argument can't be told apart from one more pattern. Each matched env runs independently against the same handler set; `--json` emits one `started`/`finished`-bracketed event stream per env, in the same NDJSON stream.
 
 ## Relationship to `winter ws init`
 

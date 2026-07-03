@@ -1409,3 +1409,152 @@ def test_connect_no_match_reports_and_exits_zero(capsys: pytest.CaptureFixture[A
     handler.connect(EnvConnectParams(patterns=["alpha/nope"], feature_branch="feature/x", output_json=False))
 
     assert "No worktrees matched" in capsys.readouterr().out
+
+
+# ── diff ─────────────────────────────────────────────────────────────────────
+
+
+def _diff_handler(worktrees_by_env: dict[str, list[str]]) -> tuple[WorkspaceHandler, MagicMock]:
+    """Handler whose repos-per-env are `worktrees_by_env[env_name]`.
+
+    Returns the handler plus the workspace_repo mock so tests can assert which
+    resolution path (get_environment by name vs. get_environments discovery)
+    was taken.
+    """
+    from types import SimpleNamespace
+
+    from winter_cli.modules.workspace.models import EnvDiffResult, RepoDiffResult
+
+    workspace_repo = MagicMock()
+    workspace_repo.get_environment.side_effect = lambda _ws, name: SimpleNamespace(name=name)
+    workspace_repo.get_environments.return_value = [SimpleNamespace(name=n) for n in worktrees_by_env]
+
+    def _get_worktrees(env: Any, _repos: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            environment=env,
+            worktrees=[SimpleNamespace(repository=SimpleNamespace(name=r)) for r in worktrees_by_env.get(env.name, [])],
+        )
+
+    def _get_env_diff(env_worktrees: Any, mode: Any) -> EnvDiffResult:
+        return EnvDiffResult(
+            env=env_worktrees.environment.name,
+            mode=mode,
+            repos=[
+                RepoDiffResult(
+                    repo_name=wt.repository.name,
+                    diff_text=f"diff-{env_worktrees.environment.name}-{wt.repository.name}",
+                    ahead=0,
+                    files_changed=1,
+                    insertions=2,
+                    deletions=1,
+                )
+                for wt in env_worktrees.worktrees
+            ],
+        )
+
+    env_status_svc = MagicMock()
+    env_status_svc.get_feature_environment_worktrees.side_effect = _get_worktrees
+    env_status_svc.get_env_diff.side_effect = _get_env_diff
+
+    cli_output_svc = MagicMock()
+    cli_output_svc.style.side_effect = lambda text, _style: text
+
+    handler = WorkspaceHandler(
+        env_status_svc=env_status_svc,
+        workspace_sync_svc=MagicMock(),
+        workspace_push_svc=MagicMock(),
+        workspace_merge_svc=MagicMock(),
+        env_checkout_svc=MagicMock(),
+        workspace_repo=workspace_repo,
+        repo_repo=MagicMock(),
+        repo_factory=MagicMock(),
+        drift_warning_svc=MagicMock(),
+        prune_svc=MagicMock(),
+        reporter_factory=MagicMock(),
+        cli_output_svc=cli_output_svc,
+        workspace=MagicMock(),
+    )
+    return handler, workspace_repo
+
+
+def test_diff_single_literal_env_renders_no_env_header(capsys: pytest.CaptureFixture[Any]) -> None:
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvDiffParams
+    from winter_cli.modules.workspace.models import DiffMode
+
+    handler, workspace_repo = _diff_handler({"alpha": ["api", "web"]})
+    handler.diff(EnvDiffParams(patterns=["alpha"], mode=DiffMode.uncommitted, no_headers=False, output_json=False))
+
+    out = capsys.readouterr().out
+    lines = out.strip().splitlines()
+    # No env header line — a single matched env renders exactly as before PATTERNS existed.
+    assert lines[0] == "=== api ==="
+    assert "=== web ===" in out
+    workspace_repo.get_environments.assert_not_called()
+
+
+def test_diff_multiple_envs_adds_env_headers(capsys: pytest.CaptureFixture[Any]) -> None:
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvDiffParams
+    from winter_cli.modules.workspace.models import DiffMode
+
+    handler, _ = _diff_handler({"alpha": ["api"], "beta": ["web"]})
+    handler.diff(
+        EnvDiffParams(patterns=["alpha", "beta"], mode=DiffMode.uncommitted, no_headers=False, output_json=False)
+    )
+
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert "alpha" in lines
+    assert "beta" in lines
+    assert "=== api ===" in lines
+    assert "=== web ===" in lines
+
+
+def test_diff_glob_matching_several_uses_discovery(capsys: pytest.CaptureFixture[Any]) -> None:
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvDiffParams
+    from winter_cli.modules.workspace.models import DiffMode
+
+    handler, workspace_repo = _diff_handler({"alpha": ["api"], "beta": ["web"]})
+    handler.diff(EnvDiffParams(patterns=["*/*"], mode=DiffMode.uncommitted, no_headers=True, output_json=True))
+
+    workspace_repo.get_environments.assert_called_once()
+    out = json.loads(capsys.readouterr().out)
+    assert [r["env"] for r in out["results"]] == ["alpha", "beta"]
+
+
+def test_diff_glob_matching_none_prints_nothing(capsys: pytest.CaptureFixture[Any]) -> None:
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvDiffParams
+    from winter_cli.modules.workspace.models import DiffMode
+
+    handler, _ = _diff_handler({"alpha": ["api"]})
+    handler.diff(EnvDiffParams(patterns=["nope-*"], mode=DiffMode.uncommitted, no_headers=False, output_json=False))
+
+    assert capsys.readouterr().out == ""
+
+
+def test_diff_json_shape_fans_out_one_entry_per_env(capsys: pytest.CaptureFixture[Any]) -> None:
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvDiffParams
+    from winter_cli.modules.workspace.models import DiffMode
+
+    handler, _ = _diff_handler({"alpha": ["api"], "beta": ["web"]})
+    handler.diff(
+        EnvDiffParams(patterns=["alpha", "beta"], mode=DiffMode.uncommitted, no_headers=False, output_json=True)
+    )
+
+    out = json.loads(capsys.readouterr().out)
+    assert out["patterns"] == ["alpha", "beta"]
+    assert out["mode"] == "uncommitted"
+    assert [r["env"] for r in out["results"]] == ["alpha", "beta"]
+    assert out["results"][0]["repos"][0]["name"] == "api"
+    assert out["results"][1]["repos"][0]["name"] == "web"
+
+
+def test_diff_defaults_to_every_env_every_repo_when_no_patterns(capsys: pytest.CaptureFixture[Any]) -> None:
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvDiffParams
+    from winter_cli.modules.workspace.models import DiffMode
+
+    handler, workspace_repo = _diff_handler({"alpha": ["api"], "beta": ["web"]})
+    handler.diff(EnvDiffParams(patterns=[], mode=DiffMode.uncommitted, no_headers=False, output_json=True))
+
+    workspace_repo.get_environments.assert_called_once()
+    out = json.loads(capsys.readouterr().out)
+    assert out["patterns"] == ["*/*"]
+    assert [r["env"] for r in out["results"]] == ["alpha", "beta"]

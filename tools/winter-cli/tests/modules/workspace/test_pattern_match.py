@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from winter_cli.modules.workspace.pattern_match import is_single_literal_pattern
+import click
+import pytest
+
+from winter_cli.modules.workspace.pattern_match import has_glob, is_single_literal_pattern, validate_env_pattern
 
 # ── is_single_literal_pattern ─────────────────────────────────────────────────
 
@@ -43,3 +46,43 @@ def test_empty_list_returns_false() -> None:
 def test_cross_env_wildcard_returns_false() -> None:
     """Cross-env pattern `*/backend` contains `*` → False."""
     assert is_single_literal_pattern(["*/backend"]) is False
+
+
+# ── has_glob ──────────────────────────────────────────────────────────────────
+
+
+def test_has_glob_literal_returns_false() -> None:
+    assert has_glob("alpha") is False
+
+
+def test_has_glob_star_returns_true() -> None:
+    assert has_glob("feature-*") is True
+
+
+def test_has_glob_question_mark_returns_true() -> None:
+    assert has_glob("alpha?") is True
+
+
+def test_has_glob_bracket_returns_true() -> None:
+    assert has_glob("alpha[ab]") is True
+
+
+# ── validate_env_pattern ──────────────────────────────────────────────────────
+
+
+def test_validate_env_pattern_accepts_literal() -> None:
+    validate_env_pattern("alpha")  # no raise
+
+
+def test_validate_env_pattern_accepts_glob() -> None:
+    validate_env_pattern("feature-*")  # no raise
+
+
+def test_validate_env_pattern_rejects_empty() -> None:
+    with pytest.raises(click.ClickException, match="Empty pattern"):
+        validate_env_pattern("")
+
+
+def test_validate_env_pattern_rejects_slash() -> None:
+    with pytest.raises(click.ClickException, match="no '/'"):
+        validate_env_pattern("alpha/winter")

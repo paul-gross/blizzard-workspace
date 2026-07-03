@@ -3,6 +3,30 @@ from __future__ import annotations
 import fnmatch
 from collections.abc import Iterable
 
+import click
+
+
+def has_glob(pattern: str) -> bool:
+    """Whether `pattern` (or one segment of it) contains an fnmatch wildcard (`*`, `?`, `[`)."""
+    return any(c in pattern for c in "*?[")
+
+
+def validate_env_pattern(pattern: str) -> None:
+    """Validate a bare env-level pattern (`provision`, `ws destroy`): non-empty, no `/`.
+
+    Env-level operations (`winter provision`, `winter ws destroy`) select whole
+    feature environments, not `<env>/<repo>` worktrees — unlike `<env>/<repo>`
+    commands (`fetch`/`pull`/`push`/`status`/`diff`/…), a pattern here is a bare
+    glob over env names only. Reject a `/`-qualified pattern up front with a
+    clear error rather than silently matching nothing.
+    """
+    if not pattern:
+        raise click.ClickException("Empty pattern is not allowed")
+    if "/" in pattern:
+        raise click.ClickException(
+            f"Invalid pattern '{pattern}' — env-level patterns select whole environments, not '<env>/<repo>' (no '/')"
+        )
+
 
 def is_single_literal_pattern(patterns: Iterable[str]) -> bool:
     """Return True only when there is exactly one pattern and it is a literal <env>/<svc>.

@@ -750,6 +750,9 @@ class Container(containers.DeclarativeContainer):
         provision_service=provision_svc,
         stream_reporter=stream_provision_reporter,
         json_reporter=json_provision_reporter,
+        workspace_repo=worktree_repo,
+        repo_factory=repo_factory,
+        workspace=workspace,
     )
 
     destroy_svc = providers.Factory(
@@ -767,6 +770,9 @@ class Container(containers.DeclarativeContainer):
         DestroyHandler,
         destroy_service=destroy_svc,
         reporter_factory=reporter_factory,
+        workspace_repo=worktree_repo,
+        repo_factory=repo_factory,
+        workspace=workspace,
     )
 
     # ── lint: dispatcher to extension-contributed convention checks ─────────

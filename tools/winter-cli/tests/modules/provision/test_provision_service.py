@@ -690,7 +690,7 @@ def test_provision_rejects_reset_and_destroy_together() -> None:
     from winter_cli.modules.provision.command import provision_command
 
     runner = CliRunner()
-    result = runner.invoke(provision_command, ["alpha", "resource", "--reset", "--destroy"])
+    result = runner.invoke(provision_command, ["alpha", "--stage", "resource", "--reset", "--destroy"])
     assert result.exit_code != 0
     assert "mutually exclusive" in result.output.lower()
 
@@ -702,7 +702,7 @@ def test_provision_rejects_seed_without_resource_subtarget() -> None:
     from winter_cli.modules.provision.command import provision_command
 
     runner = CliRunner()
-    result = runner.invoke(provision_command, ["alpha", "data", "--seed"])
+    result = runner.invoke(provision_command, ["alpha", "--stage", "data", "--seed"])
     assert result.exit_code != 0
     assert "resource" in result.output.lower()
 
