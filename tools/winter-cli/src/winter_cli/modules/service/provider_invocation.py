@@ -10,8 +10,9 @@ env dict. Used by the fan-out (up/down) and status matrix to inject scope vars
 into the provider subprocess environment.
 
 ``service_matches_pattern`` is the segment-aware fnmatch check used by
-``restart`` and ``logs`` routing to decide whether a known service name
-matches a user-supplied selection pattern.
+``restart`` and ``logs`` routing to decide whether a scope-qualified describe
+identifier (``<env>/<svc>``, ``*/<svc>``, ``workspace/<svc>``) matches a
+user-supplied selection pattern.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from winter_cli.core.extension_invocation import build_extension_env
+from winter_cli.modules.service.scope import WORKSPACE_SCOPE
 
 if TYPE_CHECKING:
     from winter_cli.modules.service.service_reporter import IServiceReporter
@@ -83,15 +85,64 @@ def provision_scope_env(
 
 
 def service_matches_pattern(svc_name: str, pattern: str) -> bool:
-    """Return True when ``svc_name`` matches ``pattern``.
+    """Return True when the describe identifier ``svc_name`` matches ``pattern``.
 
-    Handles two forms:
-    - Two-segment ``<env>/<svc>`` pattern: only the svc segment is matched
-      against ``svc_name`` (the env segment is used for env-scoping at the
-      provider level — see dispatch routing).
-    - Bare pattern (no ``/``): matched directly against ``svc_name`` via fnmatch.
+    ``svc_name`` is a scope-qualified describe identifier as emitted by a provider's
+    ``describe`` action — ``<env>/<svc>`` for a concrete env, ``*/<svc>`` for a
+    project-scoped (env-agnostic) service, or ``workspace/<svc>`` for a
+    workspace-scoped singleton. ``pattern`` is the user selection token.
+
+    Matching is **segment-wise** over the two ``env``/``svc`` positions: the env
+    segments must match and the svc segments must match. Each segment comparison is
+    bidirectional so a wildcard on *either* side is honoured — the describe side may
+    carry ``*`` on the env segment (``*/api`` runs in any env), and the query side
+    may carry ``*`` (e.g. the ``<env>/*`` bare-env expansion below).
+
+    The ``workspace`` scope is reserved and distinct from the ``*`` (any-feature-env)
+    wildcard: a ``workspace`` query selects only ``workspace/<svc>`` identifiers, and
+    a project-scoped ``*/<svc>`` identifier is never pulled into the workspace scope —
+    mirroring the catalog's ``contains`` convention.
+
+    Normalisation of a bare (single-segment) token differs by role:
+    - A bare **pattern** is an environment query and expands to ``<pattern>/*`` —
+      selecting every service in that env.
+    - A bare **describe identifier** is treated as env-agnostic (``*/<svc>``),
+      matching the scope-qualified convention providers emit.
     """
+    d_env, d_svc = _split_describe(svc_name)
+    p_env, p_svc = _split_pattern(pattern)
+    return _env_matches(d_env, p_env) and _segment_matches(d_svc, p_svc)
+
+
+def _split_describe(svc_name: str) -> tuple[str, str]:
+    """Split a describe identifier into ``(env, svc)``; a bare name is env-agnostic (``*``)."""
+    if "/" in svc_name:
+        env_seg, svc_seg = svc_name.split("/", 1)
+        return env_seg, svc_seg
+    return "*", svc_name
+
+
+def _split_pattern(pattern: str) -> tuple[str, str]:
+    """Split a selection pattern into ``(env, svc)``; a bare token is an env → ``<env>/*``."""
     if "/" in pattern:
-        _env_seg, svc_seg = pattern.split("/", 1)
-        return fnmatch.fnmatchcase(svc_name, svc_seg)
-    return fnmatch.fnmatchcase(svc_name, pattern)
+        env_seg, svc_seg = pattern.split("/", 1)
+        return env_seg, svc_seg
+    return pattern, "*"
+
+
+def _env_matches(describe_env: str, pattern_env: str) -> bool:
+    """Match the env segment, keeping the reserved ``workspace`` scope out of ``*``.
+
+    When either side names the ``workspace`` scope the match is exact — a
+    ``workspace`` query never selects a project-scoped ``*/<svc>`` identifier, and a
+    ``*`` (any-feature-env) query never selects a ``workspace/<svc>`` singleton.
+    Otherwise the normal bidirectional glob applies.
+    """
+    if describe_env == WORKSPACE_SCOPE or pattern_env == WORKSPACE_SCOPE:
+        return describe_env == pattern_env
+    return _segment_matches(describe_env, pattern_env)
+
+
+def _segment_matches(describe_seg: str, pattern_seg: str) -> bool:
+    """Match one segment, honouring a glob wildcard on either side."""
+    return fnmatch.fnmatchcase(pattern_seg, describe_seg) or fnmatch.fnmatchcase(describe_seg, pattern_seg)

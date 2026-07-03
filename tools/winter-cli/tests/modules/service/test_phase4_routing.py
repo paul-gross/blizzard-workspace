@@ -311,17 +311,17 @@ def test_restart_routes_to_owning_provider_only() -> None:
 
     runner = FakeSubprocessRunner(
         run_responses={
-            describe_key_a: _describe_result(_describe_json("frontend")),
-            describe_key_b: _describe_result(_describe_json("backend")),
+            describe_key_a: _describe_result(_describe_json("*/frontend")),
+            describe_key_b: _describe_result(_describe_json("*/backend")),
         }
     )
     dispatch = _make_dispatch(runner, registry, resolver)
-    code = dispatch.dispatch("restart", ["backend"])
+    code = dispatch.dispatch("restart", ["alpha/backend"])
 
     assert code == 0
     # Only provider-b's restart should be called.
     call_cmds = [cmd for cmd, _cwd in runner.call_calls]
-    assert [str(ENTRYPOINT_B), "restart", "backend"] in call_cmds
+    assert [str(ENTRYPOINT_B), "restart", "alpha/backend"] in call_cmds
     # Provider-a must NOT be invoked for restart.
     assert not any(str(ENTRYPOINT_A) in " ".join(cmd) for cmd in call_cmds)
 
@@ -332,12 +332,12 @@ def test_restart_provider_a_not_called_when_b_owns_service() -> None:
 
     runner = FakeSubprocessRunner(
         run_responses={
-            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("frontend", "web")),
-            f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("backend", "worker")),
+            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("*/frontend", "*/web")),
+            f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("*/backend", "*/worker")),
         }
     )
     dispatch = _make_dispatch(runner, registry, resolver)
-    dispatch.dispatch("restart", ["backend"])
+    dispatch.dispatch("restart", ["alpha/backend"])
 
     restart_calls = [cmd for cmd, _cwd in runner.call_calls if "restart" in cmd]
     assert all(str(ENTRYPOINT_A) not in cmd[0] for cmd in restart_calls)
@@ -349,19 +349,21 @@ def test_restart_each_provider_gets_its_own_services() -> None:
 
     runner = FakeSubprocessRunner(
         run_responses={
-            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("frontend", "web")),
-            f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("backend", "worker")),
+            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("*/frontend", "*/web")),
+            f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("*/backend", "*/worker")),
         }
     )
     dispatch = _make_dispatch(runner, registry, resolver)
-    # Pattern matches all services across both providers.
-    dispatch.dispatch("restart", ["frontend", "backend"])
+    # Patterns match one service in each provider.
+    dispatch.dispatch("restart", ["alpha/frontend", "alpha/backend"])
 
     call_cmds = [cmd for cmd, _cwd in runner.call_calls]
-    # Provider-a should restart frontend
-    assert any(str(ENTRYPOINT_A) in cmd[0] and "frontend" in cmd for cmd in call_cmds)
-    # Provider-b should restart backend
-    assert any(str(ENTRYPOINT_B) in cmd[0] and "backend" in cmd for cmd in call_cmds)
+    # Provider-a should restart frontend, and NOT receive backend.
+    assert any(str(ENTRYPOINT_A) in cmd[0] and "alpha/frontend" in cmd for cmd in call_cmds)
+    assert not any(str(ENTRYPOINT_A) in cmd[0] and "alpha/backend" in cmd for cmd in call_cmds)
+    # Provider-b should restart backend, and NOT receive frontend.
+    assert any(str(ENTRYPOINT_B) in cmd[0] and "alpha/backend" in cmd for cmd in call_cmds)
+    assert not any(str(ENTRYPOINT_B) in cmd[0] and "alpha/frontend" in cmd for cmd in call_cmds)
 
 
 def test_restart_no_match_pattern_invokes_no_provider() -> None:
@@ -370,12 +372,12 @@ def test_restart_no_match_pattern_invokes_no_provider() -> None:
 
     runner = FakeSubprocessRunner(
         run_responses={
-            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("frontend")),
-            f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("backend")),
+            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("*/frontend")),
+            f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("*/backend")),
         }
     )
     dispatch = _make_dispatch(runner, registry, resolver)
-    code = dispatch.dispatch("restart", ["nonexistent-service"])
+    code = dispatch.dispatch("restart", ["alpha/nonexistent-service"])
 
     assert code == 0
     restart_calls = [cmd for cmd, _ in runner.call_calls if "restart" in cmd]
@@ -1028,13 +1030,13 @@ def test_restart_no_match_emits_stderr_diagnostic() -> None:
 
     runner = FakeSubprocessRunner(
         run_responses={
-            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("frontend")),
-            f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("backend")),
+            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("*/frontend")),
+            f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("*/backend")),
         }
     )
     reporter = FakeServiceReporter()
     dispatch = _make_dispatch(runner, registry, resolver, reporter=reporter)
-    code = dispatch.dispatch("restart", ["nonexistent-service"])
+    code = dispatch.dispatch("restart", ["alpha/nonexistent-service"])
 
     assert code == 0
     assert len(reporter.no_match_diagnostic_calls) >= 1
@@ -1101,7 +1103,7 @@ def test_logs_broken_provider_owns_requested_service_returns_nonzero() -> None:
     runner = FakeSubprocessRunner(
         run_responses={
             # provider-a emits valid describe: owns 'frontend'
-            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("frontend")),
+            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("*/frontend")),
             # provider-b emits invalid describe; would have owned 'backend'
             f"{ENTRYPOINT_B} describe": SubprocessResult(returncode=0, stdout="not-json", stderr=""),
         },
@@ -1109,7 +1111,7 @@ def test_logs_broken_provider_owns_requested_service_returns_nonzero() -> None:
     )
     logs, reporter = _make_logs(runner, registry, resolver)
     # Request 'backend', which only the broken provider would have owned.
-    code = logs.stream(_log_opts(patterns=("backend",)), reporter)
+    code = logs.stream(_log_opts(patterns=("alpha/backend",)), reporter)
 
     # Non-zero: ownership could not be resolved.
     assert code != 0

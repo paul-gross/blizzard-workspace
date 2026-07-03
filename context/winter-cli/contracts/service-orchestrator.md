@@ -185,10 +185,10 @@ The orchestrator's **stderr must reach winter's stderr** (diagnostics), NOT be m
 The orchestrator **must emit a single JSON object on stdout** for the `describe` action:
 
 ```json
-{"services": ["api", "worker", "frontend"]}
+{"services": ["workspace/db", "*/api", "*/worker"]}
 ```
 
-`services` is the list of service names this provider owns. Unknown or empty → `{"services": []}`. Winter uses this to build a service-name → provider ownership index when multiple providers are bound (`capabilities.service = [...]`, or two or more self-registered candidates). Missing or non-list `services` key is treated as empty (shape-stability).
+`services` is the list of **scope-qualified** service identifiers this provider owns, using the same scope-prefix convention as the `catalog` contract below (`workspace/<name>` for a workspace-scoped singleton, `*/<name>` for a per-feature-env service). Unknown or empty → `{"services": []}`. Winter uses this to build a describe-identifier → provider ownership index when multiple providers are bound (`capabilities.service = [...]`, or two or more self-registered candidates), and `logs`/`restart` routing matches a user's `<env>/<svc>` selection pattern against these identifiers segment-wise (see [usage/service.md](../usage/service.md)). Emitting a bare, unqualified name breaks that matching for workspace-scoped services — a bare `db` is treated as env-agnostic (`*/db`) and never routed to the `workspace` scope. Missing or non-list `services` key is treated as empty (shape-stability).
 
 `describe` is called **only when two or more providers are bound** (an explicit `capabilities.service` list of 2+, or 2+ self-registered candidates with no explicit binding). Single-provider workspaces are never asked to `describe`.
 
