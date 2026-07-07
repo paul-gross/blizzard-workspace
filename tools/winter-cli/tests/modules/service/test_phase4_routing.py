@@ -377,7 +377,7 @@ def test_restart_each_provider_gets_its_own_services() -> None:
 
 
 def test_restart_no_match_pattern_invokes_no_provider() -> None:
-    """A pattern matching no owned service → no provider invoked, no error."""
+    """A pattern matching no owned service → no provider invoked, non-zero exit (winter#149)."""
     registry, resolver = _make_two_provider_registry()
 
     runner = FakeSubprocessRunner(
@@ -389,7 +389,53 @@ def test_restart_no_match_pattern_invokes_no_provider() -> None:
     dispatch = _make_dispatch(runner, registry, resolver)
     code = dispatch.dispatch("restart", ["alpha/nonexistent-service"])
 
-    assert code == 0
+    assert code != 0
+    restart_calls = [cmd for cmd, _ in runner.call_calls if "restart" in cmd]
+    assert len(restart_calls) == 0
+
+
+def test_restart_bare_unmatched_token_errors_multi_provider() -> None:
+    """A bare token is read as the env query ``repo-name/*``, matches no configured
+    env, and is rejected rather than silently dropped while the sibling `alpha`
+    token restarts the whole env (multi-provider, winter#149).
+    """
+    registry, resolver = _make_two_provider_registry()
+
+    runner = FakeSubprocessRunner(
+        run_responses={
+            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("*/frontend")),
+            f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("*/backend")),
+        }
+    )
+    reporter = FakeServiceReporter()
+    dispatch = _make_dispatch(runner, registry, resolver, reporter=reporter)
+    code = dispatch.dispatch("restart", ["alpha", "repo-name"])
+
+    assert code != 0
+    restart_calls = [cmd for cmd, _ in runner.call_calls if "restart" in cmd]
+    assert len(restart_calls) == 0
+    assert len(reporter.invalid_restart_pattern_calls) == 1
+    detail = reporter.invalid_restart_pattern_calls[0]
+    # Diagnosed as an unknown environment, suggesting the token as a service
+    # under the real configured env — not a "no such service" claim.
+    assert detail == "'repo-name' is not a valid environment — did you mean 'alpha/repo-name'?"
+
+
+def test_restart_mixed_valid_and_unmatched_pattern_fails_whole_command_multi_provider() -> None:
+    """A mixed invocation with one unmatched token fails the whole command (winter#149)."""
+    registry, resolver = _make_two_provider_registry()
+
+    runner = FakeSubprocessRunner(
+        run_responses={
+            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("*/frontend")),
+            f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("*/backend")),
+        }
+    )
+    dispatch = _make_dispatch(runner, registry, resolver)
+    code = dispatch.dispatch("restart", ["alpha/backend", "alpha/typo-service"])
+
+    assert code != 0
+    # The valid pattern must not have been dispatched either — the whole command fails.
     restart_calls = [cmd for cmd, _ in runner.call_calls if "restart" in cmd]
     assert len(restart_calls) == 0
 
@@ -1046,7 +1092,12 @@ def test_restart_cross_env_pattern_forwards_original_token() -> None:
 
 
 def test_restart_no_match_emits_stderr_diagnostic() -> None:
-    """Multi-provider restart with no matching service → reporter gets no_match_diagnostic, exit 0."""
+    """Multi-provider restart with no matching service → reporter gets invalid_restart_pattern, non-zero exit (winter#149).
+
+    The pattern is already qualified against a real, known env (`alpha`) — the
+    diagnostic must name the missing service and that same env directly,
+    rather than repeating the qualified-form suggestion the user already used.
+    """
     registry, resolver = _make_two_provider_registry()
 
     runner = FakeSubprocessRunner(
@@ -1059,10 +1110,10 @@ def test_restart_no_match_emits_stderr_diagnostic() -> None:
     dispatch = _make_dispatch(runner, registry, resolver, reporter=reporter)
     code = dispatch.dispatch("restart", ["alpha/nonexistent-service"])
 
-    assert code == 0
-    assert len(reporter.no_match_diagnostic_calls) >= 1
-    combined = " ".join(reporter.no_match_diagnostic_calls)
-    assert "nonexistent-service" in combined
+    assert code != 0
+    assert len(reporter.invalid_restart_pattern_calls) == 1
+    detail = reporter.invalid_restart_pattern_calls[0]
+    assert detail == "'alpha/nonexistent-service': no service 'nonexistent-service' in environment 'alpha'"
 
 
 def test_logs_no_match_emits_stderr_diagnostic() -> None:

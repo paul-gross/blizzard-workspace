@@ -37,7 +37,7 @@ class IServiceReporter(Protocol):
     def env_provision_error(self, scope: str, detail: str) -> None: ...
     def timestamps_warning(self) -> None: ...
     def time_filter_warning(self) -> None: ...
-    def no_match_diagnostic(self, token_list: str) -> None: ...
+    def invalid_restart_pattern(self, detail: str) -> None: ...
     def readiness_timeout(self, env: str, timeout_s: float, unhealthy: tuple[str, ...]) -> None: ...
 
 
@@ -146,8 +146,8 @@ class StreamServiceReporter:
             err=True,
         )
 
-    def no_match_diagnostic(self, token_list: str) -> None:
-        self._click.echo(f"no service matched {token_list}", err=True)
+    def invalid_restart_pattern(self, detail: str) -> None:
+        self._click.echo(f"error: {detail}", err=True)
 
     def readiness_timeout(self, env: str, timeout_s: float, unhealthy: tuple[str, ...]) -> None:
         names = ", ".join(unhealthy)
@@ -236,5 +236,5 @@ class JsonServiceReporter:
             err=True,
         )
 
-    def no_match_diagnostic(self, token_list: str) -> None:
-        self._click.echo(f"no service matched {token_list}", err=True)
+    def invalid_restart_pattern(self, detail: str) -> None:
+        self._click.echo(f"error: {detail}", err=True)

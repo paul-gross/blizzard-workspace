@@ -163,3 +163,27 @@ def _env_matches(describe_env: str, pattern_env: str) -> bool:
 def _segment_matches(describe_seg: str, pattern_seg: str) -> bool:
     """Match one segment, honouring a glob wildcard on either side."""
     return fnmatch.fnmatchcase(pattern_seg, describe_seg) or fnmatch.fnmatchcase(describe_seg, pattern_seg)
+
+
+def restart_pattern_env_known(pattern: str, known_envs: frozenset[str]) -> bool:
+    """Return True when *pattern*'s env segment is a configured env, the reserved
+    ``workspace`` scope, or the cross-env wildcard ``*``.
+
+    Used by ``restart``'s pre-dispatch pattern validation (winter#149): a bare
+    token is parsed as an env-only query (``_split_pattern`` expands it to
+    ``<token>/*``) and, until now, was forwarded to the provider unvalidated —
+    a typo'd service name meant as the second half of a qualified
+    ``<env>/<svc>`` selection (e.g. the ``repo-name`` in
+    ``restart alpha repo-name``) silently matched no configured env and was
+    dropped rather than erroring, while the ``alpha`` token restarted the
+    entire env.
+
+    The env segment is the whole token for a bare pattern, or the text before
+    the first ``/`` for a qualified pattern. Matching is glob-aware and
+    bidirectional (``al*`` matches a configured ``alpha`` env), mirroring
+    ``_env_seg_matches_scope`` in the status matrix.
+    """
+    env_seg = pattern.split("/", 1)[0] if "/" in pattern else pattern
+    if env_seg in (WORKSPACE_SCOPE, "*"):
+        return True
+    return any(_segment_matches(known_env, env_seg) for known_env in known_envs)

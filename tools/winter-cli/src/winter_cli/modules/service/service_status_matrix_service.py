@@ -296,6 +296,16 @@ class ServiceStatusMatrixService:
 
         return self._multi_provider_matrix(providers, configured_envs, patterns, on_describe_error)
 
+    def known_envs(self) -> frozenset[str]:
+        """Return the configured env names from the env-index registry.
+
+        Exposed for restart's pre-dispatch pattern validation
+        (``ServiceDispatchService._dispatch_restart``, winter#149) — the same
+        registry-driven env catalog the up/down and status matrices already
+        build the scope axis from.
+        """
+        return frozenset(self._env_index_registry.all_assignments())
+
     def run_matrix(
         self,
         cells: list[_StatusCell],

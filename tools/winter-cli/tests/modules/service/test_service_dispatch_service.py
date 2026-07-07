@@ -227,6 +227,59 @@ def test_dispatch_restart_sets_workspace_context_env_vars() -> None:
     assert env["WINTER_SERVICE_PREFIX"] == SERVICE_PREFIX
 
 
+# ── restart pattern validation (winter#149) ──────────────────────────────────
+
+
+def _single_provider() -> ResolvedCapability:
+    return _provider(
+        "winter-service-tmux",
+        WS / "winter-service-tmux/workflow/service",
+        WS / "winter-service-tmux",
+    )
+
+
+def test_dispatch_restart_bare_unmatched_token_errors_single_provider() -> None:
+    """A bare token is read as the env query ``repo-name/*``, matches no configured
+    env, and is rejected rather than silently dropped while the sibling `alpha`
+    token restarts the whole env (single provider).
+    """
+    runner = FakeSubprocessRunner()
+    reporter = FakeServiceReporter()
+    svc = _dispatch_svc(runner, [_single_provider()], assignments={"alpha": 1, "beta": 2}, reporter=reporter)
+    code = svc.dispatch("restart", ["alpha", "repo-name"])
+
+    assert code != 0
+    # Nothing was dispatched — the valid `alpha` token must not restart the whole env.
+    assert runner.call_calls == []
+    assert len(reporter.invalid_restart_pattern_calls) == 1
+    detail = reporter.invalid_restart_pattern_calls[0]
+    # Diagnosed as an unknown environment, suggesting the token as a service
+    # under a real configured env — not a "no such service" claim.
+    assert detail == "'repo-name' is not a valid environment — did you mean 'alpha/repo-name'?"
+
+
+def test_dispatch_restart_valid_qualified_pattern_restarts_exactly_that_service_single_provider() -> None:
+    """A valid qualified pattern (`alpha/repo-name`) restarts exactly that service."""
+    runner = FakeSubprocessRunner()
+    svc = _dispatch_svc(runner, [_single_provider()], assignments={"alpha": 1})
+    code = svc.dispatch("restart", ["alpha/repo-name"])
+
+    assert code == 0
+    entrypoint = str(WS / "winter-service-tmux/workflow/service")
+    assert runner.call_calls == [([entrypoint, "restart", "alpha/repo-name"], WS)]
+
+
+def test_dispatch_restart_multiple_valid_qualified_patterns_all_restart_single_provider() -> None:
+    """Multiple valid qualified patterns in one invocation all restart."""
+    runner = FakeSubprocessRunner()
+    svc = _dispatch_svc(runner, [_single_provider()], assignments={"alpha": 1})
+    code = svc.dispatch("restart", ["alpha/api", "alpha/web"])
+
+    assert code == 0
+    entrypoint = str(WS / "winter-service-tmux/workflow/service")
+    assert runner.call_calls == [([entrypoint, "restart", "alpha/api", "alpha/web"], WS)]
+
+
 def test_dispatch_status_with_patterns_passes_them_on_argv() -> None:
     runner = FakeSubprocessRunner()
     _service(runner).dispatch("status", ["alpha/web", "alpha/api"])
@@ -329,12 +382,15 @@ def test_dispatch_forwards_leading_dash_token_verbatim() -> None:
 
     At the Click boundary a bare `-`-leading token is rejected as an unknown option
     (exit 2); the caller must use `--` to pass it through. Winter then forwards the
-    token verbatim as a positional argv element — it never reinterprets it.
+    token verbatim as a positional argv element — it never reinterprets it. The
+    ``workspace/`` scope prefix keeps the pattern valid under restart's env-segment
+    validation (winter#149) so this test still exercises argv passthrough rather
+    than the (separately tested) unmatched-pattern error path.
     """
     runner = FakeSubprocessRunner()
-    _service(runner).dispatch("restart", ["-weird"])
+    _service(runner).dispatch("restart", ["workspace/-weird"])
     entrypoint = str(WS / "winter-service-tmux/workflow/service")
-    assert runner.call_calls == [([entrypoint, "restart", "-weird"], WS)]
+    assert runner.call_calls == [([entrypoint, "restart", "workspace/-weird"], WS)]
 
 
 # ── misconfiguration errors (tested via the registry) ────────────────────────

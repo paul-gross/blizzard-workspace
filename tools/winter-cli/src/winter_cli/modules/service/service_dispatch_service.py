@@ -7,6 +7,7 @@ from winter_cli.modules.capability.models import ResolvedCapability
 from winter_cli.modules.service.orchestrator_resolver import ServiceOrchestratorResolver
 from winter_cli.modules.service.provider_invocation import (
     build_provider_env,
+    restart_pattern_env_known,
     service_matches_pattern,
     up_down_positional,
 )
@@ -29,11 +30,15 @@ class ServiceDispatchService:
     them out via ``ServiceFanOutService`` with no readiness gate or ordering
     semantics beyond the matrix's own deterministic cell order.
 
-    For ``restart`` with multiple providers, builds the service-to-provider ownership
+    For ``restart``, every pattern is first validated against the known env/service
+    catalog (winter#149) — a pattern matching neither a configured env nor (when
+    ownership is known) a known service is a hard error, not a silently-dropped
+    no-op. With multiple providers, builds the service-to-provider ownership
     index via ``ServiceDescribeService``, groups matched services by owning provider,
     and dispatches each provider only the services it owns.  With a single provider,
-    ``restart`` behaves exactly as before (no ``describe`` call, patterns forwarded
-    verbatim).
+    ``restart`` still makes no ``describe`` call (only the env segment is
+    validated, against the configured-env registry) and forwards patterns
+    verbatim once validated.
 
     For other actions (``describe``, etc.), dispatches to the single resolved provider
     via the orchestrator resolver, as before.
@@ -171,20 +176,41 @@ class ServiceDispatchService:
     def _dispatch_restart(self, patterns: list[str]) -> int:
         """Route restart to the owning provider(s) based on the service ownership index.
 
-        D1 short-circuit: with a single provider, no describe call is made; the
-        provider receives all patterns verbatim.
+        Every pattern is first validated against the known env/service catalog
+        (winter#149): a pattern whose env segment names neither a configured env,
+        the reserved ``workspace`` scope, nor the cross-env wildcard ``*`` is a
+        hard error — this catches a bare token that was intended as a qualified
+        ``<env>/<service>`` selector (e.g. ``restart alpha repo-name``, where
+        ``repo-name`` is silently parsed as the unrelated env query
+        ``repo-name/*``) before any provider is invoked, rather than dropping it
+        while the valid ``alpha`` token restarts the whole env as a side effect.
+        A qualified pattern (``<env>/<svc>``) whose service segment matches no
+        known service is likewise a hard error once ownership is known
+        (multi-provider only — see below). A bare env-only pattern is not held
+        to that stricter check: it selects "every service in that env", valid
+        regardless of whether the env currently has any concretely-known
+        service.
 
-        With multiple providers, the index is built, each user pattern is matched
-        against the known service names, and each provider receives only the
-        original pattern tokens that match services it owns (in the user-supplied
-        order, deduplicated per provider).  A pattern matching no service in any
-        provider emits a diagnostic to stderr.  A provider with no matched
-        patterns is not invoked.
+        D1 short-circuit: with a single provider, no describe call is made (this
+        validation only consults the configured-env registry, not the provider's
+        service catalog); the provider receives all patterns verbatim once the
+        env-segment check passes.
+
+        With multiple providers, the ownership index is built, each user pattern
+        is matched against the known service names, and each provider receives
+        only the original pattern tokens that match services it owns (in the
+        user-supplied order, deduplicated per provider).
         """
         providers = self._orchestrator_resolver.resolve_all()
+        known_envs = self._matrix_service.known_envs()
+        env_invalid = [pat for pat in patterns if not restart_pattern_env_known(pat, known_envs)]
 
-        # D1: single-provider short-circuit — no describe, forward verbatim.
+        # D1: single-provider short-circuit — no describe, forward verbatim
+        # once every pattern's env segment is known.
         if len(providers) == 1:
+            if env_invalid:
+                self._report_invalid_restart_patterns(env_invalid, known_envs)
+                return 1
             provider = providers[0]
             return self._call_provider(provider, "restart", patterns)
 
@@ -211,11 +237,14 @@ class ServiceDispatchService:
                     if pat not in owned:
                         owned.append(pat)
 
-        # Emit no-match diagnostic for patterns that resolved to no known service.
-        unmatched = [p for p in patterns if p not in matched_patterns]
-        if unmatched and self._reporter is not None:
-            token_list = ", ".join(repr(p) for p in unmatched)
-            self._reporter.no_match_diagnostic(token_list)
+        # A qualified pattern that matches no known service is a hard error
+        # (winter#149); a bare env-only pattern is exempt from this check (see
+        # docstring above) as long as its env segment already passed.
+        svc_invalid = [pat for pat in patterns if "/" in pat and pat not in matched_patterns and pat not in env_invalid]
+        invalid = [pat for pat in patterns if pat in env_invalid or pat in svc_invalid]
+        if invalid:
+            self._report_invalid_restart_patterns(invalid, known_envs, svc_invalid=frozenset(svc_invalid))
+            return 1
 
         # Dispatch each provider that owns matched patterns.
         exit_code = 0
@@ -228,6 +257,40 @@ class ServiceDispatchService:
                 exit_code = code
 
         return exit_code
+
+    def _report_invalid_restart_patterns(
+        self,
+        invalid: list[str],
+        known_envs: frozenset[str],
+        svc_invalid: frozenset[str] = frozenset(),
+    ) -> None:
+        """Emit one hard-error diagnostic naming every invalid restart pattern.
+
+        Two distinct causes land here and are worded differently (winter#149):
+
+        - A pattern in *svc_invalid* is already qualified as ``<env>/<svc>``
+          against a real, known env — its service segment is the only thing
+          wrong. The diagnostic names that env (the pattern's own, not some
+          other configured env) and the missing service directly, and does
+          not suggest re-running the identical qualified form.
+        - Every other pattern here (a bare token, or one whose env segment
+          matches no configured env) is diagnosed as an unknown environment,
+          with a suggestion to use it as the service half of a qualified
+          pattern under an actual configured env (or the generic ``<env>``
+          placeholder when none are configured).
+        """
+        if self._reporter is None:
+            return
+        example_env = sorted(known_envs)[0] if known_envs else "<env>"
+        parts: list[str] = []
+        for pat in invalid:
+            if pat in svc_invalid:
+                env_seg, _, svc_seg = pat.partition("/")
+                parts.append(f"{pat!r}: no service {svc_seg!r} in environment {env_seg!r}")
+            else:
+                suggestion = f"{example_env}/{pat}"
+                parts.append(f"{pat!r} is not a valid environment — did you mean {suggestion!r}?")
+        self._reporter.invalid_restart_pattern("; ".join(parts))
 
     def _call_provider(self, provider: ResolvedCapability, action: str, positionals: list[str]) -> int:
         cmd = [str(provider.entrypoint), action, *positionals]

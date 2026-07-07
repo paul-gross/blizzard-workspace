@@ -182,7 +182,7 @@ class FakeServiceReporter:
         self.describe_parse_error_calls: list[tuple[str, str]] = []
         self.timestamps_warning_called: int = 0
         self.time_filter_warning_called: int = 0
-        self.no_match_diagnostic_calls: list[str] = []
+        self.invalid_restart_pattern_calls: list[str] = []
         self.readiness_timeout_calls: list[tuple[str, float, tuple[str, ...]]] = []
         self.env_provision_error_calls: list[tuple[str, str]] = []
 
@@ -216,8 +216,8 @@ class FakeServiceReporter:
     def time_filter_warning(self) -> None:
         self.time_filter_warning_called += 1
 
-    def no_match_diagnostic(self, token_list: str) -> None:
-        self.no_match_diagnostic_calls.append(token_list)
+    def invalid_restart_pattern(self, detail: str) -> None:
+        self.invalid_restart_pattern_calls.append(detail)
 
     def readiness_timeout(self, env: str, timeout_s: float, unhealthy: tuple[str, ...]) -> None:
         self.readiness_timeout_calls.append((env, timeout_s, unhealthy))

@@ -295,6 +295,16 @@ def test_cell_pattern_scope_qualified_glob_env() -> None:
     assert _cell_argv_pattern("alpha", ("al*/api",)) == "alpha/api"
 
 
+# ── known_envs (restart pattern validation, winter#149) ───────────────────────
+
+
+def test_known_envs_returns_configured_env_names() -> None:
+    runner = FakeSubprocessRunner()
+    svc = _matrix_svc(runner, registry_assignments={"alpha": 1, "beta": 2})
+
+    assert svc.known_envs() == frozenset({"alpha", "beta"})
+
+
 # ── Single-provider matrix (describe-skip) ────────────────────────────────────
 
 

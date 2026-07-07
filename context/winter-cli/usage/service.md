@@ -120,7 +120,18 @@ With a single provider, `describe` is never called — the sole provider implici
 
 ### `logs` and `restart` routing (multi-provider)
 
-`logs` and `restart` are **routed to the owning provider** for each matched service via the ownership index. With a single provider, patterns are forwarded verbatim without building an index.
+`logs` and `restart` are **routed to the owning provider** for each matched service via the ownership index. With a single provider, no index is built (no `describe` call), but patterns are not forwarded blind either — see restart pattern validation below.
+
+### `restart` pattern validation
+
+Every `restart` PATTERN is validated before any provider is invoked. This env-segment check runs for single-provider restart too, without requiring `describe` (see [describe wire contract](../contracts/service-orchestrator.md#describe-wire-contract) — a single provider is still never asked to `describe`):
+
+- **Bare or unknown-env token** — a pattern whose env segment (the whole token for a bare pattern, or the text before the first `/` for a qualified one) names neither a configured env, the reserved `workspace` scope, nor the cross-env wildcard `*` is a **hard error**: a bare `repo-name` is read as the env query `repo-name/*`, matches nothing, and is rejected rather than silently dropped while a sibling `alpha` token restarts the whole env. Winter names the offending token and suggests the qualified `<env>/<service>` form (e.g. `alpha/repo-name`).
+- **Qualified pattern, unknown service (multiple providers only)** — a qualified pattern (`<env>/<svc>`) that matches no known service (per the ownership index) is also a **hard error**; winter names the missing service and the pattern's own env directly, rather than repeating the qualified form the caller already used.
+- **Bare env-only pattern** — exempt from the stricter service check above: it always means "every service in that env," valid even when the env currently has no concretely-known service.
+- **Single provider** — no ownership index is built (no `describe` call), so only the env-segment check applies; the `describe`-based service check above never runs.
+
+Any failure exits non-zero without dispatching anything.
 
 **Describe resilience differs by action:**
 
