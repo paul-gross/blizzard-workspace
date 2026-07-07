@@ -404,8 +404,7 @@ class ProvisionService:
         if scope is None:
             valid = ", ".join(repr(t) for t in SELECTOR_SCOPE_TOKENS)
             raise click.ClickException(
-                f"Invalid provision selector {name_selector!r}: unknown scope {scope_token!r}. "
-                f"Must be one of: {valid}."
+                f"Invalid provision selector {name_selector!r}: unknown scope {scope_token!r}. Must be one of: {valid}."
             )
 
         matches = [h for h in all_handlers if h.scope == scope and h.name == entry_name]
