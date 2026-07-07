@@ -29,6 +29,7 @@ class ProvisionParams:
     no_service_check: bool = False
     dry_run: bool = False
     output_json: bool = False
+    name_selector: str | None = None
 
 
 class ProvisionCommandHandler:
@@ -79,6 +80,7 @@ class ProvisionCommandHandler:
                 no_service_check=params.no_service_check,
                 reporter=reporter,  # type: ignore[arg-type]
                 dry_run=params.dry_run,
+                name_selector=params.name_selector,
             )
             if summary.exit_code != 0:
                 exit_code = summary.exit_code

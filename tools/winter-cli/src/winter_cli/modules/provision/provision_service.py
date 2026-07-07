@@ -11,7 +11,12 @@ from winter_cli.config.workspace import parse_provision
 from winter_cli.core.config_file import ConfigError
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.provision.execution_service import HandlerExecutionResult, ProvisionExecutionService
-from winter_cli.modules.provision.manifest import PROVISION_SUBTARGETS, ProvisionHandler, ProvisionScope
+from winter_cli.modules.provision.manifest import (
+    PROVISION_SUBTARGETS,
+    SELECTOR_SCOPE_TOKENS,
+    ProvisionHandler,
+    ProvisionScope,
+)
 from winter_cli.modules.provision.provision_reporter import IProvisionReporter
 from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST, IExtensionManifestLoader
 from winter_cli.modules.workspace.models import RepoError
@@ -183,11 +188,19 @@ class ProvisionService:
         no_service_check: bool,
         reporter: IProvisionReporter,
         dry_run: bool = False,
+        name_selector: str | None = None,
     ) -> ProvisionSummary:
         """Run the provision chain (or a single sub-target) for *env_name*.
 
         ``subtarget`` is the explicit sub-target name when given, or ``None``
         for the full dependency→resource→data chain.
+
+        ``name_selector``, when given, is a scope-qualified ``<scope>.<name>``
+        token (see ``manifest.SELECTOR_SCOPE_TOKENS``) that narrows the run to
+        the single named handler it resolves to — every other handler
+        (including siblings in the same sub-target) is skipped. When
+        ``subtarget`` is also given, the resolved handler must belong to that
+        sub-target or the run aborts with a clear error.
 
         When ``dry_run`` is ``True``, no handler scripts are executed, no
         services are started, and the reporter receives ``plan_handler`` events
@@ -204,10 +217,21 @@ class ProvisionService:
                 f"Run 'winter ws init {env_name}' to create it."
             )
 
-        subtargets_to_run = self._resolve_subtargets(subtarget, seed)
-        reporter.provision_started(env_name, list(subtargets_to_run))
-
         all_handlers = self._collect_all_handlers()
+
+        selected_handler: ProvisionHandler | None = None
+        if name_selector is not None:
+            selected_handler = self._resolve_selector(name_selector, all_handlers)
+            if subtarget is not None and selected_handler.subtarget != subtarget:
+                raise click.ClickException(
+                    f"provision selector {name_selector!r} resolves to a {selected_handler.subtarget!r} handler, "
+                    f"but --stage {subtarget!r} was given."
+                )
+            subtargets_to_run: tuple[str, ...] = (selected_handler.subtarget,)
+        else:
+            subtargets_to_run = self._resolve_subtargets(subtarget, seed)
+
+        reporter.provision_started(env_name, list(subtargets_to_run))
 
         if dry_run:
             return self._run_dry(
@@ -217,10 +241,11 @@ class ProvisionService:
                 reset=reset,
                 destroy=destroy,
                 reporter=reporter,
+                selected_handler=selected_handler,
             )
 
         for st in subtargets_to_run:
-            handlers = self._filter_and_sort(all_handlers, st)
+            handlers = [selected_handler] if selected_handler is not None else self._filter_and_sort(all_handlers, st)
 
             reporter.subtarget_started(st)
 
@@ -261,10 +286,11 @@ class ProvisionService:
         reset: bool,
         destroy: bool,
         reporter: IProvisionReporter,
+        selected_handler: ProvisionHandler | None = None,
     ) -> ProvisionSummary:
         """Emit plan events for every handler that would run; no scripts executed."""
         for st in subtargets_to_run:
-            handlers = self._filter_and_sort(all_handlers, st)
+            handlers = [selected_handler] if selected_handler is not None else self._filter_and_sort(all_handlers, st)
 
             reporter.subtarget_started(st)
 
@@ -357,6 +383,44 @@ class ProvisionService:
                 logger.warning("Skipping extension %r provision manifest: %s", repo.name, exc)
 
         return handlers
+
+    @staticmethod
+    def _resolve_selector(name_selector: str, all_handlers: list[ProvisionHandler]) -> ProvisionHandler:
+        """Resolve a ``<scope>.<name>`` selector to the single handler it names.
+
+        Raises ``click.ClickException`` for a malformed selector, an unknown
+        scope token, an unmatched name, or (defensively) a name that
+        collides across manifest sources — never a silent no-op.
+        """
+        scope_token, sep, entry_name = name_selector.partition(".")
+        if not sep or not scope_token or not entry_name:
+            valid = ", ".join(repr(t) for t in SELECTOR_SCOPE_TOKENS)
+            raise click.ClickException(
+                f"Invalid provision selector {name_selector!r}. Expected '<scope>.<name>' where <scope> is "
+                f"one of: {valid}."
+            )
+
+        scope = SELECTOR_SCOPE_TOKENS.get(scope_token)
+        if scope is None:
+            valid = ", ".join(repr(t) for t in SELECTOR_SCOPE_TOKENS)
+            raise click.ClickException(
+                f"Invalid provision selector {name_selector!r}: unknown scope {scope_token!r}. "
+                f"Must be one of: {valid}."
+            )
+
+        matches = [h for h in all_handlers if h.scope == scope and h.name == entry_name]
+        if not matches:
+            raise click.ClickException(
+                f"No provision handler matches selector {name_selector!r} "
+                f"(no {scope.value!r}-scope entry named {entry_name!r})."
+            )
+        if len(matches) > 1:
+            raise click.ClickException(
+                f"Provision selector {name_selector!r} matches {len(matches)} handlers "
+                f"({', '.join(sorted({m.source for m in matches}))}) — ambiguous. "
+                f"'name' must be unique within its scope grouping across every manifest source."
+            )
+        return matches[0]
 
     def _filter_and_sort(
         self,

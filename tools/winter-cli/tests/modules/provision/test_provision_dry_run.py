@@ -926,6 +926,89 @@ def test_dry_run_plan_handler_project_is_none_when_not_set() -> None:
     assert reporter.plan_handler_calls[0]["project"] is None
 
 
+# ---------------------------------------------------------------------------
+# Named selector narrows --dry-run / --json plan output
+# ---------------------------------------------------------------------------
+
+
+def test_dry_run_name_selector_narrows_plan_to_one_handler() -> None:
+    """--dry-run --name shows only the resolved handler's plan_handler event."""
+    config = _make_config(
+        provision_raw={
+            "resource": [
+                {"scope": "workspace", "apply": "scripts/create-db.sh", "name": "mydb"},
+                {"scope": "workspace", "apply": "scripts/create-bucket.sh", "name": "mybucket"},
+            ],
+        }
+    )
+    svc, exec_svc, sc, reporter = _make_service(config)
+    summary = svc.run(
+        ENV_NAME,
+        subtarget=None,
+        reset=False,
+        destroy=False,
+        seed=False,
+        no_service_check=False,
+        reporter=reporter,
+        dry_run=True,
+        name_selector="workspace.mydb",
+    )  # type: ignore[arg-type]
+
+    assert summary.status == "ok"
+    assert len(reporter.plan_handler_calls) == 1
+    assert reporter.plan_handler_calls[0]["commands"] == ["scripts/create-db.sh"]
+    assert len(exec_svc.calls) == 0
+    assert len(sc.ensure_calls) == 0
+
+
+def test_dry_run_json_name_selector_narrows_plan_to_one_handler() -> None:
+    """--dry-run --json --name emits exactly one plan_handler for the matched entry."""
+    from winter_cli.modules.provision.provision_reporter import JsonProvisionReporter
+
+    class _CapturingClick:
+        def __init__(self) -> None:
+            self.lines: list[str] = []
+
+        def echo(self, msg: str, err: bool = False) -> None:
+            self.lines.append(msg)
+
+    capturing_click = _CapturingClick()
+    json_reporter = JsonProvisionReporter(click=capturing_click)
+
+    config = _make_config(
+        provision_raw={
+            "resource": [
+                {"scope": "workspace", "apply": "scripts/create-db.sh", "name": "mydb"},
+                {"scope": "workspace", "apply": "scripts/create-bucket.sh", "name": "mybucket"},
+            ],
+        }
+    )
+    svc = ProvisionService(
+        config=config,
+        execution_svc=_RecordingExecutionService(),  # type: ignore[arg-type]
+        manifest_loader=_FakeManifestLoader(),
+        repo_factory=_FakeRepoFactory(),
+        service_check=_RecordingServiceCheck(),  # type: ignore[arg-type]
+        fs=_make_fs_with_env(),
+    )
+    svc.run(
+        ENV_NAME,
+        subtarget=None,
+        reset=False,
+        destroy=False,
+        seed=False,
+        no_service_check=False,
+        reporter=json_reporter,  # type: ignore[arg-type]
+        dry_run=True,
+        name_selector="workspace.mydb",
+    )
+
+    events = [json.loads(line) for line in capturing_click.lines]
+    plan_events = [e for e in events if e.get("type") == "plan_handler"]
+    assert len(plan_events) == 1
+    assert plan_events[0]["commands"] == ["scripts/create-db.sh"]
+
+
 def test_dry_run_json_plan_handler_includes_project_field() -> None:
     """--dry-run --json plan_handler event includes the project key."""
     from winter_cli.config.models import AdoptExtensions, ProjectRepositoryConfig

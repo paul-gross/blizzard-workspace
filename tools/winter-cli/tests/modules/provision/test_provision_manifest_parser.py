@@ -551,3 +551,88 @@ def test_parse_project_empty_string_rejected() -> None:
     raw = {"data": [{"scope": "feature-environment", "apply": "echo seed", "project": ""}]}
     with pytest.raises(ConfigError, match="non-empty string"):
         parser.parse(raw, SOURCE)
+
+
+# ── name field ─────────────────────────────────────────────────────────────
+
+
+def test_parse_name_absent_is_none() -> None:
+    """No name field → handler.name is None."""
+    parser = ProvisionManifestParser()
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply"}]}
+    handlers = parser.parse(raw, SOURCE)
+    assert handlers[0].name is None
+
+
+def test_parse_name_valid_string_accepted() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "name": "mydb"}]}
+    handlers = parser.parse(raw, SOURCE)
+    assert handlers[0].name == "mydb"
+
+
+def test_parse_name_empty_string_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "name": ""}]}
+    with pytest.raises(ConfigError, match="non-empty string"):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_name_non_string_rejected() -> None:
+    parser = ProvisionManifestParser()
+    raw = {"resource": [{"scope": "workspace", "apply": "echo apply", "name": 42}]}
+    with pytest.raises(ConfigError, match="non-empty string"):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_duplicate_name_within_same_scope_rejected() -> None:
+    """Two entries in the same scope with the same name is a parse-time ConfigError."""
+    parser = ProvisionManifestParser()
+    raw = {
+        "resource": [
+            {"scope": "workspace", "apply": "echo one", "name": "mydb"},
+            {"scope": "workspace", "apply": "echo two", "name": "mydb"},
+        ]
+    }
+    with pytest.raises(ConfigError, match="duplicates another"):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_duplicate_name_across_subtargets_same_scope_rejected() -> None:
+    """Uniqueness spans subtargets too — same scope, same name, different subtargets still collides."""
+    parser = ProvisionManifestParser()
+    raw = {
+        "dependency": [{"scope": "workspace", "apply": "echo dep", "name": "mydb"}],
+        "resource": [{"scope": "workspace", "apply": "echo res", "name": "mydb"}],
+    }
+    with pytest.raises(ConfigError, match="duplicates another"):
+        parser.parse(raw, SOURCE)
+
+
+def test_parse_same_name_different_scope_allowed() -> None:
+    """The same short name under different scopes is not a collision."""
+    parser = ProvisionManifestParser()
+    raw = {
+        "resource": [
+            {"scope": "workspace", "apply": "echo one", "name": "mydb"},
+            {"scope": "feature-environment", "apply": "echo two", "name": "mydb"},
+        ]
+    }
+    handlers = parser.parse(raw, SOURCE)
+    assert len(handlers) == 2
+    assert handlers[0].name == "mydb"
+    assert handlers[1].name == "mydb"
+    assert handlers[0].scope != handlers[1].scope
+
+
+def test_parse_duplicate_name_error_names_scope_and_name() -> None:
+    parser = ProvisionManifestParser()
+    raw = {
+        "resource": [
+            {"scope": "workspace", "apply": "echo one", "name": "mydb"},
+            {"scope": "workspace", "apply": "echo two", "name": "mydb"},
+        ]
+    }
+    with pytest.raises(ConfigError, match="mydb") as exc_info:
+        parser.parse(raw, SOURCE)
+    assert "workspace" in str(exc_info.value)

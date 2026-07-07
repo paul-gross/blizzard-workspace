@@ -37,6 +37,7 @@ class _FakeProvisionService:
         no_service_check: bool,
         reporter: Any,
         dry_run: bool = False,
+        name_selector: str | None = None,
     ) -> SimpleNamespace:
         self.calls.append(env_name)
         status = self._statuses.get(env_name, "ok")

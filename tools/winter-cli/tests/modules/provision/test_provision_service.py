@@ -729,6 +729,42 @@ def test_provision_rejects_destroy_without_subtarget() -> None:
     assert result.exit_code != 0
 
 
+def test_provision_accepts_reset_with_name_and_no_stage() -> None:
+    """--reset with --name (no --stage) is accepted at the command-validation level."""
+    from click.testing import CliRunner
+
+    from winter_cli.modules.provision.command import provision_command
+
+    runner = CliRunner()
+    # No container is wired in this bare CliRunner invocation, so this will fail
+    # further down the stack — but NOT at the flag-combination validation step.
+    result = runner.invoke(provision_command, ["alpha", "--name", "workspace.mydb", "--reset"])
+    assert "require an explicit --stage or --name" not in (result.output or "")
+
+
+def test_provision_accepts_destroy_with_name_and_no_stage() -> None:
+    """--destroy with --name (no --stage) is accepted at the command-validation level."""
+    from click.testing import CliRunner
+
+    from winter_cli.modules.provision.command import provision_command
+
+    runner = CliRunner()
+    result = runner.invoke(provision_command, ["alpha", "--name", "workspace.mydb", "--destroy"])
+    assert "require an explicit --stage or --name" not in (result.output or "")
+
+
+def test_provision_rejects_seed_combined_with_name() -> None:
+    """--seed cannot be combined with --name."""
+    from click.testing import CliRunner
+
+    from winter_cli.modules.provision.command import provision_command
+
+    runner = CliRunner()
+    result = runner.invoke(provision_command, ["alpha", "--stage", "resource", "--seed", "--name", "workspace.mydb"])
+    assert result.exit_code != 0
+    assert "--name" in result.output
+
+
 # ---------------------------------------------------------------------------
 # Service-check integration: ensure() called before handlers; raised error aborts
 # ---------------------------------------------------------------------------
@@ -1143,3 +1179,324 @@ def test_workspace_config_load_does_not_raise_on_malformed_provision() -> None:
 
     with pytest.raises(ConfigError):
         parse_provision(config, source="project")
+
+
+# ---------------------------------------------------------------------------
+# Named resource selector (--name <scope>.<name>)
+# ---------------------------------------------------------------------------
+
+
+def test_name_selector_apply_runs_only_the_named_entry() -> None:
+    """--name workspace.mydb runs only that entry; sibling resources untouched."""
+    config = _make_config(
+        provision_raw={
+            "resource": [
+                {"scope": "workspace", "apply": "scripts/create-db.sh", "name": "mydb"},
+                {"scope": "workspace", "apply": "scripts/create-bucket.sh", "name": "mybucket"},
+            ],
+        }
+    )
+    svc, exec_svc, reporter = _make_service(config=config)
+    summary = svc.run(
+        ENV_NAME,
+        subtarget=None,
+        reset=False,
+        destroy=False,
+        seed=False,
+        no_service_check=False,
+        reporter=reporter,
+        name_selector="workspace.mydb",
+    )  # type: ignore[arg-type]
+
+    assert summary.status == "ok"
+    assert len(exec_svc.calls) == 1
+    assert exec_svc.calls[0][0].name == "mydb"
+    assert exec_svc.calls[0][1] == "apply"
+    # Only the matched sub-target's started event fires.
+    assert reporter.subtarget_started_calls == ["resource"]
+
+
+def test_name_selector_destroy_runs_only_the_named_entry() -> None:
+    config = _make_config(
+        provision_raw={
+            "resource": [
+                {
+                    "scope": "workspace",
+                    "apply": "scripts/create-db.sh",
+                    "destroy": "scripts/drop-db.sh",
+                    "name": "mydb",
+                },
+                {
+                    "scope": "workspace",
+                    "apply": "scripts/create-bucket.sh",
+                    "destroy": "scripts/drop-bucket.sh",
+                    "name": "mybucket",
+                },
+            ],
+        }
+    )
+    svc, exec_svc, reporter = _make_service(config=config)
+    summary = svc.run(
+        ENV_NAME,
+        subtarget=None,
+        reset=False,
+        destroy=True,
+        seed=False,
+        no_service_check=False,
+        reporter=reporter,
+        name_selector="workspace.mydb",
+    )  # type: ignore[arg-type]
+
+    assert summary.status == "ok"
+    assert len(exec_svc.calls) == 1
+    assert exec_svc.calls[0][0].name == "mydb"
+    assert exec_svc.calls[0][1] == "destroy"
+
+
+def test_name_selector_reset_runs_only_the_named_entry() -> None:
+    config = _make_config(
+        provision_raw={
+            "resource": [
+                {
+                    "scope": "workspace",
+                    "apply": "scripts/create-db.sh",
+                    "reset": "scripts/reset-db.sh",
+                    "name": "mydb",
+                },
+                {
+                    "scope": "workspace",
+                    "apply": "scripts/create-bucket.sh",
+                    "reset": "scripts/reset-bucket.sh",
+                    "name": "mybucket",
+                },
+            ],
+        }
+    )
+    svc, exec_svc, reporter = _make_service(config=config)
+    summary = svc.run(
+        ENV_NAME,
+        subtarget=None,
+        reset=True,
+        destroy=False,
+        seed=False,
+        no_service_check=False,
+        reporter=reporter,
+        name_selector="workspace.mydb",
+    )  # type: ignore[arg-type]
+
+    assert summary.status == "ok"
+    assert len(exec_svc.calls) == 1
+    assert exec_svc.calls[0][0].name == "mydb"
+    assert exec_svc.calls[0][1] == "reset"
+
+
+def test_name_selector_unknown_name_raises_clean_error() -> None:
+    """An unmatched selector aborts with a clear error naming the selector — no silent no-op."""
+    import click
+
+    config = _make_config(
+        provision_raw={
+            "resource": [{"scope": "workspace", "apply": "scripts/create-db.sh", "name": "mydb"}],
+        }
+    )
+    svc, exec_svc, reporter = _make_service(config=config)
+
+    with pytest.raises(click.ClickException) as exc_info:
+        svc.run(
+            ENV_NAME,
+            subtarget=None,
+            reset=False,
+            destroy=False,
+            seed=False,
+            no_service_check=False,
+            reporter=reporter,
+            name_selector="workspace.nosuch",
+        )  # type: ignore[arg-type]
+
+    assert "workspace.nosuch" in exc_info.value.format_message()
+    assert len(exec_svc.calls) == 0
+
+
+def test_name_selector_unknown_scope_token_raises_clean_error() -> None:
+    import click
+
+    config = _make_config(
+        provision_raw={
+            "resource": [{"scope": "workspace", "apply": "scripts/create-db.sh", "name": "mydb"}],
+        }
+    )
+    svc, _exec_svc, reporter = _make_service(config=config)
+
+    with pytest.raises(click.ClickException) as exc_info:
+        svc.run(
+            ENV_NAME,
+            subtarget=None,
+            reset=False,
+            destroy=False,
+            seed=False,
+            no_service_check=False,
+            reporter=reporter,
+            name_selector="bogus-scope.mydb",
+        )  # type: ignore[arg-type]
+
+    assert "bogus-scope" in exc_info.value.format_message()
+
+
+def test_name_selector_malformed_selector_raises_clean_error() -> None:
+    """A selector without the '<scope>.<name>' shape is a clean error, not a crash."""
+    import click
+
+    config = _make_config(
+        provision_raw={
+            "resource": [{"scope": "workspace", "apply": "scripts/create-db.sh", "name": "mydb"}],
+        }
+    )
+    svc, _exec_svc, reporter = _make_service(config=config)
+
+    with pytest.raises(click.ClickException):
+        svc.run(
+            ENV_NAME,
+            subtarget=None,
+            reset=False,
+            destroy=False,
+            seed=False,
+            no_service_check=False,
+            reporter=reporter,
+            name_selector="mydb",  # no '.' separator
+        )  # type: ignore[arg-type]
+
+
+def test_name_selector_ambiguous_match_raises_clean_error() -> None:
+    """Same name declared in the same scope across two manifest sources is ambiguous, not a silent pick."""
+    import click
+
+    from winter_cli.modules.workspace.models import StandaloneRepository
+
+    class _FakeExtManifest:
+        provision = (
+            ProvisionHandler(
+                subtarget="resource",
+                scope=ProvisionScope.workspace,
+                apply=("scripts/ext.sh",),
+                source="my-ext",
+                name="mydb",
+            ),
+        )
+
+    fake_repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+
+    fs = FakeFilesystem(files={manifest_path: ""}, directories=[WORKSPACE_ROOT / ENV_NAME])
+    loader = _FakeManifestLoader(manifests={manifest_path: _FakeExtManifest()})
+    repo_factory = _FakeRepoFactory(standalone=[fake_repo])
+
+    config = _make_config(
+        provision_raw={
+            "resource": [{"scope": "workspace", "apply": "scripts/create-db.sh", "name": "mydb"}],
+        }
+    )
+    exec_svc = _FakeExecutionService()
+    reporter = _FakeReporter()
+    svc = ProvisionService(
+        config=config,
+        execution_svc=exec_svc,  # type: ignore[arg-type]
+        manifest_loader=loader,  # type: ignore[arg-type]
+        repo_factory=repo_factory,  # type: ignore[arg-type]
+        service_check=NoOpServiceCheck(),
+        fs=fs,
+    )
+
+    with pytest.raises(click.ClickException) as exc_info:
+        svc.run(
+            ENV_NAME,
+            subtarget=None,
+            reset=False,
+            destroy=False,
+            seed=False,
+            no_service_check=False,
+            reporter=reporter,
+            name_selector="workspace.mydb",
+        )  # type: ignore[arg-type]
+
+    assert "workspace.mydb" in exc_info.value.format_message()
+    assert len(exec_svc.calls) == 0
+
+
+def test_name_selector_same_name_different_scope_disambiguates() -> None:
+    """Same short name declared under two different scopes resolves unambiguously by scope token."""
+    config = _make_config(
+        provision_raw={
+            "resource": [
+                {"scope": "workspace", "apply": "scripts/ws.sh", "name": "mydb"},
+                {"scope": "feature-environment", "apply": "scripts/env.sh", "name": "mydb"},
+            ],
+        }
+    )
+    svc, exec_svc, reporter = _make_service(config=config)
+    summary = svc.run(
+        ENV_NAME,
+        subtarget=None,
+        reset=False,
+        destroy=False,
+        seed=False,
+        no_service_check=False,
+        reporter=reporter,
+        name_selector="feature.mydb",
+    )  # type: ignore[arg-type]
+
+    assert summary.status == "ok"
+    assert len(exec_svc.calls) == 1
+    assert exec_svc.calls[0][0].scope == ProvisionScope.feature_environment
+    assert exec_svc.calls[0][0].apply == ("scripts/env.sh",)
+
+
+def test_name_selector_works_without_explicit_stage() -> None:
+    """--name resolves and runs without requiring --stage."""
+    config = _make_config(
+        provision_raw={
+            "dependency": [{"scope": "workspace", "apply": "scripts/dep.sh", "name": "depname"}],
+            "resource": [{"scope": "workspace", "apply": "scripts/res.sh", "name": "resname"}],
+        }
+    )
+    svc, exec_svc, reporter = _make_service(config=config)
+    summary = svc.run(
+        ENV_NAME,
+        subtarget=None,
+        reset=False,
+        destroy=False,
+        seed=False,
+        no_service_check=False,
+        reporter=reporter,
+        name_selector="workspace.resname",
+    )  # type: ignore[arg-type]
+
+    assert summary.status == "ok"
+    assert len(exec_svc.calls) == 1
+    assert exec_svc.calls[0][0].name == "resname"
+    assert reporter.subtarget_started_calls == ["resource"]
+
+
+def test_name_selector_mismatched_explicit_stage_raises_clean_error() -> None:
+    """--name resolving to a different sub-target than an explicit --stage is a clean error."""
+    import click
+
+    config = _make_config(
+        provision_raw={
+            "resource": [{"scope": "workspace", "apply": "scripts/res.sh", "name": "resname"}],
+        }
+    )
+    svc, _exec_svc, reporter = _make_service(config=config)
+
+    with pytest.raises(click.ClickException) as exc_info:
+        svc.run(
+            ENV_NAME,
+            subtarget="data",
+            reset=False,
+            destroy=False,
+            seed=False,
+            no_service_check=False,
+            reporter=reporter,
+            name_selector="workspace.resname",
+        )  # type: ignore[arg-type]
+
+    assert "resname" in exc_info.value.format_message() or "workspace.resname" in exc_info.value.format_message()

@@ -7,7 +7,7 @@ from winter_cli.core.config_file import ConfigError
 
 PROVISION_SUBTARGETS = ("dependency", "resource", "data")
 
-_ENTRY_ALLOWED_KEYS = frozenset({"scope", "apply", "destroy", "reset", "required_services", "project"})
+_ENTRY_ALLOWED_KEYS = frozenset({"scope", "apply", "destroy", "reset", "required_services", "project", "name"})
 _SUBTARGETS_WITH_REQUIRED_SERVICES = frozenset({"resource", "data"})
 
 
@@ -20,6 +20,18 @@ class ProvisionScope(enum.Enum):
 # Scopes on which ``project`` is permitted (defined after the enum so the enum members are available).
 _PROJECT_ALLOWED_SCOPES = frozenset({ProvisionScope.feature_environment})
 
+# Scope-qualified selector token grammar for `winter provision --name <scope>.<name>`.
+# Short, hyphen-free tokens — distinct from the (hyphenated) `scope` field spelling and
+# from arbitrary env names, so a selector can never be confused with either. Mirrors the
+# brevity of the `required_services` `workspace/<service>` token while avoiding that
+# grammar's per-env token (a provision entry is declared once and is not itself bound to
+# a specific env instance, so there is no env name to reuse here).
+SELECTOR_SCOPE_TOKENS: dict[str, ProvisionScope] = {
+    "workspace": ProvisionScope.workspace,
+    "feature": ProvisionScope.feature_environment,
+    "worktree": ProvisionScope.feature_worktree,
+}
+
 
 @dataclass(frozen=True)
 class ProvisionHandler:
@@ -31,6 +43,7 @@ class ProvisionHandler:
     reset: tuple[str, ...] | None = None
     required_services: tuple[str, ...] = field(default_factory=tuple)
     project: str | None = None
+    name: str | None = None
 
 
 def _parse_commands(
@@ -106,6 +119,7 @@ class ProvisionManifestParser:
             return []
 
         handlers: list[ProvisionHandler] = []
+        names_by_scope: dict[ProvisionScope, set[str]] = {}
 
         for key, entries in raw.items():
             if key not in PROVISION_SUBTARGETS:
@@ -188,6 +202,21 @@ class ProvisionManifestParser:
                         )
                     project = project_raw
 
+                name_raw = entry.get("name")
+                name: str | None = None
+                if name_raw is not None:
+                    if not isinstance(name_raw, str) or not name_raw:
+                        raise ConfigError(f"provision.{key}[{i}].name in {source!r} must be a non-empty string.")
+                    seen = names_by_scope.setdefault(scope, set())
+                    if name_raw in seen:
+                        raise ConfigError(
+                            f"provision.{key}[{i}].name {name_raw!r} in {source!r} duplicates another "
+                            f"provision entry's name within scope {scope.value!r}. "
+                            f"'name' must be unique within its scope grouping."
+                        )
+                    seen.add(name_raw)
+                    name = name_raw
+
                 handlers.append(
                     ProvisionHandler(
                         subtarget=key,
@@ -198,6 +227,7 @@ class ProvisionManifestParser:
                         reset=reset,
                         required_services=required_services,
                         project=project,
+                        name=name,
                     )
                 )
 

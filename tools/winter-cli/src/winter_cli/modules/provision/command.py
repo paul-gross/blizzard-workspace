@@ -25,6 +25,17 @@ from winter_cli.modules.workspace.pattern_match import validate_env_pattern
 @click.option("--destroy", is_flag=True, default=False, help="Destroy the sub-target only.")
 @click.option("--seed", is_flag=True, default=False, help="Create resources then seed data (resource only).")
 @click.option(
+    "--name",
+    "name_selector",
+    default=None,
+    metavar="SCOPE.NAME",
+    help=(
+        "Target a single named provision entry instead of a whole stage. "
+        "SCOPE.NAME is scope-qualified: SCOPE is one of 'workspace', 'feature', 'worktree'. "
+        "Works with bare apply, --destroy, and --reset; --stage is optional when --name is given."
+    ),
+)
+@click.option(
     "--no-service-check", is_flag=True, default=False, help="Skip the required-services check before running handlers."
 )
 @click.option(
@@ -45,6 +56,7 @@ def provision_command(
     reset: bool,
     destroy: bool,
     seed: bool,
+    name_selector: str | None,
     no_service_check: bool,
     dry_run: bool,
     output_json: bool,
@@ -56,7 +68,7 @@ def provision_command(
     segment. At least one PATTERN is required — pass a literal name, several
     names, or a glob to fan out across every matching env. Runs three ordered
     sub-targets — dependency → resource → data — per matched env, or a single
-    explicit --stage.
+    explicit --stage, or a single named entry via --name.
 
     \b
     Examples:
@@ -71,6 +83,9 @@ def provision_command(
       winter provision alpha --json              # full chain, NDJSON output
       winter provision alpha --dry-run           # print plan, no side effects
       winter provision alpha --dry-run --json    # structured plan as NDJSON
+      winter provision alpha --name workspace.mydb            # apply just the named entry
+      winter provision alpha --name workspace.mydb --reset     # reset just the named entry
+      winter provision alpha --name workspace.mydb --destroy   # destroy just the named entry
     """
     # Validate mutually exclusive action flags.
     if reset and destroy:
@@ -82,11 +97,15 @@ def provision_command(
             raise click.ClickException("--seed requires an explicit --stage resource")
         if reset or destroy:
             raise click.ClickException("--seed cannot be combined with --reset or --destroy")
+        if name_selector is not None:
+            raise click.ClickException("--seed cannot be combined with --name")
 
-    # Action flags require an explicit sub-target (the full chain doesn't accept
-    # a single action because dependency/resource/data use them differently).
-    if (reset or destroy) and subtarget is None:
-        raise click.ClickException("--reset and --destroy require an explicit --stage")
+    # Action flags require an explicit sub-target or a --name selector (the full
+    # chain doesn't accept a single action because dependency/resource/data use
+    # them differently) — a --name selector already narrows to one handler, so
+    # it satisfies the same requirement without --stage.
+    if (reset or destroy) and subtarget is None and name_selector is None:
+        raise click.ClickException("--reset and --destroy require an explicit --stage or --name")
 
     for pattern in patterns:
         validate_env_pattern(pattern)
@@ -103,5 +122,6 @@ def provision_command(
             no_service_check=no_service_check,
             dry_run=dry_run,
             output_json=output_json,
+            name_selector=name_selector,
         )
     )

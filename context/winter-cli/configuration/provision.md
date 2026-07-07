@@ -51,6 +51,7 @@ destroy = "dropdb --if-exists myapp_ext"
 | `reset` | no | Inline shell command (string) or list (array) run by `--reset`. If absent, winter composes destroy + apply when both exist; otherwise warns and degrades to re-apply. |
 | `required_services` | no | Services that must be running before this handler executes (valid only on `resource` and `data` — rejected on `dependency`). The runtime check is [../usage/provision.md#service-check-required_services](../usage/provision.md#service-check-required_services). |
 | `project` | no | Project repo name (must be a declared `[[project_repository]]`). Valid only on `feature-environment` scope. When set, the handler's cwd is `<workspace>/<env>/<project>/` instead of the env root. See [Project field](#project-field) below. |
+| `name` | no | Identifies this entry for single-handler targeting (`winter provision <env> --name <scope>.<name>`). Must be unique within its `scope` grouping — see [Name field](#name-field) below. |
 
 **Sub-targets:** `dependency`, `resource`, `data`. Unknown sub-target keys (e.g. `[[provision.custom]]`) are rejected. Unknown per-entry keys are also rejected.
 
@@ -110,6 +111,30 @@ apply   = "bundle exec rails db:seed"
 - If `project` is set and the named worktree does not exist in the target env at provision time, `winter provision` **aborts with a hard error** naming the missing project and env. There is no skip-with-warning fallback — use `winter ws init <env>` to create the worktree first.
 - `--dry-run` / `--json` plan output shows the resolved `project` value so you can verify the target before running.
 
+## Name field
+
+`name` identifies an entry so it can be targeted individually — apply, `--destroy`, or `--reset` — instead of running the whole stage it belongs to. Declaring `name` is optional; entries without it remain reachable only via whole-stage actions.
+
+```toml
+[[provision.resource]]
+scope   = "workspace"
+name    = "postgres-db"
+apply   = ["createdb myapp", "psql myapp -f schema.sql"]
+destroy = "dropdb --if-exists myapp"
+
+[[provision.resource]]
+scope   = "workspace"
+name    = "message-queue"
+apply   = "rabbitmqadmin declare vhost name=myapp"
+destroy = "rabbitmqadmin delete vhost name=myapp"
+```
+
+**Rules:**
+
+- `name` must be a non-empty string.
+- `name` must be unique within its `scope` grouping — across every sub-target (`dependency`/`resource`/`data`) declared in the same manifest source (workspace `.winter/config.toml`, or one extension's `winter-ext.toml`). The same short name may be reused under a *different* scope without conflict (e.g. a `workspace`-scope `mydb` and a `feature-environment`-scope `mydb` coexist). A collision is a `ConfigError` at parse time and a `[provision]` doctor finding.
+- Targeting a named entry uses the scope-qualified selector `<scope>.<name>` on `winter provision` — see [../usage/provision.md#named-resource-selector---name](../usage/provision.md#named-resource-selector---name).
+
 ## Validation
 
 The following values are rejected at parse time (`ConfigError`) and flagged by the doctor `[provision]` probe:
@@ -120,5 +145,7 @@ The following values are rejected at parse time (`ConfigError`) and flagged by t
 - A value that is neither a string nor a list
 - `project` on `workspace` or `feature-worktree` scope
 - `project` naming a repo not declared in `[[project_repository]]`
+- `name` that is not a non-empty string
+- `name` duplicating another entry's name within the same `scope` grouping
 
 The full doctor `[provision]` probe is [../usage/provision.md#doctor-probe](../usage/provision.md#doctor-probe).

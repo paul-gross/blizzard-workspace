@@ -15,12 +15,17 @@ winter provision alpha --stage dependency     # install/check dependencies
 winter provision alpha --stage resource       # create resources (databases, message-queue vhosts, buckets)
 winter provision alpha --stage data           # load baseline state (idempotent)
 
-# Action flags — always require an explicit --stage
+# Action flags — always require an explicit --stage (or a --name selector, below)
 winter provision alpha --stage resource --reset       # destroy + recreate resources
 winter provision alpha --stage resource --destroy     # destroy resources only
 winter provision alpha --stage resource --seed        # create resources, then run data
 winter provision alpha --stage data --reset           # destroy + recreate data
 winter provision alpha --stage data --destroy         # delete data only
+
+# Named resource selector — target one named entry instead of a whole stage
+winter provision alpha --name workspace.mydb              # apply just that entry
+winter provision alpha --name workspace.mydb --reset       # reset just that entry
+winter provision alpha --name workspace.mydb --destroy     # destroy just that entry
 
 # Global flags
 winter provision alpha --no-service-check     # skip the required_services check entirely
@@ -54,13 +59,33 @@ Authors guarantee idempotency; winter tracks no state between runs.
 
 **Flag validation:**
 - `--reset` and `--destroy` together are rejected.
-- `--seed` is valid only on `resource`, not on `dependency` or `data`.
-- Any action flag (`--reset`, `--destroy`, `--seed`) requires an explicit sub-target — not the bare full-chain form.
-- `--dry-run` may be combined with any action flag or sub-target: it previews what the given invocation would do.
+- `--seed` is valid only on `resource`, not on `dependency` or `data`; it also cannot be combined with `--name`.
+- Any action flag (`--reset`, `--destroy`) requires an explicit sub-target (`--stage`) **or** a `--name` selector — not the bare full-chain form.
+- `--dry-run` may be combined with any action flag, sub-target, or `--name` selector: it previews what the given invocation would do.
+
+## Named resource selector (`--name`)
+
+`--name <scope>.<name>` targets a single named `[[provision.*]]` entry (see [configuration/provision.md#name-field](../configuration/provision.md#name-field)) for apply (bare), `--destroy`, or `--reset` — every sibling handler, including others in the same sub-target, is skipped. `--stage` is optional when `--name` is given; when both are present, the resolved handler must belong to the given `--stage` or the run aborts with a clear error before anything runs.
+
+`<scope>` is one of three short tokens — **not** the hyphenated `scope` field spelling used in the manifest:
+
+| Selector token | Manifest `scope` value |
+|-----------------|--------------------------|
+| `workspace` | `workspace` |
+| `feature` | `feature-environment` |
+| `worktree` | `feature-worktree` |
+
+```bash
+winter provision alpha --name workspace.mydb              # apply just the workspace-scope "mydb" entry
+winter provision alpha --name feature.mydb --reset         # reset the feature-environment-scope "mydb" entry
+winter provision alpha --name workspace.mydb --destroy     # destroy just that entry
+```
+
+An unresolvable selector — malformed shape, unknown scope token, or no entry with that name in that scope — **aborts with a hard error naming the selector**; there is no skip-with-warning fallback (mirrors the `project` field's missing-worktree hard error in [configuration/provision.md#project-field](../configuration/provision.md#project-field)). `--dry-run` and `--json` plan output reflect the narrowed selection: only the resolved handler's `plan_handler` event(s) appear.
 
 ## Manifest schema
 
-The `[[provision.*]]` shape an author declares — per-entry fields, the string/array command forms, scope semantics (working directory and injected environment), the `project` field, and the parse-time validation rules — is owned by [configuration/provision.md](../configuration/provision.md). This page covers running the handlers it declares.
+The `[[provision.*]]` shape an author declares is owned by [configuration/provision.md](../configuration/provision.md). This page covers running the handlers it declares.
 
 ## Scope and ordering
 
@@ -112,7 +137,7 @@ A `required_services` token must be scoped as `workspace/<service>` or `<current
 - Per-handler output: sub-target, scope, source, the commands that would run (joined with ` && ` for display when multiple), resolved action (apply / destroy / reset), resolved `project` cwd (when set), and which `required_services` it would check (if any).
 - A sub-target with no declared handlers is reported as a no-op.
 - No mutation occurs: no commands run, no `winter service up` calls are made.
-- `--dry-run` may be combined with any action flag (`--reset`, `--destroy`, `--seed`) or sub-target to preview that specific path.
+- See the flag validation rules under [Action vocabulary](#action-vocabulary), above, for what `--dry-run` can be combined with; it previews that specific path without executing it.
 
 `--dry-run --json` emits the same NDJSON stream as a real run (see below), replacing `execution_*` and `handler_result` events with `plan_handler` events — one per resolved action in plan order. (A handler with `--reset` that has no `reset` field but does have a `destroy` field emits two events: a `destroy` then an `apply`.) The `plan_handler` event includes a `project` key (`null` or the project name) so the resolved cwd is visible in the structured output.
 
@@ -159,6 +184,6 @@ A `required_services` token must be scoped as `workspace/<service>` or `<current
 
 ## Doctor probe
 
-`winter doctor` includes a built-in `[provision]` probe that validates every declared `[[provision.*]]` manifest entry — from both `.winter/config.toml` and installed extension `winter-ext.toml` files — against the manifest rules in [configuration/provision.md](../configuration/provision.md#validation) (the per-entry field shapes, scope and `project` constraints, and unknown-key rejection). It reports one finding per bad entry without aborting other doctor checks.
+`winter doctor` includes a built-in `[provision]` probe that validates every declared `[[provision.*]]` manifest entry — from both `.winter/config.toml` and installed extension `winter-ext.toml` files — against the manifest rules in [configuration/provision.md](../configuration/provision.md#validation). It reports one finding per bad entry without aborting other doctor checks.
 
 See [doctor.md](./doctor.md) for the full doctor probe contract.

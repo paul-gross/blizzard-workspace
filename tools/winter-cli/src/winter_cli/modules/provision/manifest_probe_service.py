@@ -81,6 +81,7 @@ def _validate_raw_provision(
 
     findings: list[ProbeResult] = []
     valid_entries = 0
+    names_by_scope: dict[str, set[str]] = {}
 
     for key, entries in raw.items():
         if key not in PROVISION_SUBTARGETS:
@@ -267,6 +268,37 @@ def _validate_raw_provision(
                         )
                     )
                     entry_ok = False
+
+            # name: optional non-empty string, unique within its scope grouping.
+            name_raw = entry.get("name")
+            if name_raw is not None:
+                if not isinstance(name_raw, str) or not name_raw:
+                    findings.append(
+                        ProbeResult(
+                            source=PROVISION_SOURCE,
+                            name=f"provision manifest: {source}",
+                            status=ProbeStatus.fail,
+                            message=f"{location}.name must be a non-empty string.",
+                        )
+                    )
+                    entry_ok = False
+                elif scope_raw in _VALID_SCOPES:
+                    seen = names_by_scope.setdefault(scope_raw, set())
+                    if name_raw in seen:
+                        findings.append(
+                            ProbeResult(
+                                source=PROVISION_SOURCE,
+                                name=f"provision manifest: {source}",
+                                status=ProbeStatus.fail,
+                                message=(
+                                    f"{location}.name {name_raw!r} duplicates another provision entry's name "
+                                    f"within scope {scope_raw!r}. 'name' must be unique within its scope grouping."
+                                ),
+                            )
+                        )
+                        entry_ok = False
+                    else:
+                        seen.add(name_raw)
 
             if entry_ok:
                 valid_entries += 1

@@ -220,6 +220,72 @@ def test_mixed_good_and_bad_entries_all_bad_are_reported() -> None:
     assert "totally-wrong" in fail_results[0].message
 
 
+# ── name field ─────────────────────────────────────────────────────────────
+
+
+def test_name_valid_and_unique_emits_pass() -> None:
+    raw = {
+        "resource": [
+            {"scope": "workspace", "apply": "scripts/create-db.sh", "name": "mydb"},
+        ],
+    }
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+
+    results = svc.run([])
+
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+
+
+def test_name_non_string_emits_fail() -> None:
+    raw = {
+        "resource": [{"scope": "workspace", "apply": "scripts/create-db.sh", "name": 42}],
+    }
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+
+    results = svc.run([])
+
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.fail
+    assert "name" in results[0].message
+
+
+def test_duplicate_name_within_same_scope_emits_fail() -> None:
+    raw = {
+        "resource": [
+            {"scope": "workspace", "apply": "scripts/one.sh", "name": "mydb"},
+            {"scope": "workspace", "apply": "scripts/two.sh", "name": "mydb"},
+        ],
+    }
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+
+    results = svc.run([])
+
+    fail_results = [r for r in results if r.status == ProbeStatus.fail]
+    assert len(fail_results) == 1
+    assert "mydb" in fail_results[0].message
+    assert "workspace" in fail_results[0].message
+
+
+def test_same_name_different_scope_does_not_emit_fail() -> None:
+    raw = {
+        "resource": [
+            {"scope": "workspace", "apply": "scripts/one.sh", "name": "mydb"},
+            {"scope": "feature-environment", "apply": "scripts/two.sh", "name": "mydb"},
+        ],
+    }
+    config = _build_config(provision_raw=raw)
+    svc, _repo = _build_service(config)
+
+    results = svc.run([])
+
+    assert len(results) == 1
+    assert results[0].status == ProbeStatus.pass_
+
+
 # ── extension provision ───────────────────────────────────────────────────────
 
 
