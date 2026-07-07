@@ -134,9 +134,9 @@ The name gives you an unambiguous way to reference and speak about the workspace
 
 ## Contributing
 
-Winter is not currently accepting outside contributions. If you'd like to talk about becoming a contributor, get in touch via [LinkedIn](https://www.linkedin.com/in/pjgross) or email at [paul@grosscode.net](mailto:paul@grosscode.net).
+Contributions are welcome. For changes to the winter core, reach out first to become a collaborator — opening an issue that introduces what you'd like to work on is perfect — so we can align on direction before you invest in a PR. Issues, bug reports, and ideas are welcome from anyone, any time.
 
-That said, the core winter foundation being closed to PRs doesn't stop you from building on it — use the [winter-workspace](https://github.com/paul-gross/winter-workspace) repo as your base to develop your own extensions and share them.
+You also don't need anyone's go-ahead to build *on* winter — use the [winter-workspace](https://github.com/paul-gross/winter-workspace) repo as your base to develop your own extensions and share them.
 
 ## License
 
