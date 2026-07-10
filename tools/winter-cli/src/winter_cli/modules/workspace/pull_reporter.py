@@ -66,7 +66,9 @@ class StreamPullReporter:
             msg = pin_ref if pin_ref else "pin operation failed"
             self._echo(f"{prefix} pin error: {msg}", err=True)
         elif result == SyncResult.no_upstream:
-            self._echo(f"{prefix} no upstream", err=True)
+            # Benign for a feature worktree (excluded from the env's success
+            # calc) → stdout; a real failure for a standalone → stderr.
+            self._echo(f"{prefix} no upstream", err=scope_label == "standalone")
         elif result == SyncResult.up_to_date:
             self._echo(f"{prefix} up to date")
         elif result == SyncResult.merged:

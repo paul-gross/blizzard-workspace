@@ -196,6 +196,7 @@ def test_get_worktree_upstream_returns_tracking_branch_name(
     tb = MagicMock()
     tb.name = "origin/feature-123"
     r.active_branch.tracking_branch.return_value = tb
+    r.git.rev_parse.return_value = ""  # ref resolves in the local store
     wt = _wt(_REPO_PATH)
 
     assert repo.get_worktree_upstream(wt) == "origin/feature-123"
@@ -207,6 +208,28 @@ def test_get_worktree_upstream_returns_none_when_unset(
     git_mock = _fake_git_repo(monkeypatch)
     r = git_mock.Repo.return_value
     r.active_branch.tracking_branch.return_value = None
+    wt = _wt(_REPO_PATH)
+
+    assert repo.get_worktree_upstream(wt) is None
+
+
+def test_get_worktree_upstream_returns_none_when_configured_ref_does_not_resolve(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
+) -> None:
+    """A connected feature branch that origin doesn't have yet reads as no upstream.
+
+    `winter ws connect` writes `branch.<head>.{remote,merge}` without a matching
+    remote ref, so `tracking_branch()` reports a name that doesn't resolve. Pull
+    must see None here (→ benign no_upstream skip), not a non-resolving ref it
+    would try to integrate and mis-report as divergence.
+    """
+    git_mock = _fake_git_repo(monkeypatch)
+    r = git_mock.Repo.return_value
+    tb = MagicMock()
+    tb.name = "origin/feature/ghost-branch"
+    r.active_branch.tracking_branch.return_value = tb
+    unknown_rev = git.GitCommandError(("git", "rev-parse"), 128, stderr=b"unknown revision")
+    r.git.rev_parse.side_effect = unknown_rev
     wt = _wt(_REPO_PATH)
 
     assert repo.get_worktree_upstream(wt) is None

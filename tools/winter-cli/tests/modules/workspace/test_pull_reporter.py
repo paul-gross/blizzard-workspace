@@ -73,6 +73,31 @@ def test_stream_repo_synced_diverged_to_stderr_with_span() -> None:
     assert click.lines == [("[alpha/demo] diverged: +3/-2", True)]
 
 
+def test_stream_repo_synced_no_upstream_worktree_is_benign_on_stdout() -> None:
+    """An unconnected feature worktree is a benign skip, not an error.
+
+    Pulling a whole env where only one repo tracks a feature branch must not
+    spam stderr with a line per unconnected worktree — the env still succeeds.
+    """
+    click = _CapturingClick()
+    reporter = StreamPullReporter(click)
+
+    reporter.repo_synced("alpha", "demo", SyncResult.no_upstream, commits=0, ahead=0, behind=0)
+
+    assert click.lines == [("[alpha/demo] no upstream", False)]
+
+
+def test_stream_repo_synced_no_upstream_standalone_stays_on_stderr() -> None:
+    """A standalone repo is expected to track something — no upstream is a real
+    failure there (it fails PullReport.success), so it stays on stderr."""
+    click = _CapturingClick()
+    reporter = StreamPullReporter(click)
+
+    reporter.repo_synced("standalone", "my-lib", SyncResult.no_upstream, commits=0, ahead=0, behind=0)
+
+    assert click.lines == [("[standalone/my-lib] no upstream", True)]
+
+
 # --- json reporter ------------------------------------------------------------
 
 

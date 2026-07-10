@@ -224,19 +224,35 @@ class WriteRepoRepository(ReadRepoRepository):
                 ) from exc
 
     def get_worktree_upstream(self, worktree: FeatureWorktree) -> str | None:
-        """The worktree branch's current upstream (e.g. `origin/feature-123`), or None. No network."""
+        """The worktree branch's current upstream (e.g. `origin/feature-123`), or None. No network.
+
+        Returns None both when no upstream is configured AND when the configured
+        upstream's remote-tracking ref doesn't resolve in the local object store
+        — i.e. the worktree was connected (`winter ws connect` writes
+        `branch.<head>.{remote,merge}` directly, without a matching remote ref)
+        but origin has no such branch yet, or it was never fetched for this repo.
+        gitpython's `tracking_branch()` returns the configured ref name even when
+        it doesn't exist, so we verify resolution here. Without this, pulling an
+        env where only some repos carry the feature branch would try to integrate
+        a non-resolving ref in the others and mis-report it as divergence, failing
+        the whole pull; treating it as "no upstream" lets those worktrees skip
+        benignly (they have nothing to pull until the branch is pushed).
+        """
         with git.Repo(str(worktree.path)) as r:
-            return self._tracking_branch_name(r)
+            name = self._tracking_branch_name(r)
+            if name is None:
+                return None
+            return name if self._has_ref(r, name) else None
 
     def get_worktree_push_branch(self, worktree: FeatureWorktree) -> str | None:
         """The bare branch this worktree pushes to, read from its own tracking config.
 
         Returns the branch name from `branch.<head>.merge` when the worktree
         tracks `origin`, or None when no upstream is configured. Unlike
-        `get_worktree_upstream` (which goes through `tracking_branch()` and so
-        sees None for a never-fetched feature branch), this reads config
-        directly via `read_origin_merge_branch`, which resolves the first-push
-        target. No network.
+        `get_worktree_upstream` — which returns None for a connected feature
+        branch whose remote ref doesn't resolve yet — this reads config directly
+        via `read_origin_merge_branch`, so it still resolves the first-push
+        target of a branch that origin doesn't have yet. No network.
         """
         with git.Repo(str(worktree.path)) as r:
             return read_origin_merge_branch(r, self._error_factory, cwd=worktree.path, label=worktree.repository.name)
