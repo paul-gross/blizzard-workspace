@@ -15,6 +15,10 @@ Interactive TUI showing workspace status, feature environments, and repo details
 - `ctrl+k` / `ctrl+j` — jump table focus.
 - `c` — clear the Log tab (Log screen only; not remappable).
 
+**Live config reload:** the workspace screen re-reads `.winter/config.toml` on every refresh (its `r` key, and the automatic 30s poll) — a `[[project_repository]]` or `[[standalone_repository]]` added and materialized while the dashboard is running appears on the next refresh, no restart needed, and a newly materialized feature env is discovered the same way. The worktree-detail and standalone-detail screens' own `r` only re-reads that screen's git status and does not trigger a config reload. A malformed `config.toml` at refresh time is tolerated: the parse error lands in the Log tab and the dashboard keeps showing the last-good state.
+
+**Limitation:** `[keybindings]` and plugin-contributed screens/actions are resolved once at launch and stay fixed for the session — editing `[keybindings]` or a plugin's registered actions requires a restart to take effect, even though the plugin's own repo shows up live in the standalone panel like any other standalone.
+
 **Tracking glyphs** in the repo rows: `[+N, -N]` shows commits ahead/behind upstream; `[+]` marks an unborn upstream ref (the local branch tracks a remote that doesn't exist yet); the pin glyph marks pinned repos.
 
 **Main-checkout indicator** in the repo-name label: each repo-name label in the feature-worktrees grid carries a status suffix sourced from the project's main checkout under `projects/<repo>` — dirty-file count (red), `+N`/`-N` commits ahead/behind `origin/<main>` (green/yellow). A clean, up-to-date checkout shows nothing.

@@ -9,6 +9,7 @@ from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, LoadingIndicator, Static
 
 from winter_cli.config.models import DashboardLayout
+from winter_cli.core.config_file import ConfigError
 from winter_cli.modules.tui.error_log import ErrorLogService
 from winter_cli.modules.tui.keybindings import (
     KeybindingMixin,
@@ -22,6 +23,7 @@ from winter_cli.modules.tui.screens.workspace.feature_worktrees import FeatureWo
 from winter_cli.modules.tui.screens.workspace.standalone_repos import StandaloneReposTable
 from winter_cli.modules.tui.widgets.refresh_status import RefreshStatus
 from winter_cli.modules.tui.widgets.service_panel import ServicePanel
+from winter_cli.modules.workspace.dashboard_snapshot_service import DashboardSnapshotService
 from winter_cli.modules.workspace.models import (
     FeatureEnvironmentOverview,
     FeatureEnvironmentWorktrees,
@@ -31,7 +33,6 @@ from winter_cli.modules.workspace.models import (
     WorktreeRepoStatus,
 )
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
-from winter_cli.modules.workspace.workspace_snapshot_service import WorkspaceSnapshotService
 from winter_cli.plugins.loader import PluginRegistry
 from winter_cli.plugins.types import (
     ActionInvocation,
@@ -54,7 +55,7 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
 
     def __init__(
         self,
-        snapshot_svc: WorkspaceSnapshotService,
+        snapshot_svc: DashboardSnapshotService,
         repo_factory: RepositoryFactory,
         workspace: Workspace,
         plugin_registry: PluginRegistry,
@@ -149,14 +150,27 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
         def _on_repo_error(wt, exc):
             self._capture_error(f"WorkspaceScreen.refresh({wt.repository.name})", exc)
 
+        def _on_config_error(exc: ConfigError) -> None:
+            # Tolerated: a last-good config exists and DashboardSnapshotService
+            # already fell back to it, so the panels stay populated — this only
+            # surfaces the failure in the error log, it does not blank anything.
+            self._capture_error("WorkspaceScreen.refresh(config)", RepoError(str(exc)), title="config error")
+
         try:
             data = self._snapshot_svc.collect_for_dashboard(
                 on_repo_error=_on_repo_error,
+                on_config_error=_on_config_error,
                 env_decorators=environment_decorators or None,
                 worktree_repo_decorators=worktree_repo_decorators or None,
             )
         except RepoError as exc:
             self._capture_error("WorkspaceScreen.refresh", exc)
+            self.app.call_from_thread(self._update_widgets, {}, [], [])
+            return
+        except ConfigError as exc:
+            # No last-good config was ever loaded (first-ever refresh hit a
+            # malformed config.toml) — nothing valid to fall back to yet.
+            self._capture_error("WorkspaceScreen.refresh", RepoError(str(exc)), title="config error")
             self.app.call_from_thread(self._update_widgets, {}, [], [])
             return
 

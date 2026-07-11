@@ -21,6 +21,7 @@ from winter_cli.core.internal.local_subprocess_runner import LocalSubprocessRunn
 from winter_cli.core.internal.tomllib_config_file_reader import TomllibConfigFileReader
 from winter_cli.modules.workspace.agent_install import ExtensionAgentService
 from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
+from winter_cli.modules.workspace.dashboard_snapshot_service import DashboardSnapshotService
 
 # NB: the doctor, lint, graph, and tui (textual) command trees are deliberately
 # NOT imported at module top — see `_lazy` below. They are pulled in on first
@@ -157,6 +158,9 @@ class Container(containers.DeclarativeContainer):
         error_factory=repo_error_factory,
         git_ops=git_ops_svc,
     )
+    # `DashboardSnapshotService._build` rebuilds an equivalent Workspace per
+    # poll from its own reloaded config — a constructor change here must be
+    # mirrored there too.
     workspace = providers.Singleton(
         repo_repo.provided.get_workspace.call(
             workspace_config.provided.workspace_root,
@@ -167,6 +171,9 @@ class Container(containers.DeclarativeContainer):
         ),
     )
 
+    # `DashboardSnapshotService._build` rebuilds its own RepositoryFactory per
+    # poll from its own reloaded config — a constructor change here must be
+    # mirrored there too.
     repo_factory = providers.Singleton(
         RepositoryFactory,
         config=workspace_config,
@@ -181,6 +188,9 @@ class Container(containers.DeclarativeContainer):
         standalone_repos=repo_factory.provided.get_standalone_repos.call(),
     )
 
+    # `DashboardSnapshotService._build` rebuilds its own ReadWorkspaceRepository
+    # per poll from its own reloaded config — a constructor change here must be
+    # mirrored there too.
     worktree_repo = providers.Factory(
         ReadWorkspaceRepository,
         error_factory=repo_error_factory,
@@ -197,6 +207,9 @@ class Container(containers.DeclarativeContainer):
         click=providers.Object(click),
     )
 
+    # `DashboardSnapshotService._build` rebuilds its own EnvStatusService per
+    # poll from its own reloaded config — a constructor change here must be
+    # mirrored there too.
     env_status_svc = providers.Factory(
         EnvStatusService,
         worktree_repo=worktree_repo,
@@ -302,6 +315,10 @@ class Container(containers.DeclarativeContainer):
         git_repo=git_repo,
     )
 
+    # `DashboardSnapshotService._build` rebuilds this same graph (workspace,
+    # env_status_svc, worktree_repo, repo_factory, plus the non-config-derived
+    # collaborators below) per poll from its own reloaded config — a
+    # constructor change here must be mirrored there too.
     workspace_snapshot_svc = providers.Factory(
         WorkspaceSnapshotService,
         workspace=workspace,
@@ -314,6 +331,23 @@ class Container(containers.DeclarativeContainer):
         config_lock_repo=config_lock_repo,
         git_repo=git_repo,
         dashboard_layout=workspace_config.provided.dashboard.layout,
+    )
+
+    # Dashboard-only: re-reads config.toml on every poll and rebuilds the
+    # config-derived collaborators, so the dashboard's 30s refresh (which
+    # resolves the container only once, at launch) surfaces repos/envs/
+    # standalones added after launch. Singleton so it accumulates the
+    # last-good config across polls (see DashboardSnapshotService).
+    dashboard_snapshot_svc = providers.Singleton(
+        DashboardSnapshotService,
+        workspace_config_svc=workspace_config_svc,
+        repo_error_factory=repo_error_factory,
+        repo_repo=repo_repo,
+        env_index_registry=env_index_registry,
+        drift_warning_svc=drift_warning_svc,
+        prune_svc=prune_svc,
+        config_lock_repo=config_lock_repo,
+        git_repo=git_repo,
     )
 
     init_svc = providers.Factory(
@@ -906,7 +940,7 @@ class Container(containers.DeclarativeContainer):
 
     workspace_screen = providers.Factory(
         _lazy("winter_cli.modules.tui.screens.workspace:WorkspaceScreen"),
-        snapshot_svc=workspace_snapshot_svc,
+        snapshot_svc=dashboard_snapshot_svc,
         repo_factory=repo_factory,
         workspace=workspace,
         plugin_registry=plugin_registry,

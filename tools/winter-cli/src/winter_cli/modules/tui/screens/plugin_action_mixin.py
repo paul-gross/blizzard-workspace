@@ -31,18 +31,21 @@ class PluginActionMixin:
     _plugin_registry: PluginRegistry
     _error_log: ErrorLogService
 
-    def _capture_error(self, location: str, exc: RepoError) -> None:
+    def _capture_error(self, location: str, exc: RepoError, *, title: str = "git error") -> None:
         """Log a RepoError to the session log and toast (deduped) without crashing.
 
         Called from refresh/detail worker threads, so the toast is marshaled onto
-        the UI thread via `call_from_thread`.
+        the UI thread via `call_from_thread`. `title` defaults to "git error" since
+        most captured RepoErrors originate from a git subcommand failure; callers
+        wrapping a non-git failure (e.g. a config-parse error reused via RepoError
+        to share this capture path) should pass a more accurate category.
         """
         entry, should_notify = self._error_log.record(location=location, exc=exc)
         if should_notify:
             self.app.call_from_thread(  # type: ignore[attr-defined]
                 self.app.notify,  # type: ignore[attr-defined]
                 f"{entry.message}\nPress L for log",
-                title="git error",
+                title=title,
                 severity="error",
                 timeout=6,
             )
