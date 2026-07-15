@@ -1144,3 +1144,124 @@ def test_reconcile_env_already_connected_repo_unchanged(
     # No upstream_inferred action
     auto_connect_actions = [a for a in init_reporter.actions if a[2] == "upstream_inferred"]
     assert auto_connect_actions == []
+
+
+def _connected_env_config_with_cmd() -> WorkspaceConfig:
+    """Two non-pinned repos; the newly-added one carries a bootstrap `cmd` list."""
+    return WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=GitIdentity(name="Bot", email="bot@example.com"),
+        project_repos=[
+            ProjectRepositoryConfig(name="alpha-repo", url="git@example.com:org/alpha-repo.git"),
+            ProjectRepositoryConfig(
+                name="beta-repo", url="git@example.com:org/beta-repo.git", cmd=["mise trust"]
+            ),
+        ],
+    )
+
+
+def test_reconcile_env_wires_unpushed_inferred_upstream_and_runs_cmd(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """Regression for #156: connect to an unpushed feature branch, then init a fresh sibling repo.
+
+    Scenario: env 'myenv' was connected to a feature branch that was never
+    pushed, so its existing 'alpha-repo' worktree tracks `origin/feature/foo`
+    (a remote-tracking ref git cannot resolve locally). A newly-added
+    'beta-repo' with a bootstrap `cmd` list is reconciled. Init must wire the
+    inferred `origin/feature/foo` upstream tolerantly (no git-128 / RepoError)
+    AND still run beta-repo's `cmd` list.
+    """
+    cfg = _connected_env_config_with_cmd()
+    alpha_main = WORKSPACE_ROOT / "projects" / "alpha-repo"
+    beta_main = WORKSPACE_ROOT / "projects" / "beta-repo"
+    alpha_worktree = WORKSPACE_ROOT / "myenv" / "alpha-repo"
+    beta_worktree = WORKSPACE_ROOT / "myenv" / "beta-repo"
+
+    fs = FakeFilesystem(
+        directories=[
+            WORKSPACE_ROOT / "projects",
+            alpha_main,
+            beta_main,
+            alpha_worktree,  # beta-repo absent → newly added this run
+        ]
+    )
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+
+    git = FakeGitRepository()
+    git.local_branches[alpha_main] = ["myenv"]
+    git.local_branches[beta_main] = ["main"]
+    # The env is connected to a feature branch that was never pushed.
+    git.tracking_branches[alpha_worktree] = "origin/feature/foo"
+
+    subprocess = FakeSubprocessRunner(popen_responses={"mise trust": (["trusted"], 0)})
+    svc = _service(cfg, fs, subprocess, git)
+    ok = svc.reconcile_env("myenv", init_reporter)
+
+    assert ok is True
+    # No error was reported for the newly-added repo.
+    assert init_reporter.errors == []
+    # Upstream tracking was set to the unpushed origin/<feature> ref.
+    assert (beta_worktree, "origin/feature/foo") in git.upstreams_set
+    inferred = [a for a in init_reporter.actions if a[2] == "upstream_inferred"]
+    assert inferred and inferred[0][0] == "beta-repo" and inferred[0][3] == "origin/feature/foo"
+    # The repo's cmd list executed.
+    assert ("beta-repo", "mise trust", 0) in init_reporter.cmds_completed
+
+
+class _UpstreamRefusingGitRepository(FakeGitRepository):
+    """FakeGitRepository whose set_upstream_to raises — mimics the strict git-128 path.
+
+    Exercises the cmd-isolation backstop: even if upstream wiring blows up, the
+    repo's `cmd` bootstrap must still run and the repo must not be marked failed.
+    """
+
+    def set_upstream_to(self, path: Path, ref: str) -> None:
+        raise RepoError(f"set-upstream-to {ref} failed at {path}", cwd=str(path))
+
+
+def test_reconcile_env_upstream_failure_does_not_skip_cmd(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """Regression for #156: a failure wiring upstream is isolated from the cmd bootstrap.
+
+    Even when `set_upstream_to` raises (the pre-fix git-128 blast radius), the
+    repo is not marked failed and its `cmd` list still runs; the wiring failure
+    surfaces as a soft `upstream_skipped` action rather than a repo error.
+    """
+    cfg = _connected_env_config_with_cmd()
+    alpha_main = WORKSPACE_ROOT / "projects" / "alpha-repo"
+    beta_main = WORKSPACE_ROOT / "projects" / "beta-repo"
+    alpha_worktree = WORKSPACE_ROOT / "myenv" / "alpha-repo"
+
+    fs = FakeFilesystem(
+        directories=[
+            WORKSPACE_ROOT / "projects",
+            alpha_main,
+            beta_main,
+            alpha_worktree,
+        ]
+    )
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+
+    git = _UpstreamRefusingGitRepository()
+    git.local_branches[alpha_main] = ["myenv"]
+    git.local_branches[beta_main] = ["main"]
+    git.tracking_branches[alpha_worktree] = "origin/feature/foo"
+
+    subprocess = FakeSubprocessRunner(popen_responses={"mise trust": (["trusted"], 0)})
+    svc = _service(cfg, fs, subprocess, git)
+    ok = svc.reconcile_env("myenv", init_reporter)
+
+    assert ok is True
+    assert init_reporter.errors == []
+    # Wiring failure was reported as a soft skip, not a repo error.
+    skipped = [a for a in init_reporter.actions if a[2] == "upstream_skipped"]
+    assert skipped and skipped[0][0] == "beta-repo"
+    # The cmd list ran regardless of the upstream failure.
+    assert ("beta-repo", "mise trust", 0) in init_reporter.cmds_completed

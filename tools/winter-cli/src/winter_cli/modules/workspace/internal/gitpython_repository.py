@@ -105,9 +105,21 @@ class GitPythonRepository:
             return tb.name if tb is not None else None
 
     def set_upstream_to(self, path: Path, ref: str) -> None:
+        # Write branch.<head>.{remote,merge} config directly instead of
+        # `git branch --set-upstream-to <ref>`, which exits 128 when <ref> is a
+        # remote-tracking branch git cannot resolve locally — the state left by
+        # `winter ws connect <env> feature/foo` on a branch that was never
+        # pushed. Setting the config directly tolerates that pre-push state
+        # (the same way `IWriteRepoRepository.set_upstream` does for connect)
+        # and is equivalent to `--set-upstream-to` when the remote ref exists.
+        remote, _, branch = ref.partition("/")
+        if not branch:
+            raise RepoError(f"set_upstream_to: expected '<remote>/<branch>', got {ref!r}")
         try:
             with git.Repo(str(path)) as r:
-                r.git.branch("--set-upstream-to", ref)
+                head = r.active_branch.name
+                r.git.config(f"branch.{head}.remote", remote)
+                r.git.config(f"branch.{head}.merge", f"refs/heads/{branch}")
         except git.GitCommandError as exc:
             raise self._error_factory.from_git(
                 exc,

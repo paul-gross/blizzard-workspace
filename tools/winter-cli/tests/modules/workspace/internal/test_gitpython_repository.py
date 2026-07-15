@@ -238,26 +238,55 @@ def test_get_tracking_branch_returns_none_on_type_error(
 # ── set_upstream_to ────────────────────────────────────────────────────────
 
 
-def test_set_upstream_to_calls_branch_set_upstream(
+def test_set_upstream_to_writes_tracking_config_directly(
     monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
 ) -> None:
     git_mock = _fake_git_repo(monkeypatch)
+    git_mock.Repo.return_value.active_branch.name = "alpha"
 
     adapter.set_upstream_to(_REPO_PATH, "origin/main")
 
-    git_mock.Repo.return_value.git.branch.assert_called_once_with("--set-upstream-to", "origin/main")
+    # Written directly (not via `git branch --set-upstream-to`) so tracking can
+    # be set to a remote branch git cannot yet resolve locally (unpushed feature).
+    git_mock.Repo.return_value.git.branch.assert_not_called()
+    git_mock.Repo.return_value.git.config.assert_any_call("branch.alpha.remote", "origin")
+    git_mock.Repo.return_value.git.config.assert_any_call("branch.alpha.merge", "refs/heads/main")
+
+
+def test_set_upstream_to_tolerates_unpushed_remote_branch(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    git_mock.Repo.return_value.active_branch.name = "alpha"
+
+    # A nested, never-pushed feature branch: `--set-upstream-to` would exit 128,
+    # but writing config directly must succeed and split remote/branch correctly.
+    adapter.set_upstream_to(_REPO_PATH, "origin/feature/foo")
+
+    git_mock.Repo.return_value.git.config.assert_any_call("branch.alpha.remote", "origin")
+    git_mock.Repo.return_value.git.config.assert_any_call("branch.alpha.merge", "refs/heads/feature/foo")
+
+
+def test_set_upstream_to_rejects_ref_without_remote_prefix(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    _fake_git_repo(monkeypatch)
+
+    with pytest.raises(RepoError):
+        adapter.set_upstream_to(_REPO_PATH, "bare-ref")
 
 
 def test_set_upstream_to_raises_repo_error_on_git_command_error(
     monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
 ) -> None:
     git_mock = _fake_git_repo(monkeypatch)
-    git_mock.Repo.return_value.git.branch.side_effect = git.GitCommandError(
-        ("git", "branch", "--set-upstream-to"), 128, stderr=b"no such ref"
+    git_mock.Repo.return_value.active_branch.name = "alpha"
+    git_mock.Repo.return_value.git.config.side_effect = git.GitCommandError(
+        ("git", "config"), 128, stderr=b"boom"
     )
 
     with pytest.raises(RepoError) as ei:
-        adapter.set_upstream_to(_REPO_PATH, "origin/nonexistent")
+        adapter.set_upstream_to(_REPO_PATH, "origin/main")
 
     assert "set-upstream-to" in ei.value.message
 

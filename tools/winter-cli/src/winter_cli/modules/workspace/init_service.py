@@ -432,13 +432,37 @@ class InitService:
 
             self._apply_identity(worktree_path)
             self._write_excludes(worktree_path, repo, reporter, location)
-            self._configure_pinned_tracking(repo, worktree_path, reporter)
-            self._connect_inferred_upstream(repo, worktree_path, inferred_upstream, reporter, newly_created)
+            self._wire_upstream_tracking(repo, worktree_path, inferred_upstream, reporter, newly_created)
             self._run_cmds(worktree_path, repo, reporter)
         except (RepoError, OSError) as exc:
             reporter.repo_error(label, str(exc))
             return False
         return True
+
+    def _wire_upstream_tracking(
+        self,
+        repo: ProjectRepository,
+        worktree_path: Path,
+        inferred_upstream: str | None,
+        reporter: IInitReporter,
+        newly_created: bool,
+    ) -> None:
+        """Wire pinned + inferred tracking, isolated from the repo's cmd bootstrap.
+
+        Tracking config is independent of the repo's `cmd` list (trust/bootstrap
+        steps like `mise trust`, `direnv allow`). A failure wiring tracking must
+        not short-circuit `_run_cmds`, so a `RepoError` here is reported as a
+        soft skip and swallowed rather than propagated to the reconcile `try`,
+        which would mark the repo failed and skip its cmds. The tolerant
+        `set_upstream_to` already handles the common unpushed-upstream case
+        without error; this isolation is the backstop for any other wiring
+        failure so the blast radius never reaches the cmd list.
+        """
+        try:
+            self._configure_pinned_tracking(repo, worktree_path, reporter)
+            self._connect_inferred_upstream(repo, worktree_path, inferred_upstream, reporter, newly_created)
+        except RepoError as exc:
+            reporter.repo_action(repo.name, str(worktree_path), "upstream_skipped", str(exc))
 
     def _infer_env_upstream(
         self,
