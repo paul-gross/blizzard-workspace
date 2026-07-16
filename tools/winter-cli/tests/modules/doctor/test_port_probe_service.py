@@ -19,6 +19,7 @@ from typing import cast
 from tests.conftest import FakeFilesystem, make_workspace_config
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemReader
+from winter_cli.modules.doctor.env_discovery_service import EnvDiscoveryService
 from winter_cli.modules.doctor.models import ProbeStatus
 from winter_cli.modules.doctor.port_probe_service import PORT_SOURCE, PortProbeService
 
@@ -72,6 +73,7 @@ def _svc(
         config=config,
         fs=cast(IFilesystemReader, fs),
         registry=registry,
+        env_discovery=EnvDiscoveryService(cast(IFilesystemReader, fs)),
     )
 
 

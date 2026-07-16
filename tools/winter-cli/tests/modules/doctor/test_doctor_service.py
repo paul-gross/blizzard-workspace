@@ -68,10 +68,19 @@ def _doctor(
     repo_factory: Any,
     port_probe: Any = None,
     capabilities: Any = None,
+    env_bands_probe: Any = None,
 ) -> DoctorService:
     """Build a DoctorService from duck-typed fakes, bridging the concrete-type seam."""
     caps: Any = capabilities or _FakeCapabilities()
-    return DoctorService(core, workspace, extensions, repo_factory, caps, port_probe)
+    return DoctorService(
+        core,
+        workspace,
+        extensions,
+        repo_factory,
+        caps,
+        port_probe,
+        env_bands_probe_svc=env_bands_probe,
+    )
 
 
 def _make(status: ProbeStatus, name: str = "probe") -> ProbeResult:
@@ -212,4 +221,59 @@ def test_port_probe_skipped_when_none() -> None:
     summary = svc.run(reporter)  # type: ignore[arg-type]
 
     assert all(r.source != "port" for r in reporter.results)
+    assert summary.total == 1
+
+
+# ── Env-bands-probe integration ────────────────────────────────────────────────
+
+
+class _FakeEnvBandsProbe:
+    """Stub EnvBandsProbeService — returns canned results from run()."""
+
+    def __init__(self, results: list[ProbeResult]) -> None:
+        self._results = results
+        self.run_calls = 0
+
+    def run(self) -> list[ProbeResult]:
+        self.run_calls += 1
+        return list(self._results)
+
+
+def test_env_bands_probe_results_land_in_summary() -> None:
+    """When env_bands_probe_svc is wired, its results appear in the summary."""
+    env_bands_probe = _FakeEnvBandsProbe(
+        [ProbeResult(source="env-vars", name="env band: ghost", status=ProbeStatus.warn)]
+    )
+    svc = _doctor(
+        _FakeCore([]),
+        _FakeWorkspace([]),
+        _FakeExtensions([]),
+        _FakeRepoFactory(),
+        env_bands_probe=env_bands_probe,
+    )
+    reporter = _RecordingReporter()
+
+    summary = svc.run(reporter)  # type: ignore[arg-type]
+
+    assert env_bands_probe.run_calls == 1
+    assert summary.total == 1
+    assert summary.warns == 1
+    assert summary.exit_code == 0
+    env_bands_sources = [r.source for r in reporter.results if r.source == "env-vars"]
+    assert len(env_bands_sources) == 1
+
+
+def test_env_bands_probe_skipped_when_none() -> None:
+    """When env_bands_probe_svc is None (default), no env-bands probes appear in results."""
+    svc = _doctor(
+        _FakeCore([ProbeResult(source="core", name="c", status=ProbeStatus.pass_)]),
+        _FakeWorkspace([]),
+        _FakeExtensions([]),
+        _FakeRepoFactory(),
+    )
+    reporter = _RecordingReporter()
+
+    summary = svc.run(reporter)  # type: ignore[arg-type]
+
+    assert all(r.source != "env-vars" for r in reporter.results)
     assert summary.total == 1

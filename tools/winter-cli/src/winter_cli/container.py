@@ -513,11 +513,24 @@ class Container(containers.DeclarativeContainer):
         registry=capability_registry_svc,
     )
 
+    env_discovery_svc = providers.Factory(
+        _lazy("winter_cli.modules.doctor.env_discovery_service:EnvDiscoveryService"),
+        fs=fs,
+    )
+
     port_probe_svc = providers.Factory(
         _lazy("winter_cli.modules.doctor.port_probe_service:PortProbeService"),
         config=workspace_config,
         fs=fs,
         registry=env_index_registry,
+        env_discovery=env_discovery_svc,
+    )
+
+    env_bands_probe_svc = providers.Factory(
+        _lazy("winter_cli.modules.doctor.env_bands_probe_service:EnvBandsProbeService"),
+        config=workspace_config,
+        registry=env_index_registry,
+        env_discovery=env_discovery_svc,
     )
 
     provision_manifest_probe_svc = providers.Factory(
@@ -554,6 +567,7 @@ class Container(containers.DeclarativeContainer):
         provision_manifest_probe_svc=provision_manifest_probe_svc,
         skill_probe_svc=skill_probe_svc,
         agent_probe_svc=agent_probe_svc,
+        env_bands_probe_svc=env_bands_probe_svc,
     )
 
     stream_doctor_reporter = providers.Factory(

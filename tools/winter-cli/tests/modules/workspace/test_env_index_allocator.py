@@ -20,6 +20,7 @@ import pytest
 from tests.conftest import FakeFilesystem
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemReader
+from winter_cli.modules.doctor.env_discovery_service import EnvDiscoveryService
 from winter_cli.modules.doctor.models import ProbeStatus
 from winter_cli.modules.doctor.port_probe_service import PortProbeService
 from winter_cli.modules.workspace.env_index import (
@@ -410,7 +411,12 @@ class TestDoctorDoesNotFlagHashBandBoundaryIndex:
         directories = {Path("/ws"), Path("/ws/lambda")}
         fs = FakeFilesystem(files=files, directories=directories)
 
-        svc = PortProbeService(config=cfg, fs=cast(IFilesystemReader, fs), registry=_InMemRegistry())
+        svc = PortProbeService(
+            config=cfg,
+            fs=cast(IFilesystemReader, fs),
+            registry=_InMemRegistry(),
+            env_discovery=EnvDiscoveryService(cast(IFilesystemReader, fs)),
+        )
         results = svc._probe_registry_drift()
 
         warns = [r for r in results if r.status == ProbeStatus.warn]
@@ -443,7 +449,12 @@ class TestDoctorDoesNotFlagHashBandBoundaryIndex:
         directories = {Path("/ws"), Path("/ws/gamma")}
         fs = FakeFilesystem(files=files, directories=directories)
 
-        svc = PortProbeService(config=cfg, fs=cast(IFilesystemReader, fs), registry=_InMemRegistry())
+        svc = PortProbeService(
+            config=cfg,
+            fs=cast(IFilesystemReader, fs),
+            registry=_InMemRegistry(),
+            env_discovery=EnvDiscoveryService(cast(IFilesystemReader, fs)),
+        )
         results = svc._probe_registry_drift()
 
         warns = [r for r in results if r.status == ProbeStatus.warn]

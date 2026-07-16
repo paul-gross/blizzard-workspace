@@ -37,7 +37,7 @@ WTS_WEB_PORT = "8421"   # alpha only — every other env keeps the feature-band 
 
 **Feature band (`[env.feature.vars]`)** — rendered only for feature envs; never emitted for the `workspace` scope.
 
-**Per-env band (`[env.<name>.vars]`)** — rendered only for the one feature env it names, on top of the feature band. Use it to point a single env at a fixed endpoint or a different backing service while its siblings keep the derived per-env value. `workspace` and `feature` are band names, so an env named either cannot carry a per-env band. A band naming an env that does not exist is inert — never looked up, never an error — so an override can outlive the env it was written for.
+**Per-env band (`[env.<name>.vars]`)** — rendered only for the one feature env it names, on top of the feature band. Use it to point a single env at a fixed endpoint or a different backing service while its siblings keep the derived per-env value. `workspace` and `feature` are band names, so an env named either cannot carry a per-env band. A band naming an env that does not exist is inert — never looked up, never an error — so an override can outlive the env it was written for. `winter doctor` warns (never fails) when `<name>` matches no env known to the registry or on disk, so a typo is distinguishable from an intentionally dormant band — see [usage/doctor.md](../usage/doctor.md).
 
 **Resolution per scope:**
 

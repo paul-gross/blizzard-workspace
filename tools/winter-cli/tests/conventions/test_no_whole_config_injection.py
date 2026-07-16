@@ -67,6 +67,7 @@ ALLOWED_FILES = frozenset(
         "modules/doctor/workspace_probe_service.py",
         "modules/doctor/extension_probe_service.py",
         "modules/doctor/port_probe_service.py",  # doctor probe service — validates port-config invariant and registry drift (lifecycle carve-out: walks every declared env)
+        "modules/doctor/env_bands_probe_service.py",  # doctor probe service — warns on [env.<name>.vars] bands naming an env that does not exist (lifecycle carve-out: walks the registry and every env dir)
         "modules/doctor/skill_probe_service.py",  # doctor probe service — checks per-vendor skill discoverability across all extensions (lifecycle carve-out: walks every declared extension and every CodeAgentVendor)
         "modules/doctor/agent_probe_service.py",  # doctor probe service — checks per-vendor agent copy staleness across all extensions (lifecycle carve-out: walks every declared extension and every CodeAgentVendor)
         # Provision manifest probe service — doctor probe that reads provision_raw

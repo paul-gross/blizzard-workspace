@@ -6,6 +6,7 @@ from winter_cli.modules.doctor.agent_probe_service import AgentProbeService
 from winter_cli.modules.doctor.capability_probe_service import CapabilityProbeService
 from winter_cli.modules.doctor.core_probe_service import CoreProbeService
 from winter_cli.modules.doctor.doctor_reporter import IDoctorReporter
+from winter_cli.modules.doctor.env_bands_probe_service import EnvBandsProbeService
 from winter_cli.modules.doctor.extension_probe_service import ExtensionProbeService
 from winter_cli.modules.doctor.models import ProbeResult, ProbeStatus
 from winter_cli.modules.doctor.port_probe_service import PortProbeService
@@ -45,6 +46,7 @@ class DoctorService:
         provision_manifest_probe_svc: ProvisionManifestProbeService | None = None,
         skill_probe_svc: SkillProbeService | None = None,
         agent_probe_svc: AgentProbeService | None = None,
+        env_bands_probe_svc: EnvBandsProbeService | None = None,
     ) -> None:
         self._core_probe_svc = core_probe_svc
         self._workspace_probe_svc = workspace_probe_svc
@@ -55,6 +57,7 @@ class DoctorService:
         self._provision_manifest_probe_svc = provision_manifest_probe_svc
         self._skill_probe_svc = skill_probe_svc
         self._agent_probe_svc = agent_probe_svc
+        self._env_bands_probe_svc = env_bands_probe_svc
 
     def run(self, reporter: IDoctorReporter) -> DoctorSummary:
         reporter.started()
@@ -66,6 +69,11 @@ class DoctorService:
 
         if self._port_probe_svc is not None:
             for result in self._port_probe_svc.run():
+                reporter.probe_result(result)
+                results.append(result)
+
+        if self._env_bands_probe_svc is not None:
+            for result in self._env_bands_probe_svc.run():
                 reporter.probe_result(result)
                 results.append(result)
 

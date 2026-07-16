@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemReader
+from winter_cli.modules.doctor.env_discovery_service import EnvDiscoveryService
 from winter_cli.modules.doctor.models import ProbeResult, ProbeStatus
 from winter_cli.modules.workspace.env_index import is_valid_env_index
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
@@ -41,10 +40,12 @@ class PortProbeService:
         config: WorkspaceConfig,
         fs: IFilesystemReader,
         registry: IEnvIndexRegistry | None,
+        env_discovery: EnvDiscoveryService,
     ) -> None:
         self._config = config
         self._fs = fs
         self._registry = registry
+        self._env_discovery = env_discovery
 
     def run(self) -> list[ProbeResult]:
         results: list[ProbeResult] = []
@@ -88,7 +89,13 @@ class PortProbeService:
             return []
 
         assignments = self._registry.all_assignments()
-        env_dirs = self._discover_env_dirs()
+        # Edge case: an env directory with no per-repo worktrees yet (none added,
+        # or all removed) has no .git-file child and is therefore not discovered
+        # as an env — unlike the former `.winter.env` marker, which an empty env
+        # shell could still carry.  This only affects the on-disk count and the
+        # unregistered-dir check (b); a registered env is still cross-checked from
+        # the registry side, so a half-created env is not mistaken for stale.
+        env_dirs = self._env_discovery.discover_env_dirs(self._config.workspace_root)
         n_envs = self._config.envs_per_workspace
 
         results: list[ProbeResult] = []
@@ -183,46 +190,3 @@ class PortProbeService:
             )
 
         return results
-
-    def _discover_env_dirs(self) -> list[str]:
-        """Return env names whose directories exist at the workspace root.
-
-        An env directory is any immediate subdirectory of the workspace root
-        that contains at least one subdirectory with a ``.git`` file (as opposed
-        to a ``.git`` directory).  Git worktrees have a ``.git`` *file* (a
-        ``gitdir:`` pointer back to the main clone), whereas source checkouts and
-        extension directories have a ``.git`` *directory*.  This is a reliable
-        worktree-presence marker that does not depend on any env file being on
-        disk.
-
-        Edge case: an env directory with no per-repo worktrees yet (none added,
-        or all removed) has no ``.git``-file child and is therefore not reported
-        as an env here — unlike the former ``.winter.env`` marker, which an empty
-        env shell could still carry.  This only affects the on-disk count and the
-        unregistered-dir check (b); a registered env is still cross-checked from
-        the registry side, so a half-created env is not mistaken for stale.
-        """
-        root = self._config.workspace_root
-        env_names: list[str] = []
-        if not self._fs.is_dir(root):
-            return env_names
-        for entry in self._fs.iterdir(root):
-            if not self._fs.is_dir(entry):
-                continue
-            if self._has_worktree_child(entry):
-                env_names.append(entry.name)
-        return env_names
-
-    def _has_worktree_child(self, env_dir: Path) -> bool:
-        """Return True when *env_dir* contains at least one git-worktree child.
-
-        A git worktree directory has a ``.git`` file (text pointer), not a
-        ``.git`` directory.  Iterates immediate children only.
-        """
-        try:
-            for child in self._fs.iterdir(env_dir):
-                if self._fs.is_dir(child) and self._fs.is_file(child / ".git"):
-                    return True
-        except OSError:
-            pass
-        return False
