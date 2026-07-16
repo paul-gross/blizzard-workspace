@@ -6,6 +6,9 @@ Covers:
 - Workspace scope: index 0, port_base_for_index(0).
 - Band selection: workspace scope → workspace band only; feature scope → union
   with feature winning collisions; workspace keys visible to feature templates.
+- Per-env override bands ([env.<name>.vars]): win over the feature and workspace
+  bands for their own env, never reach a sibling, and are inert for an env that
+  does not exist.
 - Env-band rendering: ${NAME}, ${NAME+N} expansion, sibling references.
 - Env-band error cases: undefined variable, unsupported token, non-integer +N.
 - C4 invariant: workspace-band entries resolve identically at workspace and feature scope.
@@ -61,6 +64,7 @@ def _config(
     ports_per_env: int = 20,
     workspace_vars: dict[str, str] | None = None,
     feature_vars: dict[str, str] | None = None,
+    named_vars: dict[str, dict[str, str]] | None = None,
     service_prefix: str | None = None,
 ) -> WorkspaceConfig:
     kwargs: dict = {
@@ -71,10 +75,11 @@ def _config(
         "singleton_repos": [SingletonRepository(name="ws", type=SingletonType.workspace)],
         "project_repos": [ProjectRepositoryConfig(name="demo", url="git@example.com:demo.git")],
     }
-    if workspace_vars is not None or feature_vars is not None:
+    if workspace_vars is not None or feature_vars is not None or named_vars is not None:
         kwargs["env_bands"] = EnvVarBands(
             workspace=workspace_vars or {},
             feature=feature_vars or {},
+            named=named_vars or {},
         )
     if service_prefix is not None:
         kwargs["service_prefix"] = service_prefix
@@ -87,6 +92,7 @@ def _svc(
     ports_per_env: int = 20,
     workspace_vars: dict[str, str] | None = None,
     feature_vars: dict[str, str] | None = None,
+    named_vars: dict[str, dict[str, str]] | None = None,
     service_prefix: str | None = None,
 ) -> EnvProvisionerService:
     cfg = _config(
@@ -94,6 +100,7 @@ def _svc(
         ports_per_env=ports_per_env,
         workspace_vars=workspace_vars,
         feature_vars=feature_vars,
+        named_vars=named_vars,
         service_prefix=service_prefix,
     )
     reg = _InMemoryRegistry(assignments)
@@ -327,6 +334,86 @@ class TestFeatureBandSelection:
         ).compute("alpha")
         assert result["WS_KEY"] == "ws-val"
         assert result["FEAT_KEY"] == "feat-val"
+
+    def test_named_band_wins_over_feature_band(self) -> None:
+        """A per-env override replaces the feature-band value for that key."""
+        result = _svc(
+            assignments={"alpha": 1},
+            feature_vars={"BZ_HUB_URL": "http://127.0.0.1:${WINTER_PORT_BASE+2}"},
+            named_vars={"alpha": {"BZ_HUB_URL": "http://127.0.0.1:8421"}},
+        ).compute("alpha")
+        assert result["BZ_HUB_URL"] == "http://127.0.0.1:8421"
+
+    def test_named_band_does_not_leak_to_sibling_env(self) -> None:
+        """A sibling env with no band of its own still gets the feature-band value."""
+        result = _svc(
+            assignments={"alpha": 1, "beta": 2},
+            feature_vars={"BZ_HUB_URL": "http://127.0.0.1:${WINTER_PORT_BASE+2}"},
+            named_vars={"alpha": {"BZ_HUB_URL": "http://127.0.0.1:8421"}},
+        ).compute("beta")
+        # beta's index is 2 → port base 4040 → +2 = 4042.
+        assert result["BZ_HUB_URL"] == "http://127.0.0.1:4042"
+
+    def test_named_band_for_unknown_env_is_inert(self) -> None:
+        """A band naming an env that does not exist never fires — no error, no key."""
+        result = _svc(
+            assignments={"alpha": 1},
+            feature_vars={"FEAT": "feat-value"},
+            named_vars={"nonexistent": {"FEAT": "override", "ONLY_THERE": "x"}},
+        ).compute("alpha")
+        assert result["FEAT"] == "feat-value"
+        assert "ONLY_THERE" not in result
+
+    def test_named_band_adds_env_only_key(self) -> None:
+        """An override may introduce a key no other band declares."""
+        result = _svc(
+            assignments={"alpha": 1},
+            named_vars={"alpha": {"ALPHA_ONLY": "just-alpha"}},
+        ).compute("alpha")
+        assert result["ALPHA_ONLY"] == "just-alpha"
+
+    def test_named_band_renders_alone_when_other_bands_empty(self) -> None:
+        """The override band is rendered even when workspace and feature bands are empty."""
+        result = _svc(
+            assignments={"alpha": 1},
+            named_vars={"alpha": {"SOLO": "value"}},
+        ).compute("alpha")
+        assert result["SOLO"] == "value"
+
+    def test_named_band_template_resolves_feature_port_base(self) -> None:
+        """An override template has WINTER_PORT_BASE in scope, like the feature band."""
+        result = _svc(
+            assignments={"alpha": 1},
+            named_vars={"alpha": {"PORT": "${WINTER_PORT_BASE+5}"}},
+        ).compute("alpha")
+        assert result["PORT"] == "4025"
+
+    def test_named_band_template_references_lower_band_key(self) -> None:
+        """An override template may reference a workspace- or feature-band key."""
+        result = _svc(
+            assignments={"alpha": 1},
+            workspace_vars={"DB_HOST": "db.example.com"},
+            feature_vars={"DB_NAME": "featdb"},
+            named_vars={"alpha": {"DB_URL": "postgres://${DB_HOST}/${DB_NAME}"}},
+        ).compute("alpha")
+        assert result["DB_URL"] == "postgres://db.example.com/featdb"
+
+    def test_named_band_wins_over_workspace_band(self) -> None:
+        """An override beats the workspace band too, not just the feature band."""
+        result = _svc(
+            assignments={"alpha": 1},
+            workspace_vars={"COMMON": "from-workspace"},
+            named_vars={"alpha": {"COMMON": "from-alpha"}},
+        ).compute("alpha")
+        assert result["COMMON"] == "from-alpha"
+
+    def test_workspace_scope_ignores_named_bands(self) -> None:
+        """Per-env override bands never render for the workspace scope."""
+        result = _svc(
+            workspace_vars={"COMMON": "from-workspace"},
+            named_vars={"workspace": {"COMMON": "should-not-apply"}},
+        ).compute("workspace")
+        assert result["COMMON"] == "from-workspace"
 
     def test_feature_scope_empty_bands_returns_base_vars_only(self) -> None:
         """Absent bands for feature scope: only the five WINTER_* base vars."""

@@ -32,6 +32,14 @@ WINTER_DIR = ".winter"
 CONFIG_FILE = "config.toml"
 LOCAL_CONFIG_FILE = "config.local.toml"
 
+# Sub-tables of [env] that name a scope band rather than a feature env. An env
+# named `workspace` or `feature` therefore cannot carry an [env.<name>.vars]
+# override — the default env aliases are Greek letters, so this never collides.
+# This is the extension point for the whole [env] table: everything NOT listed
+# here parses as a per-env override band, so any new non-band [env] sub-table
+# must be added here or it will be silently swallowed as an env name.
+_RESERVED_ENV_BANDS = frozenset({"workspace", "feature"})
+
 
 def _coerce_str_list(value: object) -> list[str]:
     """Coerce a TOML `str | list[str]` field into a clean list of non-empty strings.
@@ -381,11 +389,16 @@ class WorkspaceConfigService:
 
     @staticmethod
     def _parse_env_bands(env_raw: object) -> EnvVarBands:
-        """Build an ``EnvVarBands`` from ``[env.workspace.vars]`` and ``[env.feature.vars]``.
+        """Build an ``EnvVarBands`` from ``[env.workspace.vars]``, ``[env.feature.vars]``,
+        and any per-env ``[env.<name>.vars]`` override tables.
 
         Absent sub-tables produce empty bands (clean no-op).  Non-scalar values
         (e.g. TOML arrays, tables, or booleans) raise ``ConfigError`` naming the
         band and key.
+
+        Every ``[env]`` sub-table other than the two reserved band names is read as a
+        per-env override band keyed by env name.  The name is not validated against the
+        configured envs: a band for an env that does not exist is inert, never looked up.
 
         A legacy ``[env.vars]`` key (flat ``vars`` directly under ``[env]``) is a
         hard break: raises ``ConfigError`` directing the user to migrate to the new
@@ -405,11 +418,19 @@ class WorkspaceConfigService:
 
         workspace_band = WorkspaceConfigService._parse_env_band(env_raw, "workspace")
         feature_band = WorkspaceConfigService._parse_env_band(env_raw, "feature")
-        return EnvVarBands(workspace=workspace_band, feature=feature_band)
+        named_bands: dict[str, dict[str, str]] = {}
+        for name in env_raw:
+            if name in _RESERVED_ENV_BANDS:
+                continue
+            # _parse_env_band owns the shape check: a non-table sub-table yields {}.
+            band = WorkspaceConfigService._parse_env_band(env_raw, name)
+            if band:
+                named_bands[name] = band
+        return EnvVarBands(workspace=workspace_band, feature=feature_band, named=named_bands)
 
     @staticmethod
     def _parse_env_band(env_raw: dict, band: str) -> dict[str, str]:
-        """Parse one named band (``workspace`` or ``feature``) from the ``[env]`` table.
+        """Parse one band (``workspace``, ``feature``, or an env name) from the ``[env]`` table.
 
         Reads ``env_raw[band]["vars"]``; returns an empty dict when the sub-table or
         the ``vars`` key is absent.  Non-scalar values raise ``ConfigError`` naming the

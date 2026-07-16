@@ -63,7 +63,7 @@ The exact set depends on the scope:
 | `WINTER_WORKSPACE_PORT_BASE` | Port-band start for index 0 (the workspace port base) |
 | `WINTER_SERVICE_PREFIX` | Resolved workspace service-orchestration namespace prefix |
 
-Followed by the band entries from `.winter/config.toml`: workspace scope shows only the workspace band (`[env.workspace.vars]`); feature scope shows both bands with the feature band (`[env.feature.vars]`) overlaid on top. See [ports-and-environments.md](../configuration/ports-and-environments.md#env-var-bands) for band ordering, collision rules, and token grammar.
+Followed by the env var band entries from `.winter/config.toml` that apply to the scope. See [ports-and-environments.md](../configuration/ports-and-environments.md#env-var-bands) for which bands those are, their ordering, collision rules, and token grammar.
 
 ## Exit codes
 

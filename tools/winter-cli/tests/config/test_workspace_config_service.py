@@ -908,6 +908,182 @@ def test_env_bands_both_bands_parse_correctly() -> None:
     assert config.env_bands.feature == {"FE_VAR": "fe_value", "SHARED": "from_feature"}
 
 
+def test_env_bands_named_band_parses() -> None:
+    """[env.<name>.vars] parses into the named band, keyed by env name."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "env": {
+                    "feature": {"vars": {"BZ_HUB_URL": "http://127.0.0.1:${WINTER_PORT_BASE+2}"}},
+                    "alpha": {"vars": {"BZ_HUB_URL": "http://127.0.0.1:8421"}},
+                },
+            },
+        },
+    )
+
+    config = svc.load()
+
+    assert config.env_bands.feature == {"BZ_HUB_URL": "http://127.0.0.1:${WINTER_PORT_BASE+2}"}
+    assert config.env_bands.named == {"alpha": {"BZ_HUB_URL": "http://127.0.0.1:8421"}}
+
+
+def test_env_bands_reserved_names_are_not_named_bands() -> None:
+    """`workspace` and `feature` are band names — never per-env override entries."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "env": {
+                    "workspace": {"vars": {"WS_VAR": "ws_value"}},
+                    "feature": {"vars": {"FE_VAR": "fe_value"}},
+                },
+            },
+        },
+    )
+
+    config = svc.load()
+
+    assert config.env_bands.named == {}
+
+
+def test_env_bands_multiple_named_bands_parse_independently() -> None:
+    """Each [env.<name>.vars] lands under its own key."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "env": {
+                    "alpha": {"vars": {"HUB": "alpha-hub"}},
+                    "beta": {"vars": {"HUB": "beta-hub"}},
+                },
+            },
+        },
+    )
+
+    config = svc.load()
+
+    assert config.env_bands.named == {
+        "alpha": {"HUB": "alpha-hub"},
+        "beta": {"HUB": "beta-hub"},
+    }
+
+
+def test_env_bands_named_band_for_unknown_env_parses_without_error() -> None:
+    """A band naming an env that does not exist is parsed, not rejected."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {config_path: {"env": {"nonexistent": {"vars": {"KEY": "value"}}}}},
+    )
+
+    config = svc.load()
+
+    assert config.env_bands.named == {"nonexistent": {"KEY": "value"}}
+
+
+@pytest.mark.parametrize("bad_value", [["a", "b"], {"nested": "table"}, True])
+def test_env_bands_named_non_scalar_value_raises_config_error(bad_value: object) -> None:
+    """A non-scalar [env.<name>.vars] value raises ConfigError naming the env and key."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(
+        fs,
+        {config_path: {"env": {"alpha": {"vars": {"BAD_KEY": bad_value}}}}},
+    )
+
+    with pytest.raises(ConfigError) as exc:
+        svc.load()
+
+    error_msg = str(exc.value)
+    assert "env.alpha.vars" in error_msg
+    assert "BAD_KEY" in error_msg
+
+
+def test_env_bands_named_band_overlay_replaces_committed_named_band() -> None:
+    """config.local.toml overrides a committed [env.<name>.vars] band wholesale.
+
+    `env` is a one-level `TableField` in the merge spec, so `env.<name>` is the merge
+    key and its value is replaced, not merged into.  A named band therefore behaves
+    exactly like the `workspace` and `feature` bands under the overlay: redeclaring it
+    locally replaces every key, it does not patch individual ones.
+    """
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: "", local_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {"env": {"alpha": {"vars": {"HUB": "committed", "DROPPED": "gone"}}}},
+            local_path: {"env": {"alpha": {"vars": {"HUB": "from-local"}}}},
+        },
+    )
+
+    config = svc.load()
+
+    assert config.env_bands.named["alpha"] == {"HUB": "from-local"}
+
+
+def test_env_bands_local_named_band_does_not_disturb_committed_sibling() -> None:
+    """An overlay band for one env leaves another env's committed band intact."""
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: "", local_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "env": {
+                    "alpha": {"vars": {"HUB": "committed-alpha"}},
+                    "beta": {"vars": {"HUB": "committed-beta"}},
+                },
+            },
+            local_path: {"env": {"alpha": {"vars": {"HUB": "local-alpha"}}}},
+        },
+    )
+
+    config = svc.load()
+
+    assert config.env_bands.named["alpha"] == {"HUB": "local-alpha"}
+    assert config.env_bands.named["beta"] == {"HUB": "committed-beta"}
+
+
+def test_env_bands_named_band_survives_local_feature_overlay() -> None:
+    """Precedence: [env.<name>.vars] > config.local.toml feature overlay > [env.feature.vars].
+
+    The overlay wins the feature band (beating the committed feature value), and the
+    named band still sits above the merged result — so `alpha` reads its own override
+    while the feature band carries the overlay value for every sibling.
+    """
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: "", local_path: ""})
+    svc = _service(
+        fs,
+        {
+            config_path: {
+                "env": {
+                    "feature": {"vars": {"HUB": "from-committed-feature"}},
+                    "alpha": {"vars": {"HUB": "from-alpha"}},
+                },
+            },
+            local_path: {"env": {"feature": {"vars": {"HUB": "from-local-feature"}}}},
+        },
+    )
+
+    config = svc.load()
+
+    assert config.env_bands.feature == {"HUB": "from-local-feature"}
+    assert config.env_bands.named["alpha"] == {"HUB": "from-alpha"}
+
+
 def test_env_bands_only_feature_band_parses() -> None:
     """A config with only [env.feature.vars] parses; workspace band is empty."""
     config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE

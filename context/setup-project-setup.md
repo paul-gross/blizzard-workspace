@@ -116,7 +116,7 @@ This means every new environment gets the right ports automatically, without any
 
 **Allocate ports as `${WINTER_PORT_BASE+N}`.** `WINTER_PORT_BASE` is the start of this env's reserved port window (`base_port + index * ports_per_env`), and `N` is a small per-service offset *within* that window — so `WEB`, `API`, `DB` become `WINTER_PORT_BASE+0`, `+1`, `+2`, landing inside the env's own block and never colliding with another env.
 
-Per-env variables live entirely in `[env.feature.vars]` / `[env.workspace.vars]` and are injected at runtime.
+Per-env variables live in `[env.feature.vars]` / `[env.workspace.vars]` and are injected at runtime.
 
 To inspect the computed vars for a given env:
 

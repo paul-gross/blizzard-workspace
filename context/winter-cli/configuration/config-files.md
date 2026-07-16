@@ -41,7 +41,7 @@ The top-level `prefix` key is distinct from the per-`[[standalone_repository]]` 
 
 The rest of `.winter/config.toml` is organized by concept:
 
-- **Port allocation** (`base_port`, `ports_per_env`, `env_aliases`, `envs_per_workspace`) and the `[env.workspace.vars]` / `[env.feature.vars]` env var bands — [ports-and-environments.md](./ports-and-environments.md).
+- **Port allocation** (`base_port`, `ports_per_env`, `env_aliases`, `envs_per_workspace`) and the `[env.*]` env var bands — [ports-and-environments.md](./ports-and-environments.md).
 - **Repositories** (`[[project_repository]]`, `[[standalone_repository]]`, `git_excludes`) — [repositories.md](./repositories.md).
 - **Agent model & tier configuration** (`[agent_model_overrides]`, `[model_tiers]`) — [agents.md](./agents.md).
 - **Artifact space** (`[space]`) — [space.md](./space.md).
@@ -57,6 +57,8 @@ user.email = "john.doe@example.com"
 ```
 
 The overlay uses the same schema as the shared config. Keys in the overlay override the shared config key-by-key. The `[git]` identity is applied to every repo winter-cli manages during `winter ws init`.
+
+**Merge depth.** How deep a key merges is per-key, not uniform. A scalar key is replaced outright. Table keys — `[git]`, `[keybindings]`, `[tui]`, `[capabilities]`, `[env]`, `[model_tiers]`, `[agent_model_overrides]` — merge **one level deep**: the overlay's immediate sub-keys override the shared config's, but each sub-key's *value* is replaced wholesale rather than merged into. So redeclaring `[env.feature.vars]` (or any `[env.<name>.vars]` band) locally replaces that whole band, it does not patch individual variables out of it. `[[project_repository]]` and `[[standalone_repository]]` arrays append instead of replacing. The merge runs **before** any table is parsed into its model, so anything derived from the config — the env var bands among them — resolves from the already-merged result.
 
 ## Workspace-root file shape
 

@@ -431,13 +431,15 @@ _DEFAULT_ENV_ALIASES = [
 
 
 class EnvVarBands(BaseModel):
-    """Scope-split env-var bands from ``[env.workspace.vars]`` and ``[env.feature.vars]``.
+    """Scope-split env-var bands from ``[env.workspace.vars]``, ``[env.feature.vars]``,
+    and any number of per-env ``[env.<name>.vars]`` tables.
 
     ``workspace`` vars are rendered for workspace scope AND inherited as the base layer
     for every feature scope (feature-band entries are overlaid on top; feature wins key
     collisions).  ``feature`` vars are rendered for feature-env scope only — never emitted
-    for the workspace scope.  Both bands default to empty dicts when the corresponding
-    TOML sub-table is absent.
+    for the workspace scope.  ``named`` holds per-env override bands, each rendered on top
+    of the feature band for its own env only.  Every band defaults to empty when the
+    corresponding TOML sub-table is absent.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -447,6 +449,17 @@ class EnvVarBands(BaseModel):
 
     feature: dict[str, str] = Field(default_factory=dict)
     """Vars from ``[env.feature.vars]`` — feature-env scope (overlaid on workspace band)."""
+
+    named: dict[str, dict[str, str]] = Field(default_factory=dict)
+    """Per-env override bands from ``[env.<name>.vars]``, keyed by env name.
+
+    Each band is rendered only for its own feature env, on top of the feature band.
+    The parser treats ``workspace`` and ``feature`` as band names and never places
+    them here; ``compute()`` additionally never consults this dict for the workspace
+    scope, so a reserved key set directly on the model stays inert rather than
+    leaking into workspace output.  A band for an env that does not exist is inert
+    too — nothing ever looks it up.
+    """
 
 
 class SpaceConfig(BaseModel):
@@ -615,11 +628,13 @@ class WorkspaceConfig(BaseModel):
     """
 
     env_bands: EnvVarBands = Field(default_factory=EnvVarBands)
-    """Scope-split env-var bands from ``[env.workspace.vars]`` and ``[env.feature.vars]``.
+    """Scope-split env-var bands from ``[env.workspace.vars]``, ``[env.feature.vars]``,
+    and per-env ``[env.<name>.vars]`` tables.
 
     ``EnvProvisionerService.compute()`` selects bands by scope: workspace scope
-    renders only the ``workspace`` band; feature scope renders ``workspace`` first
-    then ``feature`` on top (feature wins key collisions).
+    renders only the ``workspace`` band; feature scope renders ``workspace`` first,
+    then ``feature`` on top, then that env's own ``named`` band last (each layer wins
+    key collisions against the ones below it).
     """
 
     space: SpaceConfig = Field(default_factory=SpaceConfig)

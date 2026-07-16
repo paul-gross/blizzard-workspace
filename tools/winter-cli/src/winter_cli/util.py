@@ -18,11 +18,11 @@ from winter_cli.config.overlay import ArrayAppendField, MergeSpec, TableField, o
 #
 # Merges nested-table keys one level deep via TableField; a new nested-table key
 # needing per-key overlay must be added to this spec explicitly.  For the ``env``
-# key this means the ``[env.workspace]`` and ``[env.feature]`` sub-tables are
-# merged per-key (so a config.local.toml can add ``[env.workspace.vars]`` without
-# wiping ``[env.feature.vars]``), but each band's ``vars`` dict is replaced
-# wholesale — there is no per-variable merging within a band (same one-level
-# limit as ``tui``/``[tui.dashboard]``).
+# key this means every band sub-table — ``[env.workspace]``, ``[env.feature]``,
+# and each per-env ``[env.<name>]`` — is merged per-key (so a config.local.toml
+# can add ``[env.workspace.vars]`` without wiping ``[env.feature.vars]``), but
+# each band's ``vars`` dict is replaced wholesale — there is no per-variable
+# merging within a band (same one-level limit as ``tui``/``[tui.dashboard]``).
 #
 # - [model_tiers]: per-tier-label key merging so a config.local.toml can
 #   override or add individual tier entries without wiping the shared map

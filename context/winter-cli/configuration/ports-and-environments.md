@@ -17,7 +17,7 @@ envs_per_workspace = 48   # max feature-env index (1..envs_per_workspace); must 
 
 ## Env var bands
 
-Two scope-bound bands of config-driven variables can be declared in `.winter/config.toml`. Values support `${...}` substitution; literal text passes through unchanged. These variables are computed at runtime by `EnvProvisionerService` and injected into every provider subprocess by `winter service`. To inspect the computed values for a scope, use `winter env <scope>` (see [usage/env.md](../usage/env.md)).
+Three kinds of scope-bound band can be declared in `.winter/config.toml`. Values support `${...}` substitution; literal text passes through unchanged. These variables are computed at runtime by `EnvProvisionerService` and injected into every provider subprocess by `winter service`. To inspect the computed values for a scope, use `winter env <scope>` (see [usage/env.md](../usage/env.md)).
 
 ```toml
 [env.workspace.vars]
@@ -28,20 +28,27 @@ WTS_WEB_PORT = "${WINTER_PORT_BASE+10}"
 WTS_API_PORT = "${WINTER_PORT_BASE+11}"
 WTS_DB_PORT  = "${WINTER_PORT_BASE+12}"
 DATABASE_URL = "postgresql://wts:wts@localhost:${WTS_DB_PORT}/wts-${WINTER_ENV}"  # reuses WTS_DB_PORT and WINTER_ENV
+
+[env.alpha.vars]
+WTS_WEB_PORT = "8421"   # alpha only — every other env keeps the feature-band value
 ```
 
 **Workspace band (`[env.workspace.vars]`)** — rendered for both the `workspace` scope and every feature env. Because `WINTER_PORT_BASE` is omitted from the workspace scope, workspace-band entries that reference a port should use `${WINTER_WORKSPACE_PORT_BASE+N}`.
 
 **Feature band (`[env.feature.vars]`)** — rendered only for feature envs; never emitted for the `workspace` scope.
 
+**Per-env band (`[env.<name>.vars]`)** — rendered only for the one feature env it names, on top of the feature band. Use it to point a single env at a fixed endpoint or a different backing service while its siblings keep the derived per-env value. `workspace` and `feature` are band names, so an env named either cannot carry a per-env band. A band naming an env that does not exist is inert — never looked up, never an error — so an override can outlive the env it was written for.
+
 **Resolution per scope:**
 
 | Scope | Variables emitted |
 |-------|-----------------|
-| `workspace` | `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_WORKSPACE_PORT_BASE`, `WINTER_SERVICE_PREFIX` + workspace-band entries only |
-| `<feature>` | `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE`, `WINTER_SERVICE_PREFIX` + workspace band rendered first, then feature band on top (feature band wins key collisions) |
+| `workspace` | `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_WORKSPACE_PORT_BASE`, `WINTER_SERVICE_PREFIX` + workspace-band entries only (per-env bands are never rendered here) |
+| `<feature>` | `WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE`, `WINTER_SERVICE_PREFIX` + workspace band rendered first, then feature band, then `[env.<name>.vars]` for that env last (each layer wins key collisions against the ones below it) |
 
-A feature-band entry may reference keys already rendered from the workspace band.
+An entry may reference keys already rendered by the bands below it: a feature-band entry may reference workspace-band keys, and a per-env entry may reference either.
+
+**Precedence with the local overlay.** `.winter/config.local.toml` merges into the committed config before bands are resolved (see [config-files.md](./config-files.md#local-overlay-winterconfiglocaltoml)), so the effective order lowest to highest is `[env.feature.vars]` < `config.local.toml` feature overlay < `[env.<name>.vars]` — a per-env band wins over a locally-overlaid feature band.
 
 **Migration from `[env.vars]` (hard break).** A config that still declares the legacy `[env.vars]` table is rejected with a `ConfigError` at startup. Migrate by moving entries to `[env.feature.vars]` (for feature-env variables) or `[env.workspace.vars]` (for shared workspace variables). There is no alias or fallback — the failure is intentional so no variables are silently dropped.
 

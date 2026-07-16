@@ -127,8 +127,9 @@ class StreamServiceReporter:
     def env_provision_error(self, scope: str, detail: str) -> None:
         self._click.echo(
             f"warning: could not compute the environment for scope {scope!r} "
-            f"— services will run without injected WINTER_* / [env.workspace.vars] / [env.feature.vars] values. "
-            f"Fix the [env.workspace.vars] / [env.feature.vars] template in .winter/config.toml. "
+            f"— services will run without injected WINTER_* / [env.*.vars] values. "
+            f"Fix the offending [env.*.vars] template in .winter/config.toml — "
+            f"the detail below names the band. "
             f"Detail: {detail}",
             err=True,
         )
@@ -217,8 +218,9 @@ class JsonServiceReporter:
     def env_provision_error(self, scope: str, detail: str) -> None:
         self._click.echo(
             f"warning: could not compute the environment for scope {scope!r} "
-            f"— services will run without injected WINTER_* / [env.workspace.vars] / [env.feature.vars] values. "
-            f"Fix the [env.workspace.vars] / [env.feature.vars] template in .winter/config.toml. "
+            f"— services will run without injected WINTER_* / [env.*.vars] values. "
+            f"Fix the offending [env.*.vars] template in .winter/config.toml — "
+            f"the detail below names the band. "
             f"Detail: {detail}",
             err=True,
         )

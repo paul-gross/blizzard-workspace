@@ -32,13 +32,18 @@ workspace value (index-0) would make the name ambiguous across scopes.
 
 Band selection
 --------------
-``[env.workspace.vars]`` and ``[env.feature.vars]`` are selected by scope:
+``[env.workspace.vars]``, ``[env.feature.vars]``, and the per-env
+``[env.<name>.vars]`` override tables are selected by scope:
 
 - **workspace scope**: only ``[env.workspace.vars]`` entries are rendered.
 - **feature scope**: ``[env.workspace.vars]`` entries are rendered first (into the
-  accumulating dict), then ``[env.feature.vars]`` entries on top.  On a key
-  collision the feature-band value wins.  Feature-band templates may reference
-  keys already rendered from the workspace band.
+  accumulating dict), then ``[env.feature.vars]`` entries on top, then that env's
+  own ``[env.<name>.vars]`` band last.  Each layer wins key collisions against the
+  ones below it, and its templates may reference keys already rendered by them.
+
+Only the band matching the scope's own name is rendered, so a per-env override never
+reaches a sibling env, and one naming an env that does not exist is simply never
+looked up — inert, not an error.
 
 Workspace-band template scope invariant
 ---------------------------------------
@@ -179,8 +184,9 @@ class EnvProvisionerService:
 
         - workspace scope: ``[env.workspace.vars]`` entries only.
         - feature scope: ``[env.workspace.vars]`` rendered first, then
-          ``[env.feature.vars]`` on top (feature wins key collisions; feature
-          templates may reference workspace-band keys already in scope).
+          ``[env.feature.vars]``, then this env's own ``[env.<name>.vars]`` band
+          last (each layer wins key collisions against the ones below it, and may
+          reference their already-rendered keys).
 
         Raises ``ValueError`` when a band template has an unsupported token or a
         reference to an undefined variable.
@@ -209,8 +215,12 @@ class EnvProvisionerService:
         bands = self._config.env_bands
         workspace_band = bands.workspace
         feature_band = bands.feature
+        # Per-env override band for this scope only. A miss — including every
+        # workspace-scope call and any [env.<name>.vars] naming an env that does
+        # not exist — yields an empty band and renders nothing.
+        named_band = bands.named.get(scope, {}) if scope != WORKSPACE_SCOPE else {}
 
-        if workspace_band or feature_band:
+        if workspace_band or feature_band or named_band:
             if scope == WORKSPACE_SCOPE:
                 # Workspace band template scope: base vars only (no WINTER_PORT_BASE —
                 # it is not in `result` for workspace scope, and we do not inject an
@@ -232,5 +242,11 @@ class EnvProvisionerService:
                 # and already-rendered workspace-band keys.
                 feat_template_scope = dict(result)
                 _render_band("env.feature.vars", feature_band, feat_template_scope, result)
+                # This env's own band renders last, so it wins every key collision
+                # against the bands below it. Its template scope carries the fully
+                # accumulated result, so an override may reference WINTER_PORT_BASE
+                # and any workspace- or feature-band key it is replacing.
+                named_template_scope = dict(result)
+                _render_band(f"env.{scope}.vars", named_band, named_template_scope, result)
 
         return result
