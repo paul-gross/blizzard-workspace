@@ -1,0 +1,197 @@
+main_branch = "master"
+
+# Workspace service-namespace prefix. Injected to every service provider as
+# WINTER_SERVICE_PREFIX. Chosen "bws" to avoid colliding with the reference
+# winter workspace's "wws" band on the same machine.
+service_prefix = "bws"
+
+# Per-env port allocation: port base = base_port + index * ports_per_env.
+# 20-per-env spacing, sitting in the 4500 band so it does not overlap the
+# reference workspace's 4000 band (alpha=index 1=4520, beta=4540, … r1=index 5=4600).
+base_port = 4500
+ports_per_env = 20
+
+# Fixed-index env aliases (slots 1..N in list order). The Greek quartet
+# alpha..delta (1-4) is the human's pool; r1..r4 (5-8) is the blizzard runner's
+# static pool — see ../runner/blizzard-runner.toml `workspace_envs`. Declaring
+# them as aliases pins r1..r4 to stable, sequential port bands instead of the
+# scattered hash-band slots ad-hoc names would otherwise draw.
+env_aliases = ["alpha", "beta", "gamma", "delta", "r1", "r2", "r3", "r4"]
+
+# Dashboard default layout: render the env/repo matrix with repos as rows
+# (envs as columns). `t` cycles layouts live for the session.
+[tui.dashboard]
+layout = "repos-as-rows"
+
+# ---------------------------------------------------------------------------
+# Service orchestration — two providers, bound explicitly. winter-service-docker
+# runs the dockerized daemon (the per-env Postgres); winter-service-tmux carries
+# the from-source services (mock forge, hub, runner — slotted for P4-P6) plus a
+# workspace-scoped ad-hoc `shell`. Order is the `up` fan-out order: docker first
+# so Postgres is up (and health-gated by `--wait`) before any from-source service
+# that needs it. Service names are globally unique across providers, so
+# logs/restart route to the right one.
+#
+# Because two providers are bound, `up <env>` (which ensures the `workspace` scope
+# first) needs at least one provider to own a `workspace`-scoped service, else the
+# multi-provider workspace dispatch matches nothing and exits non-zero. blizzard's
+# app stack is per-env by design, so winter-service-tmux's workspace `shell` is
+# the workspace scope's sole tenant and what keeps that ensure-step exit 0.
+# See workspace:/context/winter-cli/configuration/capabilities.md.
+# ---------------------------------------------------------------------------
+
+[capabilities]
+service = ["winter-service-docker", "winter-service-tmux"]
+
+# ---------------------------------------------------------------------------
+# Env variable bands (see context/winter-cli/configuration/ports-and-environments.md).
+# The env-provisioner resolves these per scope and injects them into service
+# providers. A feature env gets the workspace band unioned with the feature band.
+#
+# Feature-env variables — per-env, resolved against each env's own port base via
+# ${WINTER_PORT_BASE+N} (alpha base 4420, beta 4440, …), so each env gets its own
+# ports from one template. The blizzard verification stack claims a stable slot
+# per service from day one; only BZ_PG_PORT is wired to a live service today
+# (the per-env Postgres in winter-service-docker), the rest reserve ports for the
+# from-source services that P4-P6 activate.
+# ---------------------------------------------------------------------------
+
+[env.feature.vars]
+# Per-env Postgres host port (band +0 → alpha 4420, beta 4440). The docker
+# environment-compose.yaml publishes Postgres on ${BZ_PG_PORT}.
+BZ_PG_PORT     = "${WINTER_PORT_BASE+0}"
+# Mock GitHub forge port (band +1 → alpha 4421). LIVE as of P4 — the forge slot
+# in .winter/config/winter-service-tmux/config.toml binds it.
+BZ_FORGE_PORT  = "${WINTER_PORT_BASE+1}"  # mock GitHub forge (P4)
+# blizzard hub / runner ports (band +2 / +3). LIVE as of P6 — the hub and runner
+# slots in .winter/config/winter-service-tmux/config.toml bind them.
+BZ_HUB_PORT    = "${WINTER_PORT_BASE+2}"  # blizzard hub (P5/P6)
+BZ_RUNNER_PORT = "${WINTER_PORT_BASE+3}"  # blizzard runner (P6)
+# Angular dev-server ports (band +4 / +5) — the HMR surface for the two web apps.
+# Each daemon serves its own built bundle beside its API on its own port above; these
+# are the `ng serve` twins that rebuild on save. Two ports because there are two apps
+# aimed at two different daemons: the hub board proxies /api to BZ_HUB_PORT, the runner
+# panel to BZ_RUNNER_PORT (blizzard:web/proxy.conf.{hub,runner}.js). Bound by the
+# web-hub / web-runner slots in .winter/config/winter-service-tmux/config.toml.
+BZ_HUB_WEB_PORT    = "${WINTER_PORT_BASE+4}"  # `ng serve hub` — the board's HMR port
+BZ_RUNNER_WEB_PORT = "${WINTER_PORT_BASE+5}"  # `ng serve runner` — the panel's HMR port
+# The hub URL the runner reconciliation loop points at (same host, band +2). Read by
+# `blizzard runner init`'s scaffold (RunnerConfig, BZ_HUB_URL).
+BZ_HUB_URL     = "http://127.0.0.1:${BZ_HUB_PORT}"
+# Connection string for the per-env Postgres — interpolates the env's own
+# BZ_PG_PORT (rendered above, already resolved) against the fixed bootstrap
+# credentials/db (blizzard/blizzard) created by the postgres container.
+DATABASE_URL   = "postgresql://blizzard:blizzard@localhost:${BZ_PG_PORT}/blizzard"
+# Fixture-workspace scratch root — shared by the mock forge and the
+# `blizzard-mock-fixture` scaffold so they agree on ONE git truth
+# (blizzard-discovery:/implementation/verification.md). The forge fronts the same
+# bare origins the fixture workspace pushes to; both derive the per-env origins
+# directory from this root plus WINTER_ENV. Disposable, so it sits under the
+# system temp dir (not the workspace tree). The fixture CLI reads
+# BLIZZARD_MOCK_SCRATCH_ROOT; the forge reads BZ_FORGE_REPOS_DIR.
+BLIZZARD_MOCK_SCRATCH_ROOT = "/tmp/blizzard-mock/fixtures"
+BZ_FORGE_REPOS_DIR = "${BLIZZARD_MOCK_SCRATCH_ROOT}/${WINTER_ENV}/origins"
+# The winter workspace the runner's provider drives — the per-env blizzard-mock
+# fixture workspace (bare file:// origins + a real winter workspace), minted by
+# `blizzard-mock-fixture` under the same scratch root (one git truth). Read by
+# `blizzard runner init`'s scaffold (BZ_WORKSPACE_ROOT); the runner acquires its
+# inner env pool (BZ_WORKSPACE_ENVS) inside it via `winter ws init`.
+BZ_WORKSPACE_ROOT = "${BLIZZARD_MOCK_SCRATCH_ROOT}/${WINTER_ENV}/workspace"
+BZ_WORKSPACE_ENVS = "e1"          # the provider's static inner env pool (D-062)
+BZ_BASE_BRANCH    = "main"        # the origins' default branch the fixture seeds
+# Where the runner's transcript reader and mock-claude-code's transcript writer
+# both look for a session's JSONL file (a sibling scratch dir of origins/workspace
+# above, one git truth). Left unset, the runner falls back to the developer's real
+# ~/.claude/projects — pinning it per env keeps a feature env's mock-minted
+# transcripts out of that real store.
+BZ_TRANSCRIPTS_ROOT = "${BLIZZARD_MOCK_SCRATCH_ROOT}/${WINTER_ENV}/transcripts"
+# Disposable per-env runtime roots for the hub and runner daemons (sqlite stores +
+# scaffolded config), under the system temp dir so they never touch the worktree.
+BZ_HUB_RUNTIME    = "/tmp/blizzard/${WINTER_ENV}/hub"
+BZ_RUNNER_RUNTIME = "/tmp/blizzard/${WINTER_ENV}/runner"
+# Unfences the mock coding-harness façade the runner spawns (mock-claude-code): the
+# runner passes its own environment to the worker, so this rides into the spawn. The
+# companion marker file is dropped in the fixture tree when it is minted (the
+# acceptance loop / `blizzard-mock-fixture`). Harmless on the other panes.
+BLIZZARD_MOCK_HARNESS_FENCE = "1"
+
+# ---------------------------------------------------------------------------
+# Provisioning — `winter provision <env>` brings a feature env to a working
+# state. blizzard-mock is a uv project; sync its virtualenv in the env's
+# worktree so `uv run blizzard-mock-forge` (the forge service) and the mock
+# CLIs resolve. Scoped to the blizzard-mock worktree; other repos gain their
+# own handlers as later phases (P5+) land.
+# ---------------------------------------------------------------------------
+
+[[provision.dependency]]
+scope = "feature-environment"
+project = "blizzard-mock"
+apply = "uv sync"
+
+# blizzard (P5) is a uv project with an Angular frontend under web/. Sync the
+# Python virtualenv (daemons, CLI, `blizzard-export-openapi`) and install the
+# frontend node_modules so `mise run gate` / `mise run build` resolve in the
+# worktree. Array form: `uv sync` in the worktree root, then `npm ci` in web/.
+# The tmux hub/runner service slots stay commented until P6 fills them.
+[[provision.dependency]]
+scope = "feature-environment"
+project = "blizzard"
+apply = ["uv sync", "cd web && npm ci"]
+
+# ---------------------------------------------------------------------------
+# Project repositories — worktreed into every feature environment.
+# ---------------------------------------------------------------------------
+
+[[project_repository]]
+name = "blizzard"
+url = "git@github.com:paul-gross/blizzard.git"
+
+[[project_repository]]
+name = "blizzard-harness"
+url = "git@github.com:paul-gross/blizzard-harness.git"
+
+[[project_repository]]
+name = "blizzard-mock"
+url = "git@github.com:paul-gross/blizzard-mock.git"
+
+[[project_repository]]
+name = "blizzard-discovery"
+url = "git@github.com:paul-gross/blizzard-discovery.git"
+
+# ---------------------------------------------------------------------------
+# Standalone repositories — winter extensions, cloned once under .winter/ext/.
+# The winter-* extensions are the same repos that serve the winter workspace.
+# blizzard-harness is additionally installed as an extension so its conventions
+# load into every agent context (it also appears as a project repo above, for
+# editing through the feature-environment flow).
+# ---------------------------------------------------------------------------
+
+[[standalone_repository]]
+name = "winter-canon"
+url = "git@github.com:paul-gross/winter-canon.git"
+path = ".winter/ext/canon"
+
+[[standalone_repository]]
+name = "winter-github"
+url = "git@github.com:paul-gross/winter-github.git"
+path = ".winter/ext/github"
+
+[[standalone_repository]]
+name = "winter-workflow"
+url = "git@github.com:paul-gross/winter-workflow.git"
+path = ".winter/ext/workflow"
+
+[[standalone_repository]]
+name = "winter-service-tmux"
+url = "git@github.com:paul-gross/winter-service-tmux.git"
+path = ".winter/ext/service-tmux"
+
+[[standalone_repository]]
+name = "winter-service-docker"
+url = "git@github.com:paul-gross/winter-service-docker.git"
+path = ".winter/ext/service-docker"
+
+[[standalone_repository]]
+name = "blizzard-harness"
+url = "git@github.com:paul-gross/blizzard-harness.git"
+path = ".winter/ext/harness"
