@@ -14,8 +14,10 @@ from winter_cli.modules.workspace.env_status_service import EnvStatusService
 from winter_cli.modules.workspace.models import (
     FeatureEnvironment,
     FeatureEnvironmentStatus,
+    LocalFastForward,
     PinnedScope,
     ProjectRepository,
+    RepoError,
     RepoScope,
     RepoStatus,
     StandaloneRepository,
@@ -179,6 +181,11 @@ class _PushSpyRepoRepo:
     def get_worktree_push_branch(self, worktree: Any) -> str | None:
         return self._push_branches.get(worktree.repository.name)
 
+    def get_remote_branch_tip(self, worktree: Any, branch: str) -> str | None:
+        # No remote ref yet — the post-push fast-forward is a no-op, keeping
+        # these tests focused on push targeting.
+        return None
+
     def push(self, worktree: Any, feature_branch: str | None = None) -> int:
         self.pushes.append((worktree.repository.name, feature_branch))
         return 1
@@ -285,6 +292,130 @@ def test_push_pinned_plain_pushes_without_resolving_a_branch(workspace: Workspac
 
     assert repo_repo.pushes == [("pinned-repo", None)]
     assert report.envs[0].repos[0].pushed is True
+
+
+class _FfSpyRepoRepo:
+    """Spy write-repo exercising the post-push local-branch fast-forward.
+
+    Every worktree pushes to `push_branch` (default `main`, but any shared branch
+    name — the ff is name-independent). `ff_results` maps repo name → the
+    `LocalFastForward | None` that `fast_forward_local_branch` returns, letting a
+    test drive the in-sync / behind / dirty branches without a real git repo.
+    Records `(repo_name, branch, pre_remote_tip)` for each ff call.
+    """
+
+    def __init__(self, ff_results: dict[str, LocalFastForward | None], push_branch: str = "main") -> None:
+        self._ff_results = ff_results
+        self._push_branch = push_branch
+        self.pushes: list[tuple[str, str | None]] = []
+        self.ff_calls: list[tuple[str, str, str]] = []
+
+    def get_worktree_status(self, worktree: Any) -> RepoStatus:
+        return RepoStatus(
+            name=worktree.repository.name,
+            path=str(worktree.path),
+            main_branch="main",
+            ahead=1,
+            tracking_ahead=1,
+        )
+
+    def get_worktree_push_branch(self, worktree: Any) -> str | None:
+        return self._push_branch
+
+    def get_remote_branch_tip(self, worktree: Any, branch: str) -> str | None:
+        assert branch == self._push_branch
+        return f"pre-{worktree.repository.name}"
+
+    def push(self, worktree: Any, feature_branch: str | None = None) -> int:
+        self.pushes.append((worktree.repository.name, feature_branch))
+        return 1
+
+    def fast_forward_local_branch(self, repo: Any, branch: str, pre_remote_tip: str) -> LocalFastForward | None:
+        self.ff_calls.append((repo.name, branch, pre_remote_tip))
+        return self._ff_results.get(repo.name)
+
+    def __getattr__(self, name: str) -> Any:
+        raise AssertionError(f"_FfSpyRepoRepo.{name} called unexpectedly")
+
+
+def test_push_fast_forwards_local_branch_when_in_sync(workspace: Workspace) -> None:
+    """A push reports the local-branch fast-forward, keyed on the pushed branch name."""
+    repo_repo = _FfSpyRepoRepo({"repo-a": LocalFastForward(branch="main", advanced=True, commits=1)})
+    svc = _push_service(workspace, repo_repo, _two_repo_factory(workspace, ["repo-a"]))
+
+    report = svc.push_all(scope=RepoScope.project, patterns=None)
+
+    assert repo_repo.ff_calls == [("repo-a", "main", "pre-repo-a")]
+    outcome = report.envs[0].repos[0]
+    assert outcome.pushed is True
+    assert outcome.local_ff == LocalFastForward(branch="main", advanced=True, commits=1)
+
+
+def test_push_ff_is_name_independent(workspace: Workspace) -> None:
+    """The fast-forward applies to any shared branch name, not just the repo's main."""
+    repo_repo = _FfSpyRepoRepo(
+        {"repo-a": LocalFastForward(branch="develop", advanced=True, commits=2)},
+        push_branch="develop",
+    )
+    svc = _push_service(workspace, repo_repo, _two_repo_factory(workspace, ["repo-a"]))
+
+    report = svc.push_all(scope=RepoScope.project, patterns=None)
+
+    assert repo_repo.ff_calls == [("repo-a", "develop", "pre-repo-a")]
+    assert report.envs[0].repos[0].local_ff == LocalFastForward(branch="develop", advanced=True, commits=2)
+
+
+def test_push_per_repo_ff_evaluation(workspace: Workspace) -> None:
+    """Two repos pushing to the same branch: only the in-sync one advances."""
+    repo_repo = _FfSpyRepoRepo(
+        {
+            "repo-a": LocalFastForward(branch="main", advanced=True, commits=1),
+            "repo-b": LocalFastForward(branch="main", advanced=False, skipped_reason="not in sync"),
+        }
+    )
+    svc = _push_service(workspace, repo_repo, _two_repo_factory(workspace, ["repo-a", "repo-b"]))
+
+    report = svc.push_all(scope=RepoScope.project, patterns=None)
+
+    outcomes = {o.repo_name: o for o in report.envs[0].repos}
+    assert outcomes["repo-a"].local_ff is not None and outcomes["repo-a"].local_ff.advanced is True
+    assert outcomes["repo-b"].local_ff is not None and outcomes["repo-b"].local_ff.advanced is False
+    assert outcomes["repo-b"].local_ff.skipped_reason == "not in sync"
+
+
+def test_push_ff_failure_does_not_fail_the_push(workspace: Workspace) -> None:
+    """A fast-forward that raises is surfaced as a skip note, not a push failure."""
+
+    class _RaisingFfRepoRepo(_FfSpyRepoRepo):
+        def fast_forward_local_branch(self, repo: Any, branch: str, pre_remote_tip: str) -> LocalFastForward | None:
+            raise RepoError("ff blew up")
+
+    repo_repo = _RaisingFfRepoRepo({})
+    svc = _push_service(workspace, repo_repo, _two_repo_factory(workspace, ["repo-a"]))
+
+    report = svc.push_all(scope=RepoScope.project, patterns=None)
+
+    outcome = report.envs[0].repos[0]
+    assert outcome.pushed is True  # push itself succeeded
+    assert report.success is True
+    assert outcome.local_ff is not None and outcome.local_ff.skipped_reason == "ff failed"
+
+
+def test_push_first_push_skips_ff(workspace: Workspace) -> None:
+    """A first push (no remote ref beforehand) has no in-sync local branch to advance."""
+
+    class _NoRemoteTipRepoRepo(_FfSpyRepoRepo):
+        def get_remote_branch_tip(self, worktree: Any, branch: str) -> str | None:
+            return None  # remote branch does not exist yet
+
+    repo_repo = _NoRemoteTipRepoRepo({})
+    svc = _push_service(workspace, repo_repo, _two_repo_factory(workspace, ["repo-a"]))
+
+    report = svc.push_all(scope=RepoScope.project, patterns=None)
+
+    # fast_forward_local_branch is never consulted (would append to ff_calls).
+    assert repo_repo.ff_calls == []
+    assert report.envs[0].repos[0].local_ff is None
 
 
 def test_push_all_with_no_envs_returns_empty_report(workspace: Workspace, workspace_config: WorkspaceConfig) -> None:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import git
 
@@ -10,6 +11,7 @@ from winter_cli.modules.workspace.internal.read_repo_repository import ReadRepoR
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.models import (
     FeatureWorktree,
+    LocalFastForward,
     MergeMode,
     MergeResult,
     ProjectRepository,
@@ -309,6 +311,98 @@ class WriteRepoRepository(ReadRepoRepository):
                     message=message,
                 )
         return commit_count
+
+    def get_remote_branch_tip(self, worktree: FeatureWorktree, branch: str) -> str | None:
+        """OID of `origin/<branch>` in the worktree's object store, or None when the
+        remote ref doesn't resolve yet (first push of a new branch). No network.
+
+        Read *before* a push to capture the remote tip the push will advance past,
+        so `fast_forward_local_branch` can tell whether the workspace's local copy of
+        the branch was in sync beforehand.
+        """
+        with git.Repo(str(worktree.path)) as r:
+            try:
+                return r.git.rev_parse("--verify", "--quiet", f"origin/{branch}")
+            except git.GitCommandError:
+                return None
+
+    def fast_forward_local_branch(
+        self, repo: ProjectRepository, branch: str, pre_remote_tip: str
+    ) -> LocalFastForward | None:
+        """Fast-forward the workspace's local `<branch>` to the just-pushed origin tip.
+
+        Applies to *any* local branch of the pushed name — not just the repo's
+        configured main — so an env connected to a shared integration branch keeps
+        the workspace's copy of that branch in sync after a push. Guarded so it only
+        ever advances a branch that was *exactly* at `pre_remote_tip` (the remote tip
+        before the push): a local branch that is behind, ahead, or diverged is left
+        for the user to integrate deliberately.
+
+        Returns None when nothing applies (no local branch of that name, or already
+        at the tip); a `LocalFastForward` describing the advance; or a skip with a
+        reason when the branch was in sync but its checkout was dirty.
+
+        The workspace's clones are linked git worktrees sharing one object store, so
+        `origin/<branch>` here already reflects the push, and the local branch may be
+        checked out in a *different* worktree than the one that pushed.
+        """
+        with git.Repo(str(repo.main_path)) as r:
+            try:
+                local_tip = r.git.rev_parse("--verify", "--quiet", f"refs/heads/{branch}")
+            except git.GitCommandError:
+                return None  # no local branch of this name — nothing to sync
+            if local_tip != pre_remote_tip:
+                return LocalFastForward(branch=branch, advanced=False, skipped_reason="not in sync")
+            try:
+                new_tip = r.git.rev_parse("--verify", "--quiet", f"refs/remotes/origin/{branch}")
+            except git.GitCommandError:
+                return None
+            if new_tip == local_tip:
+                return None
+            checkout_path = self._worktree_checked_out_on(r, branch)
+
+        # Not checked out anywhere: a pure ref advance is safe (we verified the
+        # local branch is an ancestor of the new tip via local_tip == pre_remote_tip).
+        if checkout_path is None:
+            with git.Repo(str(repo.main_path)) as r:
+                r.git.update_ref(f"refs/heads/{branch}", new_tip, local_tip)
+            return LocalFastForward(branch=branch, advanced=True, commits=self._count_between(repo, local_tip, new_tip))
+
+        # Checked out in some worktree: advance it there so the working tree and
+        # index move with the ref. A dirty checkout is left untouched.
+        with git.Repo(str(checkout_path)) as r:
+            if r.is_dirty(working_tree=True, index=True, untracked_files=False):
+                return LocalFastForward(branch=branch, advanced=False, skipped_reason="dirty")
+            try:
+                r.git.merge("--ff-only", f"origin/{branch}")
+            except git.GitCommandError as exc:
+                raise self._error_factory.from_git(
+                    exc,
+                    message=f"local fast-forward failed for {repo.name}",
+                    cwd=checkout_path,
+                ) from exc
+            advanced = self._count_range(r, repo.name, f"{local_tip}..{r.head.commit.hexsha}")
+            return LocalFastForward(branch=branch, advanced=True, commits=advanced)
+
+    @staticmethod
+    def _worktree_checked_out_on(r: git.Repo, branch: str) -> Path | None:
+        """Path of the linked worktree that has `branch` checked out, or None.
+
+        Parses `git worktree list --porcelain`; each record is a `worktree <path>`
+        line optionally followed by a `branch refs/heads/<name>` line (absent for a
+        detached HEAD).
+        """
+        current_path: Path | None = None
+        for line in r.git.worktree("list", "--porcelain").splitlines():
+            if line.startswith("worktree "):
+                current_path = Path(line[len("worktree ") :])
+            elif line == f"branch refs/heads/{branch}":
+                return current_path
+        return None
+
+    def _count_between(self, repo: ProjectRepository, old_tip: str, new_tip: str) -> int:
+        with git.Repo(str(repo.main_path)) as r:
+            return self._count_range(r, repo.name, f"{old_tip}..{new_tip}")
 
     def fetch_standalone(self, repo: StandaloneRepository) -> None:
         with git.Repo(str(repo.path)) as r:

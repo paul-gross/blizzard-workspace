@@ -440,13 +440,35 @@ class MergeReport:
 
 
 @dataclasses.dataclass
+class LocalFastForward:
+    """Result of the post-push sync of the workspace's local copy of a shared branch.
+
+    When a worktree pushes to a long-lived branch (e.g. `main`), winter tries to
+    fast-forward the source checkout's local copy of that branch so it stays in
+    sync. `advanced` records whether the ff happened; `skipped_reason` explains a
+    no-op that was still worth surfacing (local branch not in sync, dirty, or the
+    ff itself failed).
+    """
+
+    branch: str
+    advanced: bool
+    commits: int = 0
+    skipped_reason: str | None = None
+
+
+@dataclasses.dataclass
 class RepoPushOutcome:
-    """Result of pushing one repo — name, push status, commits delivered, error if any."""
+    """Result of pushing one repo — name, push status, commits delivered, error if any.
+
+    `local_ff` is set only when the push targeted a repo's main branch: it records
+    whether the workspace's local main was fast-forwarded to the pushed tip.
+    """
 
     repo_name: str
     pushed: bool
     commits: int = 0
     error: str | None = None
+    local_ff: LocalFastForward | None = None
 
 
 @dataclasses.dataclass

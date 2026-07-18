@@ -7,6 +7,7 @@ from winter_cli.modules.workspace.models import (
     EnvPushReport,
     EnvSkipped,
     FeatureWorktree,
+    LocalFastForward,
     PinnedScope,
     PushReport,
     RepoError,
@@ -141,6 +142,11 @@ class WorkspacePushService:
         worktree with no upstream is reported `no upstream` per-repo —
         parity with the standalone path — instead of being forced onto a
         sibling repo's feature branch.
+
+        After the push, if the workspace holds a local branch of the pushed
+        name that was in sync with the remote beforehand (e.g. an env connected
+        to a shared integration branch), that local branch is fast-forwarded to
+        the pushed tip. See `_fast_forward_local_branch`.
         """
         if wt.repository.pinned:
             target_branch = None
@@ -152,12 +158,39 @@ class WorkspacePushService:
                     pushed=False,
                     error="no upstream — run `winter ws connect` first",
                 )
+        # The branch this push actually lands on — resolved even for pinned
+        # worktrees (which plain-push to their tracked upstream) so we can
+        # sync the workspace's local copy of that branch afterward. Capture the
+        # remote tip *before* the push so the ff knows what "in sync" meant.
+        landing_branch = self._repo_repo.get_worktree_push_branch(wt)
+        pre_remote_tip = (
+            self._repo_repo.get_remote_branch_tip(wt, landing_branch) if landing_branch is not None else None
+        )
         try:
             commits = self._repo_repo.push(wt, target_branch)
         except RepoError as exc:
             logger.warning("Push failed for %s: %s", wt.repository.name, exc)
             return RepoPushOutcome(repo_name=wt.repository.name, pushed=False, error=str(exc))
-        return RepoPushOutcome(repo_name=wt.repository.name, pushed=True, commits=commits)
+        local_ff = self._fast_forward_local_branch(wt, landing_branch, pre_remote_tip)
+        return RepoPushOutcome(repo_name=wt.repository.name, pushed=True, commits=commits, local_ff=local_ff)
+
+    def _fast_forward_local_branch(
+        self, wt: FeatureWorktree, landing_branch: str | None, pre_remote_tip: str | None
+    ) -> LocalFastForward | None:
+        """Fast-forward the workspace's local copy of the just-pushed branch.
+
+        `pre_remote_tip` is None unless the remote ref existed before the push
+        (a first push has no in-sync local branch to advance), so this returns
+        None in that case. A ff failure never fails the push itself (the commits
+        are already on the remote); it is surfaced as a skip note.
+        """
+        if landing_branch is None or pre_remote_tip is None:
+            return None
+        try:
+            return self._repo_repo.fast_forward_local_branch(wt.repository, landing_branch, pre_remote_tip)
+        except RepoError as exc:
+            logger.warning("Local fast-forward failed for %s: %s", wt.repository.name, exc)
+            return LocalFastForward(branch=landing_branch, advanced=False, skipped_reason="ff failed")
 
     def _push_one_standalone(self, repo: StandaloneRepository) -> RepoPushOutcome:
         try:

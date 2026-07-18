@@ -931,12 +931,27 @@ class WorkspaceHandler:
         return envs > 1 or (envs > 0 and include_standalone)
 
     def _push_table_lines(self, rows) -> list[str]:
+        # Only show the LOCAL column when a push actually landed on a main branch
+        # — otherwise every feature-branch push would carry an empty column.
+        has_local_ff = any(getattr(r, "local_ff", None) is not None for r in rows)
         table_rows: list[list[str | Cell]] = []
         for r in rows:
             pushed_cell = Cell.of("yes", "green") if r.pushed else Cell.of("failed", "red")
             commits = str(r.commits) if r.pushed else (r.error or "")
-            table_rows.append([r.repo_name, pushed_cell, commits])
-        return self._cli_output_svc.render_table(table_rows, headers=["REPO", "PUSHED", "COMMITS"])
+            row: list[str | Cell] = [r.repo_name, pushed_cell, commits]
+            if has_local_ff:
+                row.append(self._local_ff_cell(getattr(r, "local_ff", None)))
+            table_rows.append(row)
+        headers = ["REPO", "PUSHED", "COMMITS"] + (["LOCAL"] if has_local_ff else [])
+        return self._cli_output_svc.render_table(table_rows, headers=headers)
+
+    @staticmethod
+    def _local_ff_cell(ff) -> str | Cell:
+        if ff is None:
+            return ""
+        if ff.advanced:
+            return Cell.of(f"{ff.branch} +{ff.commits}", "green")
+        return Cell.of(f"{ff.branch} skipped ({ff.skipped_reason})", "dim")
 
     def _render_status_table(self, snapshot: WorkspaceSnapshot) -> None:
         """Render the human-readable `ws status` output from a WorkspaceSnapshot."""
