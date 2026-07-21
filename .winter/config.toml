@@ -195,3 +195,12 @@ path = ".winter/ext/service-docker"
 name = "blizzard-harness"
 url = "git@github.com:paul-gross/blizzard-harness.git"
 path = ".winter/ext/harness"
+
+# blizzard-product is the live product-intent repo (roadmap + requirements),
+# the continuation of the frozen blizzard-discovery corpus. Extension, not a
+# project repo: product intent must not branch per env — one current copy at
+# the workspace root, read deliberately when planning.
+[[standalone_repository]]
+name = "blizzard-product"
+url = "git@github.com:paul-gross/blizzard-product.git"
+path = ".winter/ext/product"
