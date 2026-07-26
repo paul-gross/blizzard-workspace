@@ -13,3 +13,13 @@
 # Machine-specific winter-service-tmux overrides (overlaid on setup-tmux.sh)
 /context/project/setup-tmux.local.sh
 /context/project/workflow.local.sh
+
+# The winter space — per-session artifacts the winter-workflow skills generate
+# (plans, phase docs, harness scores, review manifests, retrospectives). Winter's own
+# output, not repo deliverables, so this workspace does not track them; see
+# `winter-workflow:/context/winter-space.md` (winter resolves these paths but writes no
+# ignore rules of its own).
+/.winter/scores/
+/.winter/manifests/
+/.winter/workflows/
+/.winter/retrospectives/
