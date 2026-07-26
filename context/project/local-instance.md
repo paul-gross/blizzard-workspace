@@ -74,12 +74,12 @@ Verify: `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8421/api/heal
 
 After a landing on `master`, this runbook is not the whole story — [post-delivery.md](./post-delivery.md) owns *when* it runs, what must be confirmed before building, and the one way it bites a fleet worker (restarting the runner terminates the agent running it).
 
-## One-time: the hub's PM source
+## One-time: the hub's work source
 
-The hub needs a `[[pm_source]]` declared in `../hub/blizzard-hub.toml` (the **runtime dir's** config, not this workspace's checkout). Without one, `pm-items` 503s and every board pointer's label reads null. Skip this once it is present.
+The hub needs a `[[work_source]]` declared in `../hub/blizzard-hub.toml` (the **runtime dir's** config, not this workspace's checkout). Without one, `work-items` 503s and every board pointer's label reads null. Skip this once it is present.
 
 ```toml
-[[pm_source]]
+[[work_source]]
 name = "blizzard"
 provider = "github"
 repo = "paul-gross/blizzard"
@@ -88,9 +88,9 @@ token_env = "BZ_FORGE_TOKEN"
 
 `token_env` names `BZ_FORGE_TOKEN` because that credential is already in `../hub/.env` — no `.env` edit needed, just this block.
 
-**The name must be `blizzard`, not anything else.** The migration that introduced pointer source refs backfills every existing pointer to `source="blizzard"`, derived from the `paul-gross/blizzard` repo tail, before this config block exists to consult. Name the source anything else (or point it at a different `repo`) and those pointers name a source the config does not define: their board labels go null and their PM reads fail, even though the toml "looks" configured.
+**The name must be `blizzard`, not anything else.** The migration that introduced pointer source refs backfills every existing pointer to `source="blizzard"`, derived from the `paul-gross/blizzard` repo tail, before this config block exists to consult. Name the source anything else (or point it at a different `repo`) and those pointers name a source the config does not define: their board labels go null and their work-item reads fail, even though the toml "looks" configured.
 
-> **Vocabulary in flux.** blizzard#55 renames this whole surface to work-source terminology (`[[work_source]]`, `work-items`). It is **not landed** — `master` reads `pm_source` and nothing rejects it. Use the spelling above until the rename lands on `master`, then update this section with it.
+> **If this hub was configured before blizzard#55 landed**, its toml still says `[[pm_source]]`, and the renamed wheel **refuses to load it** — deliberately, rather than parsing as zero sources. Rename the key (contents unchanged) in the same deploy that installs the wheel. It fails at the runbook's `migrate` step, before `systemctl restart`, so a stale toml aborts the deploy with the fleet still up on the previous wheel rather than wedging it — but only if you fix the toml rather than skipping ahead to the restart.
 
 ## Operating the fleet
 
