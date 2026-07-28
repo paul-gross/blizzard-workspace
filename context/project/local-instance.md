@@ -42,10 +42,10 @@ uv pip install --python ../../../.venv --reinstall dist/blizzard-*.whl
 # 5. restart the hub (runner is After= hub, so the hub goes first)
 systemctl --user restart blizzard-blizzard-hub.service
 
-# 6. re-mint every graph the deploy changed — see below. Needs the hub UP, so it
-#    sits here, and BEFORE the runner restart (which terminates a fleet worker).
-../../../.venv/bin/blizzard hub graph mint \
-  ../../../.venv/lib/python3*/site-packages/blizzard/hub/graphs/<graph>/graph.yaml
+# 6. reconcile the hub's packaged graphs into its store. Unconditional — it mints only
+#    what changed. Needs the hub UP, so it sits here, and BEFORE the runner restart
+#    (which terminates a fleet worker).
+../../../.venv/bin/blizzard hub graph sync
 
 # 7. restart the runner
 systemctl --user restart blizzard-blizzard-runner.service   # omit to leave the runner down
@@ -53,22 +53,7 @@ systemctl --user restart blizzard-blizzard-runner.service   # omit to leave the 
 
 Paths in steps 3–6 are written from `projects/blizzard`, where step 2 leaves you: `../../../` is the workspace root's parent. Adjust if you run them from elsewhere.
 
-### Re-minting changed graphs
-
-**A deployed wheel's graph changes are inert until they are minted.** Graphs live in the hub's store, not on disk — the hub reads a *minted* graph per chunk and never consults the packaged YAML again. Nothing mints at boot, so a deploy that ships a changed graph and stops at the restart leaves every new chunk running the previous definition, with no error anywhere to say so.
-
-So after any deploy, check whether the landed range touched `src/blizzard/hub/graphs/` and mint each graph directory it did:
-
-```bash
-git -C projects/blizzard diff --name-only <previous-deploy>..HEAD -- src/blizzard/hub/graphs/
-```
-
-Two things make this easy to get wrong:
-
-- **A prompt-only change still needs a re-mint.** `graph mint` **inlines** every `prompt` / `prompt_addendum` file reference into the stored definition, so editing a `prompts/*.md` and leaving `graph.yaml` untouched is a real graph change. Diff the whole graph *directory*, never just `graph.yaml`.
-- **Mint from the installed venv, not from `projects/blizzard`.** Minting what is deployed is the point; the source checkout can differ, and if it does, minting from it stores a definition no wheel is running.
-
-Minting is additive — the new graph becomes `effective` and the prior one `superseded`, in-flight chunks stay pinned to the definition they started on. Verify with `blizzard hub graph list` (the newest per name should be `effective`) and `... graph show <id>`. Note `show` renders nodes and edges but **not** prompt text — to confirm inlined prose landed, read `GET /api/graphs/<id>` instead.
+Step 6 is not optional and has no "did a graph change?" precondition: a deployed wheel's graph changes are inert until minted, and `graph sync` is idempotent, so running it every deploy costs nothing and forgetting it silently keeps every new chunk on the previous definition. Run it against the **installed venv's** binary, as written — it reconciles the hub's *own* packaged set, so a source checkout that has drifted from the deployed wheel cannot mint the wrong definitions. `blizzard:docs/deployment.md` §Install owns why it exists and what it compares; there is nothing machine-local left to repeat here.
 
 Verify: `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8421/api/health` (and `:8431`), plus `systemctl --user is-active blizzard-blizzard-{hub,runner}.service`.
 
