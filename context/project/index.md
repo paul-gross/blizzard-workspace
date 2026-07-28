@@ -14,14 +14,14 @@ The **discovery corpus** in the `blizzard-discovery` repo (product, design, deci
 
 The `D-NNN` citations already in blizzard's code are history, and stay put — they explain why something was built a certain way. Don't add new ones.
 
-What governs a change instead is [blizzard-harness](../../.winter/ext/harness/index.md) — see [The harness](#the-harness) below.
+What governs a change instead is [blizzard-context](../../.winter/ext/context/index.md) — see [The harness](#the-harness) below.
 
 ## The repo inventory
 
 | Repo | Role |
 |------|------|
 | `blizzard` | The main application — hub, runner, CLI, web board. |
-| `blizzard-harness` | The blizzard conventions harness — worktreed for editing, and installed as an extension (`.winter/ext/harness`) so its rules load into every agent context. |
+| `blizzard-context` | The blizzard conventions harness — worktreed for editing, and installed as an extension (`.winter/ext/context`) so its rules load into every agent context. |
 | `blizzard-mock` | The mock fleet: mock coding harnesses, mock forge, mock hub/runner, mock-data CLI. |
 | `blizzard-discovery` | The design corpus blizzard was built from — history, read-only, not maintained. |
 
@@ -29,7 +29,7 @@ The winter-* extensions (`winter-canon`, `winter-github`, `winter-workflow`, `wi
 
 ## The harness
 
-Blizzard adopts **winter-canon** as its substrate and instantiates its own harness in `blizzard-harness`, following `winter-harness` in style (domain-organized convention directories, routing hubs, a verifiability matrix, architectural guidance) but carrying **blizzard's own rules**. It governs every change: read [its hub](../../.winter/ext/harness/index.md) and route from there. Project-level delivery and commit conventions stay in [contributing.md](./contributing.md).
+Blizzard adopts **winter-canon** as its substrate and instantiates its own harness in `blizzard-context`, following `winter-harness` in style (domain-organized convention directories, routing hubs, a verifiability matrix, architectural guidance) but carrying **blizzard's own rules**. It governs every change: read [its hub](../../.winter/ext/context/index.md) and route from there. Project-level delivery and commit conventions stay in [contributing.md](./contributing.md).
 
 ## Project-level conventions
 

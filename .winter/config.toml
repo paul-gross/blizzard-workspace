@@ -147,8 +147,8 @@ name = "blizzard"
 url = "git@github.com:paul-gross/blizzard.git"
 
 [[project_repository]]
-name = "blizzard-harness"
-url = "git@github.com:paul-gross/blizzard-harness.git"
+name = "blizzard-context"
+url = "git@github.com:paul-gross/blizzard-context.git"
 
 [[project_repository]]
 name = "blizzard-mock"
@@ -161,7 +161,7 @@ url = "git@github.com:paul-gross/blizzard-discovery.git"
 # ---------------------------------------------------------------------------
 # Standalone repositories — winter extensions, cloned once under .winter/ext/.
 # The winter-* extensions are the same repos that serve the winter workspace.
-# blizzard-harness is additionally installed as an extension so its conventions
+# blizzard-context is additionally installed as an extension so its conventions
 # load into every agent context (it also appears as a project repo above, for
 # editing through the feature-environment flow).
 # ---------------------------------------------------------------------------
@@ -192,9 +192,9 @@ url = "git@github.com:paul-gross/winter-service-docker.git"
 path = ".winter/ext/service-docker"
 
 [[standalone_repository]]
-name = "blizzard-harness"
-url = "git@github.com:paul-gross/blizzard-harness.git"
-path = ".winter/ext/harness"
+name = "blizzard-context"
+url = "git@github.com:paul-gross/blizzard-context.git"
+path = ".winter/ext/context"
 
 # blizzard-product is the live product-intent repo (roadmap + requirements),
 # the continuation of the frozen blizzard-discovery corpus. Extension, not a

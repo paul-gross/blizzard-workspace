@@ -11,8 +11,8 @@ Use Conventional Commits with a scope:
     Co-Authored-By: Claude <noreply@anthropic.com>
 
 Types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`, `style`, `ai`.
-Scope is the **subsystem the change touches** — `hub`, `runner`, `cli`, `web` in `blizzard`; `architecture`, `standards`, `verification` in `blizzard-harness`; and so on.
-Reach for the repo name (`blizzard`, `blizzard-harness`, `blizzard-mock`, `blizzard-workspace`, `blizzard-discovery`) only when a change genuinely spans the whole repo and no subsystem fits — a bare `feat(blizzard)` on a change that lives in one subsystem is the scope done wrong.
+Scope is the **subsystem the change touches** — `hub`, `runner`, `cli`, `web` in `blizzard`; `architecture`, `standards`, `verification` in `blizzard-context`; and so on.
+Reach for the repo name (`blizzard`, `blizzard-context`, `blizzard-mock`, `blizzard-workspace`, `blizzard-discovery`) only when a change genuinely spans the whole repo and no subsystem fits — a bare `feat(blizzard)` on a change that lives in one subsystem is the scope done wrong.
 
 The `/wf-commit` skill (from the `winter-workflow` extension) generates commits in this exact format — prefer it over hand-writing messages.
 
@@ -34,11 +34,11 @@ Use `Refs #N` to cross-link an issue this commit relates to but doesn't close.
 Always use the short `#N` form, not the full issue URL — only the short form triggers GitHub's auto-close and back-link behavior.
 
 A bare `#N` always resolves against **the repo the commit lands in**, not the repo the issue was filed in.
-When a fix lands in a different repo than the one tracking it, **scope the reference** with the `owner/repo#N` form — e.g. `Closes paul-gross/blizzard-harness#21` to close it (cross-repo auto-close works given push access to the target repo) or `Refs paul-gross/blizzard-harness#21` to link without closing.
+When a fix lands in a different repo than the one tracking it, **scope the reference** with the `owner/repo#N` form — e.g. `Closes paul-gross/blizzard-context#21` to close it (cross-repo auto-close works given push access to the target repo) or `Refs paul-gross/blizzard-context#21` to link without closing.
 
 ## Checks before pushing
 
-`blizzard-harness` owns what a change is held to and how it is proven: its [standards](../../.winter/ext/harness/standards/index.md) rules, and its [verification matrix](../../.winter/ext/harness/verification/blizzard.md) for the per-component commands and the tiers each change owes.
+`blizzard-context` owns what a change is held to and how it is proven: its [standards](../../.winter/ext/context/standards/index.md) rules, and its [verification matrix](../../.winter/ext/context/verification/blizzard.md) for the per-component commands and the tiers each change owes.
 Run the checks for the repo you touched before you push.
 
 **Assume nothing blocks a bad push.** CI runs the merge gate on a pull request to `master` and again on push to `master`, but of the three delivery paths only the fleet's `open-pr` mode leaves a PR standing long enough for a check to gate anything — the other two put commits on `master` without waiting on one.
@@ -57,7 +57,7 @@ Work reaches `master` **three** ways (D-104). Which one applies is a fact about 
 | **Fleet, `open-pr`** | a runner in this workspace, driving a chunk through its graph | the hub's `deliver` node parks the chunk on an open PR; a **human** resolves it, and the hub completes the chunk from the outcome |
 
 Only the by-hand path is an agent's to drive.
-Both fleet paths are the same hub-executed `deliver` node in its two authored modes, and their mechanics — the modes, the parking, the merge detection — belong to `blizzard-harness:/workflows/feature-delivery.md` (`bzh:feature-delivery`) and the corpus decisions it rests on.
+Both fleet paths are the same hub-executed `deliver` node in its two authored modes, and their mechanics — the modes, the parking, the merge detection — belong to `blizzard-context:/workflows/feature-delivery.md` (`bzh:feature-delivery`) and the corpus decisions it rests on.
 Read that before assuming anything about how a chunk lands; do not infer a path from the shape of a merge commit, because both fleet modes open a PR and their merge commits are indistinguishable.
 
 ### The by-hand path
@@ -76,4 +76,4 @@ See [`workspace:/context/worktree-ops.md`](../worktree-ops.md) for the exact git
 No deploys and no changelog.
 A push to `master` publishes a dev-build wheel as a workflow artifact, for fleet dogfooding.
 A `v*` tag *is* the release: it runs the full suite and attaches the wheel to a GitHub Release — there is no package-index publish.
-See `blizzard-harness:/workflows/release.md` for the sequence.
+See `blizzard-context:/workflows/release.md` for the sequence.
