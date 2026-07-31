@@ -103,6 +103,19 @@ Raw equivalent, per repo (without provision teardown, hooks, or stripping the ex
 git -C ./projects/<repo-name> worktree remove ../../<name>/<repo-name>
 ```
 
+## Verifying destructive commands safely
+
+`winter ws checkout`, `winter ws reset --hard`, and `winter ws destroy` mutate real worktrees and none of them can be scoped narrower than their own `PATTERNS`/`ENV` argument — a wrong or missing pattern reaches every worktree it matches, not just the one you meant to touch. `ws checkout` in particular has **no repo-scoping flag at all**: it always operates env-wide (see [Adopting a remote feature branch](#adopting-a-remote-feature-branch) below); use `ws reset <env>/<repo> REF` when you need to touch exactly one worktree.
+
+**Never run or exercise a destructive `winter` command against a live env you don't intend to mutate** — including via `--winter=<path>`/`--service-orchestrator=<path>` core overrides, which still target the live workspace they're invoked from, not a sandbox. To verify destructive-command behavior:
+
+- Build a throwaway env (`winter ws init <scratch-env>`) or a fully scratch workspace (its own config + throwaway git repos) and exercise the command there.
+- When a throwaway env isn't practical, drive the underlying service classes directly against a scoped, disposable git repo instead of going through the live CLI.
+- Prefer `--dry-run`/`--json` to preview a command's plan before running it for real — every destructive `ws` verb that supports it reports the exact per-repo effect with no side effects.
+- Before finishing, audit every worktree you touched (or could have touched): branch attached where expected, working tree clean unless intentionally left dirty, and the commits you expect are present — not silently stranded off every ref.
+
+This came out of a real incident: an agent reproducing a bug ran `winter ws checkout alpha master --force` through the core-override against its own live `alpha` env; `ws checkout` has no repo-scoping flag, so it force-moved every worktree in `alpha`, including the agent's own, and erased a completed, unpushed commit. `--force` bypasses the dirty/abandonment safety gate entirely, so no guard in the CLI would have stopped that specific command — the operating rule above (verify in a throwaway env or scratch workspace, never the live one) is what actually prevents a recurrence.
+
 ## Adopting a remote feature branch
 
 `winter ws checkout <name> <feature-branch>` is an all-or-nothing connect + force-checkout across every non-pinned repo — it re-attaches HEAD onto the env-named branch (moving it off whatever branch a worktree was parked on, or re-attaching a detached one) and force-moves that branch to the target ref (use `--new` for a branch that doesn't exist anywhere yet). It is env-wide with no repo filter. For the `refused-unknown-branch` / `refused-missing-ref` refusals, the dirty/abandonment guard, and what `--force` does and doesn't bypass, see [winter-cli/usage/ws/checkout.md](./winter-cli/usage/ws/checkout.md).
