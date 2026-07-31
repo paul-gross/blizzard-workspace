@@ -148,7 +148,7 @@ class WriteRepoRepository(ReadRepoRepository):
             remote, _, branch = remote_branch.partition("/")
             if not branch:
                 raise RepoError(f"set_upstream: expected '<remote>/<branch>', got {remote_branch!r}")
-            head = r.active_branch.name
+            head = self._head_branch_name(r, worktree)
             r.git.config(f"branch.{head}.remote", remote)
             r.git.config(f"branch.{head}.merge", f"refs/heads/{branch}")
 
@@ -185,9 +185,27 @@ class WriteRepoRepository(ReadRepoRepository):
                 ) from exc
 
     def hard_reset(self, worktree: FeatureWorktree, target_ref: str) -> None:
+        # Force the worktree onto `worktree.environment.name` — the branch
+        # every non-pinned feature worktree is created under
+        # (`InitService._create_git_worktree`) — reset to `target_ref`,
+        # instead of plain `git reset --hard <target_ref>`. `reset --hard`
+        # moves whatever HEAD currently points at but does not *attach* a
+        # detached HEAD, so a worktree left detached (e.g. by a manual `git
+        # checkout --detach`) stayed detached afterward and the very next
+        # Phase 2 step — `set_upstream`'s branch-name read — crashed
+        # (winter#159). `checkout -B` re-creates/attaches that branch pointed
+        # at `target_ref`; `--force` discards any uncommitted changes exactly
+        # as `reset --hard` did (untracked files are left alone either way).
+        # `--no-track` stops the checkout from writing its own upstream
+        # config from `target_ref` — `set_upstream` remains the sole writer
+        # of tracking, preserving Phase 2's reset-before-connect ordering
+        # guarantee: a mid-loop failure between this and `set_upstream` still
+        # leaves the worktree on its original tracking, not silently
+        # re-pointed.
+        branch = worktree.environment.name
         with git.Repo(str(worktree.path)) as r:
             try:
-                r.git.reset("--hard", target_ref)
+                r.git.checkout("--force", "-B", branch, "--no-track", target_ref)
             except git.GitCommandError as exc:
                 raise self._error_factory.from_git(
                     exc,
@@ -203,9 +221,16 @@ class WriteRepoRepository(ReadRepoRepository):
         idempotent-disconnect case from real config-write failures. If the
         upstream isn't configured we return without touching anything; if
         the actual `--unset-upstream` call fails, that raises.
+
+        Passes `head` explicitly to `--unset-upstream` rather than relying on
+        the bare (HEAD-implicit) form: with a detached HEAD there is no
+        current branch for git to infer, and the bare form raises
+        "could not unset upstream of HEAD when it does not point to any
+        branch" — `head` (from `_head_branch_name`) still resolves to a real
+        branch even then.
         """
         with git.Repo(str(worktree.path)) as r:
-            head = r.active_branch.name
+            head = self._head_branch_name(r, worktree)
             try:
                 r.git.config("--get", f"branch.{head}.remote")
             except git.GitCommandError as exc:
@@ -217,7 +242,7 @@ class WriteRepoRepository(ReadRepoRepository):
                     cwd=worktree.path,
                 ) from exc
             try:
-                r.git.branch("--unset-upstream")
+                r.git.branch("--unset-upstream", head)
             except git.GitCommandError as exc:
                 raise self._error_factory.from_git(
                     exc,
@@ -700,6 +725,25 @@ class WriteRepoRepository(ReadRepoRepository):
                 "abort cleanup failed: %s",
                 exc.stderr.strip() if isinstance(exc.stderr, str) else exc,
             )
+
+    @staticmethod
+    def _head_branch_name(r: git.Repo, worktree: FeatureWorktree) -> str:
+        """The branch name to key `branch.<name>.*` config writes off, tolerating a detached HEAD.
+
+        `TypeError` on detached HEAD, `ValueError` on unborn HEAD — both mean
+        there's no `r.active_branch` to read, the same condition the read
+        paths already guard against (`branch_tracking.read_origin_merge_branch`,
+        `ReadRepoRepository.get_standalone_status`). Those return `None` since
+        a read can report "no answer"; a config write can't — it falls back to
+        `worktree.environment.name`, the branch every non-pinned feature
+        worktree is created under (`InitService._create_git_worktree`) and the
+        one `hard_reset` re-attaches a detached HEAD onto, so the fallback
+        still names a real, git-visible branch.
+        """
+        try:
+            return r.active_branch.name
+        except (TypeError, ValueError):
+            return worktree.environment.name
 
     @staticmethod
     def _tracking_branch_name(r: git.Repo) -> str | None:

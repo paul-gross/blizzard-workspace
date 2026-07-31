@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, PropertyMock
 
 import git
 import pytest
@@ -94,15 +94,33 @@ def test_count_commits_not_in_raises_for_bogus_ref(monkeypatch: pytest.MonkeyPat
 
 def test_hard_reset_raises_for_bogus_ref(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
-    git_mock.Repo.return_value.git.reset.side_effect = git.GitCommandError(
-        ("git", "reset", "--hard"), 128, stderr=b"ambiguous argument"
+    git_mock.Repo.return_value.git.checkout.side_effect = git.GitCommandError(
+        ("git", "checkout", "--force", "-B", "alpha", "--no-track"), 128, stderr=b"ambiguous argument"
     )
     wt = _wt(_REPO_PATH)
 
     with pytest.raises(RepoError) as ei:
         repo.hard_reset(wt, "refs/heads/does-not-exist")
 
-    assert ei.value.subcommand == "reset"
+    assert ei.value.subcommand == "checkout"
+
+
+def test_hard_reset_checks_out_env_branch_forced_untracked(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
+) -> None:
+    """`hard_reset` re-attaches HEAD to `worktree.environment.name` via `checkout -B`,
+    not a bare `git reset --hard` — the fix for winter#159 (a detached HEAD
+    stays detached after a plain reset). `--no-track` keeps it from writing its
+    own upstream config; `set_upstream` remains the sole writer of tracking.
+    """
+    git_mock = _fake_git_repo(monkeypatch)
+    r = git_mock.Repo.return_value
+    wt = _wt(_REPO_PATH)
+
+    repo.hard_reset(wt, "origin/feature/widget")
+
+    r.git.checkout.assert_called_once_with("--force", "-B", "alpha", "--no-track", "origin/feature/widget")
+    r.git.reset.assert_not_called()
 
 
 def test_push_standalone_raises_when_no_upstream(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
@@ -172,6 +190,38 @@ def test_push_falls_back_to_main_branch_count_when_no_remote_ref(
     r.git.rev_list.assert_called_with("--count", "origin/main..HEAD")
 
 
+def test_set_upstream_writes_config_for_attached_branch(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    r = git_mock.Repo.return_value
+    r.active_branch.name = "main"
+    wt = _wt(_REPO_PATH)
+
+    repo.set_upstream(wt, "origin/feature/widget")
+
+    r.git.config.assert_any_call("branch.main.remote", "origin")
+    r.git.config.assert_any_call("branch.main.merge", "refs/heads/feature/widget")
+
+
+def test_set_upstream_falls_back_to_env_branch_when_head_detached(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
+) -> None:
+    """winter#159: a detached HEAD must not crash `set_upstream` — it configures
+    tracking for `worktree.environment.name`, the branch `hard_reset` re-attaches
+    a detached worktree onto, instead of raising `TypeError` on `active_branch`.
+    """
+    git_mock = _fake_git_repo(monkeypatch)
+    r = git_mock.Repo.return_value
+    type(r).active_branch = PropertyMock(side_effect=TypeError("HEAD is a detached symbolic reference"))
+    wt = _wt(_REPO_PATH)  # env name is "alpha"
+
+    repo.set_upstream(wt, "origin/feature/widget")
+
+    r.git.config.assert_any_call("branch.alpha.remote", "origin")
+    r.git.config.assert_any_call("branch.alpha.merge", "refs/heads/feature/widget")
+
+
 def test_unset_upstream_is_idempotent_when_no_upstream(
     monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
 ) -> None:
@@ -186,6 +236,26 @@ def test_unset_upstream_is_idempotent_when_no_upstream(
     repo.unset_upstream(wt)
 
     r.git.branch.assert_not_called()
+
+
+def test_unset_upstream_falls_back_to_env_branch_when_head_detached(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
+) -> None:
+    """winter#159: `winter ws disconnect` against a detached worktree must not
+    raise `TypeError` — it probes/unsets tracking for `worktree.environment.name`
+    instead of the unreadable `active_branch`, and passes that name explicitly to
+    `--unset-upstream` (the bare, HEAD-implicit form raises on a detached HEAD too).
+    """
+    git_mock = _fake_git_repo(monkeypatch)
+    r = git_mock.Repo.return_value
+    type(r).active_branch = PropertyMock(side_effect=TypeError("HEAD is a detached symbolic reference"))
+    r.git.config.return_value = "origin"  # upstream is configured
+    wt = _wt(_REPO_PATH)  # env name is "alpha"
+
+    repo.unset_upstream(wt)
+
+    r.git.config.assert_any_call("--get", "branch.alpha.remote")
+    r.git.branch.assert_called_once_with("--unset-upstream", "alpha")
 
 
 def test_get_worktree_upstream_returns_tracking_branch_name(
