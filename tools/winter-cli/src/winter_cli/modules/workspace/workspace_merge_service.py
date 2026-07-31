@@ -22,6 +22,7 @@ from winter_cli.modules.workspace.models import (
     Workspace,
 )
 from winter_cli.modules.workspace.pattern_match import matches_any_pattern
+from winter_cli.modules.workspace.ref_resolver import resolve_ref
 from winter_cli.modules.workspace.repo_repository import IWriteRepoRepository
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_repository import IReadWorkspaceRepository
@@ -89,6 +90,13 @@ class WorkspaceMergeService:
         included regardless of `pinned_scope` — they don't carry the pin
         flag. Per-repo events fire on `reporter` as each merge finishes,
         in completion order.
+
+        `source_ref` may carry a per-repo `{main}` / `{master}` / `{default}`
+        token (see `ref_resolver.resolve_ref`) — resolved independently for
+        each matched repo (project repo, and standalone) before any merge
+        runs, so a mixed-main-branch env can be folded in with one
+        invocation. Resolution happens up front for every target, so an
+        unknown token refuses before any git operation, not mid-fan-out.
         """
         patterns = patterns or []
         project_repos = self._repo_factory.get_project_repos()
@@ -125,11 +133,6 @@ class WorkspaceMergeService:
             # The handler renders "Nothing to merge" in stream mode.
             return MergeReport(source_ref=source_ref, envs=[], standalone=[])
 
-        reporter.merge_started(source_ref)
-
-        outcomes_by_env: dict[str, list[RepoMergeOutcome]] = {env.name: [] for env in matched_envs}
-        standalone_outcomes: list[RepoMergeOutcome] = []
-
         # Group project targets by repo so each project repo's worktrees
         # run serially within a group (they share .git) while groups run
         # in parallel up to the pool's slot count. Standalones fan out
@@ -138,14 +141,29 @@ class WorkspaceMergeService:
         for t in targets:
             targets_by_repo.setdefault(t.worktree.repository.name, []).append(t)
 
+        # Resolved per repo up front — before any merge runs — so an unknown
+        # `{...}` token in `source_ref` refuses immediately rather than
+        # mid-fan-out. Every worktree in a group shares one project repo (and
+        # so one `main_branch`), so resolving once per group is enough.
+        resolved_by_repo = {
+            repo_name: resolve_ref(source_ref, group[0].worktree.repository)
+            for repo_name, group in targets_by_repo.items()
+        }
+        resolved_standalone = {repo.name: resolve_ref(source_ref, repo) for repo in standalone_repos}
+
+        reporter.merge_started(source_ref)
+
+        outcomes_by_env: dict[str, list[RepoMergeOutcome]] = {env.name: [] for env in matched_envs}
+        standalone_outcomes: list[RepoMergeOutcome] = []
+
         with self._git_ops.executor() as pool:
             project_futures: dict[concurrent.futures.Future, str] = {}
             standalone_futures: dict[concurrent.futures.Future, str] = {}
             for repo_name, group in targets_by_repo.items():
-                fut = pool.submit(self._merge_group, group, source_ref, mode, autostash, reporter)
+                fut = pool.submit(self._merge_group, group, resolved_by_repo[repo_name], mode, autostash, reporter)
                 project_futures[fut] = repo_name
             for repo in standalone_repos:
-                fut = pool.submit(self._merge_standalone, repo, source_ref, mode, autostash)
+                fut = pool.submit(self._merge_standalone, repo, resolved_standalone[repo.name], mode, autostash)
                 standalone_futures[fut] = repo.name
 
             for fut in concurrent.futures.as_completed({**project_futures, **standalone_futures}):

@@ -2,7 +2,7 @@
 
 `merge` is a sibling of `pull` with an explicit source ref. Read [`pull`](./pull.md) for the shared behavior (autostash semantics, abort-on-conflict reporting) and the [pattern and scope vocabulary](./patterns.md) for patterns and scope flags; the deltas are:
 
-- `SOURCE_REF` is an explicit positional arg, applied verbatim per repo. `pull` uses each worktree's tracked upstream.
+- `SOURCE_REF` is an explicit positional arg, applied verbatim per repo — except for a `{main}` ref token (see [ref tokens](./ref-tokens.md)), which resolves independently per repo before any merge runs. `pull` uses each worktree's tracked upstream.
 - `--no-ff` replaces `--rebase` in the mode trio — force a merge commit even when fast-forward is possible (matches `git merge --no-ff`). `--ff-only` (default) and `--merge` behave exactly as in `pull`.
 - No fetch. `pull` fetches first; `merge` doesn't, because `SOURCE_REF` is often a local branch. Run `winter ws fetch` first if you need fresh refs.
 - Pinned worktrees are included by default (`pull` always includes them; `push` excludes by default). Opt out with `--exclude-pinned` or restrict to pinned with `--only-pinned`.
@@ -11,6 +11,7 @@
 winter ws merge alpha gamma            # merge alpha into gamma's project worktrees (== 'gamma/*')
 winter ws merge master gamma           # merge master into gamma's project worktrees
 winter ws merge origin/master gamma    # explicit remote ref also accepted
+winter ws merge origin/{main} gamma    # each matched repo's own main branch, whatever it's named
 winter ws merge master '*/winter'      # merge master into every env's winter worktree
 winter ws merge master '*/*' --all     # merge master into every env's worktrees + every standalone
 ```

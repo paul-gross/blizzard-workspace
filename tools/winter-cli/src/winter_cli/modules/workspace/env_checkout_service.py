@@ -10,6 +10,7 @@ from winter_cli.modules.workspace.models import (
     RepoCheckoutOutcome,
 )
 from winter_cli.modules.workspace.pattern_match import matches_any_pattern
+from winter_cli.modules.workspace.ref_resolver import resolve_ref
 from winter_cli.modules.workspace.repo_repository import IWriteRepoRepository
 
 logger = logging.getLogger(__name__)
@@ -88,8 +89,12 @@ class EnvCheckoutService:
     ) -> EnvCheckoutReport:
         """Adopt `origin/<feature_branch>` into every non-pinned worktree repo.
 
-        No network — operates on local refs (run `winter ws fetch` first for
-        fresh ones). Phase 1 classifies each repo locally. Two ref-resolution
+        `feature_branch` may itself carry a per-repo `{main}` / `{master}` /
+        `{default}` token (see `ref_resolver.resolve_ref`) — resolved
+        independently for each repo before any git op runs, so `winter ws
+        checkout <env> {main}` adopts each repo's own main branch. No network
+        — operates on local refs (run `winter ws fetch` first for fresh
+        ones). Phase 1 classifies each repo locally. Two ref-resolution
         guards run regardless of `force`: a feature ref that resolves in *no*
         repo refuses unless `new` is set (a branch the local store has never
         seen is more likely a typo or a missing fetch than a deliberate new
@@ -116,9 +121,13 @@ class EnvCheckoutService:
             force,
             new,
         )
-        feature_ref = f"origin/{feature_branch}"
         targets = [wt for wt in env_worktrees.worktrees if not wt.repository.pinned]
-        have_feature_ref = {wt.repository.name: self._repo_repo.has_local_ref(wt, feature_ref) for wt in targets}
+        # Resolved per repo up front — before any git op — so an unknown token
+        # in `feature_branch` refuses immediately rather than mid-loop.
+        feature_refs = {wt.repository.name: resolve_ref(f"origin/{feature_branch}", wt.repository) for wt in targets}
+        have_feature_ref = {
+            wt.repository.name: self._repo_repo.has_local_ref(wt, feature_refs[wt.repository.name]) for wt in targets
+        }
 
         refused: list[RepoCheckoutOutcome] = []
         if targets and not new and not any(have_feature_ref.values()):
@@ -134,7 +143,7 @@ class EnvCheckoutService:
             # raising mid-loop after earlier repos were already mutated.
             for wt in targets:
                 if not have_feature_ref[wt.repository.name] and not self._repo_repo.has_local_ref(
-                    wt, f"origin/{wt.repository.main_branch}"
+                    wt, resolve_ref("origin/{main}", wt.repository)
                 ):
                     refused.append(RepoCheckoutOutcome(wt.repository.name, CheckoutResult.refused_missing_ref))
             refused_names = {o.repo_name for o in refused}
@@ -170,13 +179,14 @@ class EnvCheckoutService:
         # than re-pointed at the new upstream but stuck on the old HEAD.
         outcomes: list[RepoCheckoutOutcome] = []
         for wt in targets:
+            feature_ref = feature_refs[wt.repository.name]
             if have_feature_ref[wt.repository.name]:
                 self._repo_repo.hard_reset(wt, feature_ref)
                 self._repo_repo.set_upstream(wt, feature_ref)
                 self._repo_repo.set_push_default(wt)
                 outcomes.append(RepoCheckoutOutcome(wt.repository.name, CheckoutResult.reset_feature))
             else:
-                self._repo_repo.hard_reset(wt, f"origin/{wt.repository.main_branch}")
+                self._repo_repo.hard_reset(wt, resolve_ref("origin/{main}", wt.repository))
                 self._repo_repo.set_upstream(wt, feature_ref)
                 self._repo_repo.set_push_default(wt)
                 outcomes.append(RepoCheckoutOutcome(wt.repository.name, CheckoutResult.reset_main))
@@ -200,4 +210,4 @@ class EnvCheckoutService:
         upstream = self._repo_repo.get_worktree_upstream(wt)
         if upstream is not None and self._repo_repo.has_local_ref(wt, upstream):
             return upstream
-        return f"origin/{wt.repository.main_branch}"
+        return resolve_ref("origin/{main}", wt.repository)

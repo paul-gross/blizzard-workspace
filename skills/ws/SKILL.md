@@ -38,7 +38,7 @@ What would you like to do?
 | Pull, rebase down, bring down | `/ws-pull [name]` |
 | Push, send up, ship | `/ws-push [name]` |
 | Take framework/template updates, update from `winter` upstream, sync the workspace with the framework | `/ws-update` |
-| Bring main into an env, update an env against main | `winter ws fetch <name>` then `winter ws merge origin/<main-branch> <name>` |
+| Bring main into an env, update an env against main | `winter ws fetch <name>` then `winter ws merge origin/{main} <name>` |
 | Initialize, bring up after clone, make it work | `/ws-init [target]` |
 | Configure, declare new repo, set git identity | `/ws-setup` |
 | Tear down, destroy, remove an environment | `winter ws destroy <name>` |

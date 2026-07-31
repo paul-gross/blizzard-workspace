@@ -348,21 +348,24 @@ def ws_checkout(ctx: click.Context, env: str, feature_branch: str, force: bool, 
     """Adopt a remote feature branch into ENV, all-or-nothing across every repo.
 
     Connects every non-pinned project worktree to `origin/FEATURE_BRANCH` and
-    resets each to it — or to the repo's `origin/<main>` when FEATURE_BRANCH
+    resets each to it — or to the repo's `origin/{main}` when FEATURE_BRANCH
     doesn't exist there (a new branch started from main, created on first
-    push). No network — run `winter ws fetch` first if you want fresh
-    remote-tracking refs.
+    push). FEATURE_BRANCH itself may carry a per-repo `{main}` / `{master}` /
+    `{default}` token — interchangeable aliases for that repo's configured
+    main branch — so `winter ws checkout ENV {main}` resets each repo to its
+    own main even when repos disagree on the branch name. No network — run
+    `winter ws fetch` first if you want fresh remote-tracking refs.
 
     When `origin/FEATURE_BRANCH` resolves in *no* repo, the command refuses
     unless --new is given — a branch the local store has never seen is more
     likely a typo or a missing `winter ws fetch` than a new branch. A repo
-    where neither the feature ref nor `origin/<main>` resolves always refuses
+    where neither the feature ref nor `origin/{main}` resolves always refuses
     (nothing to reset to). Neither refusal is bypassed by --force.
 
     Phase 1 also checks each repo for: working tree dirty (staged or
     unstaged), and *abandonment* — commits on the worktree's branch that
     aren't on the branch it's moving away from (its own current upstream,
-    falling back to `origin/<main>` when unconnected). If any repo is dirty
+    falling back to `origin/{main}` when unconnected). If any repo is dirty
     or would abandon work (and --force is not set), the whole command refuses
     with a per-repo report — no connect and no `git reset --hard` runs
     anywhere.
@@ -640,12 +643,17 @@ def ws_merge(
 
     SOURCE_REF is the same string applied to every selected repo — typically
     an env name (`alpha`), the workspace main branch (`master`), or an
-    explicit remote ref (`origin/master`). At least one target PATTERN is
-    required when project worktrees are in scope — there is no implicit
-    "all worktrees" default; pass '*/*' to mean every env's every worktree.
-    Each PATTERN is a segment-aware glob over `<env>/<repo>`; bare env names
-    (no `/`) are treated as `<env>/*`. Pinned worktrees are included by
-    default. Standalone repos are reached via --standalone / --all.
+    explicit remote ref (`origin/master`). It may also carry a per-repo
+    `{main}` / `{master}` / `{default}` token — interchangeable aliases for
+    that repo's configured main branch — so `winter ws merge origin/{main}
+    gamma` integrates each matched repo's own main even when repos disagree
+    on the branch name; a ref with no token is passed to git unchanged. At
+    least one target PATTERN is required when project worktrees are in
+    scope — there is no implicit "all worktrees" default; pass '*/*' to mean
+    every env's every worktree. Each PATTERN is a segment-aware glob over
+    `<env>/<repo>`; bare env names (no `/`) are treated as `<env>/*`. Pinned
+    worktrees are included by default. Standalone repos are reached via
+    --standalone / --all.
 
     Diverged repos are reported and left untouched unless --merge or --no-ff
     is given (mutually exclusive). Conflicts during a fallback merge abort
@@ -658,6 +666,7 @@ def ws_merge(
       winter ws merge alpha gamma/winter          # merge alpha into one specific worktree
       winter ws merge master '*/*'                # merge master into every env's every worktree (explicit)
       winter ws merge master '*/winter'           # merge master into every env's winter worktree
+      winter ws merge origin/{main} gamma          # each matched repo's own main branch, whatever it's named
       winter ws merge origin/master gamma --merge # merge with 3-way fallback on divergence
       winter ws merge master gamma --no-ff        # force a merge commit even if ff is possible
       winter ws merge alpha gamma --autostash     # stash dirty tree first, restore after

@@ -13,7 +13,7 @@ Use raw `git pull` for the workspace branch itself — `winter ws pull` doesn't 
 
 `winter ws pull <env>` resolves each worktree's integration ref independently from its *own* tracked upstream — there is no env-wide feature branch. A non-pinned worktree pulls from whatever it tracks (`origin/<feature-branch>`, set by `winter ws connect`); a non-pinned worktree with no upstream is reported `no upstream` and skipped (the env pull still succeeds). Pinned worktrees always pull `origin/<main-branch>`. Pass `--merge` or `--rebase` to integrate diverged repos explicitly, plus `--autostash` to handle a dirty working tree.
 
-To bring `origin/<main-branch>` into an env instead of the tracked feature branch, use `winter ws merge origin/<main-branch> <env>` (run `winter ws fetch <env>` first if you need fresh refs).
+To bring `origin/<main-branch>` into an env instead of the tracked feature branch, use `winter ws merge origin/{main} <env>` (run `winter ws fetch <env>` first if you need fresh refs).
 
 ## Dispatch on the argument
 

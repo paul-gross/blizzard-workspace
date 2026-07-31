@@ -415,7 +415,7 @@ class WorkspaceHandler:
                 hint = (
                     f"origin/{report.feature_branch} doesn't resolve in any repo. "
                     f"Run {out.style('winter ws fetch', 'bold')} first if the branch exists on the remote, "
-                    f"or re-run with {out.style('--new', 'bold')} to start it from each repo's origin/<main>."
+                    f"or re-run with {out.style('--new', 'bold')} to start it from each repo's origin/{{main}}."
                 )
             elif CheckoutResult.refused_missing_ref in kinds:
                 hint = f"Some repos have no local ref to reset to — run {out.style('winter ws fetch', 'bold')} first."

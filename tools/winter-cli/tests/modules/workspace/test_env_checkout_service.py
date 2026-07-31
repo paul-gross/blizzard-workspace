@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import click
 import pytest
 
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
@@ -245,6 +246,41 @@ def test_checkout_env_resets_clean_repos_with_present_ref(
         ("r1", "origin/feature/widget"),
         ("r2", "origin/feature/widget"),
     ]
+
+
+def test_checkout_env_feature_branch_main_token_resolves_per_repo(
+    workspace: Workspace, service: EnvCheckoutService, fake_repo_repo: FakeWriteRepoRepository
+) -> None:
+    """`{main}` in FEATURE_BRANCH resolves independently per repo's own `main_branch`."""
+    repos = [
+        ProjectRepository(name="r1", main_path=workspace.root_path / "r1", main_branch="main"),
+        ProjectRepository(name="r2", main_path=workspace.root_path / "r2", main_branch="master"),
+    ]
+    env_wts = _env_worktrees(workspace, repos)
+
+    report = service.checkout_env(env_wts, feature_branch="{main}", force=False)
+
+    assert report.aborted is False
+    assert [(o.repo_name, o.result) for o in report.repos] == [
+        ("r1", CheckoutResult.reset_feature),
+        ("r2", CheckoutResult.reset_feature),
+    ]
+    assert fake_repo_repo.hard_reset_calls == [("r1", "origin/main"), ("r2", "origin/master")]
+    assert fake_repo_repo.set_upstream_calls == [("r1", "origin/main"), ("r2", "origin/master")]
+
+
+def test_checkout_env_feature_branch_unknown_token_refuses_before_any_git_op(
+    workspace: Workspace, service: EnvCheckoutService, fake_repo_repo: FakeWriteRepoRepository
+) -> None:
+    """An unrecognized `{...}` token in FEATURE_BRANCH refuses up front, naming the token and aliases."""
+    repos = [ProjectRepository(name="r1", main_path=workspace.root_path / "r1", main_branch="main")]
+    env_wts = _env_worktrees(workspace, repos)
+
+    with pytest.raises(click.ClickException, match=r"Unknown ref token '\{trunk\}'"):
+        service.checkout_env(env_wts, feature_branch="{trunk}", force=False)
+
+    assert fake_repo_repo.hard_reset_calls == []
+    assert fake_repo_repo.set_upstream_calls == []
 
 
 def test_checkout_env_connects_and_resets_to_main_when_feature_ref_missing(

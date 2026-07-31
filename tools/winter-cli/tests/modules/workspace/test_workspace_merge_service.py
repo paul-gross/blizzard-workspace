@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import click
 import pytest
 
 from winter_cli.config.models import (
@@ -296,6 +297,127 @@ def test_merge_all_applies_source_ref_uniformly_across_matched_worktrees(
         assert autostash is True
     assert report.success is True
     assert [o.repo_name for env in report.envs for o in env.repos] == ["demo", "other"]
+
+
+def test_merge_all_main_token_resolves_per_repo(
+    workspace: Workspace, workspace_config: WorkspaceConfig, materialize_paths: Any
+) -> None:
+    """`origin/{main}` in SOURCE_REF resolves independently per matched repo's own `main_branch`."""
+    workspace_repo = _FakeWorkspaceRepo(env_names=["gamma"])
+    repo_repo = _RecordingRepoRepo(
+        worktree_outcomes={
+            ("gamma", "demo"): RepoMergeOutcome("demo", MergeResult.fast_forwarded),
+            ("gamma", "other"): RepoMergeOutcome("other", MergeResult.fast_forwarded),
+        }
+    )
+    env_path = workspace.root_path / "gamma"
+    materialize_paths({env_path / "demo", env_path / "other"})
+    repo_factory = _pinned_factory(workspace)
+    svc = _make_service(workspace, workspace_config, workspace_repo, repo_repo, repo_factory=repo_factory)
+
+    svc.merge_all(
+        source_ref="origin/{main}",
+        scope=RepoScope.project,
+        patterns=["gamma"],
+        mode=MergeMode.ff_only,
+        autostash=False,
+        pinned_scope=PinnedScope.include,
+        reporter=_RecordingReporter(),
+    )
+
+    assert {(repo, source_ref) for (_env, repo, source_ref, _, _) in repo_repo.merge_calls} == {
+        ("demo", "origin/main"),
+        ("other", "origin/main"),
+    }
+
+
+def test_merge_all_main_token_resolves_per_standalone_repo(
+    workspace: Workspace, workspace_config: WorkspaceConfig, materialize_paths: Any
+) -> None:
+    """`{main}` in SOURCE_REF resolves against a standalone repo's own `main_branch` override."""
+    workspace_repo = _FakeWorkspaceRepo(env_names=["gamma"])
+    standalone = StandaloneRepository(name="stand", path=workspace.root_path / "stand", main_branch="trunk")
+    repo_repo = _RecordingRepoRepo(
+        worktree_outcomes={},
+        standalone_outcomes={"stand": RepoMergeOutcome("stand", MergeResult.fast_forwarded)},
+    )
+    materialize_paths({workspace.root_path / "stand"})
+    svc = _make_service(
+        workspace,
+        workspace_config,
+        workspace_repo,
+        repo_repo,
+        repo_factory=_pinned_factory(workspace, standalone=[standalone]),
+    )
+
+    svc.merge_all(
+        source_ref="{main}",
+        scope=RepoScope.standalone,
+        patterns=None,
+        mode=MergeMode.ff_only,
+        autostash=False,
+        pinned_scope=PinnedScope.include,
+        reporter=_RecordingReporter(),
+    )
+
+    assert repo_repo.standalone_calls == [("stand", "trunk", MergeMode.ff_only, False)]
+
+
+def test_merge_all_source_ref_report_stays_raw_when_token_used(
+    workspace: Workspace, workspace_config: WorkspaceConfig, materialize_paths: Any
+) -> None:
+    """The report's `source_ref` reflects the raw user input, not the per-repo resolved ref."""
+    workspace_repo = _FakeWorkspaceRepo(env_names=["gamma"])
+    repo_repo = _RecordingRepoRepo(
+        worktree_outcomes={("gamma", "demo"): RepoMergeOutcome("demo", MergeResult.fast_forwarded)}
+    )
+    env_path = workspace.root_path / "gamma"
+    materialize_paths({env_path / "demo", env_path / "other"})
+    svc = _make_service(workspace, workspace_config, workspace_repo, repo_repo)
+
+    report = svc.merge_all(
+        source_ref="origin/{main}",
+        scope=RepoScope.project,
+        patterns=["gamma/demo"],
+        mode=MergeMode.ff_only,
+        autostash=False,
+        pinned_scope=PinnedScope.include,
+        reporter=_RecordingReporter(),
+    )
+
+    assert report.source_ref == "origin/{main}"
+
+
+def test_merge_all_unknown_token_refuses_before_any_merge(
+    workspace: Workspace, workspace_config: WorkspaceConfig, materialize_paths: Any
+) -> None:
+    """An unrecognized `{...}` token refuses up front — no repo is merged, project or standalone."""
+    workspace_repo = _FakeWorkspaceRepo(env_names=["gamma"])
+    standalone = StandaloneRepository(name="stand", path=workspace.root_path / "stand")
+    repo_repo = _RecordingRepoRepo(worktree_outcomes={}, standalone_outcomes={})
+    env_path = workspace.root_path / "gamma"
+    materialize_paths({env_path / "demo", env_path / "other", workspace.root_path / "stand"})
+    svc = _make_service(
+        workspace,
+        workspace_config,
+        workspace_repo,
+        repo_repo,
+        repo_factory=_pinned_factory(workspace, standalone=[standalone]),
+    )
+
+    with pytest.raises(click.ClickException, match=r"Unknown ref token '\{trunk\}'"):
+        svc.merge_all(
+            source_ref="origin/{trunk}",
+            scope=RepoScope.all,
+            patterns=["gamma"],
+            mode=MergeMode.ff_only,
+            autostash=False,
+            pinned_scope=PinnedScope.include,
+            reporter=_RecordingReporter(),
+        )
+
+    assert repo_repo.merge_calls == []
+    assert repo_repo.standalone_calls == []
 
 
 def test_merge_all_failure_when_any_repo_diverges(
