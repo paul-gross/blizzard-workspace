@@ -1,6 +1,6 @@
 # `winter ws` patterns — scope and pattern vocabulary
 
-Shared vocabulary for every `winter ws` command that takes a `PATTERNS`/`REPOS`/`SCOPE` argument — the four remote-sync commands (`fetch`, `pull`, `push`, `merge`), `connect`/`disconnect`, `update`, `status`/`diff`, and `destroy` — plus the top-level `provision` command, whose env-level pattern grammar is identical to `ws destroy`'s and so is hosted here rather than duplicated under `usage/provision.md` (its placement under `ws/` is deliberate, not a routing miss). Each command's own file ([fetch](./fetch.md), [pull](./pull.md), [push](./push.md), [merge](./merge.md), etc.) covers its own deltas; this file is the single source for `PATTERNS` grammar, scope flags, and pinned-scope rules. For the family, see the [`winter ws` hub](./index.md).
+Shared vocabulary for every `winter ws` command that takes a `PATTERNS`/`REPOS`/`SCOPE` argument — the four remote-sync commands (`fetch`, `pull`, `push`, `merge`), `connect`/`disconnect`, `reset`, `update`, `status`/`diff`, and `destroy` — plus the top-level `provision` command, whose env-level pattern grammar is identical to `ws destroy`'s and so is hosted here rather than duplicated under `usage/provision.md` (its placement under `ws/` is deliberate, not a routing miss). Each command's own file ([fetch](./fetch.md), [pull](./pull.md), [push](./push.md), [merge](./merge.md), etc.) covers its own deltas; this file is the single source for `PATTERNS` grammar, scope flags, and pinned-scope rules. For the family, see the [`winter ws` hub](./index.md).
 
 All four commands accept any number of segment-aware glob `PATTERNS` over `<env>/<repo>`. A bare env name is treated as `<env>/*`. Standalone repos are reached via `--standalone` / `--all` and ignore `PATTERNS` — to operate on a single standalone repo, use raw git. `merge` takes a required `SOURCE_REF` as its first positional, then patterns trail; the other three take patterns only.
 
@@ -42,6 +42,15 @@ winter ws connect alpha feature/x            # every non-pinned worktree in alph
 winter ws disconnect alpha                   # every non-pinned worktree in alpha
 winter ws disconnect alpha/winter beta/api    # two specific worktrees
 winter ws disconnect '*/winter'               # every env's winter worktree
+```
+
+## `winter ws reset` — same grammar as `connect`, trailing `REF`
+
+`reset` uses the identical `PATTERNS... REF` shape as `connect`'s `PATTERNS... FEATURE_BRANCH` — one or more segment-aware `<env>/<repo>` globs, then a required trailing ref — scoped to non-pinned project worktrees (pinned worktrees are always skipped, standalones are never in scope). At least one `PATTERN` is required. See [`reset`](./reset.md) for the soft/mixed/hard modes and safety-gate details.
+
+```bash
+winter ws reset alpha origin/main             # every non-pinned worktree in alpha, --mixed (default)
+winter ws reset alpha/winter beta/winter origin/main --hard
 ```
 
 ## `winter ws update` — bare repo-name patterns

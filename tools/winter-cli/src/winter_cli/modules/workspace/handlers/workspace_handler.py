@@ -14,6 +14,7 @@ from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
 from winter_cli.modules.workspace.env_index import resolve_env_index
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
+from winter_cli.modules.workspace.env_reset_service import EnvResetService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
 from winter_cli.modules.workspace.models import (
     CheckoutResult,
@@ -23,6 +24,7 @@ from winter_cli.modules.workspace.models import (
     EnvSnapshot,
     FeatureEnvironment,
     FeatureEnvironmentWorktrees,
+    FeatureWorktree,
     MergeMode,
     PinnedScope,
     ProjectCheckoutSnapshot,
@@ -31,6 +33,9 @@ from winter_cli.modules.workspace.models import (
     PushReport,
     RepoError,
     RepoScope,
+    ResetMode,
+    ResetReport,
+    ResetResult,
     StandaloneCheckoutSnapshot,
     SyncResult,
     Workspace,
@@ -83,6 +88,16 @@ class EnvCheckoutParams:
     feature_branch: str
     force: bool
     new: bool
+    output_json: bool
+
+
+@dataclasses.dataclass
+class EnvResetParams:
+    patterns: list[str]
+    ref: str
+    mode: ResetMode
+    force: bool
+    dry_run: bool
     output_json: bool
 
 
@@ -183,6 +198,7 @@ class WorkspaceHandler:
         workspace_push_svc: WorkspacePushService,
         workspace_merge_svc: WorkspaceMergeService,
         env_checkout_svc: EnvCheckoutService,
+        env_reset_svc: EnvResetService,
         workspace_repo: IReadWorkspaceRepository,
         repo_repo: IReadRepoRepository,
         repo_factory: RepositoryFactory,
@@ -202,6 +218,7 @@ class WorkspaceHandler:
         self._workspace_push_svc = workspace_push_svc
         self._workspace_merge_svc = workspace_merge_svc
         self._env_checkout_svc = env_checkout_svc
+        self._env_reset_svc = env_reset_svc
         self._workspace_repo = workspace_repo
         self._repo_repo = repo_repo
         self._repo_factory = repo_factory
@@ -415,7 +432,7 @@ class WorkspaceHandler:
                 hint = (
                     f"origin/{report.feature_branch} doesn't resolve in any repo. "
                     f"Run {out.style('winter ws fetch', 'bold')} first if the branch exists on the remote, "
-                    f"or re-run with {out.style('--new', 'bold')} to start it from each repo's origin/{{main}}."
+                    f"or re-run with {out.style('--new', 'bold')} to start it from each repo's origin/<main-branch>."
                 )
             elif CheckoutResult.refused_missing_ref in kinds:
                 hint = f"Some repos have no local ref to reset to — run {out.style('winter ws fetch', 'bold')} first."
@@ -435,6 +452,85 @@ class WorkspaceHandler:
                 f"\n{out.style('✓', 'green')} Checked out "
                 f"{out.style(report.env, 'bold')} → "
                 f"{out.style(report.feature_branch, 'bold')} ({', '.join(details)})"
+            )
+
+    def reset(self, params: EnvResetParams) -> None:
+        project_repos = self._repo_factory.get_project_repos()
+        self._drift_warning_svc.raise_warning()
+        environments = self._envs_for_patterns(params.patterns, project_repos)
+
+        targets: list[FeatureWorktree] = []
+        for env in environments:
+            env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
+            for wt in env_worktrees.worktrees:
+                if wt.repository.pinned:
+                    continue
+                if not matches_any_pattern(env.name, wt.repository.name, params.patterns):
+                    continue
+                targets.append(wt)
+
+        if params.mode == ResetMode.hard and len(targets) > 1 and not params.force and not params.dry_run:
+            click.echo(
+                f"This will hard-reset {len(targets)} worktree(s): "
+                f"{', '.join(f'{wt.environment.name}/{wt.repository.name}' for wt in targets)}"
+            )
+            click.confirm("Continue?", abort=True)
+
+        report = self._env_reset_svc.reset(
+            targets=targets,
+            ref=params.ref,
+            mode=params.mode,
+            force=params.force,
+            dry_run=params.dry_run,
+        )
+
+        if params.output_json:
+            for line in _reset_ndjson_lines(report):
+                click.echo(line)
+            if report.aborted:
+                sys.exit(1)
+            return
+
+        self._render_reset_report(report, params.patterns)
+        if report.aborted:
+            sys.exit(1)
+
+    def _render_reset_report(self, report: ResetReport, patterns: list[str]) -> None:
+        out = self._cli_output_svc
+        if not report.repos:
+            click.echo(out.style(f"No worktrees matched: {' '.join(patterns)}", "dim"))
+            return
+
+        rows: list[list[str | Cell]] = []
+        row_styles: list[str | None] = []
+        for outcome in report.repos:
+            style = "green" if outcome.result == ResetResult.reset else "red"
+            rows.append([f"{outcome.env}/{outcome.repo_name}", outcome.result.value, outcome.ref or "—"])
+            row_styles.append(style)
+
+        for line in out.render_table(rows, headers=["WORKTREE", "RESULT", "REF"], row_styles=row_styles):
+            click.echo(line)
+
+        if report.aborted:
+            kinds = {o.result for o in report.repos}
+            if kinds == {ResetResult.refused_ambiguous_sha}:
+                hint = (
+                    f"{report.ref!r} looks like a bare commit SHA, which has no env-wide meaning — "
+                    "target exactly one worktree (e.g. 'alpha/winter') to reset to a specific commit."
+                )
+            elif ResetResult.refused_missing_ref in kinds:
+                hint = f"Some repos have no local ref to reset to — run {out.style('winter ws fetch', 'bold')} first."
+            else:
+                hint = f"Re-run with {out.style('--force', 'bold')} to bypass."
+            click.echo(f"\n{out.style('✗', 'red')} Not reset — refused (no changes made). {hint}")
+        else:
+            verb = "Would reset" if report.dry_run else "Reset"
+            count = len(report.repos)
+            click.echo(
+                f"\n{out.style('✓', 'green')} {verb} "
+                f"{out.style(str(count), 'bold')} "
+                f"worktree{'s' if count != 1 else ''} → "
+                f"{out.style(report.ref, 'bold')} ({report.mode.value})"
             )
 
     def fetch(self, params: EnvFetchParams) -> None:
@@ -1287,3 +1383,35 @@ def _to_dict(obj: Any) -> Any:
 
 def _echo_json(data: Any) -> None:
     click.echo(json.dumps(data, default=str, indent=2))
+
+
+def _reset_ndjson_lines(report: ResetReport) -> list[str]:
+    """NDJSON event lines for `winter ws reset --json` — one JSON object per line,
+    mirroring the `{cmd}_started` / `repo_{cmd}` / `{cmd}_completed` shape
+    `JsonMergeReporter` uses for `ws merge`, so scripted consumers of the `ws`
+    family see a consistent event vocabulary across commands.
+    """
+    lines = [
+        json.dumps(
+            {
+                "type": "reset_started",
+                "ref": report.ref,
+                "mode": report.mode.value,
+                "dry_run": report.dry_run,
+            }
+        )
+    ]
+    for outcome in report.repos:
+        lines.append(
+            json.dumps(
+                {
+                    "type": "repo_reset",
+                    "env": outcome.env,
+                    "repo": outcome.repo_name,
+                    "result": outcome.result.value,
+                    "ref": outcome.ref,
+                }
+            )
+        )
+    lines.append(json.dumps({"type": "reset_completed", "success": not report.aborted}))
+    return lines

@@ -13,7 +13,7 @@ from click.testing import CliRunner
 
 from winter_cli.modules.lint.command import lint_command
 from winter_cli.modules.provision.command import provision_command
-from winter_cli.modules.workspace.command import ws_destroy, ws_diff, ws_disconnect, ws_update
+from winter_cli.modules.workspace.command import ws_destroy, ws_diff, ws_disconnect, ws_reset, ws_update
 
 
 class TestProvisionCli:
@@ -127,6 +127,39 @@ class TestWsUpdateCli:
         result = CliRunner().invoke(ws_update, ["--help"])
         assert result.exit_code == 0
         assert "REPOS" in result.output
+
+
+class TestWsResetCli:
+    def test_no_args_is_a_usage_error(self) -> None:
+        result = CliRunner().invoke(ws_reset, [])
+        assert result.exit_code != 0
+        assert "Missing argument" in result.output or "PATTERNS" in result.output
+
+    def test_ref_alone_with_no_pattern_is_rejected(self) -> None:
+        """REF is always trailing — a single arg is parsed as PATTERNS with no REF."""
+        result = CliRunner().invoke(ws_reset, ["origin/main"])
+        assert result.exit_code != 0
+        assert "trailing REF" in result.output
+
+    def test_invalid_pattern_two_slashes_rejected(self) -> None:
+        result = CliRunner().invoke(ws_reset, ["alpha/winter/extra", "origin/main"])
+        assert result.exit_code != 0
+        assert "one '/' max" in result.output
+
+    def test_soft_and_hard_are_mutually_exclusive(self) -> None:
+        result = CliRunner().invoke(ws_reset, ["alpha", "origin/main", "--soft", "--hard"])
+        assert result.exit_code != 0
+        assert "mutually exclusive" in result.output
+
+    def test_help_documents_pattern_and_ref_grammar(self) -> None:
+        result = CliRunner().invoke(ws_reset, ["--help"])
+        assert result.exit_code == 0
+        assert "PATTERNS" in result.output
+        assert "REF" in result.output
+        assert "--soft" in result.output
+        assert "--mixed" in result.output
+        assert "--hard" in result.output
+        assert "--dry-run" in result.output
 
 
 class TestLintCli:

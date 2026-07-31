@@ -34,13 +34,15 @@ from winter_cli.modules.workspace.models import (
     ProjectRepository,
     Workspace,
 )
+from winter_cli.modules.workspace.worktree_safety import WorktreeSafetyService
 
 
 @pytest.fixture
 def service() -> EnvCheckoutService:
     error_factory = RepoErrorFactory()
     git_ops = GitOpsService(error_factory, sleep=lambda _: None, jitter=lambda: 0.0)
-    return EnvCheckoutService(repo_repo=WriteRepoRepository(error_factory=error_factory, git_ops=git_ops))
+    repo_repo = WriteRepoRepository(error_factory=error_factory, git_ops=git_ops)
+    return EnvCheckoutService(repo_repo=repo_repo, worktree_safety_svc=WorktreeSafetyService(repo_repo=repo_repo))
 
 
 def _configure(r: git.Repo) -> git.Repo:
@@ -136,6 +138,41 @@ def test_checkout_env_rerun_on_reattached_worktree_is_idempotent(tmp_path: Path,
         assert r.head.is_detached is False
         assert r.active_branch.name == "alpha"
         assert r.head.commit.hexsha == r.git.rev_parse("origin/feature/widget")
+
+
+def test_checkout_env_refuses_when_detached_worktree_env_branch_has_unpushed_commits(
+    tmp_path: Path, service: EnvCheckoutService
+) -> None:
+    """winter#159 B1 regression: force-moving `refs/heads/<env>` must not silently
+    abandon commits that sit on that branch when HEAD itself is detached elsewhere.
+
+    HEAD is detached at `origin/main`; the worktree's own `alpha` branch carries
+    one unpushed commit no other ref reaches. The HEAD-relative abandonment guard
+    alone sees zero commits (HEAD has nothing of its own), so without the
+    branch-relative check `checkout_env` would refuse nothing and
+    `force_checkout_env_branch`'s `checkout --force -B alpha` would force the
+    `alpha` branch pointer onto the feature ref, stranding the unpushed commit
+    with no ref reaching it.
+    """
+    env_wts, worktree_path = _env_worktree(tmp_path)
+    with git.Repo(str(worktree_path)) as r:
+        path = _working_dir(r) / "local-work.txt"
+        path.write_text("unpushed\n")
+        r.index.add(["local-work.txt"])
+        unpushed_sha = r.index.commit("unpushed local work").hexsha
+        r.git.checkout("--detach", "origin/main")
+        assert r.head.is_detached is True
+
+    report = service.checkout_env(env_wts, feature_branch="feature/widget", force=False)
+
+    assert report.aborted is True
+    assert [(o.repo_name, o.result) for o in report.repos] == [("demo", CheckoutResult.refused_abandonment)]
+    with git.Repo(str(worktree_path)) as r:
+        # Refused — nothing moved. The unpushed commit is still reachable from
+        # the alpha branch, and HEAD is still detached exactly where it was.
+        r.git.rev_parse("--verify", "--quiet", f"{unpushed_sha}")
+        r.git.merge_base("--is-ancestor", unpushed_sha, "refs/heads/alpha")
+        assert r.head.is_detached is True
 
 
 def test_disconnect_env_clears_tracking_on_detached_worktree(tmp_path: Path, service: EnvCheckoutService) -> None:

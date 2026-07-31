@@ -15,6 +15,7 @@ from winter_cli.modules.workspace.models import (
     FeatureWorktree,
     ProjectRepository,
     RepoError,
+    ResetMode,
     StandaloneRepository,
     Workspace,
 )
@@ -92,7 +93,9 @@ def test_count_commits_not_in_raises_for_bogus_ref(monkeypatch: pytest.MonkeyPat
     assert ei.value.subcommand == "rev-list"
 
 
-def test_hard_reset_raises_for_bogus_ref(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
+def test_force_checkout_env_branch_raises_for_bogus_ref(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
+) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.git.checkout.side_effect = git.GitCommandError(
         ("git", "checkout", "--force", "-B", "alpha", "--no-track"), 128, stderr=b"ambiguous argument"
@@ -100,15 +103,15 @@ def test_hard_reset_raises_for_bogus_ref(monkeypatch: pytest.MonkeyPatch, repo: 
     wt = _wt(_REPO_PATH)
 
     with pytest.raises(RepoError) as ei:
-        repo.hard_reset(wt, "refs/heads/does-not-exist")
+        repo.force_checkout_env_branch(wt, "refs/heads/does-not-exist")
 
     assert ei.value.subcommand == "checkout"
 
 
-def test_hard_reset_checks_out_env_branch_forced_untracked(
+def test_force_checkout_env_branch_checks_out_env_branch_forced_untracked(
     monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
 ) -> None:
-    """`hard_reset` re-attaches HEAD to `worktree.environment.name` via `checkout -B`,
+    """`force_checkout_env_branch` re-attaches HEAD to `worktree.environment.name` via `checkout -B`,
     not a bare `git reset --hard` — the fix for winter#159 (a detached HEAD
     stays detached after a plain reset). `--no-track` keeps it from writing its
     own upstream config; `set_upstream` remains the sole writer of tracking.
@@ -117,10 +120,44 @@ def test_hard_reset_checks_out_env_branch_forced_untracked(
     r = git_mock.Repo.return_value
     wt = _wt(_REPO_PATH)
 
-    repo.hard_reset(wt, "origin/feature/widget")
+    repo.force_checkout_env_branch(wt, "origin/feature/widget")
 
     r.git.checkout.assert_called_once_with("--force", "-B", "alpha", "--no-track", "origin/feature/widget")
     r.git.reset.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("mode", "flag"),
+    [(ResetMode.soft, "--soft"), (ResetMode.mixed, "--mixed"), (ResetMode.hard, "--hard")],
+)
+def test_reset_to_runs_the_literal_git_reset_flag(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository, mode: ResetMode, flag: str
+) -> None:
+    """`reset_to` is the plain `git reset --soft|--mixed|--hard <ref>` primitive —
+    unlike `force_checkout_env_branch`, it never calls `checkout` and never touches the
+    checked-out branch name.
+    """
+    git_mock = _fake_git_repo(monkeypatch)
+    r = git_mock.Repo.return_value
+    wt = _wt(_REPO_PATH)
+
+    repo.reset_to(wt, mode, "origin/feature/widget")
+
+    r.git.reset.assert_called_once_with(flag, "origin/feature/widget")
+    r.git.checkout.assert_not_called()
+
+
+def test_reset_to_raises_for_bogus_ref(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    git_mock.Repo.return_value.git.reset.side_effect = git.GitCommandError(
+        ("git", "reset", "--hard"), 128, stderr=b"ambiguous argument"
+    )
+    wt = _wt(_REPO_PATH)
+
+    with pytest.raises(RepoError) as ei:
+        repo.reset_to(wt, ResetMode.hard, "refs/heads/does-not-exist")
+
+    assert ei.value.subcommand == "reset"
 
 
 def test_push_standalone_raises_when_no_upstream(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
@@ -208,8 +245,8 @@ def test_set_upstream_falls_back_to_env_branch_when_head_detached(
     monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
 ) -> None:
     """winter#159: a detached HEAD must not crash `set_upstream` — it configures
-    tracking for `worktree.environment.name`, the branch `hard_reset` re-attaches
-    a detached worktree onto, instead of raising `TypeError` on `active_branch`.
+    tracking for `worktree.environment.name`, the branch `force_checkout_env_branch`
+    re-attaches a detached worktree onto, instead of raising `TypeError` on `active_branch`.
     """
     git_mock = _fake_git_repo(monkeypatch)
     r = git_mock.Repo.return_value
@@ -220,6 +257,25 @@ def test_set_upstream_falls_back_to_env_branch_when_head_detached(
 
     r.git.config.assert_any_call("branch.alpha.remote", "origin")
     r.git.config.assert_any_call("branch.alpha.merge", "refs/heads/feature/widget")
+
+
+def test_set_upstream_warns_when_head_detached(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository, caplog: pytest.LogCaptureFixture
+) -> None:
+    """winter#159 B5: a bare `winter ws connect` against a detached worktree still
+    writes tracking config (see the fallback test above) but must surface a warning
+    that the worktree stays detached and untracked — `EnvCheckoutService.checkout_env`
+    never hits this path since it force-attaches HEAD before calling `set_upstream`.
+    """
+    git_mock = _fake_git_repo(monkeypatch)
+    r = git_mock.Repo.return_value
+    type(r).active_branch = PropertyMock(side_effect=TypeError("HEAD is a detached symbolic reference"))
+    wt = _wt(_REPO_PATH)
+
+    with caplog.at_level("WARNING"):
+        repo.set_upstream(wt, "origin/feature/widget")
+
+    assert "detached" in caplog.text
 
 
 def test_unset_upstream_is_idempotent_when_no_upstream(

@@ -8,6 +8,7 @@ from winter_cli.modules.workspace.models.domain_model import (
     DiffMode,
     FeatureEnvironment,
     FeatureWorktree,
+    ResetMode,
     StandaloneRepository,
 )
 
@@ -302,6 +303,62 @@ class EnvCheckoutReport:
     feature_branch: str
     aborted: bool
     repos: list[RepoCheckoutOutcome]
+
+
+class ResetResult(enum.Enum):
+    """Per-repo outcome of `winter ws reset`.
+
+    `reset` is the sole success shape, for every mode — the report's `mode`
+    field (not a per-repo enum member) records which of soft/mixed/hard
+    actually ran. `refused_dirty` / `refused_abandonment` are the `--hard`-only
+    safety gate, bypassable with `--force`; `--soft`/`--mixed` never produce
+    them. `refused_missing_ref` fires when REF doesn't resolve locally in a
+    matched repo — not bypassable by `--force`, since there is nothing to
+    reset to. `refused_ambiguous_sha` fires when REF is a bare commit SHA and
+    more than one worktree matched — a commit exists in exactly one repo's
+    history and has no meaning in another's, so the whole run refuses rather
+    than guessing which repo it was meant for.
+    """
+
+    reset = "reset"
+    refused_dirty = "refused-dirty"
+    refused_abandonment = "refused-abandonment"
+    refused_missing_ref = "refused-missing-ref"
+    refused_ambiguous_sha = "refused-ambiguous-sha"
+
+
+@dataclasses.dataclass
+class RepoResetOutcome:
+    """Result of attempting to reset one matched worktree — env-qualified since
+    `winter ws reset` PATTERNS may span more than one environment."""
+
+    env: str
+    repo_name: str
+    result: ResetResult
+    ref: str = ""
+    """The per-repo resolved REF (after `{main}`-token expansion) the worktree
+    was — or, under `--dry-run`, would be — reset to. Empty for refusals that
+    never got far enough to resolve one (e.g. `refused_ambiguous_sha`)."""
+
+
+@dataclasses.dataclass
+class ResetReport:
+    """All-or-nothing report from `winter ws reset`.
+
+    `aborted` is True when at least one matched repo refused in Phase 1 (the
+    ambiguous-SHA guard, a missing REF, or — `--hard` only, unless `--force`
+    — dirty / abandonment) — in that case no `git reset` ran in any repo, and
+    `repos` contains only the refusals. When `aborted` is False, every matched
+    repo carries a `reset` outcome — for real when `dry_run` is False, or as a
+    plan preview (no git op executed) when `dry_run` is True. Upstream
+    tracking is never touched, by any mode, in either phase.
+    """
+
+    ref: str
+    mode: ResetMode
+    dry_run: bool
+    aborted: bool
+    repos: list[RepoResetOutcome]
 
 
 @dataclasses.dataclass

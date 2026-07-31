@@ -16,6 +16,7 @@ from winter_cli.modules.workspace.models import (
     RepoError,
     Workspace,
 )
+from winter_cli.modules.workspace.worktree_safety import WorktreeSafetyService
 
 WORKSPACE_ROOT = Path("/ws")
 
@@ -45,13 +46,15 @@ class FakeWriteRepoRepository:
         self.set_upstream_calls: list[tuple[str, str]] = []
         self.set_push_default_calls: list[str] = []
         self.unset_upstream_calls: list[str] = []
-        self.hard_reset_calls: list[tuple[str, str]] = []
+        self.force_checkout_calls: list[tuple[str, str]] = []
         self.count_commits_not_in_calls: list[tuple[str, str]] = []
         self.missing_refs: set[tuple[str, str]] = set()
         self.dirty_worktree_repos: set[str] = set()
         self.repos_with_commits_not_in: set[str] = set()
         self.upstreams: dict[str, str] = {}
-        self.hard_reset_raises: set[str] = set()
+        self.force_checkout_raises: set[str] = set()
+        self.active_branch_names: dict[str, str | None] = {}
+        self.branch_upstreams: dict[tuple[str, str], str] = {}
 
     def set_upstream(self, worktree: FeatureWorktree, upstream: str) -> None:
         self.set_upstream_calls.append((worktree.repository.name, upstream))
@@ -71,14 +74,25 @@ class FakeWriteRepoRepository:
     def is_worktree_dirty(self, worktree: FeatureWorktree) -> bool:
         return worktree.repository.name in self.dirty_worktree_repos
 
-    def count_commits_not_in(self, worktree: FeatureWorktree, ref: str) -> int:
+    def count_commits_not_in(self, worktree: FeatureWorktree, ref: str, from_ref: str = "HEAD") -> int:
         self.count_commits_not_in_calls.append((worktree.repository.name, ref))
         return 1 if worktree.repository.name in self.repos_with_commits_not_in else 0
 
-    def hard_reset(self, worktree: FeatureWorktree, ref: str) -> None:
-        self.hard_reset_calls.append((worktree.repository.name, ref))
-        if worktree.repository.name in self.hard_reset_raises:
-            raise RepoError(f"hard_reset failed for {worktree.repository.name}")
+    def force_checkout_env_branch(self, worktree: FeatureWorktree, ref: str) -> None:
+        self.force_checkout_calls.append((worktree.repository.name, ref))
+        if worktree.repository.name in self.force_checkout_raises:
+            raise RepoError(f"force_checkout_env_branch failed for {worktree.repository.name}")
+
+    def get_active_branch_name(self, worktree: FeatureWorktree) -> str | None:
+        # Defaults to the env branch (i.e. "attached, not detached") so tests
+        # that don't care about the winter#159 B1 branch-abandonment guard
+        # aren't forced to seed this.
+        if worktree.repository.name in self.active_branch_names:
+            return self.active_branch_names[worktree.repository.name]
+        return worktree.environment.name
+
+    def get_branch_upstream(self, worktree: FeatureWorktree, branch_name: str) -> str | None:
+        return self.branch_upstreams.get((worktree.repository.name, branch_name))
 
     # Methods touched by other EnvCheckoutService code paths — raise to surface
     # accidental fan-out beyond the call under test.
@@ -93,7 +107,10 @@ def fake_repo_repo() -> FakeWriteRepoRepository:
 
 @pytest.fixture
 def service(fake_repo_repo: FakeWriteRepoRepository) -> EnvCheckoutService:
-    return EnvCheckoutService(repo_repo=fake_repo_repo)  # type: ignore[arg-type]
+    return EnvCheckoutService(
+        repo_repo=fake_repo_repo,  # type: ignore[arg-type]
+        worktree_safety_svc=WorktreeSafetyService(repo_repo=fake_repo_repo),  # type: ignore[arg-type]
+    )
 
 
 def _env_worktrees(workspace: Workspace, repos: list[ProjectRepository]) -> FeatureEnvironmentWorktrees:
@@ -241,7 +258,7 @@ def test_checkout_env_resets_clean_repos_with_present_ref(
         ("r1", CheckoutResult.reset_feature),
         ("r2", CheckoutResult.reset_feature),
     ]
-    assert fake_repo_repo.hard_reset_calls == [("r1", "origin/feature/widget"), ("r2", "origin/feature/widget")]
+    assert fake_repo_repo.force_checkout_calls == [("r1", "origin/feature/widget"), ("r2", "origin/feature/widget")]
     assert fake_repo_repo.set_upstream_calls == [
         ("r1", "origin/feature/widget"),
         ("r2", "origin/feature/widget"),
@@ -265,7 +282,7 @@ def test_checkout_env_feature_branch_main_token_resolves_per_repo(
         ("r1", CheckoutResult.reset_feature),
         ("r2", CheckoutResult.reset_feature),
     ]
-    assert fake_repo_repo.hard_reset_calls == [("r1", "origin/main"), ("r2", "origin/master")]
+    assert fake_repo_repo.force_checkout_calls == [("r1", "origin/main"), ("r2", "origin/master")]
     assert fake_repo_repo.set_upstream_calls == [("r1", "origin/main"), ("r2", "origin/master")]
 
 
@@ -279,7 +296,7 @@ def test_checkout_env_feature_branch_unknown_token_refuses_before_any_git_op(
     with pytest.raises(click.ClickException, match=r"Unknown ref token '\{trunk\}'"):
         service.checkout_env(env_wts, feature_branch="{trunk}", force=False)
 
-    assert fake_repo_repo.hard_reset_calls == []
+    assert fake_repo_repo.force_checkout_calls == []
     assert fake_repo_repo.set_upstream_calls == []
 
 
@@ -298,7 +315,7 @@ def test_checkout_env_connects_and_resets_to_main_when_feature_ref_missing(
     # Connected to the feature branch even though its ref doesn't exist yet...
     assert fake_repo_repo.set_upstream_calls == [("r1", "origin/feature/new")]
     # ...but reset to the repo's main branch.
-    assert fake_repo_repo.hard_reset_calls == [("r1", "origin/trunk")]
+    assert fake_repo_repo.force_checkout_calls == [("r1", "origin/trunk")]
 
 
 def test_checkout_env_refuses_unknown_branch_without_new(
@@ -321,7 +338,7 @@ def test_checkout_env_refuses_unknown_branch_without_new(
         ("r2", CheckoutResult.refused_unknown_branch),
     ]
     assert fake_repo_repo.set_upstream_calls == []
-    assert fake_repo_repo.hard_reset_calls == []
+    assert fake_repo_repo.force_checkout_calls == []
 
 
 def test_checkout_env_unknown_branch_guard_is_not_bypassed_by_force(
@@ -336,7 +353,7 @@ def test_checkout_env_unknown_branch_guard_is_not_bypassed_by_force(
 
     assert report.aborted is True
     assert [(o.repo_name, o.result) for o in report.repos] == [("r1", CheckoutResult.refused_unknown_branch)]
-    assert fake_repo_repo.hard_reset_calls == []
+    assert fake_repo_repo.force_checkout_calls == []
 
 
 def test_checkout_env_mixed_ref_presence_needs_no_new_flag(
@@ -357,7 +374,7 @@ def test_checkout_env_mixed_ref_presence_needs_no_new_flag(
         ("r1", CheckoutResult.reset_feature),
         ("r2", CheckoutResult.reset_main),
     ]
-    assert fake_repo_repo.hard_reset_calls == [("r1", "origin/feature/widget"), ("r2", "origin/main")]
+    assert fake_repo_repo.force_checkout_calls == [("r1", "origin/feature/widget"), ("r2", "origin/main")]
 
 
 def test_checkout_env_refuses_repo_with_no_ref_to_reset_to(
@@ -374,7 +391,7 @@ def test_checkout_env_refuses_repo_with_no_ref_to_reset_to(
     assert report.aborted is True
     assert [(o.repo_name, o.result) for o in report.repos] == [("r1", CheckoutResult.refused_missing_ref)]
     assert fake_repo_repo.set_upstream_calls == []
-    assert fake_repo_repo.hard_reset_calls == []
+    assert fake_repo_repo.force_checkout_calls == []
 
 
 def test_checkout_env_refuses_abandonment_against_own_upstream(
@@ -392,7 +409,7 @@ def test_checkout_env_refuses_abandonment_against_own_upstream(
     assert [(o.repo_name, o.result) for o in report.repos] == [("r1", CheckoutResult.refused_abandonment)]
     # The abandonment check compared against the repo's OWN upstream, not the target.
     assert fake_repo_repo.count_commits_not_in_calls == [("r1", "origin/feature-123")]
-    assert fake_repo_repo.hard_reset_calls == []
+    assert fake_repo_repo.force_checkout_calls == []
     assert fake_repo_repo.set_upstream_calls == []
 
 
@@ -455,7 +472,7 @@ def test_checkout_env_all_pinned_env_is_a_clean_noop(
 
     assert report.aborted is False
     assert report.repos == []
-    assert fake_repo_repo.hard_reset_calls == []
+    assert fake_repo_repo.force_checkout_calls == []
     assert fake_repo_repo.set_upstream_calls == []
 
 
@@ -473,13 +490,13 @@ def test_checkout_env_force_bypasses_abandonment(
     assert report.aborted is False
     assert [(o.repo_name, o.result) for o in report.repos] == [("r1", CheckoutResult.reset_feature)]
     assert fake_repo_repo.count_commits_not_in_calls == []
-    assert fake_repo_repo.hard_reset_calls == [("r1", "origin/feature-xyz")]
+    assert fake_repo_repo.force_checkout_calls == [("r1", "origin/feature-xyz")]
 
 
 def test_checkout_env_aborts_whole_env_when_any_repo_is_dirty_without_force(
     workspace: Workspace, service: EnvCheckoutService, fake_repo_repo: FakeWriteRepoRepository
 ) -> None:
-    """One dirty repo + force=False → no `hard_reset` runs in ANY repo (all-or-nothing safety)."""
+    """One dirty repo + force=False → no `force_checkout_env_branch` runs in ANY repo (all-or-nothing safety)."""
     repos = [
         ProjectRepository(name="clean-repo", main_path=workspace.root_path / "clean-repo", main_branch="main"),
         ProjectRepository(name="dirty-repo", main_path=workspace.root_path / "dirty-repo", main_branch="main"),
@@ -493,7 +510,7 @@ def test_checkout_env_aborts_whole_env_when_any_repo_is_dirty_without_force(
     refused = [o for o in report.repos if o.result == CheckoutResult.refused_dirty]
     assert [o.repo_name for o in refused] == ["dirty-repo"]
     # The clean repo is not in the refused list and Phase 2 never runs.
-    assert fake_repo_repo.hard_reset_calls == []
+    assert fake_repo_repo.force_checkout_calls == []
     assert fake_repo_repo.set_upstream_calls == []
 
 
@@ -511,27 +528,27 @@ def test_checkout_env_with_force_resets_dirty_repos(
 
     assert report.aborted is False
     assert [(o.repo_name, o.result) for o in report.repos] == [("dirty-repo", CheckoutResult.reset_feature)]
-    assert fake_repo_repo.hard_reset_calls == [("dirty-repo", "origin/feature/widget")]
+    assert fake_repo_repo.force_checkout_calls == [("dirty-repo", "origin/feature/widget")]
 
 
-def test_checkout_env_mid_repo_hard_reset_failure_leaves_tracking_unchanged(
+def test_checkout_env_mid_repo_force_checkout_failure_leaves_tracking_unchanged(
     workspace: Workspace, service: EnvCheckoutService, fake_repo_repo: FakeWriteRepoRepository
 ) -> None:
-    """A hard_reset failure mid-loop must not leave the repo re-pointed at the new upstream.
+    """A force_checkout_env_branch failure mid-loop must not leave the repo re-pointed at the new upstream.
 
-    hard_reset runs before set_upstream / set_push_default so that a raised
+    force_checkout_env_branch runs before set_upstream / set_push_default so that a raised
     exception propagates before tracking is written — the worktree stays on
     its original (old) upstream rather than silently mis-tracked.
     """
     repos = [ProjectRepository(name="r1", main_path=workspace.root_path / "r1", main_branch="main")]
-    fake_repo_repo.hard_reset_raises.add("r1")
+    fake_repo_repo.force_checkout_raises.add("r1")
     env_wts = _env_worktrees(workspace, repos)
 
     with pytest.raises(RepoError):
         service.checkout_env(env_wts, feature_branch="feature/widget", force=False)
 
-    # hard_reset was attempted (it raised), but set_upstream must NOT have been
+    # force_checkout_env_branch was attempted (it raised), but set_upstream must NOT have been
     # called because the reset failed — tracking must stay on the old ref.
-    assert fake_repo_repo.hard_reset_calls == [("r1", "origin/feature/widget")]
+    assert fake_repo_repo.force_checkout_calls == [("r1", "origin/feature/widget")]
     assert fake_repo_repo.set_upstream_calls == []
     assert fake_repo_repo.set_push_default_calls == []

@@ -63,6 +63,7 @@ def _make_index_handler(
         workspace_push_svc=MagicMock(),
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
+        env_reset_svc=MagicMock(),
         workspace_repo=MagicMock(),
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),

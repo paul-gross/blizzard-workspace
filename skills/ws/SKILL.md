@@ -43,6 +43,7 @@ What would you like to do?
 | Configure, declare new repo, set git identity | `/ws-setup` |
 | Tear down, destroy, remove an environment | `winter ws destroy <name>` |
 | Adopt a remote feature branch into an env | `winter ws checkout <name> <feature-branch>` |
+| Roll one or more worktrees back to a ref, move a branch pointer (not env-wide, not a tracking change) | `winter ws reset <name>/<repo> <ref>` — scope to `<env>/<repo>`; a bare `<env>` moves *every* non-pinned worktree in it |
 | Clean up orphan project clones / broken symlinks | `winter ws prune` |
 
 Respond with a brief explanation and the exact command to run. For example:

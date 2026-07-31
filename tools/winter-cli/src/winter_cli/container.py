@@ -31,6 +31,7 @@ from winter_cli.modules.workspace.dashboard_snapshot_service import DashboardSna
 from winter_cli.modules.workspace.destroy_service import DestroyService
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
+from winter_cli.modules.workspace.env_reset_service import EnvResetService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
 from winter_cli.modules.workspace.extension_agentsmd_service import ExtensionAgentsMdService
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
@@ -61,6 +62,7 @@ from winter_cli.modules.workspace.workspace_push_service import WorkspacePushSer
 from winter_cli.modules.workspace.workspace_skill_service import WorkspaceSkillService
 from winter_cli.modules.workspace.workspace_snapshot_service import WorkspaceSnapshotService
 from winter_cli.modules.workspace.workspace_sync_service import WorkspaceSyncService
+from winter_cli.modules.workspace.worktree_safety import WorktreeSafetyService
 from winter_cli.plugins.internal.importlib_plugin_loader import ImportlibPluginLoader
 from winter_cli.plugins.loader import PluginRegistry
 
@@ -247,9 +249,21 @@ class Container(containers.DeclarativeContainer):
         git_ops=git_ops_svc,
     )
 
+    worktree_safety_svc = providers.Factory(
+        WorktreeSafetyService,
+        repo_repo=repo_repo,
+    )
+
     env_checkout_svc = providers.Factory(
         EnvCheckoutService,
         repo_repo=repo_repo,
+        worktree_safety_svc=worktree_safety_svc,
+    )
+
+    env_reset_svc = providers.Factory(
+        EnvResetService,
+        repo_repo=repo_repo,
+        worktree_safety_svc=worktree_safety_svc,
     )
 
     extension_manifest_loader = providers.Singleton(
@@ -433,6 +447,7 @@ class Container(containers.DeclarativeContainer):
         workspace_push_svc=workspace_push_svc,
         workspace_merge_svc=workspace_merge_svc,
         env_checkout_svc=env_checkout_svc,
+        env_reset_svc=env_reset_svc,
         workspace_repo=worktree_repo,
         repo_repo=repo_repo,
         repo_factory=repo_factory,

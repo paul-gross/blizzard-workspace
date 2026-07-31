@@ -19,6 +19,7 @@ from winter_cli.modules.workspace.models import (
     RepoError,
     RepoMergeOutcome,
     RepoSyncOutcome,
+    ResetMode,
     StandaloneRepository,
     SyncResult,
 )
@@ -149,6 +150,28 @@ class WriteRepoRepository(ReadRepoRepository):
             if not branch:
                 raise RepoError(f"set_upstream: expected '<remote>/<branch>', got {remote_branch!r}")
             head = self._head_branch_name(r, worktree)
+            try:
+                r.active_branch  # noqa: B018 — probed only to detect detached HEAD
+                is_detached = False
+            except TypeError:
+                is_detached = True
+            if is_detached:
+                # winter#159 B5: on a detached worktree there is no real
+                # `head` to attach tracking to — `_head_branch_name` falls
+                # back to `worktree.environment.name` so this write still
+                # succeeds (needed by `EnvCheckoutService.checkout_env`,
+                # which force-attaches HEAD onto that exact branch moments
+                # before calling here). A bare `winter ws connect` against a
+                # still-detached worktree hits this same fallback with no
+                # such attach step, so the config write lands on a branch
+                # name HEAD isn't actually on — warn rather than fail silently.
+                logger.warning(
+                    "set_upstream: %s is detached — writing branch.%s.* tracking config without "
+                    "attaching HEAD to it; the worktree stays detached and untracked until something "
+                    "else (e.g. `winter ws checkout`) attaches it",
+                    worktree.repository.name,
+                    head,
+                )
             r.git.config(f"branch.{head}.remote", remote)
             r.git.config(f"branch.{head}.merge", f"refs/heads/{branch}")
 
@@ -172,11 +195,18 @@ class WriteRepoRepository(ReadRepoRepository):
         with git.Repo(str(worktree.path)) as r:
             return r.is_dirty(working_tree=True, index=True, untracked_files=False)
 
-    def count_commits_not_in(self, worktree: FeatureWorktree, ref: str) -> int:
-        """Commits reachable from HEAD but not from `ref`. No network."""
+    def count_commits_not_in(self, worktree: FeatureWorktree, ref: str, from_ref: str = "HEAD") -> int:
+        """Commits reachable from `from_ref` (HEAD by default) but not from `ref`. No network.
+
+        `from_ref` lets a caller measure abandonment against a ref other than
+        HEAD — needed by `EnvCheckoutService`'s branch-abandonment guard
+        (winter#159 B1), which must also measure `refs/heads/<env>` when that
+        branch isn't currently checked out, since `force_checkout_env_branch`
+        force-moves it regardless of what HEAD points at.
+        """
         with git.Repo(str(worktree.path)) as r:
             try:
-                return int(r.git.rev_list("--count", "HEAD", f"^{ref}"))
+                return int(r.git.rev_list("--count", from_ref, f"^{ref}"))
             except git.GitCommandError as exc:
                 raise self._error_factory.from_git(
                     exc,
@@ -184,7 +214,32 @@ class WriteRepoRepository(ReadRepoRepository):
                     cwd=worktree.path,
                 ) from exc
 
-    def hard_reset(self, worktree: FeatureWorktree, target_ref: str) -> None:
+    def get_active_branch_name(self, worktree: FeatureWorktree) -> str | None:
+        """The currently checked-out branch name, or None when HEAD is detached. No network."""
+        with git.Repo(str(worktree.path)) as r:
+            try:
+                return r.active_branch.name
+            except TypeError:
+                return None
+
+    def get_branch_upstream(self, worktree: FeatureWorktree, branch_name: str) -> str | None:
+        """`branch_name`'s configured upstream (e.g. `origin/feature-123`), or None. No network.
+
+        Same resolution shape as `get_worktree_upstream`, but keyed off an
+        explicit branch rather than the currently checked-out one — needed to
+        read `refs/heads/<env>`'s own tracking when that branch isn't HEAD.
+        """
+        with git.Repo(str(worktree.path)) as r:
+            try:
+                head = r.heads[branch_name]
+            except IndexError:
+                return None
+            tb = head.tracking_branch()
+            if tb is None:
+                return None
+            return tb.name if self._has_ref(r, tb.name) else None
+
+    def force_checkout_env_branch(self, worktree: FeatureWorktree, target_ref: str) -> None:
         # Force the worktree onto `worktree.environment.name` — the branch
         # every non-pinned feature worktree is created under
         # (`InitService._create_git_worktree`) — reset to `target_ref`,
@@ -206,6 +261,33 @@ class WriteRepoRepository(ReadRepoRepository):
         with git.Repo(str(worktree.path)) as r:
             try:
                 r.git.checkout("--force", "-B", branch, "--no-track", target_ref)
+            except git.GitCommandError as exc:
+                raise self._error_factory.from_git(
+                    exc,
+                    message=f"reset failed for {worktree.repository.name}",
+                    cwd=worktree.path,
+                ) from exc
+
+    def reset_to(self, worktree: FeatureWorktree, mode: ResetMode, target_ref: str) -> None:
+        """`git reset --soft|--mixed|--hard <target_ref>` — the literal, unmodified
+        git primitive `winter ws reset` needs.
+
+        Deliberately distinct from `force_checkout_env_branch`: that method
+        backs `ws checkout`'s connect-and-reset step via `git checkout
+        --force -B <env-branch> --no-track <target_ref>`, which *attaches* a
+        possibly detached HEAD onto the env branch as a side effect
+        (winter#159's fix) — exactly the opposite of what `ws reset` wants,
+        since `reset` is deliberately the half of the checkout/reset split
+        that never touches which branch is checked out or its tracking
+        config. `reset_to` only ever moves the pointer of whatever is
+        currently checked out (staying detached if it was detached, matching
+        plain `git reset`), and never writes `branch.<name>.{remote,merge}` —
+        `set_upstream` remains the sole writer of tracking, same invariant
+        `force_checkout_env_branch` preserves.
+        """
+        with git.Repo(str(worktree.path)) as r:
+            try:
+                r.git.reset(f"--{mode.value}", target_ref)
             except git.GitCommandError as exc:
                 raise self._error_factory.from_git(
                     exc,
@@ -737,7 +819,7 @@ class WriteRepoRepository(ReadRepoRepository):
         a read can report "no answer"; a config write can't — it falls back to
         `worktree.environment.name`, the branch every non-pinned feature
         worktree is created under (`InitService._create_git_worktree`) and the
-        one `hard_reset` re-attaches a detached HEAD onto, so the fallback
+        one `force_checkout_env_branch` re-attaches a detached HEAD onto, so the fallback
         still names a real, git-visible branch.
         """
         try:

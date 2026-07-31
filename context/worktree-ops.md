@@ -105,7 +105,9 @@ git -C ./projects/<repo-name> worktree remove ../../<name>/<repo-name>
 
 ## Adopting a remote feature branch
 
-`winter ws checkout <name> <feature-branch>` is an all-or-nothing connect + hard-reset across every non-pinned repo (use `--new` for a branch that doesn't exist anywhere yet). For the `refused-unknown-branch` / `refused-missing-ref` refusals, the dirty/abandonment guard, and what `--force` does and doesn't bypass, see [winter-cli/usage/ws/checkout.md](./winter-cli/usage/ws/checkout.md).
+`winter ws checkout <name> <feature-branch>` is an all-or-nothing connect + force-checkout across every non-pinned repo — it re-attaches HEAD onto the env-named branch (moving it off whatever branch a worktree was parked on, or re-attaching a detached one) and force-moves that branch to the target ref (use `--new` for a branch that doesn't exist anywhere yet). It is env-wide with no repo filter. For the `refused-unknown-branch` / `refused-missing-ref` refusals, the dirty/abandonment guard, and what `--force` does and doesn't bypass, see [winter-cli/usage/ws/checkout.md](./winter-cli/usage/ws/checkout.md).
+
+To move a single worktree's branch pointer without touching the rest of the env — or without re-attaching a detached HEAD — use `winter ws reset <name>/<repo-name> <ref>` instead; see [winter-cli/usage/ws/reset.md](./winter-cli/usage/ws/reset.md) for the soft/mixed/hard modes and safety-gate details.
 
 ## Pushing completed work
 

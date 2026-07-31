@@ -50,6 +50,7 @@ def _make_handler(fetch_report: FetchReport) -> WorkspaceHandler:
         workspace_push_svc=MagicMock(),
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
+        env_reset_svc=MagicMock(),
         workspace_repo=MagicMock(),
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -183,6 +184,7 @@ def _make_worktrees_handler(
         workspace_push_svc=MagicMock(),
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
+        env_reset_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=repo_repo,
         repo_factory=repo_factory,
@@ -362,6 +364,7 @@ def test_worktrees_human_table_calls_render_table_with_expected_rows(
         workspace_push_svc=MagicMock(),
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
+        env_reset_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=MagicMock(),
         repo_factory=repo_factory,
@@ -433,6 +436,7 @@ def _make_worktrees_handler_with_status(
         workspace_push_svc=MagicMock(),
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
+        env_reset_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=MagicMock(),
         repo_factory=repo_factory,
@@ -899,6 +903,7 @@ def _make_status_handler(snapshot: WorkspaceSnapshot | None, raise_exc: Exceptio
         workspace_push_svc=MagicMock(),
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
+        env_reset_svc=MagicMock(),
         workspace_repo=MagicMock(),
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -1018,6 +1023,7 @@ def _make_status_handler_with_sync(
         workspace_push_svc=MagicMock(),
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
+        env_reset_svc=MagicMock(),
         workspace_repo=MagicMock(),
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -1353,6 +1359,7 @@ def _connect_handler(connect_returns: dict[str, list[str]]) -> tuple[WorkspaceHa
         workspace_push_svc=MagicMock(),
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=env_checkout_svc,
+        env_reset_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -1445,6 +1452,7 @@ def _disconnect_handler(disconnect_returns: dict[str, list[str]]) -> tuple[Works
         workspace_push_svc=MagicMock(),
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=env_checkout_svc,
+        env_reset_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -1566,6 +1574,7 @@ def _diff_handler(worktrees_by_env: dict[str, list[str]]) -> tuple[WorkspaceHand
         workspace_push_svc=MagicMock(),
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
+        env_reset_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -1659,3 +1668,298 @@ def test_diff_defaults_to_every_env_every_repo_when_no_patterns(capsys: pytest.C
     out = json.loads(capsys.readouterr().out)
     assert out["patterns"] == ["*/*"]
     assert [r["env"] for r in out["results"]] == ["alpha", "beta"]
+
+
+# ── reset ────────────────────────────────────────────────────────────────────
+
+
+def _reset_handler(
+    worktrees_by_env: dict[str, list[tuple[str, bool]]],
+    reset_report: Any = None,
+) -> tuple[WorkspaceHandler, MagicMock, MagicMock]:
+    """Handler whose per-env worktrees are `worktrees_by_env[env_name]`, each a
+    `(repo_name, pinned)` pair. `reset_report` (if given) is returned verbatim
+    by `env_reset_svc.reset`, whatever `targets` it was called with — tests
+    that need to assert on `targets` read `env_reset_svc.reset.call_args`
+    instead of overriding this.
+
+    Returns the handler, the workspace_repo mock, and the env_reset_svc mock.
+    """
+    from types import SimpleNamespace
+
+    from winter_cli.modules.workspace.models import ResetMode, ResetReport
+
+    workspace_repo = MagicMock()
+    workspace_repo.get_environment.side_effect = lambda _ws, name: SimpleNamespace(name=name)
+    workspace_repo.get_environments.return_value = [SimpleNamespace(name=n) for n in worktrees_by_env]
+
+    def _get_worktrees(env: Any, _repos: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            environment=env,
+            worktrees=[
+                SimpleNamespace(environment=env, repository=SimpleNamespace(name=name, pinned=pinned))
+                for name, pinned in worktrees_by_env.get(env.name, [])
+            ],
+        )
+
+    env_status_svc = MagicMock()
+    env_status_svc.get_feature_environment_worktrees.side_effect = _get_worktrees
+
+    env_reset_svc = MagicMock()
+    env_reset_svc.reset.return_value = reset_report or ResetReport(
+        ref="origin/main", mode=ResetMode.mixed, dry_run=False, aborted=False, repos=[]
+    )
+
+    cli_output_svc = MagicMock()
+    cli_output_svc.style.side_effect = lambda text, _style: text
+
+    handler = WorkspaceHandler(
+        env_status_svc=env_status_svc,
+        workspace_sync_svc=MagicMock(),
+        workspace_push_svc=MagicMock(),
+        workspace_merge_svc=MagicMock(),
+        env_checkout_svc=MagicMock(),
+        env_reset_svc=env_reset_svc,
+        workspace_repo=workspace_repo,
+        repo_repo=MagicMock(),
+        repo_factory=MagicMock(),
+        drift_warning_svc=MagicMock(),
+        prune_svc=MagicMock(),
+        reporter_factory=MagicMock(),
+        cli_output_svc=cli_output_svc,
+        workspace=MagicMock(),
+    )
+    return handler, workspace_repo, env_reset_svc
+
+
+def test_reset_skips_pinned_worktrees() -> None:
+    """Pinned worktrees are never in `targets`, matching `reset`'s Protocol contract."""
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvResetParams
+    from winter_cli.modules.workspace.models import ResetMode
+
+    handler, _, env_reset_svc = _reset_handler({"alpha": [("api", False), ("pinned-repo", True)]})
+    handler.reset(
+        EnvResetParams(
+            patterns=["alpha"], ref="origin/main", mode=ResetMode.mixed, force=False, dry_run=False, output_json=True
+        )
+    )
+
+    targets = env_reset_svc.reset.call_args.kwargs["targets"]
+    assert [wt.repository.name for wt in targets] == ["api"]
+
+
+def test_reset_cross_env_pattern_matches_worktrees_in_each_env() -> None:
+    """A glob PATTERNS spanning more than one env collects targets from every matched env."""
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvResetParams
+    from winter_cli.modules.workspace.models import ResetMode
+
+    handler, workspace_repo, env_reset_svc = _reset_handler({"alpha": [("winter", False)], "beta": [("winter", False)]})
+    handler.reset(
+        EnvResetParams(
+            patterns=["*/winter"], ref="origin/main", mode=ResetMode.mixed, force=False, dry_run=False, output_json=True
+        )
+    )
+
+    workspace_repo.get_environments.assert_called_once()
+    targets = env_reset_svc.reset.call_args.kwargs["targets"]
+    assert [(wt.environment.name, wt.repository.name) for wt in targets] == [("alpha", "winter"), ("beta", "winter")]
+
+
+def test_reset_scoped_pattern_excludes_non_matching_repo_in_same_env() -> None:
+    """A scoped `<env>/<repo>` pattern narrows targets to that one worktree, not the whole env."""
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvResetParams
+    from winter_cli.modules.workspace.models import ResetMode
+
+    handler, _, env_reset_svc = _reset_handler({"alpha": [("winter", False), ("other-repo", False)]})
+    handler.reset(
+        EnvResetParams(
+            patterns=["alpha/winter"],
+            ref="origin/main",
+            mode=ResetMode.mixed,
+            force=False,
+            dry_run=False,
+            output_json=True,
+        )
+    )
+
+    targets = env_reset_svc.reset.call_args.kwargs["targets"]
+    assert [wt.repository.name for wt in targets] == ["winter"]
+
+
+def test_reset_aborted_report_exits_nonzero_in_json_mode(capsys: pytest.CaptureFixture[Any]) -> None:
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvResetParams
+    from winter_cli.modules.workspace.models import ResetMode, ResetReport, ResetResult
+
+    report = ResetReport(
+        ref="origin/main",
+        mode=ResetMode.hard,
+        dry_run=False,
+        aborted=True,
+        repos=[_reset_outcome("alpha", "api", ResetResult.refused_dirty)],
+    )
+    handler, _, _ = _reset_handler({"alpha": [("api", False)]}, reset_report=report)
+
+    with pytest.raises(SystemExit) as excinfo:
+        handler.reset(
+            EnvResetParams(
+                patterns=["alpha"], ref="origin/main", mode=ResetMode.hard, force=False, dry_run=False, output_json=True
+            )
+        )
+
+    assert excinfo.value.code == 1
+
+
+def test_reset_aborted_report_exits_nonzero_in_text_mode(capsys: pytest.CaptureFixture[Any]) -> None:
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvResetParams
+    from winter_cli.modules.workspace.models import ResetMode, ResetReport, ResetResult
+
+    report = ResetReport(
+        ref="origin/main",
+        mode=ResetMode.hard,
+        dry_run=False,
+        aborted=True,
+        repos=[_reset_outcome("alpha", "api", ResetResult.refused_dirty)],
+    )
+    handler, _, _ = _reset_handler({"alpha": [("api", False)]}, reset_report=report)
+
+    with pytest.raises(SystemExit) as excinfo:
+        handler.reset(
+            EnvResetParams(
+                patterns=["alpha"],
+                ref="origin/main",
+                mode=ResetMode.hard,
+                force=False,
+                dry_run=False,
+                output_json=False,
+            )
+        )
+
+    assert excinfo.value.code == 1
+    assert "Not reset" in capsys.readouterr().out
+
+
+def test_reset_no_match_reports_patterns_not_ref(capsys: pytest.CaptureFixture[Any]) -> None:
+    """`_render_reset_report`'s empty-match message names the patterns the operator
+    typed, not REF — a typo'd env shouldn't be reported back as "no match for
+    origin/main" when the operator never typed that as a target.
+    """
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvResetParams
+    from winter_cli.modules.workspace.models import ResetMode
+
+    handler, _, _ = _reset_handler({"alpha": []})
+    handler.reset(
+        EnvResetParams(
+            patterns=["alpha/nope"],
+            ref="origin/main",
+            mode=ResetMode.mixed,
+            force=False,
+            dry_run=False,
+            output_json=False,
+        )
+    )
+
+    out = capsys.readouterr().out
+    assert "No worktrees matched: alpha/nope" in out
+    assert "origin/main" not in out
+
+
+def test_reset_hard_multi_worktree_prompts_for_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A `--hard` reset matching more than one worktree confirms before mutating anything."""
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvResetParams
+    from winter_cli.modules.workspace.models import ResetMode
+
+    handler, _, env_reset_svc = _reset_handler({"alpha": [("api", False), ("web", False)]})
+    confirm = MagicMock(side_effect=click.exceptions.Abort())
+    monkeypatch.setattr(click, "confirm", confirm)
+
+    with pytest.raises(click.exceptions.Abort):
+        handler.reset(
+            EnvResetParams(
+                patterns=["alpha"], ref="origin/main", mode=ResetMode.hard, force=False, dry_run=False, output_json=True
+            )
+        )
+
+    confirm.assert_called_once()
+    env_reset_svc.reset.assert_not_called()
+
+
+def test_reset_hard_single_worktree_skips_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A `--hard` reset matching exactly one worktree never prompts."""
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvResetParams
+    from winter_cli.modules.workspace.models import ResetMode
+
+    handler, _, env_reset_svc = _reset_handler({"alpha": [("api", False)]})
+    confirm = MagicMock()
+    monkeypatch.setattr(click, "confirm", confirm)
+
+    handler.reset(
+        EnvResetParams(
+            patterns=["alpha/api"], ref="origin/main", mode=ResetMode.hard, force=False, dry_run=False, output_json=True
+        )
+    )
+
+    confirm.assert_not_called()
+    env_reset_svc.reset.assert_called_once()
+
+
+def test_reset_hard_multi_worktree_force_skips_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--force` bypasses the confirmation prompt, matching `ws destroy`'s convention."""
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvResetParams
+    from winter_cli.modules.workspace.models import ResetMode
+
+    handler, _, env_reset_svc = _reset_handler({"alpha": [("api", False), ("web", False)]})
+    confirm = MagicMock()
+    monkeypatch.setattr(click, "confirm", confirm)
+
+    handler.reset(
+        EnvResetParams(
+            patterns=["alpha"], ref="origin/main", mode=ResetMode.hard, force=True, dry_run=False, output_json=True
+        )
+    )
+
+    confirm.assert_not_called()
+    env_reset_svc.reset.assert_called_once()
+
+
+def test_reset_hard_multi_worktree_dry_run_skips_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--dry-run` never prompts — it's the non-interactive preview path."""
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvResetParams
+    from winter_cli.modules.workspace.models import ResetMode
+
+    handler, _, env_reset_svc = _reset_handler({"alpha": [("api", False), ("web", False)]})
+    confirm = MagicMock()
+    monkeypatch.setattr(click, "confirm", confirm)
+
+    handler.reset(
+        EnvResetParams(
+            patterns=["alpha"], ref="origin/main", mode=ResetMode.hard, force=False, dry_run=True, output_json=True
+        )
+    )
+
+    confirm.assert_not_called()
+    env_reset_svc.reset.assert_called_once()
+
+
+def test_reset_soft_multi_worktree_skips_confirmation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--soft`/`--mixed` never prompt — the confirmation gate is `--hard`-only."""
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvResetParams
+    from winter_cli.modules.workspace.models import ResetMode
+
+    handler, _, env_reset_svc = _reset_handler({"alpha": [("api", False), ("web", False)]})
+    confirm = MagicMock()
+    monkeypatch.setattr(click, "confirm", confirm)
+
+    handler.reset(
+        EnvResetParams(
+            patterns=["alpha"], ref="origin/main", mode=ResetMode.soft, force=False, dry_run=False, output_json=True
+        )
+    )
+
+    confirm.assert_not_called()
+    env_reset_svc.reset.assert_called_once()
+
+
+def _reset_outcome(env: str, repo_name: str, result: Any, ref: str = "") -> Any:
+    from winter_cli.modules.workspace.models import RepoResetOutcome
+
+    return RepoResetOutcome(env=env, repo_name=repo_name, result=result, ref=ref)

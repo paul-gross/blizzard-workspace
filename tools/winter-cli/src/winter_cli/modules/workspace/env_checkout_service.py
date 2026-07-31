@@ -12,6 +12,7 @@ from winter_cli.modules.workspace.models import (
 from winter_cli.modules.workspace.pattern_match import matches_any_pattern
 from winter_cli.modules.workspace.ref_resolver import resolve_ref
 from winter_cli.modules.workspace.repo_repository import IWriteRepoRepository
+from winter_cli.modules.workspace.worktree_safety import WorktreeSafetyService
 
 logger = logging.getLogger(__name__)
 
@@ -25,13 +26,14 @@ class EnvCheckoutService:
     safety check that aborts the entire run if any repo refuses (so a refusal
     blocks Phase 2 globally — no connect and no `git reset` executes in that
     case). Phase 2 then runs the destructive `set_upstream` / `set_push_default`
-    / `hard_reset` sequence serially across every non-pinned repo; if a Phase 2
+    / `force_checkout_env_branch` sequence serially across every non-pinned repo; if a Phase 2
     git op raises mid-loop, earlier repos have already been mutated and the
     exception propagates with no rollback.
     """
 
-    def __init__(self, repo_repo: IWriteRepoRepository) -> None:
+    def __init__(self, repo_repo: IWriteRepoRepository, worktree_safety_svc: WorktreeSafetyService) -> None:
         self._repo_repo = repo_repo
+        self._worktree_safety_svc = worktree_safety_svc
 
     def connect_env(
         self,
@@ -102,8 +104,13 @@ class EnvCheckoutService:
         `origin/<main_branch>` resolves refuses (Phase 2 would have nothing to
         reset it to). The safety classification — dirty, or *abandonment*
         (HEAD carries commits not on the branch the env is moving away from —
-        its own current upstream) — is skipped under `force`. If any repo
-        refuses, Phase 2 is skipped — no connect, no reset anywhere.
+        its own current upstream) — is skipped under `force`. Because Phase 2
+        force-moves `refs/heads/<env>` regardless of what HEAD currently
+        points at, abandonment is also checked against that branch directly
+        whenever it isn't already checked out (winter#159 B1) — a detached or
+        differently-parked worktree can't hide unpushed commits sitting on
+        its own env branch. If any repo refuses, Phase 2 is skipped — no
+        connect, no reset anywhere.
         Otherwise Phase 2 connects every non-pinned repo to
         `origin/<feature_branch>` and hard-resets it to that ref where it
         exists, or to the repo's `origin/<main_branch>` where the feature ref
@@ -160,6 +167,26 @@ class EnvCheckoutService:
                     safety_ref = self._abandonment_safety_ref(wt)
                     if self._repo_repo.count_commits_not_in(wt, safety_ref) > 0:
                         refused.append(RepoCheckoutOutcome(wt.repository.name, CheckoutResult.refused_abandonment))
+                        continue
+                    # winter#159 B1: force_checkout_env_branch force-moves
+                    # refs/heads/<env> regardless of what HEAD currently
+                    # points at. The HEAD-relative check above only protects
+                    # commits reachable from HEAD, so a worktree that is
+                    # detached (or parked on a different branch) with
+                    # unpushed commits sitting on its own env branch would
+                    # otherwise abandon them silently. Measure that branch
+                    # too whenever it isn't already what's checked out.
+                    active_branch = self._repo_repo.get_active_branch_name(wt)
+                    env_branch = wt.environment.name
+                    if active_branch != env_branch and self._repo_repo.has_local_ref(wt, f"refs/heads/{env_branch}"):
+                        branch_safety_ref = self._worktree_safety_svc.branch_abandonment_safety_ref(wt, env_branch)
+                        if (
+                            self._repo_repo.count_commits_not_in(
+                                wt, branch_safety_ref, from_ref=f"refs/heads/{env_branch}"
+                            )
+                            > 0
+                        ):
+                            refused.append(RepoCheckoutOutcome(wt.repository.name, CheckoutResult.refused_abandonment))
 
         if refused:
             logger.warning(
@@ -174,19 +201,20 @@ class EnvCheckoutService:
             )
 
         # Phase 2 — reset to the feature ref (or main) first, then connect.
-        # hard_reset runs before set_upstream / set_push_default so that a
-        # mid-loop failure leaves the worktree on its original tracking rather
-        # than re-pointed at the new upstream but stuck on the old HEAD.
+        # force_checkout_env_branch runs before set_upstream / set_push_default
+        # so that a mid-loop failure leaves the worktree on its original
+        # tracking rather than re-pointed at the new upstream but stuck on the
+        # old HEAD.
         outcomes: list[RepoCheckoutOutcome] = []
         for wt in targets:
             feature_ref = feature_refs[wt.repository.name]
             if have_feature_ref[wt.repository.name]:
-                self._repo_repo.hard_reset(wt, feature_ref)
+                self._repo_repo.force_checkout_env_branch(wt, feature_ref)
                 self._repo_repo.set_upstream(wt, feature_ref)
                 self._repo_repo.set_push_default(wt)
                 outcomes.append(RepoCheckoutOutcome(wt.repository.name, CheckoutResult.reset_feature))
             else:
-                self._repo_repo.hard_reset(wt, resolve_ref("origin/{main}", wt.repository))
+                self._repo_repo.force_checkout_env_branch(wt, resolve_ref("origin/{main}", wt.repository))
                 self._repo_repo.set_upstream(wt, feature_ref)
                 self._repo_repo.set_push_default(wt)
                 outcomes.append(RepoCheckoutOutcome(wt.repository.name, CheckoutResult.reset_main))
@@ -201,13 +229,8 @@ class EnvCheckoutService:
     def _abandonment_safety_ref(self, wt: FeatureWorktree) -> str:
         """The ref a checkout would abandon work relative to.
 
-        The worktree's own current upstream when it resolves locally, else the
-        repo's `origin/<main_branch>`. Comparing against the branch the env is
-        moving *away from* (not the target) is what makes the guard protect
-        unpushed local commits. The fallback covers a disconnected env or a
-        never-pushed upstream whose ref isn't in the local object store.
+        Thin wrapper over the shared `WorktreeSafetyService` — see there for
+        the full rationale. `EnvResetService`'s `--hard` guard reuses the same
+        service.
         """
-        upstream = self._repo_repo.get_worktree_upstream(wt)
-        if upstream is not None and self._repo_repo.has_local_ref(wt, upstream):
-            return upstream
-        return resolve_ref("origin/{main}", wt.repository)
+        return self._worktree_safety_svc.abandonment_safety_ref(wt)

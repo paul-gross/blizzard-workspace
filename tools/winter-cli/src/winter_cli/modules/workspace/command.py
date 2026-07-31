@@ -15,6 +15,7 @@ from winter_cli.modules.workspace.handlers import (
     EnvMergeParams,
     EnvPullParams,
     EnvPushParams,
+    EnvResetParams,
     EnvStatusParams,
     EnvUpdateParams,
     EnvWorktreesParams,
@@ -24,7 +25,7 @@ from winter_cli.modules.workspace.handlers import (
     RepoRemoveParams,
     WorkspacePruneParams,
 )
-from winter_cli.modules.workspace.models import DiffMode, MergeMode, PinnedScope, PullMode, RepoScope
+from winter_cli.modules.workspace.models import DiffMode, MergeMode, PinnedScope, PullMode, RepoScope, ResetMode
 from winter_cli.modules.workspace.pattern_match import validate_bare_name_pattern, validate_env_pattern
 
 
@@ -58,6 +59,17 @@ def _resolve_merge_mode(ff_only: bool, merge: bool, no_ff: bool) -> MergeMode:
     if no_ff:
         return MergeMode.no_ff
     return MergeMode.ff_only
+
+
+def _resolve_reset_mode(soft: bool, mixed: bool, hard: bool) -> ResetMode:
+    chosen = [name for name, flag in (("--soft", soft), ("--mixed", mixed), ("--hard", hard)) if flag]
+    if len(chosen) > 1:
+        raise click.ClickException(f"{', '.join(chosen)} are mutually exclusive")
+    if soft:
+        return ResetMode.soft
+    if hard:
+        return ResetMode.hard
+    return ResetMode.mixed
 
 
 def _resolve_merge_pinned_scope(exclude_pinned: bool, only_pinned: bool) -> PinnedScope:
@@ -348,7 +360,7 @@ def ws_checkout(ctx: click.Context, env: str, feature_branch: str, force: bool, 
     """Adopt a remote feature branch into ENV, all-or-nothing across every repo.
 
     Connects every non-pinned project worktree to `origin/FEATURE_BRANCH` and
-    resets each to it — or to the repo's `origin/{main}` when FEATURE_BRANCH
+    resets each to it — or to the repo's `origin/<main-branch>` when FEATURE_BRANCH
     doesn't exist there (a new branch started from main, created on first
     push). FEATURE_BRANCH itself may carry a per-repo `{main}` / `{master}` /
     `{default}` token — interchangeable aliases for that repo's configured
@@ -356,16 +368,20 @@ def ws_checkout(ctx: click.Context, env: str, feature_branch: str, force: bool, 
     own main even when repos disagree on the branch name. No network — run
     `winter ws fetch` first if you want fresh remote-tracking refs.
 
+    Env-wide, no repo filter: this connects every non-pinned worktree in ENV.
+    To move a single worktree without touching the rest, use
+    `winter ws reset ENV/REPO REF` instead.
+
     When `origin/FEATURE_BRANCH` resolves in *no* repo, the command refuses
     unless --new is given — a branch the local store has never seen is more
     likely a typo or a missing `winter ws fetch` than a new branch. A repo
-    where neither the feature ref nor `origin/{main}` resolves always refuses
+    where neither the feature ref nor `origin/<main-branch>` resolves always refuses
     (nothing to reset to). Neither refusal is bypassed by --force.
 
     Phase 1 also checks each repo for: working tree dirty (staged or
     unstaged), and *abandonment* — commits on the worktree's branch that
     aren't on the branch it's moving away from (its own current upstream,
-    falling back to `origin/{main}` when unconnected). If any repo is dirty
+    falling back to `origin/<main-branch>` when unconnected). If any repo is dirty
     or would abandon work (and --force is not set), the whole command refuses
     with a per-repo report — no connect and no `git reset --hard` runs
     anywhere.
@@ -378,6 +394,116 @@ def ws_checkout(ctx: click.Context, env: str, feature_branch: str, force: bool, 
             feature_branch=feature_branch,
             force=force,
             new=new,
+            output_json=output_json,
+        )
+    )
+
+
+@ws_group.command("reset")
+@click.argument("args", nargs=-1, required=True, metavar="PATTERNS... REF")
+@click.option(
+    "--soft",
+    "soft",
+    is_flag=True,
+    default=False,
+    help="Move the branch pointer only; index and working tree kept (delta lands staged).",
+)
+@click.option(
+    "--mixed",
+    "mixed",
+    is_flag=True,
+    default=False,
+    help="Move the pointer and reset the index; working tree kept (delta lands unstaged). Default.",
+)
+@click.option("--hard", "hard", is_flag=True, default=False, help="Reset the branch pointer, index, and working tree.")
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Bypass --hard's dirty / abandonment safety checks. No effect on --soft/--mixed, which never guard.",
+)
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Print the per-repo plan; run every safety check but no `git reset`.",
+)
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as NDJSON (one JSON object per line).")
+@click.pass_context
+def ws_reset(
+    ctx: click.Context,
+    args: tuple[str, ...],
+    soft: bool,
+    mixed: bool,
+    hard: bool,
+    force: bool,
+    dry_run: bool,
+    output_json: bool,
+):
+    """Move matched worktree branches to REF, all-or-nothing across the run.
+
+    The final argument is REF; every argument before it is a segment-aware
+    glob over `<env>/<repo>` (same grammar as `connect`/`push`/`diff` — a
+    bare `<env>` matches `<env>/*`, and a pattern may span more than one
+    env). Pinned worktrees are always skipped; standalone repos are never in
+    scope (no `--standalone`/`--all`). REF may carry a per-repo `{main}` /
+    `{master}` / `{default}` token — interchangeable aliases for that repo's
+    configured main branch — resolved independently per repo before any git
+    operation runs.
+
+    \b
+      winter ws reset alpha/winter origin/{main}                  # one worktree, that repo's own main
+      winter ws reset alpha/winter beta/winter origin/main --hard # two worktrees, explicit, no confirmation
+      winter ws reset alpha origin/main                # every non-pinned worktree in alpha, --mixed (default)
+      winter ws reset alpha origin/main --hard          # same, --hard — prompts unless --force
+      winter ws reset alpha abc1234 --hard              # single worktree only — a bare SHA refuses otherwise
+      winter ws reset alpha origin/main --hard --dry-run
+
+    A bare `<env>` (no `/repo` segment) targets every non-pinned worktree in
+    that env. A `--hard` reset matching more than one worktree prints the
+    matched list and prompts `Continue?` before doing anything; --force skips
+    the prompt. --soft/--mixed, and any --hard matching exactly one worktree,
+    run with no confirmation at all — --dry-run previews those instead.
+
+    This is `git reset`, not `git checkout` — upstream tracking is never
+    touched by any mode (that stays `winter ws connect`'s job), so resetting
+    onto a different branch leaves a later `winter ws push` aimed at the
+    original upstream.
+
+    `--soft` moves only the branch pointer (index and working tree kept, the
+    delta lands staged). `--mixed` (default) additionally resets the index
+    (working tree kept, delta lands unstaged). `--hard` resets all three
+    trees and is the only mode the safety gate applies to: it refuses on any
+    matched repo that is dirty or carries commits not reachable from its own
+    current upstream (or `origin/<main-branch>` when disconnected) unless --force —
+    the refusal is all-or-nothing across the whole run, with a per-repo
+    report and no `git reset` anywhere. `--soft`/`--mixed` apply no such
+    guard, because neither touches the working tree.
+
+    A bare commit SHA as REF refuses unless PATTERNS resolves to exactly one
+    worktree — a SHA has no env-wide meaning. A REF that doesn't resolve
+    locally in a matched repo refuses the whole run before mutating
+    anything; run `winter ws fetch` first if you need fresh remote-tracking
+    refs.
+    """
+    if len(args) < 2:
+        raise click.ClickException("reset requires at least one PATTERN and a trailing REF")
+    *patterns, ref = args
+    if not ref:
+        raise click.ClickException("Empty REF is not allowed")
+    for pattern in patterns:
+        _validate_pattern(pattern)
+    mode = _resolve_reset_mode(soft, mixed, hard)
+    container = cli_ctx(ctx).container
+    handler = container.workspace_handler()
+    handler.reset(
+        EnvResetParams(
+            patterns=list(patterns),
+            ref=ref,
+            mode=mode,
+            force=force,
+            dry_run=dry_run,
             output_json=output_json,
         )
     )

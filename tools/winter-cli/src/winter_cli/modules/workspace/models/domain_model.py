@@ -183,6 +183,24 @@ class MergeMode(enum.Enum):
     no_ff = "no_ff"
 
 
+class ResetMode(enum.Enum):
+    """How `winter ws reset` moves a matched worktree's branch pointer.
+
+    Mirrors git's own three-tree `reset` semantics exactly. `soft` moves only
+    the branch pointer — the index and working tree are untouched, so the
+    delta between the old and new position lands staged. `mixed` (default)
+    additionally resets the index (working tree still untouched), so the
+    delta lands unstaged. `hard` resets all three trees, discarding the
+    delta entirely (the only mode the dirty / abandonment safety gate
+    applies to). None of the three touch upstream tracking — `reset` moves
+    the pointer, `winter ws connect` changes tracking, and the two never mix.
+    """
+
+    soft = "soft"
+    mixed = "mixed"
+    hard = "hard"
+
+
 class PinnedScope(enum.Enum):
     """Whether `winter ws push` includes pinned project worktrees.
 
