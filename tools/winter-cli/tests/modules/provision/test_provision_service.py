@@ -78,6 +78,9 @@ class _FakeRepoFactory:
     def get_standalone_repos(self) -> list[Any]:
         return list(self._standalone)
 
+    def get_extension_repos(self) -> list[Any]:
+        return list(self._standalone)
+
     def get_project_repos(self) -> list[Any]:
         return list(self._project)
 
@@ -336,6 +339,56 @@ def test_project_before_extension_within_same_scope() -> None:
     sources = [call[0].source for call in exec_svc.calls]
     assert sources[0] == "project"
     assert sources[1] == "my-ext"
+
+
+def test_collects_handlers_from_extension_repo_path_not_workspace_root_name() -> None:
+    """_collect_all_handlers reads the manifest from repo.path — the actual on-disk
+    checkout — rather than assuming workspace_root/repo.name. Regression for a
+    project-repo extension (e.g. projects/winter-docs), whose path never equals
+    workspace_root/<name>, and for any standalone installed at a custom `path`."""
+    from winter_cli.modules.workspace.models import StandaloneRepository
+
+    class _FakeExtManifest:
+        provision = (
+            ProvisionHandler(
+                subtarget="dependency",
+                scope=ProvisionScope.workspace,
+                apply=("scripts/apply.sh",),
+                source="winter-docs",
+            ),
+        )
+
+    custom_path = WORKSPACE_ROOT / "projects" / "winter-docs"
+    fake_repo = StandaloneRepository(name="winter-docs", path=custom_path)
+    manifest_path = custom_path / "winter-ext.toml"
+
+    fs = FakeFilesystem(files={manifest_path: ""}, directories=[WORKSPACE_ROOT / ENV_NAME])
+    loader = _FakeManifestLoader(manifests={manifest_path: _FakeExtManifest()})
+    repo_factory = _FakeRepoFactory(standalone=[fake_repo])
+
+    config = _make_config(provision_raw={})
+    exec_svc = _FakeExecutionService()
+    reporter = _FakeReporter()
+    svc = ProvisionService(
+        config=config,
+        execution_svc=exec_svc,  # type: ignore[arg-type]
+        manifest_loader=loader,  # type: ignore[arg-type]
+        repo_factory=repo_factory,  # type: ignore[arg-type]
+        service_check=NoOpServiceCheck(),
+        fs=fs,
+    )
+    svc.run(
+        ENV_NAME,
+        subtarget="dependency",
+        reset=False,
+        destroy=False,
+        seed=False,
+        no_service_check=False,
+        reporter=reporter,
+    )  # type: ignore[arg-type]
+
+    sources = [call[0].source for call in exec_svc.calls]
+    assert sources == ["winter-docs"]
 
 
 def test_declaration_order_tiebreak() -> None:

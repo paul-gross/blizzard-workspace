@@ -63,6 +63,9 @@ class _StubRepoFactory:
     def get_standalone_repos(self) -> list[StandaloneRepository]:
         return self._repos
 
+    def get_extension_repos(self) -> list[StandaloneRepository]:
+        return self._repos
+
 
 class FakeEnvProvisionerService:
     """Fake EnvProvisionerService returning canned dicts per scope.

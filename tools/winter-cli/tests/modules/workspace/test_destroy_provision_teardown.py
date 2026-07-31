@@ -84,6 +84,9 @@ class _FakeRepoFactory:
     def get_standalone_repos(self) -> list[Any]:
         return []
 
+    def get_extension_repos(self) -> list[Any]:
+        return []
+
     def get_project_repos(self) -> list[Any]:
         return []
 

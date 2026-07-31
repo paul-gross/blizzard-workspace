@@ -81,25 +81,23 @@ class DoctorService:
             reporter.probe_result(result)
             results.append(result)
 
-        standalone_repos = self._repo_factory.get_standalone_repos()
-        for result in self._extension_probe_svc.run(standalone_repos):
+        extension_repos = self._repo_factory.get_extension_repos()
+        for result in self._extension_probe_svc.run(extension_repos):
             reporter.probe_result(result)
             results.append(result)
 
         if self._provision_manifest_probe_svc is not None:
-            for result in self._provision_manifest_probe_svc.run(standalone_repos):
+            for result in self._provision_manifest_probe_svc.run(extension_repos):
                 reporter.probe_result(result)
                 results.append(result)
 
         if self._skill_probe_svc is not None:
-            standalone_repos = self._repo_factory.get_standalone_repos()
-            for result in self._skill_probe_svc.run(standalone_repos):
+            for result in self._skill_probe_svc.run(extension_repos):
                 reporter.probe_result(result)
                 results.append(result)
 
         if self._agent_probe_svc is not None:
-            standalone_repos = self._repo_factory.get_standalone_repos()
-            for result in self._agent_probe_svc.run(standalone_repos):
+            for result in self._agent_probe_svc.run(extension_repos):
                 reporter.probe_result(result)
                 results.append(result)
 

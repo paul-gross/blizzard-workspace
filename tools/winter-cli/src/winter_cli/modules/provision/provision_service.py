@@ -20,7 +20,7 @@ from winter_cli.modules.provision.manifest import (
 from winter_cli.modules.provision.provision_reporter import IProvisionReporter
 from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST, IExtensionManifestLoader
 from winter_cli.modules.workspace.models import RepoError
-from winter_cli.modules.workspace.repository_factory import IStandaloneRepoProvider
+from winter_cli.modules.workspace.repository_factory import IExtensionRepoProvider
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +167,7 @@ class ProvisionService:
         config: WorkspaceConfig,
         execution_svc: ProvisionExecutionService,
         manifest_loader: IExtensionManifestLoader,
-        repo_factory: IStandaloneRepoProvider,
+        repo_factory: IExtensionRepoProvider,
         service_check: IProvisionServiceCheck,
         fs: IFilesystemReader | None = None,
     ) -> None:
@@ -368,9 +368,13 @@ class ProvisionService:
         except ConfigError as exc:
             raise click.ClickException(f"Malformed workspace [provision] config: {exc}") from exc
 
-        # 2) Extension manifests — iterate standalone repos declared in config.
-        for repo in self._repo_factory.get_standalone_repos():
-            manifest_path = self._config.workspace_root / repo.name / EXT_MANIFEST
+        # 2) Extension manifests — iterate every extension-eligible repo (standalones
+        # plus project repos carrying a root winter-ext.toml). Use repo.path (the
+        # actual on-disk checkout location) rather than workspace_root/repo.name,
+        # since a repo may be installed at a custom path (e.g. .winter/ext/service-tmux
+        # for winter-service-tmux, or projects/<name> for a project-repo extension).
+        for repo in self._repo_factory.get_extension_repos():
+            manifest_path = repo.path / EXT_MANIFEST
             # Check existence: prefer the injected fs seam (testable), fall
             # back to real pathlib for production wiring where fs is None.
             exists = self._fs.is_file(manifest_path) if self._fs is not None else manifest_path.exists()

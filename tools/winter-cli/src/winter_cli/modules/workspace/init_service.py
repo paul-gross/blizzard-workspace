@@ -124,25 +124,60 @@ class InitService:
 
     def reconcile_standalones(self, reporter: IInitReporter) -> bool:
         repos = self._repo_factory.get_standalone_repos()
-        if not repos:
+        extension_repos = self._repo_factory.get_extension_repos()
+        if not repos and not extension_repos:
             return True
 
         target = "standalone/"
         reporter.target_started(target)
 
+        # Git-clone lifecycle stays standalone-only — project-repo extensions'
+        # projects/<name>/ checkout is cloned by reconcile_projects(), not here.
+        # `_reconcile_standalone` also runs skills/agents projection as its tail
+        # step (via `_project_extension`), once the clone/identity/excludes/cmds
+        # steps succeed.
         success = self._run_per_repo(repos, lambda r: self._reconcile_standalone(r, reporter))
 
+        # Skills/agents projection resolves from a project repo's projects/<name>/
+        # root identically to a standalone's — `_reconcile_standalone` above
+        # already ran it for every standalone; project-repo-only extensions (no
+        # matching [[standalone_repository]] declaration, e.g. winter-product)
+        # still need it run once their source checkout exists on disk. A repo
+        # declared as both kinds is already covered by the standalone loop above
+        # (see `RepositoryFactory.get_extension_repos` for the dedupe/warning),
+        # so it is excluded here to avoid double-processing under two different
+        # source paths.
+        standalone_names = {r.name for r in repos}
+        project_extension_repos = [
+            r for r in extension_repos if r.name not in standalone_names and self._fs.exists(r.path)
+        ]
+        if not self._run_per_repo(
+            project_extension_repos,
+            lambda r: self._project_extension(r, reporter),
+        ):
+            success = False
+
         # Aggregate-update workspace CLAUDE.md and `.git/info/exclude` from all
-        # standalones that were successfully reconciled (i.e. exist on disk now).
+        # standalones that were successfully reconciled (i.e. exist on disk now),
+        # plus the project-repo-only extensions just projected above so their
+        # projected skill/agent entries and repo path are excluded from the
+        # workspace repo's git status exactly like a standalone's.
         # Per-repo reconcile may have failed for some, but cloned-and-present
         # extensions still belong in both managed sections.
         present_repos = [r for r in repos if self._fs.exists(r.path)]
-        if not self._extension_agentsmd_svc.finalize_agentsmd(present_repos, reporter):
-            success = False
-        if not self._extension_exclude_svc.finalize_excludes(present_repos, reporter):
+        exclude_eligible_repos = present_repos + project_extension_repos
+        if not self._extension_exclude_svc.finalize_excludes(exclude_eligible_repos, reporter):
             success = False
         if self._extension_agent_svc is not None:
-            self._extension_agent_svc.check_unknown_overrides(present_repos, reporter)
+            self._extension_agent_svc.check_unknown_overrides(exclude_eligible_repos, reporter)
+
+        # AGENTS.winter.md additionally covers project-repo extensions (a
+        # projects/<name>/ root carrying its own winter-ext.toml), rendered as
+        # routing rows — those aren't reconciled by the clone loop above, so
+        # they get their own on-disk presence check.
+        present_extension_repos = [r for r in extension_repos if self._fs.exists(r.path)]
+        if not self._extension_agentsmd_svc.finalize_agentsmd(present_extension_repos, reporter):
+            success = False
 
         reporter.target_completed(target, success)
         return success
@@ -185,9 +220,9 @@ class InitService:
         ):
             success = False
 
-        standalones = self._repo_factory.get_standalone_repos()
+        extension_repos = self._repo_factory.get_extension_repos()
         if not self._extension_hook_svc.run_env_init_hooks(
-            standalones,
+            extension_repos,
             env_root,
             name,
             reporter,
@@ -223,8 +258,8 @@ class InitService:
         have been reconciled (so extension repos exist on disk) and, for the
         all-target path, before the per-env loop.
         """
-        standalones = self._repo_factory.get_standalone_repos()
-        return self._extension_hook_svc.run_workspace_reconcile_hooks(standalones, reporter)
+        extension_repos = self._repo_factory.get_extension_repos()
+        return self._extension_hook_svc.run_workspace_reconcile_hooks(extension_repos, reporter)
 
     def reconcile_all(self, reporter: IInitReporter) -> bool:
         success = self.reconcile_projects(reporter)
@@ -323,6 +358,24 @@ class InitService:
             reporter.repo_error(label, str(exc))
             return False
 
+        return self._project_extension(repo, reporter)
+
+    # ── Skills/agents projection (standalones and project-repo extensions) ─
+
+    def _project_extension(
+        self,
+        repo: StandaloneRepository,
+        reporter: IInitReporter,
+    ) -> bool:
+        """Run skills/agents projection for one extension repo, keyed only on `repo.path`.
+
+        Shared tail step for both a standalone (called from `_reconcile_standalone`
+        after its clone/identity/excludes/cmds/pin steps) and a project-repo
+        extension (called directly from `reconcile_standalones` once its
+        `projects/<name>/` source checkout exists on disk) — `repo.path` is as
+        fixed a location for a project-repo extension as it is for a standalone,
+        so both resolve through the same two services identically.
+        """
         ok = self._extension_symlink_svc.process(repo, reporter)
         if self._extension_agent_svc is not None:
             ok &= self._extension_agent_svc.process(repo, reporter)

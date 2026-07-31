@@ -84,7 +84,7 @@ Report what was cloned vs. what already existed. Then confirm:
 
 > "`winter capabilities` now shows: `service → <binding>`. Orchestrator(s) ready."
 
-**Post-clone note:** cloning registers each new extension in `workspace:/AGENTS.winter.md` (via the auto-managed `# Winter Extensions` block). Re-read that file — each newly-installed orchestrator now appears there with a link to its own `index.md`. Those links are how Step 4 reaches each orchestrator's setup guide, which is where what the orchestrator does and how its services are wired is explained. Don't restate those per-orchestrator details here.
+**Post-clone note:** cloning registers each new extension in `workspace:/AGENTS.winter.md` (via the auto-managed `# Winter Extensions` block). Re-read that file — each newly-installed orchestrator now appears there naming its entry point: a standalone as an eager `@`-import, a project-repo extension as a no-`@` routing row (see `context/winter-cli/configuration/extensions.md#project-repo-extensions`). That entry point is how Step 4 reaches each orchestrator's setup guide, which is where what the orchestrator does and how its services are wired is explained. Don't restate those per-orchestrator details here.
 
 No additional installation questions. Continue to the next step.
 
@@ -156,7 +156,7 @@ Ask **one** question:
 
 #### Multiple orchestrators installed
 
-If **multiple** orchestrators are bound, present a recommended service→orchestrator mapping as a two-column table. Base the recommendation on each orchestrator's documented strengths (from its own `index.md`, reached via `AGENTS.winter.md`) together with each service's scope — matching shared, workspace-level services to the orchestrator suited to shared infrastructure, and per-env application services to the orchestrator suited to local processes.
+If **multiple** orchestrators are bound, present a recommended service→orchestrator mapping as a two-column table. Base the recommendation on each orchestrator's documented strengths (from its own entry point, reached via `AGENTS.winter.md`) together with each service's scope — matching shared, workspace-level services to the orchestrator suited to shared infrastructure, and per-env application services to the orchestrator suited to local processes.
 
 Display the table — this is a display, not a question; present it and then ask one question:
 
@@ -183,7 +183,7 @@ Ask **one** question:
 
 **Explain first:** "Now I'll hand each orchestrator the services assigned to it and follow that orchestrator's own setup guide to wire them. Declaring and wiring a service — its manifest format, ports, panes or containers, layout — is the extension's job, not this guide's."
 
-For each orchestrator in the finalized mapping, **one at a time**: read the extension's own `index.md` (find it via `workspace:/AGENTS.winter.md`) and follow its **"Feature environment setup steps"** section, passing the services assigned to it, their scopes, **and whatever wiring facts were already discovered for them** in the [`service-discovery.md`](./service-discovery.md) schema — that section owns how this orchestrator's services are declared and wired (its manifest location, schema, and any layout/compose companions), and should use the supplied facts directly instead of re-deriving them, only asking about or inferring a field that's genuinely missing. That schema does not include a health/readiness signal — every orchestrator derives or asks about that itself. If the extension declares no such section, tell the user it provides no setup guide and point them at its `index.md`/`README.md` to wire it manually.
+For each orchestrator in the finalized mapping, **one at a time**: read the extension's own entry point (find it via `workspace:/AGENTS.winter.md` — an `@`-import for a standalone, or the routing row's named entry-point path for a project-repo extension) and follow its **"Feature environment setup steps"** section, passing the services assigned to it, their scopes, **and whatever wiring facts were already discovered for them** in the [`service-discovery.md`](./service-discovery.md) schema — that section owns how this orchestrator's services are declared and wired (its manifest location, schema, and any layout/compose companions), and should use the supplied facts directly instead of re-deriving them, only asking about or inferring a field that's genuinely missing. That schema does not include a health/readiness signal — every orchestrator derives or asks about that itself. If the extension declares no such section, tell the user it provides no setup guide and point them at its entry point/README.md to wire it manually.
 
 #### Confirm
 

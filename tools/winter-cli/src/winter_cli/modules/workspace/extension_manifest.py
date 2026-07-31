@@ -12,6 +12,14 @@ from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
 EXT_MANIFEST = "winter-ext.toml"
 DEFAULT_SKILLS_DIRS = ("skills", ".claude/skills")
 DEFAULT_AGENTS_DIRS = ("agents", ".claude/agents")
+# Applies to both standalones and project-repo extensions (ExtensionAgentsMdService
+# tries all three for either kind). For a standalone this widens eligibility versus
+# the pre-winter#160 index.md-only check: a standalone with a root AGENTS.md or
+# context/index.md but no index.md is now eagerly `@`-imported where it previously
+# wasn't. Accepted consequence, not scoped to the project-repo routing-row path —
+# grows the always-on `@`-import graph's `injected_bytes` budget only for a
+# standalone that ships one of the fallback paths but not `index.md`.
+DEFAULT_ENTRY_POINT_PATHS = ("index.md", "AGENTS.md", "context/index.md")
 
 HOOK_ON_ENV_INIT = "on_env_init"
 HOOK_ON_ENV_DESTROY = "on_env_destroy"
@@ -104,6 +112,12 @@ class ExtensionManifest:
     orchestrator(s) via the ``WINTER_SERVICE_MANIFEST`` env var.  Unknown keys
     REJECT at parse time.  Empty by default; raises `RepoError` on malformed
     entries (caught and reported at each call site like other manifest errors).
+
+    `description` is a one-line, human-readable summary of the extension, used
+    to source the text of a project-repo extension's routing row in
+    `AGENTS.winter.md` (`ExtensionAgentsMdService`). Standalone extensions
+    don't use it — their eager `@`-import needs no description. `None` when
+    absent; the row then renders with the entry-point path alone.
     """
 
     prefix: str
@@ -117,6 +131,7 @@ class ExtensionManifest:
     provides: dict[str, str] = field(default_factory=dict)
     implements: dict[str, str] = field(default_factory=dict)
     provision: tuple[ProvisionHandler, ...] = ()
+    description: str | None = None
     service_defs: tuple[ExtServiceDef, ...] = ()
 
     def capability_entrypoint(self, slot: str) -> str | None:
@@ -221,6 +236,9 @@ class ExtensionManifestLoader:
         except ConfigError as exc:
             raise RepoError(f"reading {EXT_MANIFEST} — {exc}") from exc
 
+        description_raw = data.get("description")
+        description = description_raw if isinstance(description_raw, str) and description_raw else None
+
         return ExtensionManifest(
             prefix=prefix,
             skills_dirs=skills_dirs,
@@ -234,6 +252,7 @@ class ExtensionManifestLoader:
             implements=implements,
             provision=provision,
             service_defs=service_defs,
+            description=description,
         )
 
 

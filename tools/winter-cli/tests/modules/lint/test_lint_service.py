@@ -54,7 +54,7 @@ class _FakeExtensionLint:
 
 
 class _FakeRepoFactory:
-    def get_standalone_repos(self) -> list[str]:
+    def get_extension_repos(self) -> list[str]:
         return ["repo-a"]
 
 

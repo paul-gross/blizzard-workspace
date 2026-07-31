@@ -102,7 +102,7 @@ def _init_service(
     manifest_loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader({}))
     return InitService(
         config=workspace_config,
-        repo_factory=RepositoryFactory(workspace_config),
+        repo_factory=RepositoryFactory(workspace_config, fs=fs),
         extension_symlink_svc=ExtensionSymlinkService(
             config=workspace_config,
             fs=fs,
@@ -122,6 +122,7 @@ def _init_service(
         extension_agentsmd_svc=ExtensionAgentsMdService(
             config=workspace_config,
             fs=fs,
+            manifest_loader=manifest_loader,
         ),
         fs=fs,
         subprocess_runner=subprocess,
@@ -145,7 +146,7 @@ def _destroy_service(
     )
     return DestroyService(
         config=workspace_config,
-        repo_factory=RepositoryFactory(workspace_config),
+        repo_factory=RepositoryFactory(workspace_config, fs=fs),
         extension_hook_svc=hook_svc,
         fs=fs,
         git_repo=git,

@@ -30,7 +30,8 @@ class ConformanceVerifyService:
     Resolution accepts a bare registered name OR a local path (same semantics as
     `--service-orchestrator`): if the value contains a path separator or names an
     existing directory, it is treated as a local path; otherwise it is looked up
-    among the installed standalone repos.
+    among the installed extension repos (standalones plus project repos carrying
+    a root winter-ext.toml).
 
     Delegates to `ServiceOrchestratorResolver.try_resolve_extension` so resolution
     logic lives in one place — no private fork of the path/name disambiguation here.

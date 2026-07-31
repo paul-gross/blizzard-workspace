@@ -1,12 +1,13 @@
 # Extensions
 
-Standalone repositories can opt into contributing skills and agents to the workspace's `.claude/` directory by shipping a `winter-ext.toml` file at the repo root.
+Standalone repositories can opt into contributing skills and agents to the workspace's `.claude/` directory by shipping a `winter-ext.toml` file at the repo root. A project repo (declared via `[[project_repository]]`) can opt in the same way — see [Project-repo extensions](#project-repo-extensions) below for how its eligibility and context delivery differ from a standalone's.
 
 ## `winter-ext.toml` schema
 
 ```toml
 name = "winter-backlog"        # default symlink prefix when no override is set
 prefix = "wsb"                 # optional shorter prefix; takes precedence over `name`
+description = "Backlog tooling for winter issues." # optional; one-line summary used by a project-repo extension's AGENTS.winter.md routing row
 skills_dir = "skills"          # optional; explicit path overrides default discovery
 agents_dir = "agents"          # optional; explicit path overrides default discovery
 doctor = "scripts/doctor.sh"   # optional; executable that emits NDJSON probe events for `winter doctor`
@@ -144,6 +145,22 @@ The hook's **cwd is the env root** (`<workspace>/<env>/`). Hooks should read the
 The hook's **cwd is the workspace root**.
 
 **Strict vs non-strict on destroy.** By default, a non-zero exit from a destroy hook is logged and the teardown continues so a broken hook doesn't trap an env on disk. Pass `--strict` to `winter ws destroy` (or set it in CI/scripted use) when a hook failure must surface as a user-actionable error before any worktree is removed.
+
+## Project-repo extensions
+
+A `[[project_repository]]` whose `projects/<name>/` root carries a `winter-ext.toml` is extension-eligible in place — no separate `[[standalone_repository]]` clone is needed. Every extension feature (`winter doctor`, `winter lint`, `winter graph`, the capability registry, service-manifest collection, provision handlers, hooks, skills/agents projection) resolves it exactly like a standalone, reading `winter-ext.toml` and everything it declares from the `projects/<name>/` root — the source checkout, never a per-env worktree.
+
+Context delivery is the one place a project-repo extension renders differently from a standalone. A standalone lives at one fixed workspace path, so it keeps its eager `AGENTS.winter.md` `@`-import unchanged. A project repo has N copies on disk — the source checkout plus one worktree per feature env — so an eager `@`-import would inject a `master` copy that goes stale against whatever feature branch an agent is actually editing. Instead it renders as a routing row: its name, the literal `<env>/<name>/` worktree-path template, the same "resolves the `<name>:` path notation" binding a standalone's `@`-import line carries, the entry-point path, and a one-line description when the manifest declares one — with no `@`:
+
+```
+- **winter-docs** at `<env>/winter-docs/` — resolves the `winter-docs:` path notation. Read `<env>/winter-docs/index.md` — Public documentation site generator.
+```
+
+The entry point is always named in the row — every installed extension's own `index.md` instructs agents to resolve its `winter-X:` prefix "via this exact block", so the row states both the binding and what to read, not one or the other. The manifest's `description` field, when present, is appended after the entry point rather than replacing it; when absent, the row still names the entry point alone. The entry point itself is resolved the same way for both kinds — `index.md`, then `AGENTS.md`, then `context/index.md`, first match wins (mirroring the `skills_dir`/`agents_dir` default-discovery fallback above) — but only a standalone's entry point is ever `@`-imported; a project repo's is read by the agent directly from the worktree it's in.
+
+**`<env>` binding.** `AGENTS.winter.md` auto-loads into every session via the workspace's `# Winter Extensions` block, including a session with no feature env in scope — `context/workspace-layout.md` mandates subagents spawn from the workspace root, where `<env>` is unbound and no env directory may even exist yet. When one or more routing rows are rendered, `AGENTS.winter.md` carries a one-line note ahead of them: `<env>` binds to the feature-env directory the reading agent is actually working in; a workspace-root reader with no env bound instead opens the source checkout at `projects/<name>/`.
+
+A repo declared as **both** `[[project_repository]]` (with a root `winter-ext.toml`) and `[[standalone_repository]]` dedupes to a single extension entry — while both declarations exist, the **standalone** checkout wins (keeping the pre-existing eager `@`-import unchanged, since removing the six `[[standalone_repository]]` declarations that currently double-declare winter-canon, winter-github, winter-harness, winter-service-tmux, winter-service-docker, and winter-workflow in this workspace is an explicit follow-up, not part of this change) — and `winter ws init` logs a warning naming the now-redundant `[[standalone_repository]]` declaration so it can be removed. Once it is removed, the project-repo entry takes over automatically and the extension starts rendering as a routing row.
 
 ## `adopt_extensions` modes
 

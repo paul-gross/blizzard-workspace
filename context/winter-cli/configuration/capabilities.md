@@ -8,7 +8,7 @@ Three inputs combine to determine the provider for each slot:
 
 1. **Extension manifest** — a `[provides]` table in `winter-ext.toml`, where each key is a slot name and the value is the entrypoint path relative to the extension repo root.
 2. **Workspace config** — a `[capabilities]` table in `.winter/config.toml` (or the `config.local.toml` overlay), where each key is a slot name and the value is the name of an installed extension. The table merges through the overlay key-by-key like every other table.
-3. **Installed-extension set** — the standalone repos on disk that the registry walks at resolve time.
+3. **Installed-extension set** — the extension repos (standalones plus project repos carrying a root `winter-ext.toml`) the registry walks at resolve time; see [extensions.md#project-repo-extensions](./extensions.md#project-repo-extensions).
 
 ### Resolution rules
 
@@ -40,7 +40,7 @@ The only in-scope slot today is `service`. Future slots are added to `Capability
 
 Three config paths connect the interface to an implementation:
 
-- **Single provider** — `capabilities.service = "<extension-name>"` in the `[capabilities]` table in `.winter/config.toml` (or the `config.local.toml` overlay). The name must match a `[[standalone_repository]]` that ships a `winter-ext.toml`. If only one installed extension declares `provides.service`, the binding is implicit and the explicit config entry is optional.
+- **Single provider** — `capabilities.service = "<extension-name>"` in the `[capabilities]` table in `.winter/config.toml` (or the `config.local.toml` overlay). The name must match an installed extension — a `[[standalone_repository]]` or a `[[project_repository]]` carrying a root `winter-ext.toml` (see [extensions.md#project-repo-extensions](./extensions.md#project-repo-extensions)). If only one installed extension declares `provides.service`, the binding is implicit and the explicit config entry is optional.
 - **Multiple providers** — `capabilities.service = ["<name-1>", "<name-2>"]` (a list value in the same `[capabilities]` table). Every named provider is bound; list order carries no execution semantics. Each provider must declare `provides.service` in its `winter-ext.toml`. Repeated names are de-duplicated (preserving order) at config load.
 - **Extension manifest** — `provides.service = "<path>"` in the `[provides]` table in each extension's `winter-ext.toml`, an executable entrypoint relative to the extension's repo root.
 

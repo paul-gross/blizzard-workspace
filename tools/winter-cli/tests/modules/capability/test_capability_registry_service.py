@@ -20,7 +20,7 @@ class _StubRepoFactory:
     def __init__(self, repos: list[StandaloneRepository]) -> None:
         self._repos = repos
 
-    def get_standalone_repos(self) -> list[StandaloneRepository]:
+    def get_extension_repos(self) -> list[StandaloneRepository]:
         return self._repos
 
 

@@ -14,7 +14,7 @@ from winter_cli.modules.capability.spec_loader import ISpecLoader
 from winter_cli.modules.capability.version_compat import VersionCompatError, check_compat
 from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST, ExtensionManifestLoader
 from winter_cli.modules.workspace.models import RepoError
-from winter_cli.modules.workspace.repository_factory import IStandaloneRepoProvider
+from winter_cli.modules.workspace.repository_factory import IExtensionRepoProvider
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ class CapabilityRegistryService:
 
     def __init__(
         self,
-        repo_factory: IStandaloneRepoProvider,
+        repo_factory: IExtensionRepoProvider,
         manifest_loader: ExtensionManifestLoader,
         bindings: dict[str, list[str]],
         fs: IFilesystemReader,
@@ -57,13 +57,13 @@ class CapabilityRegistryService:
     def candidates(self, slot: CapabilitySlot) -> list[CapabilityCandidate]:
         """Return every installed extension that declares it provides `slot`.
 
-        Walks `get_standalone_repos()`; for each repo whose directory contains a
+        Walks `get_extension_repos()`; for each repo whose directory contains a
         `winter-ext.toml`, loads the manifest and asks whether it provides the slot.
         Repos with unreadable manifests are skipped with a warning.
         Returns candidates in enumeration order.
         """
         result: list[CapabilityCandidate] = []
-        for repo in self._repo_factory.get_standalone_repos():
+        for repo in self._repo_factory.get_extension_repos():
             manifest_path = repo.path / EXT_MANIFEST
             if not self._fs.is_file(manifest_path):
                 continue
@@ -116,7 +116,7 @@ class CapabilityRegistryService:
 
         if ordered_list:
             # Explicit binding: validate each member in order.
-            all_names = {r.name for r in self._repo_factory.get_standalone_repos()}
+            all_names = {r.name for r in self._repo_factory.get_extension_repos()}
             for name in ordered_list:
                 matching = [c for c in slot_candidates if c.extension_name == name]
                 if not matching:
@@ -128,7 +128,8 @@ class CapabilityRegistryService:
                     else:
                         error = (
                             f"capabilities.{slot.value} = {name!r} — no installed extension named {name!r}"
-                            f" (capabilities.{slot.value} must name a [[standalone_repository]])."
+                            f" (capabilities.{slot.value} must name a [[standalone_repository]] or a"
+                            " [[project_repository]] carrying a root winter-ext.toml)."
                         )
                     return SlotResolution(
                         slot=slot,

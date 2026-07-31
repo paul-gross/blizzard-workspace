@@ -68,7 +68,7 @@ Field reference:
 | `ambiguous` | boolean | Always `false` in the current model — 2+ candidates bind all (implicit) rather than refusing. Retained for machine-contract stability. |
 | `error` | string \| null | Human-readable error for `binding_kind == "invalid"`; `null` otherwise. |
 | `candidates` | array | Every installed extension declaring `provides.<slot>`. |
-| `candidates[].extension` | string | Extension name (matches its `[[standalone_repository]]` name). |
+| `candidates[].extension` | string | Extension name (matches an installed extension — a `[[standalone_repository]]` or a `[[project_repository]]` carrying a root `winter-ext.toml`; see [../configuration/extensions.md#project-repo-extensions](../configuration/extensions.md#project-repo-extensions)). |
 | `candidates[].entrypoint` | string | Raw entrypoint path from the manifest (relative to the extension repo root). |
 | `candidates[].valid` | boolean | True when the entrypoint file exists on disk. |
 

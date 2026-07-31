@@ -1,6 +1,18 @@
 from __future__ import annotations
 
-from winter_cli.config.models import SingletonRepository, SingletonType, StandaloneRepositoryConfig, WorkspaceConfig
+import logging
+
+import pytest
+
+from tests.conftest import FakeFilesystem
+from winter_cli.config.models import (
+    ProjectRepositoryConfig,
+    SingletonRepository,
+    SingletonType,
+    StandaloneRepositoryConfig,
+    WorkspaceConfig,
+)
+from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
 
@@ -79,3 +91,140 @@ def test_get_standalone_repos_ref_is_none_when_not_configured(
 
     assert len(repos) == 1
     assert repos[0].ref is None
+
+
+# ── get_extension_repos() ─────────────────────────────────────────────────
+
+
+def test_get_extension_repos_includes_standalones(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """A plain standalone (no project-repo counterpart) is included as-is."""
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [],
+            "standalone_repos": [
+                StandaloneRepositoryConfig(name="my-ext", url="git@example.com:org/my-ext.git"),
+            ],
+        },
+    )
+    factory = RepositoryFactory(config, fs=FakeFilesystem())
+
+    repos = factory.get_extension_repos()
+
+    assert [r.name for r in repos] == ["my-ext"]
+    assert repos[0].path == config.workspace_root / "my-ext"
+
+
+def test_get_extension_repos_includes_project_repo_with_manifest(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """A project repo whose projects/<name>/ root carries a winter-ext.toml is eligible."""
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [
+                ProjectRepositoryConfig(name="winter-docs", url="git@example.com:org/winter-docs.git"),
+            ],
+            "standalone_repos": [],
+        },
+    )
+    main_path = config.workspace_root / "projects" / "winter-docs"
+    fs = FakeFilesystem(files={main_path / EXT_MANIFEST: ""})
+    factory = RepositoryFactory(config, fs=fs)
+
+    repos = factory.get_extension_repos()
+
+    assert [r.name for r in repos] == ["winter-docs"]
+    assert repos[0].path == main_path
+
+
+def test_get_extension_repos_excludes_project_repo_without_manifest(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """A project repo with no root winter-ext.toml is not extension-eligible."""
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [
+                ProjectRepositoryConfig(name="plain-app", url="git@example.com:org/plain-app.git"),
+            ],
+            "standalone_repos": [],
+        },
+    )
+    factory = RepositoryFactory(config, fs=FakeFilesystem())
+
+    repos = factory.get_extension_repos()
+
+    assert repos == []
+
+
+def test_get_extension_repos_dedupes_repo_declared_as_both_kinds(
+    workspace_config: WorkspaceConfig,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A repo declared as both [[project_repository]] and [[standalone_repository]]
+    yields a single extension entry — the standalone checkout, not the project-repo
+    one — with a warning naming the now-redundant [[standalone_repository]]
+    declaration. Keeping the standalone entry (rather than the project-repo entry)
+    while both declarations exist is what keeps `ExtensionAgentsMdService`'s
+    routing-row fork from firing early — see winter#160."""
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [
+                ProjectRepositoryConfig(name="winter-harness", url="git@example.com:org/winter-harness.git"),
+            ],
+            "standalone_repos": [
+                StandaloneRepositoryConfig(
+                    name="winter-harness",
+                    url="git@example.com:org/winter-harness.git",
+                    path=".winter/ext/harness",
+                ),
+            ],
+        },
+    )
+    main_path = config.workspace_root / "projects" / "winter-harness"
+    fs = FakeFilesystem(files={main_path / EXT_MANIFEST: ""})
+    factory = RepositoryFactory(config, fs=fs)
+
+    with caplog.at_level(logging.WARNING):
+        repos = factory.get_extension_repos()
+
+    assert [r.name for r in repos] == ["winter-harness"]
+    assert repos[0].path == config.workspace_root / ".winter/ext/harness"
+    assert any(
+        "winter-harness" in record.message and "standalone_repository" in record.message
+        for record in caplog.records
+    )
+
+
+def test_get_standalone_repos_excludes_project_repo_extensions(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """Regression: get_standalone_repos() — the seam the git/lifecycle call sites
+    (sync, push, merge, prune, destroy, snapshot, repo_handler) depend on — never
+    picks up a project repo, even one carrying a root winter-ext.toml. Only
+    get_extension_repos() folds project-repo extensions in."""
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [
+                ProjectRepositoryConfig(name="winter-docs", url="git@example.com:org/winter-docs.git"),
+            ],
+            "standalone_repos": [],
+        },
+    )
+    main_path = config.workspace_root / "projects" / "winter-docs"
+    fs = FakeFilesystem(files={main_path / EXT_MANIFEST: ""})
+    factory = RepositoryFactory(config, fs=fs)
+
+    assert factory.get_standalone_repos() == []
+    assert [r.name for r in factory.get_extension_repos()] == ["winter-docs"]
+
+
+def test_get_extension_repos_defaults_fs_to_local_filesystem(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """No `fs` injected — RepositoryFactory falls back to the real filesystem
+    rather than raising, so untouched call sites keep working."""
+    config = workspace_config.model_copy(update={"project_repos": [], "standalone_repos": []})
+    factory = RepositoryFactory(config)
+
+    assert factory.get_extension_repos() == []

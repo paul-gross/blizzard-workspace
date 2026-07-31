@@ -57,6 +57,9 @@ class _StubRepoFactory:
     def get_standalone_repos(self) -> list[StandaloneRepository]:
         return self._repos
 
+    def get_extension_repos(self) -> list[StandaloneRepository]:
+        return self._repos
+
 
 def _opts(**kwargs: Any) -> StatusOptions:
     defaults: dict[str, Any] = {"patterns": (), "as_json": False}

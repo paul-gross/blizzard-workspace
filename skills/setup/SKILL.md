@@ -324,7 +324,7 @@ winter capabilities
 Then, for each extension that **is not bound to the `service` capability**, **one at a time**:
 
 1. Tell the user: "Checking `<ext-name>`..."
-2. Read that extension's `index.md` (the path shown in the block, e.g. `./winter-harness/index.md`).
+2. Read that extension's entry point at the path named in its `AGENTS.winter.md` line — for a standalone, the `@`-imported path (e.g. `./winter-harness/index.md`); for a project-repo extension's routing row, the entry-point path named in the row, opened from `<env>/<name>/` (or `projects/<name>/` if reading from the workspace root with no env bound).
 3. If the extension has a **"Feature environment setup steps"** section, tell the user what setup it needs and walk them through whatever it describes — typically that's another linked markdown guide. Treat each extension's walkthrough as its own mini-walkthrough: keep the same explain → ask → execute → confirm pattern, one question per turn.
 4. If no such section exists, tell the user "No feature-environment setup needed for `<ext-name>`." and move to the next extension.
 

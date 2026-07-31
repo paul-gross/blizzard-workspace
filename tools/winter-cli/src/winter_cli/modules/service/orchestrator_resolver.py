@@ -9,7 +9,7 @@ from winter_cli.modules.capability.capability_registry_service import Capability
 from winter_cli.modules.capability.models import CapabilitySlot, ResolvedCapability
 from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST, ExtensionManifestLoader
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
-from winter_cli.modules.workspace.repository_factory import IStandaloneRepoProvider
+from winter_cli.modules.workspace.repository_factory import IExtensionRepoProvider
 
 
 @dataclass(frozen=True)
@@ -48,7 +48,7 @@ class ServiceOrchestratorResolver:
     def __init__(
         self,
         registry: CapabilityRegistryService,
-        repo_factory: IStandaloneRepoProvider,
+        repo_factory: IExtensionRepoProvider,
         manifest_loader: ExtensionManifestLoader,
         fs: IFilesystemReader,
         override: str | None = None,
@@ -237,8 +237,8 @@ class ServiceOrchestratorResolver:
         if repo is None:
             raise RepoError(
                 f"service orchestrator {name!r} is not an installed extension — "
-                "`service_orchestrator` must match the name of a "
-                "[[standalone_repository]] in .winter/config.toml."
+                "`service_orchestrator` must match the name of a [[standalone_repository]] "
+                "or a [[project_repository]] carrying a root winter-ext.toml in .winter/config.toml."
             )
 
         manifest = self._manifest_loader.load(repo, repo.path / EXT_MANIFEST)
@@ -262,7 +262,7 @@ class ServiceOrchestratorResolver:
         )
 
     def _find_extension(self, name: str) -> StandaloneRepository | None:
-        for repo in self._repo_factory.get_standalone_repos():
+        for repo in self._repo_factory.get_extension_repos():
             if repo.name == name:
                 return repo
         return None
@@ -307,5 +307,6 @@ class ServiceOrchestratorResolver:
     def _verify_error_name_not_installed(name: str) -> str:
         return (
             f"extension {name!r} is not an installed extension — "
-            "it must match the name of a [[standalone_repository]] in .winter/config.toml"
+            "it must match the name of a [[standalone_repository]] or a [[project_repository]] "
+            "carrying a root winter-ext.toml in .winter/config.toml"
         )

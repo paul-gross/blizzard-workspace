@@ -29,7 +29,7 @@ from winter_cli.modules.service.ext_service_manifest import (
 )
 from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST, ExtensionManifestLoader
 from winter_cli.modules.workspace.models import RepoError
-from winter_cli.modules.workspace.repository_factory import IStandaloneRepoProvider
+from winter_cli.modules.workspace.repository_factory import IExtensionRepoProvider
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class ServiceManifestCollectorService:
         workspace_root: Path,
         workspace_service_defs_raw: list,
         manifest_loader: ExtensionManifestLoader,
-        repo_factory: IStandaloneRepoProvider,
+        repo_factory: IExtensionRepoProvider,
         fs: IFilesystemReader,
     ) -> None:
         self._workspace_root = workspace_root
@@ -116,7 +116,7 @@ class ServiceManifestCollectorService:
     def _collect_extension_def_groups(self) -> list[list[ExtServiceDef]]:
         """Walk every installed extension and collect their [[service]] defs."""
         groups: list[list[ExtServiceDef]] = []
-        for repo in self._repo_factory.get_standalone_repos():
+        for repo in self._repo_factory.get_extension_repos():
             # Use repo.path (the actual on-disk checkout location) rather than
             # workspace_root/repo.name, since extensions may be installed at a
             # custom path (e.g. .winter/ext/service-tmux for winter-service-tmux).

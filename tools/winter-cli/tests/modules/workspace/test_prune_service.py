@@ -52,7 +52,7 @@ def _service(
     )
     return PruneService(
         config=workspace_config,
-        repo_factory=RepositoryFactory(workspace_config),
+        repo_factory=RepositoryFactory(workspace_config, fs=fs),
         extension_exclude_svc=exclude_svc,
         fs=fs,
         git_repo=git,
@@ -324,6 +324,61 @@ def test_find_orphan_agent_copies_no_exclude_file(workspace_config: WorkspaceCon
     orphans = svc.find_orphans()
     agent_orphans = [o for o in orphans if o.kind == "orphan_agent_copy"]
     assert agent_orphans == []
+
+
+# A minimal exclude file block for a project-repo extension, as written by
+# ExtensionExcludeService for a repo whose projects/<name>/ root carries a
+# winter-ext.toml (see repository_factory.get_extension_repos()).
+_EXCLUDE_WITH_PROJECT_REPO_EXT = """\
+# >>> winter-docs (managed by winter)
+/projects/winter-docs/
+.claude/skills/winter-docs-*
+.codex/skills/winter-docs-*
+.opencode/skill/winter-docs-*
+.claude/agents/winter-docs-*
+.codex/agents/winter-docs-*
+.opencode/agent/winter-docs-*
+# <<< winter-docs
+"""
+
+
+def test_find_orphans_never_flags_a_declared_project_repo_extension_as_orphan_clone(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """Regression for winter#160 F4: a declared project repo whose projects/<name>/
+    root carries a winter-ext.toml is extension-eligible (get_extension_repos()),
+    so its managed exclude block must never be treated as orphaned — the block
+    names `/projects/winter-docs/`, which is the declared repo's own clean
+    source checkout, not an orphan.
+    """
+    ext_path = WORKSPACE_ROOT / "projects" / "winter-docs"
+    fs = FakeFilesystem(
+        directories=[PROJECTS_DIR, ext_path],
+        files={ext_path / ".git" / "HEAD": "ref: refs/heads/main\n", ext_path / "winter-ext.toml": ""},
+    )
+    _write_exclude(fs, WORKSPACE_ROOT, _EXCLUDE_WITH_PROJECT_REPO_EXT)
+
+    config = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        project_repos=[
+            ProjectRepositoryConfig(name="winter-docs", url="git@example.com:org/winter-docs.git"),
+        ],
+    )
+    # Even a clean tree with no linked worktrees — which is_safe_to_remove()
+    # would otherwise mark safe_to_remove=True — must not be reported at all.
+    git = FakeGitRepository()
+    git.clean_worktrees.add(ext_path)
+    svc = _service(config, fs, git)
+
+    orphans = svc.find_orphans()
+    standalone_orphans = [o for o in orphans if o.kind == "standalone_clone"]
+    assert not any(o.path == ext_path for o in standalone_orphans), (
+        f"declared project-repo extension's source checkout wrongly flagged as orphan: "
+        f"{[o.path for o in standalone_orphans]}"
+    )
 
 
 def test_remove_orphan_agent_copy(workspace_config: WorkspaceConfig) -> None:

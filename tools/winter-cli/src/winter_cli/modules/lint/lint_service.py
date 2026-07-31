@@ -14,7 +14,8 @@ class LintService:
     A pure dispatcher: it owns discovery, ordering, and aggregation, but never
     inspects content itself — every finding originates in a check it dispatches.
     Built-in core checks run first, then the workspace script, then each
-    extension in standalone-repo order — mirroring the doctor
+    extension-eligible repo (standalones plus project repos carrying a root
+    `winter-ext.toml`) — mirroring the doctor
     `[core]`-then-`[project]`-then-extensions ordering.
     """
 
@@ -39,8 +40,8 @@ class LintService:
         if workspace_outcome is not None:
             outcomes.append(workspace_outcome)
 
-        standalone_repos = self._repo_factory.get_standalone_repos()
-        outcomes.extend(self._extension_lint_svc.run(scope, standalone_repos))
+        extension_repos = self._repo_factory.get_extension_repos()
+        outcomes.extend(self._extension_lint_svc.run(scope, extension_repos))
 
         findings = [finding for outcome in outcomes for finding in outcome.findings]
         for finding in findings:

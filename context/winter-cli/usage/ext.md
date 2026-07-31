@@ -24,7 +24,7 @@ winter ext verify <extension> --json
 Runs the conformance checks from the bundled capability spec against each given EXTENSION's declared service entrypoint. Pass any number of EXTENSIONs to verify them all in one run — there is no glob support here, since a name/path isn't a registry enumeration to expand (unlike `winter lint` or `winter ws update`). Each `<extension>` is either:
 
 - A **local path** — any value containing an OS path separator (`/`) or resolving to an existing directory on disk. `winter-ext.toml` is read directly from that directory.
-- An **installed extension name** — a bare name (e.g. `winter-service-tmux`) looked up among the `[[standalone_repository]]` entries in `.winter/config.toml`.
+- An **installed extension name** — a bare name (e.g. `winter-service-tmux`) looked up among the installed extension repos (`[[standalone_repository]]` entries plus `[[project_repository]]` entries carrying a root `winter-ext.toml`) in `.winter/config.toml`; see [../configuration/extensions.md#project-repo-extensions](../configuration/extensions.md#project-repo-extensions).
 
 At least one EXTENSION is required.
 

@@ -80,7 +80,13 @@ class PruneService:
             self._fs.unlink(orphan.path)
 
     def reaggregate_excludes(self, reporter: IInitReporter) -> bool:
-        return self._extension_exclude_svc.finalize_excludes(self._repo_factory.get_standalone_repos(), reporter)
+        # Reads extension identity (which repos own a managed exclude block), not
+        # git/lifecycle state, so this resolves through get_extension_repos() —
+        # standalones plus project-repo extensions — matching the set InitService
+        # wrote the blocks for. get_standalone_repos() here would strip a
+        # project-repo extension's block on every prune, which init then
+        # re-adds on the next `winter ws init` (permanent init<->prune churn).
+        return self._extension_exclude_svc.finalize_excludes(self._repo_factory.get_extension_repos(), reporter)
 
     # ── detection ────────────────────────────────────────────────────────
 
@@ -113,7 +119,12 @@ class PruneService:
         except OSError:
             return []
 
-        eligible = {repo.name for repo in self._repo_factory.get_standalone_repos()}
+        # Extension identity, not git/lifecycle state: a block belongs to a repo
+        # if that repo is still extension-eligible, whether standalone or a
+        # project-repo extension. get_standalone_repos() here would mark a
+        # declared project repo's projects/<name>/ block as orphaned — reporting
+        # the declared repo's own source checkout as an orphan clone.
+        eligible = {repo.name for repo in self._repo_factory.get_extension_repos()}
         orphans: list[PruneOrphan] = []
         seen_paths: set[Path] = set()
 
@@ -188,7 +199,9 @@ class PruneService:
         except OSError:
             return []
 
-        eligible = {repo.name for repo in self._repo_factory.get_standalone_repos()}
+        # See the matching comment in _find_orphan_standalone_clones: extension
+        # identity, not git/lifecycle state, gates which blocks are "orphaned".
+        eligible = {repo.name for repo in self._repo_factory.get_extension_repos()}
         orphans: list[PruneOrphan] = []
         seen_paths: set[Path] = set()
 

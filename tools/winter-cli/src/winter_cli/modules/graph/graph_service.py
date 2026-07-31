@@ -6,7 +6,7 @@ from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.graph.models import ModuleNode
 from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST, ExtensionManifestLoader
 from winter_cli.modules.workspace.models import RepoError
-from winter_cli.modules.workspace.repository_factory import IStandaloneRepoProvider
+from winter_cli.modules.workspace.repository_factory import IExtensionRepoProvider
 
 logger = logging.getLogger(__name__)
 
@@ -14,19 +14,20 @@ logger = logging.getLogger(__name__)
 class GraphService:
     """Builds the module dependency graph from each module's `requires`.
 
-    Enumerates every standalone repo (the installed extension modules) that
-    ships a `winter-ext.toml` and records its declared `requires`. Pure data
-    aggregation: it reports the edges and applies no rules — `winter lint`
-    checks (e.g. the extractability linter) consume this graph and decide what
-    is allowed. A module whose manifest can't be read is skipped with a log
-    line rather than aborting the whole graph.
+    Enumerates every extension-eligible repo — standalones plus project repos
+    carrying a root `winter-ext.toml` — that ships a `winter-ext.toml` and
+    records its declared `requires`. Pure data aggregation: it reports the
+    edges and applies no rules — `winter lint` checks (e.g. the extractability
+    linter) consume this graph and decide what is allowed. A module whose
+    manifest can't be read is skipped with a log line rather than aborting the
+    whole graph.
     """
 
     def __init__(
         self,
         fs: IFilesystemReader,
         manifest_loader: ExtensionManifestLoader,
-        repo_factory: IStandaloneRepoProvider,
+        repo_factory: IExtensionRepoProvider,
     ) -> None:
         self._fs = fs
         self._manifest_loader = manifest_loader
@@ -34,7 +35,7 @@ class GraphService:
 
     def build(self) -> list[ModuleNode]:
         nodes: list[ModuleNode] = []
-        for repo in self._repo_factory.get_standalone_repos():
+        for repo in self._repo_factory.get_extension_repos():
             manifest_path = repo.path / EXT_MANIFEST
             if not self._fs.is_file(manifest_path):
                 continue

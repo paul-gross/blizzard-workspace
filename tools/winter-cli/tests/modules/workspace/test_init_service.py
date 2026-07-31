@@ -63,7 +63,7 @@ def _service(
     manifest_loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader({}))
     return InitService(
         config=workspace_config,
-        repo_factory=RepositoryFactory(workspace_config),
+        repo_factory=RepositoryFactory(workspace_config, fs=fs),
         extension_symlink_svc=ExtensionSymlinkService(
             config=workspace_config,
             fs=fs,
@@ -83,6 +83,7 @@ def _service(
         extension_agentsmd_svc=ExtensionAgentsMdService(
             config=workspace_config,
             fs=fs,
+            manifest_loader=manifest_loader,
         ),
         fs=fs,
         subprocess_runner=subprocess,
@@ -414,7 +415,7 @@ def _service_with_ext(
     manifest_loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
     return InitService(
         config=workspace_config,
-        repo_factory=RepositoryFactory(workspace_config),
+        repo_factory=RepositoryFactory(workspace_config, fs=fs),
         extension_symlink_svc=ExtensionSymlinkService(
             config=workspace_config,
             fs=fs,
@@ -434,6 +435,7 @@ def _service_with_ext(
         extension_agentsmd_svc=ExtensionAgentsMdService(
             config=workspace_config,
             fs=fs,
+            manifest_loader=manifest_loader,
         ),
         fs=fs,
         subprocess_runner=subprocess,
@@ -489,6 +491,65 @@ def test_workspace_reconcile_hook_fires_once_on_reconcile_all(
     ws_reconcile_calls = [call for call, _ in subprocess.popen_calls if str(hook_path) in str(call)]
     assert len(ws_reconcile_calls) == 1, (
         f"expected exactly 1 on_workspace_reconcile call, got {len(ws_reconcile_calls)}"
+    )
+
+
+def _make_project_extension_config(fs: FakeFilesystem, config_files: dict, name: str) -> ProjectRepositoryConfig:
+    """Register a project repo whose root carries a winter-ext.toml with an
+    on_workspace_reconcile hook — mirrors _make_extension_config for standalones."""
+    ext_path = WORKSPACE_ROOT / "projects" / name
+    fs.directories.add(ext_path)
+    manifest_path = ext_path / "winter-ext.toml"
+    fs.files[manifest_path] = ""
+    config_files[manifest_path] = {
+        "name": name,
+        "hooks": {"on_workspace_reconcile": "hooks/ws-reconcile.sh"},
+    }
+    hook_path = (ext_path / "hooks" / "ws-reconcile.sh").resolve()
+    fs.files[hook_path] = ""
+    fs.executables.add(hook_path)
+    fs.directories.add(hook_path.parent)
+    return ProjectRepositoryConfig(name=name, url=f"git@example.com:org/{name}.git")
+
+
+def test_workspace_reconcile_hook_fires_for_project_repo_extension(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """A project repo carrying a root winter-ext.toml (no standalone counterpart)
+    fires its on_workspace_reconcile hook too — get_extension_repos() folds it in."""
+    config_files: dict = {}
+    fs = FakeFilesystem()
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    fs.directories.add(WORKSPACE_ROOT / "projects")
+
+    proj_cfg = _make_project_extension_config(fs, config_files, "winter-docs")
+    ext_path = WORKSPACE_ROOT / "projects" / "winter-docs"
+    hook_path = (ext_path / "hooks" / "ws-reconcile.sh").resolve()
+
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=GitIdentity(name="Bot", email="bot@example.com"),
+        project_repos=[proj_cfg],
+    )
+
+    git = FakeGitRepository()
+    git.local_branches[ext_path] = ["main"]
+    git.worktree_paths[ext_path] = [ext_path]  # only the source checkout itself
+
+    subprocess = FakeSubprocessRunner(popen_responses={str(hook_path): (["workspace reconcile ran"], 0)})
+
+    svc = _service_with_ext(cfg, fs, config_files, subprocess, git)
+    ok = svc.reconcile_all(init_reporter)
+
+    assert ok is True
+    ws_reconcile_calls = [call for call, _ in subprocess.popen_calls if str(hook_path) in str(call)]
+    assert len(ws_reconcile_calls) == 1, (
+        f"expected exactly 1 on_workspace_reconcile call for the project-repo extension, "
+        f"got {len(ws_reconcile_calls)}"
     )
 
 
@@ -805,6 +866,210 @@ def test_pin_dirty_stale_lock_refuses_re_resolve(
     assert git.detached_checkouts == []
     assert git.branch_checkouts == []
     assert lock_repo.write_calls == []
+
+
+def test_reconcile_standalones_does_not_clone_project_repo_extensions(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """Regression: the git-clone loop in reconcile_standalones stays standalone-only.
+
+    A project repo carrying a root winter-ext.toml is extension-eligible (it feeds
+    AGENTS.winter.md via get_extension_repos()), but its projects/<name>/ checkout
+    is reconciled by reconcile_projects, not by the standalone clone loop here — so
+    reconcile_standalones must never attempt to clone or pin it.
+    """
+    ext_path = WORKSPACE_ROOT / "projects" / "winter-docs"
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", ext_path])
+    manifest_path = ext_path / "winter-ext.toml"
+    fs.files[manifest_path] = ""
+    fs.files[ext_path / "index.md"] = "# winter-docs\n"
+    config_files: dict = {manifest_path: {"name": "winter-docs"}}
+
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=None,
+        project_repos=[
+            ProjectRepositoryConfig(name="winter-docs", url="git@example.com:org/winter-docs.git"),
+        ],
+    )
+    git = FakeGitRepository()
+
+    svc = _service_with_ext(cfg, fs, config_files, FakeSubprocessRunner(), git)
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    # No clone/identity/pin machinery touched the project-repo extension.
+    assert git.clones == []
+    # AGENTS.winter.md still renders the project-repo extension as a routing row —
+    # get_extension_repos() folds it in even though the clone loop skipped it.
+    agents_path = WORKSPACE_ROOT / "AGENTS.winter.md"
+    assert agents_path in fs.files
+    assert "winter-docs" in fs.files[agents_path]
+    assert "@" not in fs.files[agents_path]
+
+
+def _service_with_ext_and_agents(
+    workspace_config: WorkspaceConfig,
+    fs: FakeFilesystem,
+    config_files: dict,
+    subprocess: FakeSubprocessRunner,
+    git: FakeGitRepository,
+) -> InitService:
+    """Like `_service_with_ext`, but also wires ExtensionAgentService — mirroring
+    the container's full wiring — so agent projection can be exercised too."""
+    from winter_cli.modules.workspace.agent_install import ExtensionAgentService
+    from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
+    from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
+    from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
+
+    manifest_loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    return InitService(
+        config=workspace_config,
+        repo_factory=RepositoryFactory(workspace_config, fs=fs),
+        extension_symlink_svc=ExtensionSymlinkService(
+            config=workspace_config,
+            fs=fs,
+            manifest_loader=manifest_loader,
+        ),
+        extension_agent_svc=ExtensionAgentService(
+            config=workspace_config,
+            fs=fs,
+            manifest_loader=manifest_loader,
+            agent_enumerator=CanonicalAgentEnumerator(fs=fs, manifest_loader=manifest_loader),
+        ),
+        extension_hook_svc=ExtensionHookService(
+            config=workspace_config,
+            fs=fs,
+            subprocess_runner=subprocess,
+            manifest_loader=manifest_loader,
+        ),
+        extension_exclude_svc=ExtensionExcludeService(
+            config=workspace_config,
+            fs=fs,
+            manifest_loader=manifest_loader,
+        ),
+        extension_agentsmd_svc=ExtensionAgentsMdService(
+            config=workspace_config,
+            fs=fs,
+            manifest_loader=manifest_loader,
+        ),
+        fs=fs,
+        subprocess_runner=subprocess,
+        git_repo=git,
+        git_ops=GitOpsService(RepoErrorFactory()),
+        registry=FakeEnvIndexRegistry(),
+    )
+
+
+def test_reconcile_standalones_projects_skills_and_agents_for_project_repo_extension(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """A project repo carrying a root winter-ext.toml (no standalone counterpart,
+    e.g. winter-product) gets its skills AND agents projected identically to a
+    standalone's, once its projects/<name>/ source checkout exists on disk.
+
+    This is the regression for the observable symptom the gap left behind:
+    `winter doctor` flagging "missing: <prefix>-<skill> (source exists, not
+    projected)" / "missing copy: <prefix>-<agent>.md" for a project-repo-only
+    extension, because `reconcile_standalones` never ran the projection step
+    for anything outside `get_standalone_repos()`.
+    """
+    ext_path = WORKSPACE_ROOT / "projects" / "winter-product"
+    skill_dir = ext_path / "skills" / "do-thing"
+    agents_dir = ext_path / "agents"
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", ext_path, skill_dir, agents_dir])
+    manifest_path = ext_path / "winter-ext.toml"
+    fs.files[manifest_path] = ""
+    fs.files[skill_dir / "SKILL.md"] = "---\ndescription: An example skill\n---\n\n# do-thing\n"
+    fs.files[agents_dir / "reviewer.md"] = (
+        "---\nname: reviewer\ndescription: Reviews code\nmodel: sonnet\n---\nYou review code.\n"
+    )
+    config_files: dict = {manifest_path: {"name": "winter-product", "prefix": "wp"}}
+
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=None,
+        project_repos=[
+            ProjectRepositoryConfig(name="winter-product", url="git@example.com:org/winter-product.git"),
+        ],
+    )
+    git = FakeGitRepository()
+
+    svc = _service_with_ext_and_agents(cfg, fs, config_files, FakeSubprocessRunner(), git)
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    # No clone/identity/pin machinery touched the project-repo extension — the
+    # git-clone lifecycle stays standalone-only.
+    assert git.clones == []
+
+    skill_link = WORKSPACE_ROOT / ".claude" / "skills" / "wp-do-thing"
+    assert fs.is_symlink(skill_link)
+
+    agent_copy = WORKSPACE_ROOT / ".claude" / "agents" / "wp-reviewer.md"
+    assert agent_copy in fs.files
+
+
+def test_reconcile_standalones_does_not_double_project_skills_for_dual_declared_repo(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """A repo declared as both [[project_repository]] (with a root winter-ext.toml)
+    and [[standalone_repository]] is only projected once, via the standalone loop
+    — `get_extension_repos()` dedupes the project-repo entry away with a warning,
+    so `reconcile_standalones` must not also run projection at the project-repo
+    checkout path for it.
+    """
+    standalone_path = WORKSPACE_ROOT / "my-ext"
+    project_path = WORKSPACE_ROOT / "projects" / "my-ext"
+    skill_dir = standalone_path / "skills" / "do-thing"
+    fs = FakeFilesystem(
+        directories=[
+            WORKSPACE_ROOT / "projects",
+            standalone_path,
+            project_path,
+            skill_dir,
+        ]
+    )
+    standalone_manifest = standalone_path / "winter-ext.toml"
+    project_manifest = project_path / "winter-ext.toml"
+    fs.files[standalone_manifest] = ""
+    fs.files[project_manifest] = ""
+    fs.files[skill_dir / "SKILL.md"] = "---\ndescription: An example skill\n---\n\n# do-thing\n"
+    config_files: dict = {
+        standalone_manifest: {"name": "my-ext", "prefix": "wm"},
+        project_manifest: {"name": "my-ext", "prefix": "wm"},
+    }
+
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=None,
+        project_repos=[
+            ProjectRepositoryConfig(name="my-ext", url="git@example.com:org/my-ext.git"),
+        ],
+        standalone_repos=[
+            StandaloneRepositoryConfig(name="my-ext", url="git@example.com:org/my-ext.git"),
+        ],
+    )
+    git = FakeGitRepository()
+    git.local_branches[standalone_path] = ["main"]
+
+    svc = _service_with_ext(cfg, fs, config_files, FakeSubprocessRunner(), git)
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    # Projected once, from the standalone checkout — never re-processed at the
+    # (unused) project-repo checkout path.
+    skill_link = WORKSPACE_ROOT / ".claude" / "skills" / "wm-do-thing"
+    assert fs.is_symlink(skill_link)
 
 
 # ── Upstream inference tests ──────────────────────────────────────────────────

@@ -68,6 +68,9 @@ class _StubRepoFactory:
     def get_standalone_repos(self) -> list[StandaloneRepository]:
         return self._repos
 
+    def get_extension_repos(self) -> list[StandaloneRepository]:
+        return self._repos
+
 
 class _FakeEnvProvisionerService:
     def compute(self, scope: str) -> dict[str, str]:

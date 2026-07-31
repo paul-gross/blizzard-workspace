@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
 from winter_cli.config.models import (
@@ -8,10 +9,15 @@ from winter_cli.config.models import (
     StandaloneRepositoryConfig,
     WorkspaceConfig,
 )
+from winter_cli.core.filesystem import IFilesystemReader
+from winter_cli.core.internal.local_filesystem import LocalFilesystem
+from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST
 from winter_cli.modules.workspace.models import (
     ProjectRepository,
     StandaloneRepository,
 )
+
+logger = logging.getLogger(__name__)
 
 _SINGLETON_PATHS: dict[SingletonType, tuple[str, ...]] = {
     SingletonType.workspace: (),
@@ -21,18 +27,34 @@ _SINGLETON_PATHS: dict[SingletonType, tuple[str, ...]] = {
 
 
 class IStandaloneRepoProvider(Protocol):
-    """The single capability `GraphService` needs from the repo factory:
-    enumerate the user-declared standalone repos (the installed extension
-    modules). Narrowing the dependency to this Protocol keeps the consumer
-    off the concrete `RepositoryFactory` and lets tests pass a plain stub.
+    """The capability the git/lifecycle call sites (sync, push, merge, prune,
+    destroy, snapshot, `repo_handler`) need from the repo factory: enumerate
+    the user-declared standalone repos — repos that exist at one fixed
+    workspace-root-relative location rather than one worktree per env.
+    Narrowing the dependency to this Protocol keeps the consumer off the
+    concrete `RepositoryFactory` and lets tests pass a plain stub.
     """
 
     def get_standalone_repos(self) -> list[StandaloneRepository]: ...
 
 
+class IExtensionRepoProvider(Protocol):
+    """The capability extension-consuming features need from the repo factory:
+    enumerate every repo eligible to act as an extension — standalones plus
+    project repos carrying a root `winter-ext.toml`. Distinct from
+    `IStandaloneRepoProvider`: doctor, lint, graph, the capability registry,
+    service-manifest collection, and provision handlers all read a
+    `winter-ext.toml` and so want project-repo extensions folded in; the
+    git/lifecycle call sites do not and stay on `IStandaloneRepoProvider`.
+    """
+
+    def get_extension_repos(self) -> list[StandaloneRepository]: ...
+
+
 class RepositoryFactory:
-    def __init__(self, config: WorkspaceConfig) -> None:
+    def __init__(self, config: WorkspaceConfig, fs: IFilesystemReader | None = None) -> None:
         self._config = config
+        self._fs = fs if fs is not None else LocalFilesystem()
 
     def get_project_repos(self) -> list[ProjectRepository]:
         result: list[ProjectRepository] = []
@@ -104,6 +126,86 @@ class RepositoryFactory:
             )
         return result
 
+    def get_extension_repos(self) -> list[StandaloneRepository]:
+        """Return every repo eligible to act as an extension.
+
+        This is standalones (`get_standalone_repos()`) plus project repos whose
+        `projects/<name>/` root carries a `winter-ext.toml`, projected as
+        `StandaloneRepository`-shaped entries rooted at the project repo's
+        source checkout (`main_path`) — never at any of its per-env worktree
+        copies. Every extension-consuming feature (doctor, lint, graph, the
+        capability registry, service-manifest collection, provision handlers,
+        hooks, skills/agents projection) already resolves its paths from
+        `repo.path`, and `projects/<name>/` is as fixed a path as
+        `.winter/ext/<x>/`, so those features need no new logic — only this
+        different source list.
+
+        A repo declared as both `[[project_repository]]` (with a root
+        `winter-ext.toml`) and `[[standalone_repository]]` dedupes to the
+        standalone entry — not the project-repo entry — with a warning naming
+        the now-redundant `[[standalone_repository]]` declaration. This keeps
+        `ExtensionAgentsMdService`'s routing-row fork (which forks on whether
+        the resolved path sits under `projects/`) from firing while both
+        declarations exist: the repo keeps rendering as its pre-existing eager
+        `@`-import instead of switching to a no-`@` routing row out from under
+        a workspace that hasn't yet removed the redundant standalone
+        declaration (a follow-up left explicitly out of scope by winter#160).
+        Once the standalone declaration is removed, the project-repo entry
+        takes over automatically.
+        """
+        result: list[StandaloneRepository] = []
+        seen: set[str] = set()
+        standalones_by_name: dict[str, StandaloneRepository] = {}
+
+        for repo in self.get_standalone_repos():
+            result.append(repo)
+            seen.add(repo.name)
+            standalones_by_name[repo.name] = repo
+
+        for project_repo in self.get_project_repos():
+            manifest_path = project_repo.main_path / EXT_MANIFEST
+            if not self._fs.is_file(manifest_path):
+                continue
+            if project_repo.name in seen:
+                redundant = standalones_by_name[project_repo.name]
+                overrides = [
+                    field
+                    for field, value in (("prefix", redundant.prefix), ("ref", redundant.ref))
+                    if value is not None
+                ]
+                override_note = (
+                    f" — note: removing it will also drop its {' and '.join(overrides)} override, which "
+                    "[[project_repository]] has no equivalent field for"
+                    if overrides
+                    else ""
+                )
+                logger.warning(
+                    "%r is declared as both [[project_repository]] (with a root winter-ext.toml) and "
+                    "[[standalone_repository]] — using the standalone checkout as the extension entry "
+                    "until the now-redundant [[standalone_repository]] declaration is removed%s",
+                    project_repo.name,
+                    override_note,
+                )
+                continue
+            # `ProjectRepositoryConfig` declares no `config_dir`/`prefix`/`ref`
+            # override fields, so there is nothing to carry over for those —
+            # but `config_dir` is set explicitly here (matching the same
+            # default formula `get_standalone_repos()` uses) rather than left
+            # None to fall through to `ServiceOrchestratorResolver`'s
+            # synthetic-config-dir fallback, which only happens to compute the
+            # same path today because it derives it from `ext_dir.name`.
+            result.append(
+                StandaloneRepository(
+                    name=project_repo.name,
+                    path=project_repo.main_path,
+                    main_branch=project_repo.main_branch,
+                    config_dir=(self._config.workspace_root / f".winter/config/{project_repo.name}").resolve(),
+                )
+            )
+            seen.add(project_repo.name)
+
+        return result
+
     def find_standalone(self, name: str) -> StandaloneRepository | None:
         """Resolve a standalone repo by name across both singletons and user-declared repos.
 
@@ -148,5 +250,11 @@ class RepositoryFactory:
 
 def _conforms_standalone_repo_provider(x: RepositoryFactory) -> IStandaloneRepoProvider:
     # Typecheck-time sentinel (never called): pins RepositoryFactory as a valid
-    # IStandaloneRepoProvider so the seam GraphService depends on can't drift.
+    # IStandaloneRepoProvider so the git/lifecycle seams that depend on it can't drift.
+    return x
+
+
+def _conforms_extension_repo_provider(x: RepositoryFactory) -> IExtensionRepoProvider:
+    # Typecheck-time sentinel (never called): pins RepositoryFactory as a valid
+    # IExtensionRepoProvider so the extension-consuming seams that depend on it can't drift.
     return x

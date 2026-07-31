@@ -179,6 +179,7 @@ class Container(containers.DeclarativeContainer):
     repo_factory = providers.Singleton(
         RepositoryFactory,
         config=workspace_config,
+        fs=fs,
     )
 
     plugin_registry = providers.Singleton(
@@ -187,6 +188,10 @@ class Container(containers.DeclarativeContainer):
         fs=fs,
         config_file_reader=config_file_reader,
         plugin_loader=plugin_loader,
+        # Deliberately standalone-only, not get_extension_repos(): this is
+        # dashboard-TUI plugin.py discovery, not the skills/agents/doctor/lint/
+        # graph extension surface winter#160 moved to project-repo extensions.
+        # Revisit if a project-repo extension ever needs to ship a dashboard plugin.
         standalone_repos=repo_factory.provided.get_standalone_repos.call(),
     )
 
@@ -312,6 +317,7 @@ class Container(containers.DeclarativeContainer):
         ExtensionAgentsMdService,
         config=workspace_config,
         fs=fs,
+        manifest_loader=extension_manifest_loader,
     )
 
     workspace_skill_svc = providers.Singleton(

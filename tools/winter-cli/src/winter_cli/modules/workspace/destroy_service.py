@@ -206,8 +206,14 @@ class DestroyService:
                 reporter.target_completed(name, False)
                 return False
 
-        # Phase 2: extension hooks (always fire before removal).
-        standalones = self._repo_factory.get_standalone_repos()
+        # Phase 2: extension hooks (always fire before removal). Hook dispatch reads
+        # [hooks] from winter-ext.toml — extension-consuming, not git/lifecycle — so
+        # this resolves through get_extension_repos() to match init_service.py's
+        # run_env_init_hooks, which already switched. Otherwise a project-repo
+        # extension's on_env_init hook would create per-env state its on_env_destroy
+        # hook is never invoked to tear down. The worktree-removal enumeration
+        # elsewhere in this method stays on get_project_repos()/get_standalone_repos().
+        extension_repos = self._repo_factory.get_extension_repos()
         if dry_run:
             # Dry-run: emit provision teardown plan first (if applicable), then
             # structural plan events — no side effects.
@@ -270,7 +276,7 @@ class DestroyService:
 
         # Phase 2b: extension hooks.
         hooks_ok = self._extension_hook_svc.run_env_destroy_hooks(
-            standalones,
+            extension_repos,
             env_root,
             name,
             reporter,

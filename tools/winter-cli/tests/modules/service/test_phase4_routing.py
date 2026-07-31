@@ -97,6 +97,9 @@ class _StubRepoFactory:
     def get_standalone_repos(self) -> list[StandaloneRepository]:
         return self._repos
 
+    def get_extension_repos(self) -> list[StandaloneRepository]:
+        return self._repos
+
 
 def _make_two_provider_registry(
     provider_a_name: str = "provider-a",

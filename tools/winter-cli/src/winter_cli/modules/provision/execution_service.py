@@ -256,8 +256,14 @@ class ProvisionExecutionService:
         return ext_repo.path, base_env
 
     def _find_extension(self, source_label: str) -> StandaloneRepository | None:
-        """Find a standalone repo whose resolved prefix matches *source_label*."""
-        for repo in self._repo_factory.get_standalone_repos():
+        """Find an extension-eligible repo whose resolved prefix matches *source_label*.
+
+        Extension-eligible repos are standalones plus project repos carrying a
+        root `winter-ext.toml`, so a provision handler collected from a
+        project-repo extension (see `ProvisionService._collect_all_handlers`)
+        resolves back to its `projects/<name>/` checkout here too.
+        """
+        for repo in self._repo_factory.get_extension_repos():
             manifest_path = repo.path / EXT_MANIFEST
             if not self._fs.is_file(manifest_path):
                 continue
