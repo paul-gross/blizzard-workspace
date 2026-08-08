@@ -27,6 +27,35 @@ from winter_cli.modules.workspace.repo_repository import IWriteRepoRepository
 
 logger = logging.getLogger(__name__)
 
+# `git clean` has no plumbing/porcelain output mode, so its per-path lines are
+# parsed. Both prefixes are gettext-translated, which is why `_run_clean`
+# pins `LC_ALL=C` before reading them.
+_CLEAN_DRY_RUN_PREFIX = "Would remove "
+_CLEAN_REMOVED_PREFIX = "Removing "
+
+
+def _parse_clean_output(output: str, prefix: str, repo_name: str) -> list[str]:
+    """Paths out of `git clean` output, or raise if the line shape is unrecognized.
+
+    Fails closed rather than returning what it could parse: a silent partial
+    parse would under-report the removal set on the one command whose preview
+    is the only thing standing in front of an unrecoverable delete. An empty
+    `output` is the legitimate nothing-to-clean case and yields `[]`; output
+    that exists but matches no line is a broken contract (git reworded the
+    message, or the locale pin failed) and raises.
+    """
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if not lines:
+        return []
+    paths = [line[len(prefix) :] for line in lines if line.startswith(prefix)]
+    if not paths:
+        raise RepoError(
+            message=f"could not parse `git clean` output for {repo_name}",
+            subcommand="clean",
+            stderr=output,
+        )
+    return paths
+
 
 def _autostash_args(autostash: bool) -> list[str]:
     return ["--autostash"] if autostash else []
@@ -296,26 +325,31 @@ class WriteRepoRepository(ReadRepoRepository):
                 ) from exc
 
     def list_untracked(self, worktree: FeatureWorktree) -> list[str]:
-        """Worktree-relative paths of untracked, non-ignored files — exactly the
-        set `clean_untracked` would delete. No network.
+        """Worktree-relative paths `clean_untracked` would remove. No network.
 
-        Backed by GitPython's `untracked_files`, i.e. `git ls-files --others
-        --exclude-standard`: `--exclude-standard` is what holds the
-        never-remove-ignored-files guarantee, so this enumeration and the
-        `git clean -fd` that follows agree on scope by construction rather
-        than by two independently-maintained exclude rules.
+        Backed by `git clean -nd` — the dry run of the very command
+        `clean_untracked` executes — rather than by `git ls-files --others
+        --exclude-standard`. The two do not agree, in both directions: an
+        empty untracked directory is invisible to `ls-files` but *is* removed
+        by `clean -fd`, and an untracked nested git repository is listed by
+        `ls-files` but *skipped* by `clean -fd`. Deriving the preview from a
+        second command would therefore under-report a path this command
+        silently deletes and over-report one it leaves behind — unacceptable
+        for the only preview standing in front of an unrecoverable delete.
 
-        Reports files, not directories, where `git clean -fd` reports and
-        removes whole untracked directories. The file-level list is the more
-        useful preview — `--dry-run` is the only look a caller gets before an
-        unrecoverable delete, and `scratch/` tells them far less than the
-        three files under it.
+        Reports whatever granularity git itself reports: a whole untracked
+        directory appears as one trailing-slash entry (`scratch/`), not as its
+        individual files, because that is the unit `clean -fd` removes.
         """
-        with git.Repo(str(worktree.path)) as r:
-            return list(r.untracked_files)
+        return self._run_clean(worktree, "-nd", _CLEAN_DRY_RUN_PREFIX)
 
-    def clean_untracked(self, worktree: FeatureWorktree) -> None:
-        """`git clean -fd` — remove untracked files and untracked directories.
+    def clean_untracked(self, worktree: FeatureWorktree) -> list[str]:
+        """`git clean -fd` — remove untracked files and untracked directories,
+        returning the paths git reports as actually removed.
+
+        Returns the executed set rather than trusting a prior enumeration, so
+        the report cannot claim a deletion that did not happen (a nested git
+        repository is enumerable but not removable).
 
         Deliberately never passes `-x` or `-X`: ignored files stay. In a winter
         worktree those are the provisioned artifacts (`.venv`, `node_modules`,
@@ -328,15 +362,27 @@ class WriteRepoRepository(ReadRepoRepository):
         carries no winter-level meaning — it is not the `--force` that skips
         the confirmation prompt, which is handled entirely in the handler.
         """
+        return self._run_clean(worktree, "-fd", _CLEAN_REMOVED_PREFIX)
+
+    def _run_clean(self, worktree: FeatureWorktree, flags: str, prefix: str) -> list[str]:
+        """`git clean <flags>`, parsed into the paths git named.
+
+        Forces `LC_ALL=C` because the line prefixes below are translated
+        strings: under a non-English locale an unforced parse would silently
+        yield an empty list, which reads as "nothing to clean" for `-nd` and as
+        "removed nothing" for `-fd`.
+        """
         with git.Repo(str(worktree.path)) as r:
             try:
-                r.git.clean("-fd")
+                with r.git.custom_environment(LC_ALL="C", LANGUAGE="C", LC_MESSAGES="C"):
+                    output = r.git.clean(flags)
             except git.GitCommandError as exc:
                 raise self._error_factory.from_git(
                     exc,
                     message=f"clean failed for {worktree.repository.name}",
                     cwd=worktree.path,
                 ) from exc
+        return _parse_clean_output(output, prefix, worktree.repository.name)
 
     def unset_upstream(self, worktree: FeatureWorktree) -> None:
         """Remove upstream tracking; no-op when already unset.

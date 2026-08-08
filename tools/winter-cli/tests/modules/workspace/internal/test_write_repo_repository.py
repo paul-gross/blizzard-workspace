@@ -160,23 +160,6 @@ def test_reset_to_raises_for_bogus_ref(monkeypatch: pytest.MonkeyPatch, repo: Wr
     assert ei.value.subcommand == "reset"
 
 
-def test_clean_untracked_runs_fd_and_never_x(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
-    """`clean_untracked` is `git clean -fd` — never `-x`/`-X`, which would take
-    the provisioned artifacts (`.venv`, `node_modules`) with it and silently
-    turn a clean into a re-provision."""
-    git_mock = _fake_git_repo(monkeypatch)
-    r = git_mock.Repo.return_value
-    wt = _wt(_REPO_PATH)
-
-    repo.clean_untracked(wt)
-
-    r.git.clean.assert_called_once_with("-fd")
-    flags = r.git.clean.call_args.args
-    assert "-x" not in flags
-    assert "-X" not in flags
-    assert "-fdx" not in flags
-
-
 def test_clean_untracked_wraps_git_failure(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.git.clean.side_effect = git.GitCommandError(
@@ -190,18 +173,104 @@ def test_clean_untracked_wraps_git_failure(monkeypatch: pytest.MonkeyPatch, repo
     assert ei.value.subcommand == "clean"
 
 
-def test_list_untracked_returns_gits_untracked_files(
-    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
-) -> None:
-    """Backed by GitPython's `untracked_files` (`git ls-files --others
-    --exclude-standard`), so ignored files are excluded by the same rule that
-    keeps `git clean -fd` off them."""
-    git_mock = _fake_git_repo(monkeypatch)
-    type(git_mock.Repo.return_value).untracked_files = PropertyMock(return_value=["scratch.py", "notes/todo.md"])
-    wt = _wt(_REPO_PATH)
+def test_parse_clean_output_raises_on_unrecognized_lines() -> None:
+    """Fails closed: output that exists but matches no known prefix means the
+    locale pin failed or git reworded the message. Returning the empty list
+    would read as "nothing to clean" on an unrecoverable-delete command."""
+    with pytest.raises(RepoError) as ei:
+        write_repo_repository._parse_clean_output("Entferne scratch.py", "Removing ", "demo")
 
-    assert repo.list_untracked(wt) == ["scratch.py", "notes/todo.md"]
-    git_mock.Repo.return_value.git.clean.assert_not_called()
+    assert ei.value.subcommand == "clean"
+
+
+def test_parse_clean_output_treats_empty_output_as_nothing_to_clean() -> None:
+    assert write_repo_repository._parse_clean_output("", "Removing ", "demo") == []
+
+
+# ── real-git clean behavior ───────────────────────────────────────────────────
+#
+# These drive actual git rather than the GitPython mock. The preview/removal
+# divergence they pin (empty directories, nested repositories) is invisible to
+# a mocked adapter — mocking is precisely why it shipped.
+
+
+def _real_worktree(tmp_path: Path) -> FeatureWorktree:
+    env_dir = tmp_path / "env"
+    repo_dir = env_dir / "demo"
+    repo_dir.mkdir(parents=True)
+    r = git.Repo.init(str(repo_dir))
+    with r.config_writer() as cw:
+        cw.set_value("user", "email", "t@t.t")
+        cw.set_value("user", "name", "t")
+    (repo_dir / "keep.txt").write_text("base\n")
+    (repo_dir / ".gitignore").write_text("ignored-stuff/\n*.pyc\n")
+    r.index.add(["keep.txt", ".gitignore"])
+    r.index.commit("base")
+    r.close()
+
+    workspace = Workspace(root_path=tmp_path, service_prefix="t", main_branch="main")
+    env = FeatureEnvironment(workspace=workspace, name="env", index=1, path=env_dir)
+    project_repo = ProjectRepository(name="demo", main_path=repo_dir, main_branch="main")
+    return FeatureWorktree(workspace=workspace, environment=env, repository=project_repo)
+
+
+def test_list_untracked_includes_empty_directories_that_clean_removes(
+    repo: WriteRepoRepository, tmp_path: Path
+) -> None:
+    """Regression: `git ls-files --others` cannot see an empty untracked
+    directory, but `git clean -fd` removes it — so an `ls-files`-backed preview
+    silently omitted a path this command deletes."""
+    wt = _real_worktree(tmp_path)
+    (wt.path / "emptydir").mkdir()
+    (wt.path / "loose.txt").write_text("x\n")
+
+    assert repo.list_untracked(wt) == ["emptydir/", "loose.txt"]
+
+
+def test_list_untracked_matches_what_clean_untracked_removes(repo: WriteRepoRepository, tmp_path: Path) -> None:
+    """The preview and the executed removal are the same set — the invariant
+    the whole confirmation flow rests on."""
+    wt = _real_worktree(tmp_path)
+    (wt.path / "emptydir").mkdir()
+    (wt.path / "scratch").mkdir()
+    (wt.path / "scratch" / "note.md").write_text("x\n")
+    (wt.path / "loose.txt").write_text("x\n")
+
+    previewed = repo.list_untracked(wt)
+    removed = repo.clean_untracked(wt)
+
+    assert previewed == removed == ["emptydir/", "loose.txt", "scratch/"]
+
+
+def test_clean_untracked_never_removes_ignored_files(repo: WriteRepoRepository, tmp_path: Path) -> None:
+    """No `-x`: provisioned artifacts survive, so a clean never forces a
+    re-provision."""
+    wt = _real_worktree(tmp_path)
+    (wt.path / "ignored-stuff").mkdir()
+    (wt.path / "ignored-stuff" / "build.out").write_text("art\n")
+    (wt.path / "mod.pyc").write_text("cache\n")
+    (wt.path / "loose.txt").write_text("x\n")
+
+    assert repo.clean_untracked(wt) == ["loose.txt"]
+    assert (wt.path / "ignored-stuff" / "build.out").exists()
+    assert (wt.path / "mod.pyc").exists()
+
+
+def test_clean_untracked_leaves_tracked_modifications_alone(repo: WriteRepoRepository, tmp_path: Path) -> None:
+    """`git clean` is the complement of `git reset --hard`, not a substitute:
+    tracked changes are the other command's business."""
+    wt = _real_worktree(tmp_path)
+    (wt.path / "keep.txt").write_text("MODIFIED\n")
+    (wt.path / "loose.txt").write_text("x\n")
+
+    assert repo.clean_untracked(wt) == ["loose.txt"]
+    assert (wt.path / "keep.txt").read_text() == "MODIFIED\n"
+
+
+def test_clean_untracked_on_a_clean_worktree_is_a_no_op(repo: WriteRepoRepository, tmp_path: Path) -> None:
+    wt = _real_worktree(tmp_path)
+
+    assert repo.clean_untracked(wt) == []
 
 
 def test_push_standalone_raises_when_no_upstream(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:

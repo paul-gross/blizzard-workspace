@@ -105,14 +105,16 @@ git -C ./projects/<repo-name> worktree remove ../../<name>/<repo-name>
 
 ## Verifying destructive commands safely
 
-`winter ws checkout`, `winter ws reset --hard`, and `winter ws destroy` mutate real worktrees and none of them can be scoped narrower than their own `PATTERNS`/`ENV` argument — a wrong or missing pattern reaches every worktree it matches, not just the one you meant to touch. `ws checkout` in particular has **no repo-scoping flag at all**: it always operates env-wide (see [Adopting a remote feature branch](#adopting-a-remote-feature-branch) below); use `ws reset <env>/<repo> REF` when you need to touch exactly one worktree.
+`winter ws checkout`, `winter ws reset --hard`, `winter ws clean`, and `winter ws destroy` mutate real worktrees and none of them can be scoped narrower than their own `PATTERNS`/`ENV` argument — a wrong or missing pattern reaches every worktree it matches, not just the one you meant to touch. `ws checkout` in particular has **no repo-scoping flag at all**: it always operates env-wide (see [Adopting a remote feature branch](#adopting-a-remote-feature-branch) below); use `ws reset <env>/<repo> REF` when you need to touch exactly one worktree.
+
+**`ws clean` is the sharpest of the four and the one to treat most carefully.** The other three move refs, so their damage is usually recoverable from the reflog; `ws clean` deletes untracked files outright and there is nothing behind them. Its blast radius is also measured in files rather than refs, so an audit of "is every branch where I expect it" will not detect a bad clean. Preview it with `--dry-run` every time the `PATTERNS` are not ones you have run before.
 
 **Never run or exercise a destructive `winter` command against a live env you don't intend to mutate** — including via `--winter=<path>`/`--service-orchestrator=<path>` core overrides, which still target the live workspace they're invoked from, not a sandbox. To verify destructive-command behavior:
 
 - Build a throwaway env (`winter ws init <scratch-env>`) or a fully scratch workspace (its own config + throwaway git repos) and exercise the command there.
 - When a throwaway env isn't practical, drive the underlying service classes directly against a scoped, disposable git repo instead of going through the live CLI.
 - Prefer `--dry-run`/`--json` to preview a command's plan before running it for real — every destructive `ws` verb that supports it reports the exact per-repo effect with no side effects.
-- Before finishing, audit every worktree you touched (or could have touched): branch attached where expected, working tree clean unless intentionally left dirty, and the commits you expect are present — not silently stranded off every ref.
+- Before finishing, audit every worktree you touched (or could have touched): branch attached where expected, working tree clean unless intentionally left dirty, and the commits you expect are present — not silently stranded off every ref. After a `ws clean`, also confirm no untracked file you meant to keep is gone — `winter ws status` reports a per-repo `untracked` count you can compare against a pre-run reading.
 
 This came out of a real incident: an agent reproducing a bug ran `winter ws checkout alpha master --force` through the core-override against its own live `alpha` env; `ws checkout` has no repo-scoping flag, so it force-moved every worktree in `alpha`, including the agent's own, and erased a completed, unpushed commit. `--force` bypasses the dirty/abandonment safety gate entirely, so no guard in the CLI would have stopped that specific command — the operating rule above (verify in a throwaway env or scratch workspace, never the live one) is what actually prevents a recurrence.
 

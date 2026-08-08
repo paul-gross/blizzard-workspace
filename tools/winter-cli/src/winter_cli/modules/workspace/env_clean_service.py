@@ -46,14 +46,17 @@ class EnvCleanService:
     def preview(self, targets: list[FeatureWorktree]) -> CleanReport:
         """Enumerate what a clean would remove, touching nothing.
 
-        Separate from `clean` so the handler can show the caller a per-file
-        list *before* prompting — the prompt has to state the real blast
-        radius, and a count computed after the deletion would be worthless for
-        that. `clean` re-enumerates rather than accepting this report back,
-        so a file created between the prompt and the confirmation is still
+        Separate from `clean` so the handler can show the caller the list
+        *before* prompting — the prompt has to state the real blast radius,
+        and a set computed after the deletion would be worthless for that.
+        `clean` re-enumerates rather than accepting this report back, so a
+        file created between the preview and the confirmation is still
         removed instead of silently surviving.
         """
-        return CleanReport(dry_run=True, repos=[self._outcome(wt) for wt in targets])
+        return CleanReport(
+            dry_run=True,
+            repos=[self._outcome(wt, self._repo_repo.list_untracked(wt)) for wt in targets],
+        )
 
     def clean(self, targets: list[FeatureWorktree], dry_run: bool) -> CleanReport:
         logger.info(
@@ -64,19 +67,18 @@ class EnvCleanService:
 
         outcomes: list[RepoCleanOutcome] = []
         for wt in targets:
-            # Enumerated before the removal in both modes: afterwards there is
-            # nothing left to list, so this is the only point the report's
-            # paths can be captured.
-            outcome = self._outcome(wt)
-            if not dry_run and outcome.paths:
-                self._repo_repo.clean_untracked(wt)
-            outcomes.append(outcome)
+            # The real run reports what `git clean` says it removed, rather
+            # than a list enumerated beforehand: the two can differ (an
+            # untracked nested git repository enumerates but is not removed),
+            # and a report that claims a deletion which did not happen is
+            # worse than no report. `clean_untracked` runs unconditionally —
+            # gating it on a prior enumeration is what previously let a
+            # worktree whose only untracked content was an empty directory
+            # report "nothing to clean" and never run.
+            paths = self._repo_repo.list_untracked(wt) if dry_run else self._repo_repo.clean_untracked(wt)
+            outcomes.append(self._outcome(wt, paths))
 
         return CleanReport(dry_run=dry_run, repos=outcomes)
 
-    def _outcome(self, wt: FeatureWorktree) -> RepoCleanOutcome:
-        return RepoCleanOutcome(
-            env=wt.environment.name,
-            repo_name=wt.repository.name,
-            paths=self._repo_repo.list_untracked(wt),
-        )
+    def _outcome(self, wt: FeatureWorktree, paths: list[str]) -> RepoCleanOutcome:
+        return RepoCleanOutcome(env=wt.environment.name, repo_name=wt.repository.name, paths=paths)

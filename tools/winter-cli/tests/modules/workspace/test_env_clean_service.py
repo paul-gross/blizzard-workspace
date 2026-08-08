@@ -30,13 +30,18 @@ class FakeWriteRepoRepository:
 
     def __init__(self) -> None:
         self.untracked: dict[tuple[str, str], list[str]] = {}
+        self.removed: dict[tuple[str, str], list[str]] = {}
         self.clean_calls: list[tuple[str, str]] = []
 
     def list_untracked(self, worktree: FeatureWorktree) -> list[str]:
         return list(self.untracked.get((worktree.environment.name, worktree.repository.name), []))
 
-    def clean_untracked(self, worktree: FeatureWorktree) -> None:
-        self.clean_calls.append((worktree.environment.name, worktree.repository.name))
+    def clean_untracked(self, worktree: FeatureWorktree) -> list[str]:
+        key = (worktree.environment.name, worktree.repository.name)
+        self.clean_calls.append(key)
+        # Defaults to the enumerated set; seed `removed` separately to model a
+        # real run whose removed set differs from what a preview enumerated.
+        return list(self.removed.get(key, self.untracked.get(key, [])))
 
     # Methods touched by other IWriteRepoRepository code paths — raise to
     # surface accidental fan-out beyond the call under test.
@@ -92,21 +97,46 @@ def test_clean_dry_run_enumerates_without_removing(
     assert report.repos[0].paths == ["scratch.py"]
 
 
-def test_clean_skips_git_call_for_worktree_with_nothing_untracked(
+def test_clean_runs_git_clean_on_every_target_unconditionally(
     service: EnvCleanService, fake_repo_repo: FakeWriteRepoRepository, workspace: Workspace
 ) -> None:
-    """A worktree with nothing untracked is still reported, but `git clean`
-    never runs for it — the command is a no-op there, and shelling out anyway
-    would make a clean run look like it touched every matched worktree."""
-    clean_wt = _wt(workspace, "winter")
-    dirty_wt = _wt(workspace, "winter-docs")
+    """`git clean` runs for every matched worktree, including ones a preview
+    would call empty.
+
+    Regression: gating the call on a prior enumeration meant a worktree whose
+    only untracked content was an **empty directory** — invisible to
+    `git ls-files --others` but removed by `git clean -fd` — reported
+    "nothing to clean" and was never cleaned.
+    """
+    quiet_wt = _wt(workspace, "winter")
+    noisy_wt = _wt(workspace, "winter-docs")
     fake_repo_repo.untracked[("alpha", "winter-docs")] = ["build/out.html"]
 
-    report = service.clean([clean_wt, dirty_wt], dry_run=False)
+    report = service.clean([quiet_wt, noisy_wt], dry_run=False)
 
-    assert fake_repo_repo.clean_calls == [("alpha", "winter-docs")]
+    assert fake_repo_repo.clean_calls == [("alpha", "winter"), ("alpha", "winter-docs")]
     assert [o.repo_name for o in report.repos] == ["winter", "winter-docs"]
     assert report.repos[0].paths == []
+    assert report.total == 1
+
+
+def test_clean_reports_what_git_removed_not_what_was_enumerated(
+    service: EnvCleanService, fake_repo_repo: FakeWriteRepoRepository, workspace: Workspace
+) -> None:
+    """The real run's report comes from `clean_untracked`'s return value.
+
+    Regression: an untracked nested git repository is enumerated by
+    `git ls-files --others` but is **not** removed by `git clean -fd`, so a
+    report derived from the enumeration claimed a deletion that never
+    happened.
+    """
+    wt = _wt(workspace, "winter")
+    fake_repo_repo.untracked[("alpha", "winter")] = ["loose.txt", "nested/"]
+    fake_repo_repo.removed[("alpha", "winter")] = ["loose.txt"]
+
+    report = service.clean([wt], dry_run=False)
+
+    assert report.repos[0].paths == ["loose.txt"]
     assert report.total == 1
 
 
@@ -153,7 +183,7 @@ def test_preview_enumerates_without_removing(
 def test_preview_does_not_freeze_the_removal_set(
     service: EnvCleanService, fake_repo_repo: FakeWriteRepoRepository, workspace: Workspace
 ) -> None:
-    """`clean` re-enumerates rather than reusing the preview's paths, so a file
+    """`clean` re-derives rather than reusing the preview's paths, so a file
     created between the preview and the confirmation is still removed."""
     wt = _wt(workspace, "winter")
     fake_repo_repo.untracked[("alpha", "winter")] = ["first.py"]
@@ -164,3 +194,15 @@ def test_preview_does_not_freeze_the_removal_set(
 
     assert report.repos[0].paths == ["first.py", "appeared-later.py"]
     assert report.total == 2
+
+
+def test_dry_run_uses_the_enumeration_and_never_the_removal_call(
+    service: EnvCleanService, fake_repo_repo: FakeWriteRepoRepository, workspace: Workspace
+) -> None:
+    wt = _wt(workspace, "winter")
+    fake_repo_repo.untracked[("alpha", "winter")] = ["scratch.py"]
+
+    report = service.clean([wt], dry_run=True)
+
+    assert fake_repo_repo.clean_calls == []
+    assert report.repos[0].paths == ["scratch.py"]

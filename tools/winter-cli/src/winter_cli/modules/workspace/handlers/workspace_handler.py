@@ -595,12 +595,16 @@ class WorkspaceHandler:
 
         self._render_clean_report(report)
 
-    def _render_clean_preview(self, report: CleanReport) -> None:
-        """The per-file list shown before the prompt, and under `--dry-run`.
+    def _render_clean_preview(self, report: CleanReport, *, hypothetical: bool = False) -> None:
+        """The per-path list shown before the prompt, and under `--dry-run`.
 
         Prints every path rather than a per-repo count — this is the only look
         a caller gets at what is about to be deleted, and a count cannot tell
         them whether the scratch file they care about is in the set.
+
+        `hypothetical` softens the summary for `--dry-run`, where the
+        imperative "this cannot be undone" would otherwise sit directly above
+        "nothing removed".
         """
         out = self._cli_output_svc
         for outcome in report.repos:
@@ -610,17 +614,20 @@ class WorkspaceHandler:
             for path in outcome.paths:
                 click.echo(f"  {out.style(path, 'dim')}")
         worktrees = sum(1 for o in report.repos if o.paths)
-        click.echo(
-            f"\nThis will remove {out.style(str(report.total), 'bold')} untracked "
-            f"file{'s' if report.total != 1 else ''} from "
-            f"{out.style(str(worktrees), 'bold')} worktree{'s' if worktrees != 1 else ''}. "
-            f"{out.style('This cannot be undone.', 'red')}"
+        lead = "Would remove" if hypothetical else "This will remove"
+        summary = (
+            f"\n{lead} {out.style(str(report.total), 'bold')} untracked "
+            f"path{'s' if report.total != 1 else ''} from "
+            f"{out.style(str(worktrees), 'bold')} worktree{'s' if worktrees != 1 else ''}."
         )
+        if not hypothetical:
+            summary += f" {out.style('This cannot be undone.', 'red')}"
+        click.echo(summary)
 
     def _render_clean_report(self, report: CleanReport) -> None:
         out = self._cli_output_svc
         if report.dry_run:
-            self._render_clean_preview(report)
+            self._render_clean_preview(report, hypothetical=True)
             click.echo(f"\n{out.style('✓', 'green')} Dry run — nothing removed.")
             return
 
@@ -636,7 +643,7 @@ class WorkspaceHandler:
         click.echo(
             f"\n{out.style('✓', 'green')} Removed "
             f"{out.style(str(report.total), 'bold')} untracked "
-            f"file{'s' if report.total != 1 else ''} from "
+            f"path{'s' if report.total != 1 else ''} from "
             f"{out.style(str(len(rows)), 'bold')} worktree{'s' if len(rows) != 1 else ''}."
         )
 

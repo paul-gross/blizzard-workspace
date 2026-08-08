@@ -1,5 +1,6 @@
 """CLI argument-parsing tests for the glob/multi-target surface added to
-`provision`, `ws destroy`, `ws diff`, `ws disconnect`, `ws update`, and `lint`.
+`provision`, `ws destroy`, `ws diff`, `ws disconnect`, `ws update`, `ws reset`,
+`ws clean`, and `lint`.
 
 Covers argument shape only (nargs, required-ness, removed/renamed flags) via
 `click.testing.CliRunner` with no container wiring — these assertions run
@@ -13,7 +14,14 @@ from click.testing import CliRunner
 
 from winter_cli.modules.lint.command import lint_command
 from winter_cli.modules.provision.command import provision_command
-from winter_cli.modules.workspace.command import ws_destroy, ws_diff, ws_disconnect, ws_reset, ws_update
+from winter_cli.modules.workspace.command import (
+    ws_clean,
+    ws_destroy,
+    ws_diff,
+    ws_disconnect,
+    ws_reset,
+    ws_update,
+)
 
 
 class TestProvisionCli:
@@ -183,3 +191,53 @@ class TestLintCli:
         result = CliRunner().invoke(lint_command, ["--help"])
         assert result.exit_code == 0
         assert "SCOPES" in result.output
+
+
+class TestWsCleanCli:
+    def test_no_patterns_is_a_usage_error(self) -> None:
+        """There is deliberately no implicit "every worktree" default for a
+        command that deletes irrecoverably."""
+        result = CliRunner().invoke(ws_clean, [])
+        assert result.exit_code != 0
+        assert "Missing argument" in result.output or "PATTERNS" in result.output
+
+    def test_invalid_pattern_two_slashes_rejected(self) -> None:
+        result = CliRunner().invoke(ws_clean, ["alpha/winter/extra"])
+        assert result.exit_code != 0
+        assert "one '/' max" in result.output
+
+    def test_json_without_force_or_dry_run_is_refused(self) -> None:
+        """The confirmation prompt would corrupt the NDJSON stream and hang a
+        non-interactive consumer, so the combination is refused rather than
+        silently auto-forced into an unrecoverable delete."""
+        result = CliRunner().invoke(ws_clean, ["alpha", "--json"])
+        assert result.exit_code != 0
+        assert "--json requires --force or --dry-run" in result.output
+
+    def test_json_with_dry_run_is_accepted_by_the_parser(self) -> None:
+        result = CliRunner().invoke(ws_clean, ["alpha", "--json", "--dry-run"])
+        assert "--json requires" not in result.output
+
+    def test_json_with_force_is_accepted_by_the_parser(self) -> None:
+        result = CliRunner().invoke(ws_clean, ["alpha", "--json", "--force"])
+        assert "--json requires" not in result.output
+
+    def test_force_help_mentions_confirmation_bypass(self) -> None:
+        result = CliRunner().invoke(ws_clean, ["--help"])
+        assert result.exit_code == 0
+        assert "--force" in result.output
+        assert "confirmation" in result.output.lower()
+
+    def test_help_documents_pattern_grammar_and_flags(self) -> None:
+        result = CliRunner().invoke(ws_clean, ["--help"])
+        assert result.exit_code == 0
+        assert "PATTERNS" in result.output
+        assert "--dry-run" in result.output
+        assert "--json" in result.output
+
+    def test_help_states_ignored_files_are_never_removed(self) -> None:
+        """The never-`-x` invariant is the reason a clean cannot force a
+        re-provision; it belongs where an agent reading `--help` will see it."""
+        result = CliRunner().invoke(ws_clean, ["--help"])
+        assert result.exit_code == 0
+        assert "gnored" in result.output

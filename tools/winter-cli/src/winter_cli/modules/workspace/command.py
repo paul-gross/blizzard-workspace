@@ -566,6 +566,15 @@ def ws_clean(
     """
     for pattern in patterns:
         _validate_pattern(pattern)
+    if output_json and not force and not dry_run:
+        # The confirmation prompt writes human text to stdout and blocks, which
+        # would corrupt the NDJSON stream and hang a non-interactive consumer.
+        # Refused rather than auto-forced: --json must never be the reason an
+        # unrecoverable delete ran without someone asking for it.
+        raise click.ClickException(
+            "--json requires --force or --dry-run: the confirmation prompt would corrupt the NDJSON stream. "
+            "Use --dry-run to preview, or --force once you mean it."
+        )
     container = cli_ctx(ctx).container
     handler = container.workspace_handler()
     handler.clean(
