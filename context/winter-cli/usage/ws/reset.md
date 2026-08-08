@@ -14,7 +14,11 @@ This is `git reset`, not `git checkout` — **upstream tracking is never touched
 |------|----------------|-------|---------------|
 | `--soft` | moves | kept | kept — delta lands **staged** |
 | `--mixed` (default) | moves | reset | kept — delta lands **unstaged** |
-| `--hard` | moves | reset | reset — delta discarded |
+| `--hard` | moves | reset | reset — **tracked** delta discarded |
+
+**Untracked files survive every mode, including `--hard`.** `--hard` resets the three trees git tracks, so an untracked file — one never `git add`ed — is in none of them and has no path entry to reconcile; git leaves it on disk. Staged adds, staged and unstaged deletes, and modifications are all discarded or restored as the table says. This is plain `git reset` behavior, not a winter addition: `reset --hard` and `git clean` are complements, and `winter ws reset` runs only the former. Resetting an env to `origin/main` therefore does **not** produce a pristine env — stale generated files and scratch files remain, and remain importable. Remove them per worktree with `git clean -nd` to preview and `git clean -fd` to delete; omit `-x` unless you also mean to discard ignored files like `.venv` and `node_modules`, which forces a re-provision.
+
+The dirty guard below reflects the same split: it counts staged and unstaged changes but **not** untracked files, so a worktree whose only local change is untracked files passes the guard, resets, and keeps those files with no refusal and nothing in the report.
 
 `--soft` and `--mixed` apply **no** dirty or abandonment guard — content is preserved (neither touches the working tree, matching plain `git reset --soft`/`--mixed`, which never refuse on a dirty tree), but history is not: both still move the branch pointer, abandoning whatever commits it left behind (reflog-only afterwards). A bare `winter ws reset '*/*' origin/main --soft` moves every repo's pointer with no refusal at all — the blast radius scales with `PATTERNS`, not with the mode. `--hard` is the only mode the safety gate applies to: it refuses on any matched repo that is dirty, or carries commits not reachable from the branch it's moving *away from* (its own current upstream, e.g. `origin/feature-123`, falling back to `origin/<main-branch>` when disconnected) — **the refusal is all-or-nothing across the whole run: a per-repo report, and no `git reset` executes in any repo.** `--force` bypasses this gate.
 
