@@ -862,7 +862,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 "diverged ahead/behind probe failed for %s vs %s: %s",
                 repo_name,
                 source_ref,
-                exc.stderr.strip() if isinstance(exc.stderr, str) else exc,
+                unwrap_gitpython_stream(exc.stderr).strip() if isinstance(exc.stderr, str) else exc,
             )
         return RepoMergeOutcome(
             repo_name=repo_name,
@@ -887,7 +887,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 "commit-count probe failed for %s over %s: %s",
                 repo_name,
                 rev_range,
-                exc.stderr.strip() if isinstance(exc.stderr, str) else exc,
+                unwrap_gitpython_stream(exc.stderr).strip() if isinstance(exc.stderr, str) else exc,
             )
             return 0
 
@@ -914,7 +914,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 "diverged ahead/behind probe failed for %s vs %s: %s",
                 repo_name,
                 target_ref,
-                exc.stderr.strip() if isinstance(exc.stderr, str) else exc,
+                unwrap_gitpython_stream(exc.stderr).strip() if isinstance(exc.stderr, str) else exc,
             )
         return RepoSyncOutcome(
             repo_name=repo_name,
@@ -933,7 +933,7 @@ class WriteRepoRepository(ReadRepoRepository):
         except git.GitCommandError as exc:
             logger.warning(
                 "abort cleanup failed: %s",
-                exc.stderr.strip() if isinstance(exc.stderr, str) else exc,
+                unwrap_gitpython_stream(exc.stderr).strip() if isinstance(exc.stderr, str) else exc,
             )
 
     @staticmethod

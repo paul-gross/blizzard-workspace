@@ -2,8 +2,18 @@ from __future__ import annotations
 
 import git
 
-from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
+from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory, unwrap_gitpython_stream
 from winter_cli.modules.workspace.models import RepoError
+
+
+def test_unwrap_gitpython_stream_extracts_decorated_multiline_stream():
+    """Real git stderr is multi-line and newline-terminated; the regex needs DOTALL to match it."""
+    decorated = "\n  stderr: 'remote: Permission denied\nfatal: Could not read from remote repository.\n'"
+    assert unwrap_gitpython_stream(decorated) == "remote: Permission denied\nfatal: Could not read from remote repository.\n"
+
+
+def test_unwrap_gitpython_stream_passes_through_plain_string():
+    assert unwrap_gitpython_stream("already plain, no decoration") == "already plain, no decoration"
 
 
 def test_repo_error_str_includes_structured_fields():

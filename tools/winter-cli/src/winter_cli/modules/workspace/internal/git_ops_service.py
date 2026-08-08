@@ -13,7 +13,7 @@ from typing import TypeVar
 
 import git
 
-from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
+from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory, unwrap_gitpython_stream
 
 logger = logging.getLogger(__name__)
 
@@ -254,7 +254,7 @@ class GitOpsService:
                     "transient git error (attempt %d/%d): %s — retrying in %.2fs",
                     attempt,
                     self.MAX_ATTEMPTS,
-                    exc.stderr.strip() if isinstance(exc.stderr, str) else "",
+                    unwrap_gitpython_stream(exc.stderr).strip() if isinstance(exc.stderr, str) else "",
                     delay,
                 )
                 self._sleep(delay)
