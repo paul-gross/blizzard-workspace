@@ -29,13 +29,19 @@ The listing granularity is git's own: a whole untracked directory is one `dir/` 
 
 ## Confirmation and previewing
 
-**`ws clean` prompts before removing anything unless `--force` — at any worktree count**, including a single match. This is stricter than [`ws reset --hard`](./reset.md), whose own prompt threshold that page owns. The asymmetry is intentional: a reset leaves its commits in the reflog, while cleaned files are unrecoverable, so worktree count is the wrong axis to decide on. The prompt lists **every path** it would delete, not a per-repo count.
+**`ws clean` prompts before removing anything unless `--force` — at any worktree count**, including a single match. [`ws reset --hard`](./reset.md) owns its own, looser prompt threshold. The asymmetry is intentional: a reset leaves its commits in the reflog, while cleaned files are unrecoverable, so worktree count is the wrong axis to decide on. The prompt lists **every path** it would delete, not a per-repo count.
 
-That list comes from `git clean -nd` — the dry run of the very command the real run executes — so the preview and the removal are the same set by construction rather than by two enumerations that have to be kept in agreement.
+That list comes from `git clean -nd`, the dry run of the very command the real run executes, so both apply the same selection rules. They are still enumerated at different moments: a file created between the prompt and your answer is removed and reported, and a worktree the prompt omitted as empty is still visited. What the prompt guarantees is the rule, not a frozen set.
 
 `--dry-run` prints that same list and removes nothing, skipping the prompt. It is the only preview available, so prefer it before any run whose `PATTERNS` you haven't used before. A run where every matched worktree is already clean reports `Nothing to clean` and exits without prompting.
 
 Matching no worktrees at all reports the patterns and exits zero — the same no-match shape `ws reset` uses.
+
+## Partial failure
+
+**`ws clean` is not all-or-nothing**, unlike [`reset`](./reset.md) and [`checkout`](./checkout.md), and cannot be: a deleted file has nothing to roll back to. `git clean` is not transactional either — it removes what it can, warns on what it cannot (an unreadable directory, a permission error), and exits non-zero having already deleted files.
+
+When that happens the run stops at that worktree and exits non-zero, but still reports every path it removed, in that worktree and in every worktree before it, followed by the worktree it stopped on and why. Worktrees after that one are left untouched. That report is the only record those files existed, so read it before re-running: a second run cannot tell you what the first one took.
 
 ## Examples
 

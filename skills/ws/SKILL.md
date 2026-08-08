@@ -44,7 +44,8 @@ What would you like to do?
 | Tear down, destroy, remove an environment | `winter ws destroy <name>` |
 | Adopt a remote feature branch into an env | `winter ws checkout <name> <feature-branch>` |
 | Roll one or more worktrees back to a ref, move a branch pointer (not env-wide, not a tracking change) | `winter ws reset <name>/<repo> <ref>` — scope to `<env>/<repo>`; a bare `<env>` moves *every* non-pinned worktree in it |
-| Clean up orphan project clones / broken symlinks | `winter ws prune` |
+| Remove untracked/scratch files from worktrees, get an env back to a pristine state | `winter ws clean <name>/<repo> --dry-run` first — a bare `<env>` reaches *every* non-pinned worktree, and removed files are unrecoverable. Pair with `winter ws reset` when the goal is a pristine ref: reset restores tracked files, clean removes untracked ones |
+| Remove orphan project clones / broken symlinks left by a deleted repo or env | `winter ws prune` |
 
 Respond with a brief explanation and the exact command to run. For example:
 

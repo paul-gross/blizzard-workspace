@@ -5,6 +5,7 @@ from winter_cli.modules.workspace.models.domain_model import (
     FeatureWorktree,
     IWorkspaceRepository,
     MergeMode,
+    PartialCleanError,
     PinnedScope,
     ProjectRepository,
     PullMode,
@@ -16,6 +17,7 @@ from winter_cli.modules.workspace.models.domain_model import (
 )
 from winter_cli.modules.workspace.models.service_model import (
     CheckoutResult,
+    CleanFailure,
     CleanReport,
     EnvCheckoutReport,
     EnvDiffResult,
@@ -64,6 +66,7 @@ from winter_cli.modules.workspace.models.snapshot_model import (
 
 __all__ = [
     "CheckoutResult",
+    "CleanFailure",
     "CleanReport",
     "DashboardSnapshot",
     "DiffMode",
@@ -87,6 +90,7 @@ __all__ = [
     "MergeReport",
     "MergeResult",
     "OrphanSnapshot",
+    "PartialCleanError",
     "PinnedScope",
     "ProjectCheckoutSnapshot",
     "ProjectRepository",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 import git
@@ -14,6 +15,7 @@ from winter_cli.modules.workspace.models import (
     LocalFastForward,
     MergeMode,
     MergeResult,
+    PartialCleanError,
     ProjectRepository,
     PullMode,
     RepoError,
@@ -33,22 +35,49 @@ logger = logging.getLogger(__name__)
 _CLEAN_DRY_RUN_PREFIX = "Would remove "
 _CLEAN_REMOVED_PREFIX = "Removing "
 
+# Lines `git clean` emits that name something it is *not* removing. Recognized
+# so the fail-closed check below cannot mistake "git only had skips to report"
+# for "the prefixes stopped matching". `git clean -nd` reports an untracked
+# nested repository this way on the git versions that mention it at all.
+_CLEAN_NON_REMOVAL_PREFIXES = ("Would skip ", "Skipping ", "warning:")
 
-def _parse_clean_output(output: str, prefix: str, repo_name: str) -> list[str]:
+
+_GITPYTHON_STREAM_RE = re.compile(r"^\s*std(?:out|err):\s*'(.*)'\s*$", re.DOTALL)
+
+
+def _unwrap_gitpython_stream(raw: str) -> str:
+    """The raw text out of GitPython's decorated `GitCommandError.stdout`.
+
+    `CommandError.__init__` stores the stream as `"\\n  stdout: '<text>'"`
+    rather than as the text itself, so a parser reading it directly sees one
+    label line and finds no paths. Returns `raw` unchanged when it carries no
+    decoration, so this is safe on an already-plain string.
+    """
+    match = _GITPYTHON_STREAM_RE.match(raw)
+    return match.group(1) if match else raw
+
+
+def _parse_clean_output(output: str, prefix: str, repo_name: str, *, strict: bool = True) -> list[str]:
     """Paths out of `git clean` output, or raise if the line shape is unrecognized.
 
     Fails closed rather than returning what it could parse: a silent partial
     parse would under-report the removal set on the one command whose preview
     is the only thing standing in front of an unrecoverable delete. An empty
-    `output` is the legitimate nothing-to-clean case and yields `[]`; output
-    that exists but matches no line is a broken contract (git reworded the
-    message, or the locale pin failed) and raises.
+    `output`, or one carrying only recognized non-removal lines, is the
+    legitimate nothing-to-clean case and yields `[]`; output that exists but
+    matches nothing known is a broken contract (git reworded the message, or
+    the locale pin failed) and raises.
+
+    `strict=False` is for the already-failing path, where this is salvaging a
+    partial record from a command that has *already deleted files*: raising a
+    second error there would discard the very paths being rescued.
     """
     lines = [line.strip() for line in output.splitlines() if line.strip()]
-    if not lines:
-        return []
     paths = [line[len(prefix) :] for line in lines if line.startswith(prefix)]
-    if not paths:
+    if paths or not strict:
+        return paths
+    unexplained = [line for line in lines if not line.startswith(_CLEAN_NON_REMOVAL_PREFIXES)]
+    if unexplained:
         raise RepoError(
             message=f"could not parse `git clean` output for {repo_name}",
             subcommand="clean",
@@ -371,17 +400,43 @@ class WriteRepoRepository(ReadRepoRepository):
         strings: under a non-English locale an unforced parse would silently
         yield an empty list, which reads as "nothing to clean" for `-nd` and as
         "removed nothing" for `-fd`.
+
+        The `git.Repo(...)` construction is inside the wrapped region because
+        it — not the `clean` call — is what raises for a path that is missing
+        or not a repository. Left outside, a worktree configured but absent on
+        disk escaped as a raw `NoSuchPathError` traceback mid-loop, after
+        earlier worktrees had already been cleaned.
         """
-        with git.Repo(str(worktree.path)) as r:
-            try:
-                with r.git.custom_environment(LC_ALL="C", LANGUAGE="C", LC_MESSAGES="C"):
-                    output = r.git.clean(flags)
-            except git.GitCommandError as exc:
-                raise self._error_factory.from_git(
-                    exc,
-                    message=f"clean failed for {worktree.repository.name}",
-                    cwd=worktree.path,
-                ) from exc
+        try:
+            with git.Repo(str(worktree.path)) as r, r.git.custom_environment(LC_ALL="C", LANGUAGE="C", LC_MESSAGES="C"):
+                output = r.git.clean(flags)
+        except (git.NoSuchPathError, git.InvalidGitRepositoryError) as exc:
+            raise self._error_factory.from_exception(
+                exc,
+                message=f"clean failed for {worktree.repository.name}: {worktree.path} is not a git worktree",
+                cwd=worktree.path,
+            ) from exc
+        except git.GitCommandError as exc:
+            # `git clean -fd` is not transactional: it deletes what it can,
+            # warns on the rest, and exits non-zero — so stdout may name paths
+            # that are already gone. Carry them; they are unrecoverable and
+            # this is the only record of them.
+            raw_stdout = _unwrap_gitpython_stream(getattr(exc, "stdout", "") or "")
+            removed = _parse_clean_output(raw_stdout, prefix, worktree.repository.name, strict=False)
+            base = self._error_factory.from_git(
+                exc,
+                message=f"clean failed for {worktree.repository.name}",
+                cwd=worktree.path,
+            )
+            raise PartialCleanError(
+                base.message,
+                removed=removed,
+                subcommand=base.subcommand,
+                cmd_args=base.cmd_args,
+                cwd=base.cwd,
+                exit_code=base.exit_code,
+                stderr=base.stderr,
+            ) from exc
         return _parse_clean_output(output, prefix, worktree.repository.name)
 
     def unset_upstream(self, worktree: FeatureWorktree) -> None:

@@ -3,9 +3,12 @@ from __future__ import annotations
 import logging
 
 from winter_cli.modules.workspace.models import (
+    CleanFailure,
     CleanReport,
     FeatureWorktree,
+    PartialCleanError,
     RepoCleanOutcome,
+    RepoError,
 )
 from winter_cli.modules.workspace.repo_repository import IWriteRepoRepository
 
@@ -34,10 +37,15 @@ class EnvCleanService:
     answered by the handler's confirmation prompt, which is why this service
     never prompts and never refuses.
 
-    Phase 2 is not atomic across repos: if a git op raises mid-loop, worktrees
-    processed earlier are already cleaned. `dry_run` enumerates every worktree
-    but removes nothing, and is the only preview available — cleaned files are
-    unrecoverable, with no reflog behind them.
+    A run is **not** all-or-nothing and cannot be: a deleted file has nothing
+    to roll back to. When a git op fails the loop stops, but the report still
+    carries every worktree already cleaned plus whatever the failing one had
+    already lost — that partial record is the only trace those files existed,
+    so it is returned rather than thrown away with the stack frame.
+
+    `dry_run` enumerates every worktree but removes nothing, and is the only
+    preview available — cleaned files are unrecoverable, with no reflog behind
+    them.
     """
 
     def __init__(self, repo_repo: IWriteRepoRepository) -> None:
@@ -67,15 +75,33 @@ class EnvCleanService:
 
         outcomes: list[RepoCleanOutcome] = []
         for wt in targets:
-            # The real run reports what `git clean` says it removed, rather
-            # than a list enumerated beforehand: the two can differ (an
-            # untracked nested git repository enumerates but is not removed),
-            # and a report that claims a deletion which did not happen is
-            # worse than no report. `clean_untracked` runs unconditionally —
-            # gating it on a prior enumeration is what previously let a
-            # worktree whose only untracked content was an empty directory
-            # report "nothing to clean" and never run.
-            paths = self._repo_repo.list_untracked(wt) if dry_run else self._repo_repo.clean_untracked(wt)
+            # The real run reports what `git clean` says it removed rather
+            # than reusing the preview's list. The two are derived from the
+            # same command (`-nd` vs `-fd`) so they share selection rules, but
+            # they are enumerated at different moments: a file created in
+            # between is removed and must still be reported. `clean_untracked`
+            # runs unconditionally — gating it on a prior enumeration is what
+            # previously let a worktree whose only untracked content was an
+            # empty directory report "nothing to clean" and never run.
+            try:
+                paths = self._repo_repo.list_untracked(wt) if dry_run else self._repo_repo.clean_untracked(wt)
+            except RepoError as exc:
+                # Stop, but return rather than propagate. Anything already
+                # deleted — in this worktree and every earlier one — is
+                # unrecoverable, so discarding `outcomes` with the stack frame
+                # would destroy the only record of what was lost.
+                removed = exc.removed if isinstance(exc, PartialCleanError) else []
+                outcomes.append(self._outcome(wt, removed))
+                logger.error("clean: stopped at %s/%s — %s", wt.environment.name, wt.repository.name, exc)
+                return CleanReport(
+                    dry_run=dry_run,
+                    repos=outcomes,
+                    failure=CleanFailure(
+                        env=wt.environment.name,
+                        repo_name=wt.repository.name,
+                        message=str(exc),
+                    ),
+                )
             outcomes.append(self._outcome(wt, paths))
 
         return CleanReport(dry_run=dry_run, repos=outcomes)

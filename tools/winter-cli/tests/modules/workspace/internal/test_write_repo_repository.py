@@ -13,6 +13,7 @@ from winter_cli.modules.workspace.internal.write_repo_repository import WriteRep
 from winter_cli.modules.workspace.models import (
     FeatureEnvironment,
     FeatureWorktree,
+    PartialCleanError,
     ProjectRepository,
     RepoError,
     ResetMode,
@@ -271,6 +272,73 @@ def test_clean_untracked_on_a_clean_worktree_is_a_no_op(repo: WriteRepoRepositor
     wt = _real_worktree(tmp_path)
 
     assert repo.clean_untracked(wt) == []
+
+
+def test_clean_untracked_reports_what_it_deleted_before_failing(repo: WriteRepoRepository, tmp_path: Path) -> None:
+    """`git clean -fd` is not transactional: it deletes what it can, warns on
+    the rest, and exits non-zero. Those deletions are unrecoverable, so the
+    error has to carry them — dropping them loses the only record."""
+    wt = _real_worktree(tmp_path)
+    (wt.path / "removable.txt").write_text("x\n")
+    locked = wt.path / "locked"
+    locked.mkdir()
+    (locked / "victim.txt").write_text("v\n")
+    locked.chmod(0o500)
+    try:
+        with pytest.raises(PartialCleanError) as ei:
+            repo.clean_untracked(wt)
+    finally:
+        locked.chmod(0o700)
+
+    assert "removable.txt" in ei.value.removed
+    assert not (wt.path / "removable.txt").exists(), "git deleted it; the error must say so"
+    assert ei.value.subcommand == "clean"
+
+
+def test_clean_untracked_on_a_missing_worktree_raises_repo_error(repo: WriteRepoRepository, tmp_path: Path) -> None:
+    """A configured-but-absent worktree must arrive as a RepoError naming the
+    path, not as a raw GitPython traceback mid-loop after earlier worktrees
+    were already cleaned."""
+    wt = _real_worktree(tmp_path)
+    missing = FeatureWorktree(
+        workspace=wt.workspace,
+        environment=wt.environment,
+        repository=ProjectRepository(name="gone", main_path=tmp_path / "gone", main_branch="main"),
+    )
+
+    with pytest.raises(RepoError) as ei:
+        repo.clean_untracked(missing)
+
+    assert "not a git worktree" in str(ei.value)
+
+
+def test_clean_untracked_on_a_non_repo_directory_raises_repo_error(repo: WriteRepoRepository, tmp_path: Path) -> None:
+    wt = _real_worktree(tmp_path)
+    plain = wt.environment.path / "plain"
+    plain.mkdir()
+    not_a_repo = FeatureWorktree(
+        workspace=wt.workspace,
+        environment=wt.environment,
+        repository=ProjectRepository(name="plain", main_path=plain, main_branch="main"),
+    )
+
+    with pytest.raises(RepoError) as ei:
+        repo.clean_untracked(not_a_repo)
+
+    assert "not a git worktree" in str(ei.value)
+
+
+def test_parse_clean_output_tolerates_skip_only_output() -> None:
+    """Output naming only things git declined to remove is a legitimate
+    nothing-to-clean result, not a broken prefix contract."""
+    out = "Would skip repository nested/\nwarning: failed to remove locked/: Permission denied"
+    assert write_repo_repository._parse_clean_output(out, "Would remove ", "demo") == []
+
+
+def test_parse_clean_output_non_strict_never_raises() -> None:
+    """The salvage path must not raise: it is recovering the record of files
+    that are already gone."""
+    assert write_repo_repository._parse_clean_output("Entfernen x", "Removing ", "demo", strict=False) == []
 
 
 def test_push_standalone_raises_when_no_upstream(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:

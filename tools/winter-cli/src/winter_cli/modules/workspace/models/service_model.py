@@ -361,6 +361,21 @@ class RepoCleanOutcome:
 
 
 @dataclasses.dataclass
+class CleanFailure:
+    """The worktree a `winter ws clean` run stopped on, and why.
+
+    Present only when a git operation raised. The paths it had already removed
+    are still carried by that worktree's `RepoCleanOutcome`, because `git
+    clean -fd` deletes what it can before failing and those deletions are
+    unrecoverable.
+    """
+
+    env: str
+    repo_name: str
+    message: str
+
+
+@dataclasses.dataclass
 class CleanReport:
     """Report from `winter ws clean`.
 
@@ -370,6 +385,12 @@ class CleanReport:
     what stands between the caller and the deletion. `dry_run` distinguishes a
     preview (paths enumerated, nothing removed) from a real run.
 
+    `failure` records a run that stopped partway. The run is **not**
+    all-or-nothing — it cannot be, since a deleted file has nothing to roll
+    back to — so `repos` still lists every worktree processed before the
+    failure plus whatever the failing one had already lost. That partial
+    record is the only trace those files ever existed.
+
     Ignored files are outside this report entirely, in both modes: `winter ws
     clean` never removes them, so a worktree whose only untracked content is
     ignored reports zero paths.
@@ -377,6 +398,7 @@ class CleanReport:
 
     dry_run: bool
     repos: list[RepoCleanOutcome]
+    failure: CleanFailure | None = None
 
     @property
     def total(self) -> int:

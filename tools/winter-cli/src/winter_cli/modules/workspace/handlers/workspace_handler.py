@@ -591,9 +591,13 @@ class WorkspaceHandler:
         if params.output_json:
             for line in _clean_ndjson_lines(report):
                 click.echo(line)
+            if report.failure is not None:
+                sys.exit(1)
             return
 
         self._render_clean_report(report)
+        if report.failure is not None:
+            sys.exit(1)
 
     def _render_clean_preview(self, report: CleanReport, *, hypothetical: bool = False) -> None:
         """The per-path list shown before the prompt, and under `--dry-run`.
@@ -631,21 +635,38 @@ class WorkspaceHandler:
             click.echo(f"\n{out.style('✓', 'green')} Dry run — nothing removed.")
             return
 
-        rows: list[list[str | Cell]] = []
+        # Every removed path is printed, not just a per-repo count: `--force`
+        # skips the pre-run preview, so without this a scripted-use run would
+        # destroy files unrecoverably and leave no record anywhere of which.
+        touched = 0
         for outcome in report.repos:
             if not outcome.paths:
                 continue
-            rows.append([f"{outcome.env}/{outcome.repo_name}", str(outcome.count)])
-
-        for line in out.render_table(rows, headers=["WORKTREE", "REMOVED"], row_styles=["green"] * len(rows)):
-            click.echo(line)
+            touched += 1
+            click.echo(f"\n{out.style(f'{outcome.env}/{outcome.repo_name}', 'bold')} ({outcome.count})")
+            for path in outcome.paths:
+                click.echo(f"  {out.style(path, 'dim')}")
 
         click.echo(
             f"\n{out.style('✓', 'green')} Removed "
             f"{out.style(str(report.total), 'bold')} untracked "
             f"path{'s' if report.total != 1 else ''} from "
-            f"{out.style(str(len(rows)), 'bold')} worktree{'s' if len(rows) != 1 else ''}."
+            f"{out.style(str(touched), 'bold')} worktree{'s' if touched != 1 else ''}."
         )
+
+        if report.failure is not None:
+            failure = report.failure
+            click.echo(
+                f"\n{out.style('✗', 'red')} Stopped at "
+                f"{out.style(f'{failure.env}/{failure.repo_name}', 'bold')} — {failure.message}"
+            )
+            click.echo(
+                out.style(
+                    "Paths listed above were already removed and cannot be recovered. "
+                    "Worktrees after this one were not processed.",
+                    "dim",
+                )
+            )
 
     def fetch(self, params: EnvFetchParams) -> None:
         self._drift_warning_svc.raise_warning()
@@ -1541,8 +1562,10 @@ def _clean_ndjson_lines(report: CleanReport) -> list[str]:
     and unlike a human at the prompt it cannot ask. Worktrees with nothing
     untracked still emit an event, so a consumer sees the full matched set.
 
-    `success` is unconditionally True — cleaning has no refusal path (see
-    `EnvCleanService`); a git failure raises instead of reporting.
+    There is no refusal path (see `EnvCleanService`), so `success` reflects
+    only whether a git op failed mid-run. On a failure the preceding
+    `repo_clean` events still carry what was already deleted — those files are
+    unrecoverable, and this is the consumer's only record of them.
     """
     lines = [json.dumps({"type": "clean_started", "dry_run": report.dry_run})]
     for outcome in report.repos:
@@ -1557,5 +1580,16 @@ def _clean_ndjson_lines(report: CleanReport) -> list[str]:
                 }
             )
         )
-    lines.append(json.dumps({"type": "clean_completed", "success": True, "total": report.total}))
+    completed: dict[str, Any] = {
+        "type": "clean_completed",
+        "success": report.failure is None,
+        "total": report.total,
+    }
+    if report.failure is not None:
+        completed["failure"] = {
+            "env": report.failure.env,
+            "repo": report.failure.repo_name,
+            "message": report.failure.message,
+        }
+    lines.append(json.dumps(completed))
     return lines

@@ -21,6 +21,27 @@ class RepoErrorFactory:
     def __init__(self, logger: logging.Logger | None = None) -> None:
         self._logger = logger or logging.getLogger(__name__)
 
+    def from_exception(
+        self,
+        exc: Exception,
+        message: str,
+        *,
+        cwd: Path | str,
+    ) -> RepoError:
+        """Wrap a non-`GitCommandError` GitPython exception and log it.
+
+        `from_git` reads `command` / `status` / `stderr` off a failed git
+        invocation; the constructor-level failures (`NoSuchPathError`,
+        `InvalidGitRepositoryError`) carry none of those because no git
+        process ever ran. They still need to reach callers as `RepoError`
+        rather than as a raw GitPython traceback, so they are wrapped here
+        with the exception text as `stderr`.
+        """
+        cwd_str = str(cwd)
+        err = RepoError(message, cwd=cwd_str, stderr=str(exc))
+        self._logger.error("%s — %s (cwd=%s)", message, type(exc).__name__, cwd_str)
+        return err
+
     def from_git(
         self,
         exc: git.GitCommandError,

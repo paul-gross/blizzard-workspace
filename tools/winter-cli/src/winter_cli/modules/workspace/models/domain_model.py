@@ -269,6 +269,24 @@ class RepoError(Exception):
         return "\n".join(parts)
 
 
+class PartialCleanError(RepoError):
+    """`git clean` failed *after* already deleting some paths.
+
+    `git clean -fd` is not transactional: it removes what it can, warns on
+    what it cannot (an unreadable directory, a permission error), and exits
+    non-zero having already deleted files. Those deletions are unrecoverable,
+    so the paths git named on stdout before failing are the only record they
+    ever existed — a plain `RepoError` would carry stderr and drop them.
+
+    Subclasses `RepoError` so existing `except RepoError` handlers keep
+    working; callers that want the partial record opt in by catching this.
+    """
+
+    def __init__(self, message: str, *, removed: list[str], **kwargs: object) -> None:
+        super().__init__(message, **kwargs)  # type: ignore[arg-type]
+        self.removed = list(removed)
+
+
 @dataclasses.dataclass
 class FeatureEnvironment:
     """A named environment (alpha, beta, gamma) for feature development."""
