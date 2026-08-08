@@ -8,6 +8,7 @@ from winter_cli.modules.workspace.handlers.repo_handler import (
 )
 from winter_cli.modules.workspace.handlers.workspace_handler import (
     EnvCheckoutParams,
+    EnvCleanParams,
     EnvConnectParams,
     EnvDiffParams,
     EnvDisconnectParams,
@@ -29,6 +30,7 @@ __all__ = [
     "DestroyHandler",
     "DestroyParams",
     "EnvCheckoutParams",
+    "EnvCleanParams",
     "EnvConnectParams",
     "EnvDiffParams",
     "EnvDisconnectParams",

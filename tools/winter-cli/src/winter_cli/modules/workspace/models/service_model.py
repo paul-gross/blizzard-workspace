@@ -342,6 +342,48 @@ class RepoResetOutcome:
 
 
 @dataclasses.dataclass
+class RepoCleanOutcome:
+    """Untracked paths removed from — or, under `--dry-run`, that would be
+    removed from — one matched worktree. Env-qualified since `winter ws clean`
+    PATTERNS may span more than one environment."""
+
+    env: str
+    repo_name: str
+    paths: list[str] = dataclasses.field(default_factory=list)
+    """Worktree-relative paths of the untracked files, in git's own order.
+    Ignored files are never listed, because they are never removed. A worktree
+    with nothing untracked carries an empty list and is still reported, so the
+    run shows every worktree it considered rather than only the ones it hit."""
+
+    @property
+    def count(self) -> int:
+        return len(self.paths)
+
+
+@dataclasses.dataclass
+class CleanReport:
+    """Report from `winter ws clean`.
+
+    Unlike `ResetReport` there is no `aborted` field and no per-repo refusal
+    enum: cleaning has no precondition to violate — no ref to resolve, no
+    history to abandon — so the confirmation prompt, not a Phase 1 gate, is
+    what stands between the caller and the deletion. `dry_run` distinguishes a
+    preview (paths enumerated, nothing removed) from a real run.
+
+    Ignored files are outside this report entirely, in both modes: `winter ws
+    clean` never removes them, so a worktree whose only untracked content is
+    ignored reports zero paths.
+    """
+
+    dry_run: bool
+    repos: list[RepoCleanOutcome]
+
+    @property
+    def total(self) -> int:
+        return sum(o.count for o in self.repos)
+
+
+@dataclasses.dataclass
 class ResetReport:
     """All-or-nothing report from `winter ws reset`.
 

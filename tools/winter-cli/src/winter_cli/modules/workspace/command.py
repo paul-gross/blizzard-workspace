@@ -6,6 +6,7 @@ from winter_cli.cli_context import cli_ctx
 from winter_cli.modules.workspace.handlers import (
     DestroyParams,
     EnvCheckoutParams,
+    EnvCleanParams,
     EnvConnectParams,
     EnvDiffParams,
     EnvDisconnectParams,
@@ -502,6 +503,74 @@ def ws_reset(
             patterns=list(patterns),
             ref=ref,
             mode=mode,
+            force=force,
+            dry_run=dry_run,
+            output_json=output_json,
+        )
+    )
+
+
+@ws_group.command("clean")
+@click.argument("patterns", nargs=-1, required=True)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Skip the confirmation prompt.",
+)
+@click.option(
+    "--dry-run",
+    "dry_run",
+    is_flag=True,
+    default=False,
+    help="Print the per-file removal list and remove nothing.",
+)
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as NDJSON (one JSON object per line).")
+@click.pass_context
+def ws_clean(
+    ctx: click.Context,
+    patterns: tuple[str, ...],
+    force: bool,
+    dry_run: bool,
+    output_json: bool,
+):
+    """Remove untracked files from matched worktrees.
+
+    Every argument is a segment-aware glob over `<env>/<repo>` (same grammar
+    as `reset`/`connect`/`push`/`diff` — a bare `<env>` matches `<env>/*`, and
+    a pattern may span more than one env). At least one PATTERN is required;
+    there is deliberately no implicit "all worktrees" default. Pinned
+    worktrees are always skipped; standalone repos are never in scope (no
+    `--standalone`/`--all`).
+
+    \b
+      winter ws clean alpha/winter --dry-run   # preview one worktree
+      winter ws clean alpha                    # every non-pinned worktree in alpha
+      winter ws clean alpha --force            # same, no prompt
+      winter ws clean '*/winter' --json
+
+    This is `git clean -fd`, the complement to `winter ws reset`: a `--hard`
+    reset restores everything git tracks, and this removes what it doesn't.
+    Run both to return a worktree to a pristine ref.
+
+    **Ignored files are never removed** — no `-x` equivalent is reachable
+    through this command, so `.venv`, `node_modules`, and build output survive
+    and a clean never forces a re-provision. Run `git clean -fdx` in a single
+    worktree when you really mean those too.
+
+    Prompts before removing anything unless `--force`, listing every file it
+    would delete — including when exactly one worktree matches, unlike
+    `reset --hard`'s multi-worktree-only prompt. Cleaned files are
+    unrecoverable: there is no reflog behind them, so `--dry-run` is the only
+    preview available.
+    """
+    for pattern in patterns:
+        _validate_pattern(pattern)
+    container = cli_ctx(ctx).container
+    handler = container.workspace_handler()
+    handler.clean(
+        EnvCleanParams(
+            patterns=list(patterns),
             force=force,
             dry_run=dry_run,
             output_json=output_json,

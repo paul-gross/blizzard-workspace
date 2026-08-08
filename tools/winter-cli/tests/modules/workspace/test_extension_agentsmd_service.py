@@ -239,9 +239,7 @@ def test_finalize_agentsmd_renders_project_repo_as_routing_row(
     """A project-repo extension (rooted under projects/) renders a no-`@` routing row."""
     fs = FakeFilesystem()
     repo, config_files = _seed_project_extension(fs, "winter-docs", description="Public docs site generator.")
-    svc = ExtensionAgentsMdService(
-        config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files)
-    )
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
 
     ok = svc.finalize_agentsmd([repo], init_reporter)
     assert ok is True
@@ -261,9 +259,7 @@ def test_finalize_agentsmd_project_repo_row_falls_back_to_entry_point_without_de
     """When `description` is absent, the row renders with the entry-point path alone."""
     fs = FakeFilesystem()
     repo, config_files = _seed_project_extension(fs, "winter-docs")
-    svc = ExtensionAgentsMdService(
-        config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files)
-    )
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
 
     ok = svc.finalize_agentsmd([repo], init_reporter)
     assert ok is True
@@ -283,9 +279,7 @@ def test_finalize_agentsmd_mixes_standalone_and_project_repo_extensions(
     fs = FakeFilesystem()
     standalone = _seed_extension_with_index(fs, "ext-a")
     project_repo, config_files = _seed_project_extension(fs, "winter-docs", description="Docs generator.")
-    svc = ExtensionAgentsMdService(
-        config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files)
-    )
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
 
     ok = svc.finalize_agentsmd([standalone, project_repo], init_reporter)
     assert ok is True
@@ -317,9 +311,7 @@ def test_finalize_agentsmd_env_binding_note_present_with_project_rows(
     binding rule and the `projects/<name>/` fallback once, ahead of the routing rows."""
     fs = FakeFilesystem()
     project_repo, config_files = _seed_project_extension(fs, "winter-docs", description="Docs generator.")
-    svc = ExtensionAgentsMdService(
-        config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files)
-    )
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
 
     ok = svc.finalize_agentsmd([project_repo], init_reporter)
     assert ok is True

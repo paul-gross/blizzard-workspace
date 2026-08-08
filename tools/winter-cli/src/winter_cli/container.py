@@ -31,6 +31,7 @@ from winter_cli.modules.workspace.dashboard_snapshot_service import DashboardSna
 from winter_cli.modules.workspace.destroy_service import DestroyService
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
+from winter_cli.modules.workspace.env_clean_service import EnvCleanService
 from winter_cli.modules.workspace.env_reset_service import EnvResetService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
 from winter_cli.modules.workspace.extension_agentsmd_service import ExtensionAgentsMdService
@@ -271,6 +272,11 @@ class Container(containers.DeclarativeContainer):
         worktree_safety_svc=worktree_safety_svc,
     )
 
+    env_clean_svc = providers.Factory(
+        EnvCleanService,
+        repo_repo=repo_repo,
+    )
+
     extension_manifest_loader = providers.Singleton(
         ExtensionManifestLoader,
         config_file_reader=config_file_reader,
@@ -454,6 +460,7 @@ class Container(containers.DeclarativeContainer):
         workspace_merge_svc=workspace_merge_svc,
         env_checkout_svc=env_checkout_svc,
         env_reset_svc=env_reset_svc,
+        env_clean_svc=env_clean_svc,
         workspace_repo=worktree_repo,
         repo_repo=repo_repo,
         repo_factory=repo_factory,

@@ -160,6 +160,50 @@ def test_reset_to_raises_for_bogus_ref(monkeypatch: pytest.MonkeyPatch, repo: Wr
     assert ei.value.subcommand == "reset"
 
 
+def test_clean_untracked_runs_fd_and_never_x(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
+    """`clean_untracked` is `git clean -fd` — never `-x`/`-X`, which would take
+    the provisioned artifacts (`.venv`, `node_modules`) with it and silently
+    turn a clean into a re-provision."""
+    git_mock = _fake_git_repo(monkeypatch)
+    r = git_mock.Repo.return_value
+    wt = _wt(_REPO_PATH)
+
+    repo.clean_untracked(wt)
+
+    r.git.clean.assert_called_once_with("-fd")
+    flags = r.git.clean.call_args.args
+    assert "-x" not in flags
+    assert "-X" not in flags
+    assert "-fdx" not in flags
+
+
+def test_clean_untracked_wraps_git_failure(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    git_mock.Repo.return_value.git.clean.side_effect = git.GitCommandError(
+        ("git", "clean", "-fd"), 1, stderr=b"permission denied"
+    )
+    wt = _wt(_REPO_PATH)
+
+    with pytest.raises(RepoError) as ei:
+        repo.clean_untracked(wt)
+
+    assert ei.value.subcommand == "clean"
+
+
+def test_list_untracked_returns_gits_untracked_files(
+    monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository
+) -> None:
+    """Backed by GitPython's `untracked_files` (`git ls-files --others
+    --exclude-standard`), so ignored files are excluded by the same rule that
+    keeps `git clean -fd` off them."""
+    git_mock = _fake_git_repo(monkeypatch)
+    type(git_mock.Repo.return_value).untracked_files = PropertyMock(return_value=["scratch.py", "notes/todo.md"])
+    wt = _wt(_REPO_PATH)
+
+    assert repo.list_untracked(wt) == ["scratch.py", "notes/todo.md"]
+    git_mock.Repo.return_value.git.clean.assert_not_called()
+
+
 def test_push_standalone_raises_when_no_upstream(monkeypatch: pytest.MonkeyPatch, repo: WriteRepoRepository) -> None:
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.active_branch.tracking_branch.return_value = None

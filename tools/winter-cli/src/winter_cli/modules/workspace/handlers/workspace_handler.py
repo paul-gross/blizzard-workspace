@@ -12,12 +12,14 @@ from winter_cli.core.cli_output_service import Cell, ICliOutputService
 from winter_cli.modules.service.scope import WORKSPACE_SCOPE
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
+from winter_cli.modules.workspace.env_clean_service import EnvCleanService
 from winter_cli.modules.workspace.env_index import resolve_env_index
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
 from winter_cli.modules.workspace.env_reset_service import EnvResetService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
 from winter_cli.modules.workspace.models import (
     CheckoutResult,
+    CleanReport,
     DiffMode,
     EnvCheckoutReport,
     EnvDiffResult,
@@ -96,6 +98,14 @@ class EnvResetParams:
     patterns: list[str]
     ref: str
     mode: ResetMode
+    force: bool
+    dry_run: bool
+    output_json: bool
+
+
+@dataclasses.dataclass
+class EnvCleanParams:
+    patterns: list[str]
     force: bool
     dry_run: bool
     output_json: bool
@@ -199,6 +209,7 @@ class WorkspaceHandler:
         workspace_merge_svc: WorkspaceMergeService,
         env_checkout_svc: EnvCheckoutService,
         env_reset_svc: EnvResetService,
+        env_clean_svc: EnvCleanService,
         workspace_repo: IReadWorkspaceRepository,
         repo_repo: IReadRepoRepository,
         repo_factory: RepositoryFactory,
@@ -219,6 +230,7 @@ class WorkspaceHandler:
         self._workspace_merge_svc = workspace_merge_svc
         self._env_checkout_svc = env_checkout_svc
         self._env_reset_svc = env_reset_svc
+        self._env_clean_svc = env_clean_svc
         self._workspace_repo = workspace_repo
         self._repo_repo = repo_repo
         self._repo_factory = repo_factory
@@ -454,10 +466,14 @@ class WorkspaceHandler:
                 f"{out.style(report.feature_branch, 'bold')} ({', '.join(details)})"
             )
 
-    def reset(self, params: EnvResetParams) -> None:
+    def _non_pinned_targets(self, patterns: list[str]) -> list[FeatureWorktree]:
+        """Worktrees matching PATTERNS, pinned ones dropped — the shared target
+        resolution for the `<env>/<repo>`-glob mutating commands (`reset`,
+        `clean`). Callers raise their own drift warning first; this is pure
+        selection with no side effects.
+        """
         project_repos = self._repo_factory.get_project_repos()
-        self._drift_warning_svc.raise_warning()
-        environments = self._envs_for_patterns(params.patterns, project_repos)
+        environments = self._envs_for_patterns(patterns, project_repos)
 
         targets: list[FeatureWorktree] = []
         for env in environments:
@@ -465,9 +481,14 @@ class WorkspaceHandler:
             for wt in env_worktrees.worktrees:
                 if wt.repository.pinned:
                     continue
-                if not matches_any_pattern(env.name, wt.repository.name, params.patterns):
+                if not matches_any_pattern(env.name, wt.repository.name, patterns):
                     continue
                 targets.append(wt)
+        return targets
+
+    def reset(self, params: EnvResetParams) -> None:
+        self._drift_warning_svc.raise_warning()
+        targets = self._non_pinned_targets(params.patterns)
 
         if params.mode == ResetMode.hard and len(targets) > 1 and not params.force and not params.dry_run:
             click.echo(
@@ -532,6 +553,92 @@ class WorkspaceHandler:
                 f"worktree{'s' if count != 1 else ''} → "
                 f"{out.style(report.ref, 'bold')} ({report.mode.value})"
             )
+
+    def clean(self, params: EnvCleanParams) -> None:
+        self._drift_warning_svc.raise_warning()
+        targets = self._non_pinned_targets(params.patterns)
+
+        if not targets:
+            if params.output_json:
+                for line in _clean_ndjson_lines(CleanReport(dry_run=params.dry_run, repos=[])):
+                    click.echo(line)
+                return
+            click.echo(self._cli_output_svc.style(f"No worktrees matched: {' '.join(params.patterns)}", "dim"))
+            return
+
+        # Enumerated before prompting, not after: the prompt has to state the
+        # real blast radius, and there is no undo behind it to soften a guess.
+        preview = self._env_clean_svc.preview(targets)
+
+        if preview.total == 0:
+            if params.output_json:
+                for line in _clean_ndjson_lines(CleanReport(dry_run=params.dry_run, repos=preview.repos)):
+                    click.echo(line)
+                return
+            click.echo(f"{self._cli_output_svc.style('✓', 'green')} Nothing to clean — no untracked files.")
+            return
+
+        if not params.force and not params.dry_run:
+            self._render_clean_preview(preview)
+            # Prompted even for a single worktree, unlike `reset --hard`'s
+            # multi-worktree-only prompt: a reset leaves its commits in the
+            # reflog, a clean leaves nothing, so worktree count is the wrong
+            # axis to decide on.
+            click.confirm("Continue?", abort=True)
+
+        report = self._env_clean_svc.clean(targets=targets, dry_run=params.dry_run)
+
+        if params.output_json:
+            for line in _clean_ndjson_lines(report):
+                click.echo(line)
+            return
+
+        self._render_clean_report(report)
+
+    def _render_clean_preview(self, report: CleanReport) -> None:
+        """The per-file list shown before the prompt, and under `--dry-run`.
+
+        Prints every path rather than a per-repo count — this is the only look
+        a caller gets at what is about to be deleted, and a count cannot tell
+        them whether the scratch file they care about is in the set.
+        """
+        out = self._cli_output_svc
+        for outcome in report.repos:
+            if not outcome.paths:
+                continue
+            click.echo(f"\n{out.style(f'{outcome.env}/{outcome.repo_name}', 'bold')} ({outcome.count})")
+            for path in outcome.paths:
+                click.echo(f"  {out.style(path, 'dim')}")
+        worktrees = sum(1 for o in report.repos if o.paths)
+        click.echo(
+            f"\nThis will remove {out.style(str(report.total), 'bold')} untracked "
+            f"file{'s' if report.total != 1 else ''} from "
+            f"{out.style(str(worktrees), 'bold')} worktree{'s' if worktrees != 1 else ''}. "
+            f"{out.style('This cannot be undone.', 'red')}"
+        )
+
+    def _render_clean_report(self, report: CleanReport) -> None:
+        out = self._cli_output_svc
+        if report.dry_run:
+            self._render_clean_preview(report)
+            click.echo(f"\n{out.style('✓', 'green')} Dry run — nothing removed.")
+            return
+
+        rows: list[list[str | Cell]] = []
+        for outcome in report.repos:
+            if not outcome.paths:
+                continue
+            rows.append([f"{outcome.env}/{outcome.repo_name}", str(outcome.count)])
+
+        for line in out.render_table(rows, headers=["WORKTREE", "REMOVED"], row_styles=["green"] * len(rows)):
+            click.echo(line)
+
+        click.echo(
+            f"\n{out.style('✓', 'green')} Removed "
+            f"{out.style(str(report.total), 'bold')} untracked "
+            f"file{'s' if report.total != 1 else ''} from "
+            f"{out.style(str(len(rows)), 'bold')} worktree{'s' if len(rows) != 1 else ''}."
+        )
 
     def fetch(self, params: EnvFetchParams) -> None:
         self._drift_warning_svc.raise_warning()
@@ -1414,4 +1521,34 @@ def _reset_ndjson_lines(report: ResetReport) -> list[str]:
             )
         )
     lines.append(json.dumps({"type": "reset_completed", "success": not report.aborted}))
+    return lines
+
+
+def _clean_ndjson_lines(report: CleanReport) -> list[str]:
+    """NDJSON event lines for `winter ws clean --json`, in the same
+    `{cmd}_started` / `repo_{cmd}` / `{cmd}_completed` shape as `ws reset` and
+    `ws merge`.
+
+    `repo_clean` carries the full `paths` list, not just a count: a scripted
+    consumer diffing before/after has no other way to learn *which* files went,
+    and unlike a human at the prompt it cannot ask. Worktrees with nothing
+    untracked still emit an event, so a consumer sees the full matched set.
+
+    `success` is unconditionally True — cleaning has no refusal path (see
+    `EnvCleanService`); a git failure raises instead of reporting.
+    """
+    lines = [json.dumps({"type": "clean_started", "dry_run": report.dry_run})]
+    for outcome in report.repos:
+        lines.append(
+            json.dumps(
+                {
+                    "type": "repo_clean",
+                    "env": outcome.env,
+                    "repo": outcome.repo_name,
+                    "count": outcome.count,
+                    "paths": outcome.paths,
+                }
+            )
+        )
+    lines.append(json.dumps({"type": "clean_completed", "success": True, "total": report.total}))
     return lines

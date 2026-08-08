@@ -191,8 +191,7 @@ def test_get_extension_repos_dedupes_repo_declared_as_both_kinds(
     assert [r.name for r in repos] == ["winter-harness"]
     assert repos[0].path == config.workspace_root / ".winter/ext/harness"
     assert any(
-        "winter-harness" in record.message and "standalone_repository" in record.message
-        for record in caplog.records
+        "winter-harness" in record.message and "standalone_repository" in record.message for record in caplog.records
     )
 
 

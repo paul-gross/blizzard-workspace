@@ -295,6 +295,49 @@ class WriteRepoRepository(ReadRepoRepository):
                     cwd=worktree.path,
                 ) from exc
 
+    def list_untracked(self, worktree: FeatureWorktree) -> list[str]:
+        """Worktree-relative paths of untracked, non-ignored files — exactly the
+        set `clean_untracked` would delete. No network.
+
+        Backed by GitPython's `untracked_files`, i.e. `git ls-files --others
+        --exclude-standard`: `--exclude-standard` is what holds the
+        never-remove-ignored-files guarantee, so this enumeration and the
+        `git clean -fd` that follows agree on scope by construction rather
+        than by two independently-maintained exclude rules.
+
+        Reports files, not directories, where `git clean -fd` reports and
+        removes whole untracked directories. The file-level list is the more
+        useful preview — `--dry-run` is the only look a caller gets before an
+        unrecoverable delete, and `scratch/` tells them far less than the
+        three files under it.
+        """
+        with git.Repo(str(worktree.path)) as r:
+            return list(r.untracked_files)
+
+    def clean_untracked(self, worktree: FeatureWorktree) -> None:
+        """`git clean -fd` — remove untracked files and untracked directories.
+
+        Deliberately never passes `-x` or `-X`: ignored files stay. In a winter
+        worktree those are the provisioned artifacts (`.venv`, `node_modules`,
+        build output), so removing them would silently turn a clean into a
+        re-provision. A caller who genuinely wants them gone runs `git clean
+        -fdx` in the one worktree they mean, where the blast radius is visible;
+        there is deliberately no flag that fans that across matched worktrees.
+
+        `-f` is required by git itself (`clean.requireForce` defaults true) and
+        carries no winter-level meaning — it is not the `--force` that skips
+        the confirmation prompt, which is handled entirely in the handler.
+        """
+        with git.Repo(str(worktree.path)) as r:
+            try:
+                r.git.clean("-fd")
+            except git.GitCommandError as exc:
+                raise self._error_factory.from_git(
+                    exc,
+                    message=f"clean failed for {worktree.repository.name}",
+                    cwd=worktree.path,
+                ) from exc
+
     def unset_upstream(self, worktree: FeatureWorktree) -> None:
         """Remove upstream tracking; no-op when already unset.
 

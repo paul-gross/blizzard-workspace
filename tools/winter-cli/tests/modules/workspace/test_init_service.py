@@ -548,8 +548,7 @@ def test_workspace_reconcile_hook_fires_for_project_repo_extension(
     assert ok is True
     ws_reconcile_calls = [call for call, _ in subprocess.popen_calls if str(hook_path) in str(call)]
     assert len(ws_reconcile_calls) == 1, (
-        f"expected exactly 1 on_workspace_reconcile call for the project-repo extension, "
-        f"got {len(ws_reconcile_calls)}"
+        f"expected exactly 1 on_workspace_reconcile call for the project-repo extension, got {len(ws_reconcile_calls)}"
     )
 
 

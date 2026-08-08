@@ -51,6 +51,7 @@ def _make_handler(fetch_report: FetchReport) -> WorkspaceHandler:
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
         env_reset_svc=MagicMock(),
+        env_clean_svc=MagicMock(),
         workspace_repo=MagicMock(),
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -185,6 +186,7 @@ def _make_worktrees_handler(
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
         env_reset_svc=MagicMock(),
+        env_clean_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=repo_repo,
         repo_factory=repo_factory,
@@ -365,6 +367,7 @@ def test_worktrees_human_table_calls_render_table_with_expected_rows(
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
         env_reset_svc=MagicMock(),
+        env_clean_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=MagicMock(),
         repo_factory=repo_factory,
@@ -437,6 +440,7 @@ def _make_worktrees_handler_with_status(
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
         env_reset_svc=MagicMock(),
+        env_clean_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=MagicMock(),
         repo_factory=repo_factory,
@@ -904,6 +908,7 @@ def _make_status_handler(snapshot: WorkspaceSnapshot | None, raise_exc: Exceptio
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
         env_reset_svc=MagicMock(),
+        env_clean_svc=MagicMock(),
         workspace_repo=MagicMock(),
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -1024,6 +1029,7 @@ def _make_status_handler_with_sync(
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
         env_reset_svc=MagicMock(),
+        env_clean_svc=MagicMock(),
         workspace_repo=MagicMock(),
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -1360,6 +1366,7 @@ def _connect_handler(connect_returns: dict[str, list[str]]) -> tuple[WorkspaceHa
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=env_checkout_svc,
         env_reset_svc=MagicMock(),
+        env_clean_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -1453,6 +1460,7 @@ def _disconnect_handler(disconnect_returns: dict[str, list[str]]) -> tuple[Works
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=env_checkout_svc,
         env_reset_svc=MagicMock(),
+        env_clean_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -1575,6 +1583,7 @@ def _diff_handler(worktrees_by_env: dict[str, list[str]]) -> tuple[WorkspaceHand
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
         env_reset_svc=MagicMock(),
+        env_clean_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -1720,6 +1729,7 @@ def _reset_handler(
         workspace_merge_svc=MagicMock(),
         env_checkout_svc=MagicMock(),
         env_reset_svc=env_reset_svc,
+        env_clean_svc=MagicMock(),
         workspace_repo=workspace_repo,
         repo_repo=MagicMock(),
         repo_factory=MagicMock(),
@@ -1963,3 +1973,191 @@ def _reset_outcome(env: str, repo_name: str, result: Any, ref: str = "") -> Any:
     from winter_cli.modules.workspace.models import RepoResetOutcome
 
     return RepoResetOutcome(env=env, repo_name=repo_name, result=result, ref=ref)
+
+
+# ── clean ────────────────────────────────────────────────────────────────────
+
+
+def _clean_handler(
+    worktrees_by_env: dict[str, list[tuple[str, bool]]],
+    untracked_by_repo: dict[str, list[str]] | None = None,
+) -> tuple[WorkspaceHandler, MagicMock]:
+    """Handler whose per-env worktrees are `worktrees_by_env[env_name]`, each a
+    `(repo_name, pinned)` pair. `untracked_by_repo` maps a repo name to the
+    paths its preview reports; a repo absent from it has nothing untracked.
+
+    The clean service is a mock whose `preview`/`clean` both derive their
+    report from `untracked_by_repo` and the `targets` they were handed, so
+    pinned-skip assertions can be made on the report the handler renders as
+    well as on `call_args`.
+
+    Returns the handler and the env_clean_svc mock.
+    """
+    from types import SimpleNamespace
+
+    from winter_cli.modules.workspace.models import CleanReport, RepoCleanOutcome
+
+    untracked = untracked_by_repo or {}
+
+    workspace_repo = MagicMock()
+    workspace_repo.get_environment.side_effect = lambda _ws, name: SimpleNamespace(name=name)
+    workspace_repo.get_environments.return_value = [SimpleNamespace(name=n) for n in worktrees_by_env]
+
+    def _get_worktrees(env: Any, _repos: Any) -> SimpleNamespace:
+        return SimpleNamespace(
+            environment=env,
+            worktrees=[
+                SimpleNamespace(environment=env, repository=SimpleNamespace(name=name, pinned=pinned))
+                for name, pinned in worktrees_by_env.get(env.name, [])
+            ],
+        )
+
+    env_status_svc = MagicMock()
+    env_status_svc.get_feature_environment_worktrees.side_effect = _get_worktrees
+
+    def _report(targets: list[Any], dry_run: bool = True) -> CleanReport:
+        return CleanReport(
+            dry_run=dry_run,
+            repos=[
+                RepoCleanOutcome(
+                    env=wt.environment.name,
+                    repo_name=wt.repository.name,
+                    paths=list(untracked.get(wt.repository.name, [])),
+                )
+                for wt in targets
+            ],
+        )
+
+    env_clean_svc = MagicMock()
+    env_clean_svc.preview.side_effect = lambda targets: _report(targets)
+    env_clean_svc.clean.side_effect = lambda targets, dry_run: _report(targets, dry_run)
+
+    cli_output_svc = MagicMock()
+    cli_output_svc.style.side_effect = lambda text, _style: text
+    cli_output_svc.render_table.side_effect = lambda rows, headers, row_styles: [str(r) for r in rows]
+
+    handler = WorkspaceHandler(
+        env_status_svc=env_status_svc,
+        workspace_sync_svc=MagicMock(),
+        workspace_push_svc=MagicMock(),
+        workspace_merge_svc=MagicMock(),
+        env_checkout_svc=MagicMock(),
+        env_reset_svc=MagicMock(),
+        env_clean_svc=env_clean_svc,
+        workspace_repo=workspace_repo,
+        repo_repo=MagicMock(),
+        repo_factory=MagicMock(),
+        drift_warning_svc=MagicMock(),
+        prune_svc=MagicMock(),
+        reporter_factory=MagicMock(),
+        cli_output_svc=cli_output_svc,
+        workspace=MagicMock(),
+    )
+    return handler, env_clean_svc
+
+
+def _clean_params(**overrides: Any) -> Any:
+    from winter_cli.modules.workspace.handlers.workspace_handler import EnvCleanParams
+
+    base = {"patterns": ["alpha"], "force": True, "dry_run": False, "output_json": True}
+    base.update(overrides)
+    return EnvCleanParams(**base)  # type: ignore[arg-type]
+
+
+def test_clean_skips_pinned_worktrees() -> None:
+    handler, env_clean_svc = _clean_handler(
+        {"alpha": [("api", False), ("vendor", True)]}, {"api": ["scratch.py"], "vendor": ["also-scratch.py"]}
+    )
+
+    handler.clean(_clean_params())
+
+    targets = env_clean_svc.clean.call_args.kwargs["targets"]
+    assert [wt.repository.name for wt in targets] == ["api"]
+
+
+def test_clean_prompts_before_removing_even_for_a_single_worktree(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unlike `reset --hard`, which prompts only on a multi-worktree match, a
+    clean prompts whatever the count — there is no reflog behind it."""
+    handler, env_clean_svc = _clean_handler({"alpha": [("api", False)]}, {"api": ["scratch.py"]})
+    confirm = MagicMock(side_effect=click.exceptions.Abort())
+    monkeypatch.setattr(click, "confirm", confirm)
+
+    with pytest.raises(click.exceptions.Abort):
+        handler.clean(_clean_params(force=False))
+
+    confirm.assert_called_once()
+    env_clean_svc.clean.assert_not_called()
+
+
+def test_clean_force_skips_confirmation() -> None:
+    handler, env_clean_svc = _clean_handler({"alpha": [("api", False)]}, {"api": ["scratch.py"]})
+
+    handler.clean(_clean_params(force=True))
+
+    env_clean_svc.clean.assert_called_once()
+
+
+def test_clean_dry_run_skips_confirmation_and_does_not_remove(monkeypatch: pytest.MonkeyPatch) -> None:
+    handler, env_clean_svc = _clean_handler({"alpha": [("api", False)]}, {"api": ["scratch.py"]})
+    confirm = MagicMock()
+    monkeypatch.setattr(click, "confirm", confirm)
+
+    handler.clean(_clean_params(force=False, dry_run=True))
+
+    confirm.assert_not_called()
+    assert env_clean_svc.clean.call_args.kwargs["dry_run"] is True
+
+
+def test_clean_with_nothing_untracked_short_circuits_without_prompting(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[Any]
+) -> None:
+    """Every matched worktree is already clean — no prompt, and no removal
+    call, so a no-op run never asks the caller to confirm nothing."""
+    handler, env_clean_svc = _clean_handler({"alpha": [("api", False)]}, {})
+    confirm = MagicMock()
+    monkeypatch.setattr(click, "confirm", confirm)
+
+    handler.clean(_clean_params(force=False, output_json=False))
+
+    confirm.assert_not_called()
+    env_clean_svc.clean.assert_not_called()
+    assert "Nothing to clean" in capsys.readouterr().out
+
+
+def test_clean_no_match_reports_patterns(capsys: pytest.CaptureFixture[Any]) -> None:
+    handler, env_clean_svc = _clean_handler({"alpha": [("api", False)]})
+
+    handler.clean(_clean_params(patterns=["beta"], output_json=False))
+
+    env_clean_svc.preview.assert_not_called()
+    assert "No worktrees matched: beta" in capsys.readouterr().out
+
+
+def test_clean_json_emits_started_repo_and_completed_events(capsys: pytest.CaptureFixture[Any]) -> None:
+    handler, _ = _clean_handler({"alpha": [("api", False)]}, {"api": ["scratch.py", "tmp.log"]})
+
+    handler.clean(_clean_params(output_json=True))
+
+    events = [json.loads(line) for line in capsys.readouterr().out.strip().splitlines()]
+    assert [e["type"] for e in events] == ["clean_started", "repo_clean", "clean_completed"]
+    assert events[1]["paths"] == ["scratch.py", "tmp.log"]
+    assert events[1]["count"] == 2
+    assert events[2]["total"] == 2
+    assert events[2]["success"] is True
+
+
+def test_clean_preview_lists_every_path_before_the_prompt(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[Any]
+) -> None:
+    """The prompt has to state the real blast radius, so each path is printed
+    rather than a per-repo count."""
+    handler, _ = _clean_handler({"alpha": [("api", False)]}, {"api": ["scratch.py", "notes/todo.md"]})
+    monkeypatch.setattr(click, "confirm", MagicMock(side_effect=click.exceptions.Abort()))
+
+    with pytest.raises(click.exceptions.Abort):
+        handler.clean(_clean_params(force=False, output_json=False))
+
+    out = capsys.readouterr().out
+    assert "scratch.py" in out
+    assert "notes/todo.md" in out
+    assert "cannot be undone" in out

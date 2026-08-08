@@ -16,6 +16,7 @@ from winter_cli.modules.workspace.models.domain_model import (
 )
 from winter_cli.modules.workspace.models.service_model import (
     CheckoutResult,
+    CleanReport,
     EnvCheckoutReport,
     EnvDiffResult,
     EnvMergeReport,
@@ -32,6 +33,7 @@ from winter_cli.modules.workspace.models.service_model import (
     PullReport,
     PushReport,
     RepoCheckoutOutcome,
+    RepoCleanOutcome,
     RepoCommit,
     RepoDiffResult,
     RepoFetchOutcome,
@@ -62,6 +64,7 @@ from winter_cli.modules.workspace.models.snapshot_model import (
 
 __all__ = [
     "CheckoutResult",
+    "CleanReport",
     "DashboardSnapshot",
     "DiffMode",
     "EnvCheckoutReport",
@@ -91,6 +94,7 @@ __all__ = [
     "PullReport",
     "PushReport",
     "RepoCheckoutOutcome",
+    "RepoCleanOutcome",
     "RepoCommit",
     "RepoDiffResult",
     "RepoError",
