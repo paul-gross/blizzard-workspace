@@ -1,11 +1,28 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 import git
 
 from winter_cli.modules.workspace.models import RepoError
+
+_GITPYTHON_STREAM_RE = re.compile(r"^\s*std(?:out|err):\s*'(.*)'\s*$", re.DOTALL)
+
+
+def unwrap_gitpython_stream(raw: str) -> str:
+    """The raw text out of GitPython's decorated `GitCommandError.stdout`/`.stderr`.
+
+    `CommandError.__init__` stores each stream as `"\\n  stdout: '<text>'"` (or
+    `stderr:`) rather than as the text itself, so a caller reading `.stderr`
+    directly gets that label wrapped around the real message — doubling up
+    when `RepoError.__str__` prepends its own `stderr:` label. Returns `raw`
+    unchanged when it carries no decoration, so this is safe on an
+    already-plain string.
+    """
+    match = _GITPYTHON_STREAM_RE.match(raw)
+    return match.group(1) if match else raw
 
 
 class RepoErrorFactory:
@@ -62,7 +79,7 @@ class RepoErrorFactory:
         subcommand = command[1] if len(command) > 1 else None
         cmd_args = tuple(str(a) for a in command[2:]) if len(command) > 2 else ()
         stderr_raw = exc.stderr if isinstance(exc.stderr, str) else ""
-        stderr = stderr_raw.strip()
+        stderr = unwrap_gitpython_stream(stderr_raw).strip()
         cwd_str = str(cwd)
         err = RepoError(
             message,

@@ -32,7 +32,7 @@ def test_factory_from_git_extracts_fields():
     exc = git.GitCommandError(
         command=["git", "fetch", "origin"],
         status=128,
-        stderr="stderr: 'connection closed'",
+        stderr="connection closed",
     )
     err = factory.from_git(exc, message="fetch failed for X", cwd="/tmp/r")
     assert isinstance(err, RepoError)
@@ -40,8 +40,23 @@ def test_factory_from_git_extracts_fields():
     assert err.cmd_args == ("origin",)
     assert err.cwd == "/tmp/r"
     assert err.exit_code == 128
-    assert "connection closed" in err.stderr
+    assert err.stderr == "connection closed"
     assert err.message == "fetch failed for X"
+
+
+def test_factory_from_git_unwraps_gitpython_stderr_label():
+    """GitPython decorates `.stderr` as `"\\n  stderr: '<text>'"`; RepoError.__str__ adds its
+    own `stderr:` label, so an unwrapped value would render doubled as `stderr: stderr: '...'`.
+    """
+    factory = RepoErrorFactory()
+    exc = git.GitCommandError(
+        command=["git", "push", "origin"],
+        status=1,
+        stderr="rejected: non-fast-forward",
+    )
+    err = factory.from_git(exc, message="push failed", cwd="/tmp/r")
+    assert err.stderr == "rejected: non-fast-forward"
+    assert str(err).count("stderr:") == 1
 
 
 def test_repo_error_str_renders_legible_message_for_negative_exit_code():
