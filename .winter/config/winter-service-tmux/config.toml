@@ -1,0 +1,169 @@
+# Declarative manifest for winter-service-tmux.
+# See winter-service-tmux:/workflow/config.toml.example for annotated schema docs.
+#
+# Validate with:
+#   cd alpha/winter-service-tmux
+#   PYTHONPATH=src python3 -m service_manifest.cli validate /path/to/workspace
+#
+# This provider carries the blizzard from-source services — the per-env verification
+# stack of blizzard-discovery:/implementation/verification.md. As of P6 all three are
+# LIVE: the mock GitHub forge (pane 0.0), the blizzard hub (0.1), and the blizzard
+# runner (0.2). `winter service up <env> --wait` brings the trio up in order (forge ->
+# hub -> runner) via depends_on. Postgres runs under winter-service-docker, not here;
+# P6 uses each daemon's embedded sqlite store, so postgres is not on the up path.
+#
+# The one live service is a WORKSPACE-scoped `shell` (bws-workspace session). It
+# is scoped to the workspace, not per-env, for two reasons: (1) an ad-hoc pane
+# for driving the verification loop by hand is a workspace-level convenience, not
+# something worth duplicating per env; (2) `winter service up <env>` ensures the
+# workspace scope first, and — because blizzard binds TWO providers (docker +
+# tmux) — that implicit ensure-step needs at least one provider to own a
+# `workspace`-scoped service, or the multi-provider dispatch matches nothing and
+# `up <env>` exits non-zero. Owning `workspace/shell` here makes the ensure-step
+# a real, succeeding dispatch. blizzard's app stack is otherwise per-env by
+# design (blizzard-discovery:/implementation/verification.md), so this shell is
+# the workspace scope's sole tenant.
+
+# Env-session layout — the per-env session (bws-<env>) hosts the forge/hub/runner
+# panes (0.0/0.1/0.2); layout-hook.sh splits and titles them.
+layout_hook = "layout-hook.sh"
+# Workspace-session layout — titles the shared shell pane in bws-workspace.
+workspace_layout_hook = "workspace-layout-hook.sh"
+
+# ---------------------------------------------------------------------------
+# Live services
+# ---------------------------------------------------------------------------
+
+[[service]]
+# Workspace-scoped utility shell (bws-workspace, pane 0.0). Empty command leaves
+# an interactive prompt — an ad-hoc pane for driving the verification loop by
+# hand (`cd alpha`, etc.). Being `workspace`-scoped, it is also what keeps the
+# implicit `up workspace` ensure-step (run before every `up <env>`) a matching,
+# exit-0 dispatch under blizzard's two-provider binding. log = "pane": read live
+# via tmux capture-pane, no file persistence.
+name = "shell"
+target = "0.0"
+cmd = ""
+log = "pane"
+scope = "workspace"
+
+# ---------------------------------------------------------------------------
+# From-source per-env services — the verification stack (forge -> hub -> runner).
+#
+# Each binds a stable port from workspace:/.winter/config.toml [env.feature.vars]
+# (BZ_FORGE_PORT / BZ_HUB_PORT / BZ_RUNNER_PORT) and reads its runtime seams from the
+# injected env band. The panes are created by layout-hook.sh (0.0 forge, 0.1 hub,
+# 0.2 runner). depends_on orders a `--wait` up so each starts after its dependency
+# is healthy.
+# ---------------------------------------------------------------------------
+
+# --- P4: mock GitHub forge (blizzard-mock) — the PM + delivery seams ----------
+# Runs the forge from the env's blizzard-mock worktree. It reads BZ_FORGE_PORT
+# (band +1) and BZ_FORGE_REPOS_DIR (the fixture workspace's per-env bare origins)
+# from the injected feature-env band — see workspace:/.winter/config.toml
+# [env.feature.vars] — so no flags are needed. Health is a log probe on uvicorn's
+# ready line (used verbatim, not interpolated); the forge starts even before a
+# fixture is minted (it 404s until the origins appear), so this reports healthy
+# as soon as the server is listening.
+[[service]]
+name = "forge"
+target = "0.0"  # first pane of the per-env session (shell is workspace-scoped)
+cwd = "blizzard-mock"
+cmd = "uv run blizzard-mock-forge"
+port = "WINTER_PORT_BASE + 1"
+
+[service.health]
+type = "log"
+target = "Application startup complete"
+
+# --- P5/P6: blizzard hub (blizzard) — the code under test ---------------------
+# Runs the hub daemon from the env's blizzard worktree over a disposable per-env
+# sqlite runtime (BZ_HUB_RUNTIME). `init` scaffolds config + migrates the store
+# (idempotent); `host` becomes the daemon on BZ_HUB_PORT (band +2). The forge seam
+# is wired from the injected BZ_FORGE_PORT (build_hosted_app reads it); BZ_FORGE_OWNER
+# defaults to `blizzard`. Ordered after the forge so a `--wait` up brings the git
+# truth up first.
+[[service]]
+name = "hub"
+target = "0.1"  # split from forge's pane in layout-hook.sh
+cwd = "blizzard"
+cmd = 'uv run blizzard hub init "$BZ_HUB_RUNTIME" && exec uv run blizzard hub host --dir "$BZ_HUB_RUNTIME" --host 127.0.0.1 --port "$BZ_HUB_PORT"'
+port = "WINTER_PORT_BASE + 2"
+depends_on = ["forge"]
+
+[service.health]
+type = "url"
+target = "http://localhost:${BZ_HUB_PORT}/api/health"
+
+# --- P6: blizzard runner (blizzard) — the code under test ---------------------
+# The reconciliation-loop daemon: it drives the per-env blizzard-mock fixture
+# workspace (BZ_WORKSPACE_ROOT) and spawns the fenced mock-claude-code façade for
+# build workers (design/runner/loop.md; blizzard-discovery:/implementation/verification.md).
+# BZ_HARNESS_BINARY must be an absolute path (the runner spawns the worker with the
+# acquired env dir as cwd), so it is resolved from the sibling blizzard-mock worktree
+# here; the remaining loop seams (workspace root, env pool, hub url, base branch) ride
+# the injected env into `runner init`'s scaffold. The stale toml is cleared first so
+# each `up` re-derives config from the current env. Ordered after the hub.
+[[service]]
+name = "runner"
+target = "0.2"  # split in layout-hook.sh
+cwd = "blizzard"
+cmd = 'export BZ_HARNESS_BINARY="$(cd ../blizzard-mock && pwd)/.venv/bin/mock-claude-code"; rm -f "$BZ_RUNNER_RUNTIME/blizzard-runner.toml"; uv run blizzard runner init "$BZ_RUNNER_RUNTIME" && exec uv run blizzard runner host --dir "$BZ_RUNNER_RUNTIME" --host 127.0.0.1 --port "$BZ_RUNNER_PORT"'
+port = "WINTER_PORT_BASE + 3"
+depends_on = ["hub"]
+
+[service.health]
+type = "url"
+target = "http://localhost:${BZ_RUNNER_PORT}/api/health"
+
+# ---------------------------------------------------------------------------
+# Web dev servers — the HMR surface for the two Angular apps (window 1).
+#
+# Each daemon above already serves its app's BUILT bundle from the wheel's package
+# data (src/blizzard/static/<app>, mounted at / by foundation/web.py), so the board
+# is reachable without these — but only as of the last `mise run web-build`. These
+# two slots add the `ng serve` twins that rebuild on save.
+#
+# There are two because there are two apps talking to two different daemons: the
+# hub board reaches hubApi, the runner panel reaches runnerApi, and both generated
+# clients carry an empty baseUrl — so each requests the same same-origin `/api/*`
+# prefix but must land on a different daemon. Each app therefore gets its own
+# proxy file (blizzard:web/proxy.conf.{hub,runner}.js), which reads the target port
+# from the injected band rather than pinning a literal.
+#
+# They live in window 1 (layout-hook.sh) to keep the daemon stack legible in window
+# 0 — five panes in one window is unreadable, and the daemon/dev-server split is the
+# natural seam. `winter service logs <env> web-hub` reads the compile output.
+# ---------------------------------------------------------------------------
+
+# --- The hub board (projects/hub) --------------------------------------------
+# `ng serve` on the band's +4 port, proxying /api -> BZ_HUB_PORT. proxyConfig is
+# declared in angular.json's hub:serve options, so a bare `npm start` picks the same
+# proxy up; only the port needs passing here. Ordered after the hub so a `--wait` up
+# has the proxy's target listening before the dev server accepts a request.
+[[service]]
+name = "web-hub"
+target = "1.0"
+cwd = "blizzard/web"
+cmd = 'exec npx ng serve hub --port "$BZ_HUB_WEB_PORT"'
+port = "WINTER_PORT_BASE + 4"
+depends_on = ["hub"]
+
+[service.health]
+type = "url"
+target = "http://localhost:${BZ_HUB_WEB_PORT}/"
+
+# --- The runner local panel (projects/runner) --------------------------------
+# The twin of web-hub, aimed at the runner: /api -> BZ_RUNNER_PORT via
+# proxy.conf.runner.js (runner:serve options in angular.json).
+[[service]]
+name = "web-runner"
+target = "1.1"
+cwd = "blizzard/web"
+cmd = 'exec npx ng serve runner --port "$BZ_RUNNER_WEB_PORT"'
+port = "WINTER_PORT_BASE + 5"
+depends_on = ["runner"]
+
+[service.health]
+type = "url"
+target = "http://localhost:${BZ_RUNNER_WEB_PORT}/"
