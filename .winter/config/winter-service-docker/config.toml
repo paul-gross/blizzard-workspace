@@ -1,0 +1,42 @@
+# Declarative manifest for winter-service-docker.
+# See winter-service-docker:/workflow/config.toml.example for the annotated schema.
+#
+# Scaffolded for the blizzard verification stack. blizzard's verification model
+# (blizzard-discovery:/implementation/verification.md) runs each feature env's
+# stack fully isolated so parallel envs verify in parallel — so Postgres is
+# PER-ENV, not a workspace singleton: every feature env gets its own container on
+# its own band port. Container/network/volume namespacing is automatic via
+# COMPOSE_PROJECT_NAME = <prefix>-<env> (bws-alpha, bws-beta, …), so alpha and
+# beta coexist with zero collisions. A real pg healthcheck makes
+# `winter service up <env> --wait` a genuine readiness gate.
+
+# COMPOSE_PROJECT_NAME prefix (per-env project = <prefix>-<env>) comes from the
+# workspace-level `service_prefix` config, injected as WINTER_SERVICE_PREFIX on
+# every dispatch action — so it resolves to `bws` here (bws-alpha, bws-beta). No
+# `project_prefix` override needed.
+
+# Only per-env services are declared here, so only the per-env compose file is
+# set; this provider owns no workspace singletons, so no workspace_compose_file
+# (docker's workspace scope is empty). The implicit `up workspace` sweep that
+# `up <env>` runs first is still satisfied — the tmux provider owns the
+# workspace-scoped `shell`, so the two-provider workspace dispatch matches a
+# real cell and exits 0. (With no provider owning a workspace service, that
+# sweep would match nothing and `up <env>` would exit non-zero.)
+environment_compose_file = "environment-compose.yaml"
+
+# --- Per-env Postgres ------------------------------------------------------
+# scope defaults to "project" → one container per feature env in bws-<env>,
+# auto-named bws-<env>-postgres-1. Host port comes from the injected feature
+# band var ${BZ_PG_PORT} (WINTER_PORT_BASE+0 → alpha 4420, beta 4440); see
+# [env.feature.vars] in workspace:/.winter/config.toml. The compose service key
+# `postgres` matches this name so partial up/down and status route correctly.
+[[service]]
+name = "postgres"
+# scope = "project"  # default — per-env in bws-<env>
+
+# ---------------------------------------------------------------------------
+# Future per-env services (mock GitHub forge, blizzard hub, blizzard runner)
+# run FROM SOURCE under winter-service-tmux, not docker — their slots live in
+# workspace:/.winter/config/winter-service-tmux/config.toml. Only the dockerized
+# Postgres daemon lives here.
+# ---------------------------------------------------------------------------

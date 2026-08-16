@@ -9,3 +9,17 @@
 
 # User/machine-specific overrides imported from AGENTS.md
 /AGENTS.local.md
+
+# The winter space — per-session artifacts the winter-workflow skills generate
+# (plans, phase docs, harness scores, review manifests, retrospectives). Winter's own
+# output, not repo deliverables, so this workspace does not track them; see
+# `winter-workflow:/context/winter-space.md` (winter resolves these paths but writes no
+# ignore rules of its own).
+/.winter/scores/
+/.winter/manifests/
+/.winter/workflows/
+/.winter/retrospectives/
+
+# Fleet-worker scratch files (drafts, notes) — the graph prompts route these to
+# `winter space scratch` instead of loose files in environment roots.
+/.winter/scratch/
