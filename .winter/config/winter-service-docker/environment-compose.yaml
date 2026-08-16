@@ -1,0 +1,48 @@
+# Per-env (project-scoped) services for winter-service-docker — the blizzard
+# verification stack's Postgres, run once PER FEATURE ENV (compose project
+# bws-<env>). winter injects the feature-scope env (WINTER_* plus
+# [env.feature.vars]) into the provider process on every dispatch, so the host
+# port below resolves from ${BZ_PG_PORT} (alpha 4420, beta 4440); the inline :-
+# default keeps the file runnable by hand.
+#
+# Isolation is by COMPOSE_PROJECT_NAME namespacing, NOT a pinned container_name:
+# each env's compose project (bws-alpha, bws-beta) auto-names its container
+# bws-<env>-postgres-1 and gives it its own network + named volume, so two
+# envs' Postgres instances never collide. Do NOT pin container_name here — that
+# would force both envs onto one name and break parallel envs.
+#
+# Runnable by hand — inject the feature env first, then run compose:
+#   set -a; eval "$(winter env alpha)"; set +a
+#   docker compose -p bws-alpha -f .winter/config/winter-service-docker/environment-compose.yaml up -d
+
+services:
+  # Per-env Postgres (project scope, project bws-<env>). Each feature env gets
+  # its own instance on its own band port (${BZ_PG_PORT}). POSTGRES_USER/DB
+  # `blizzard` are the bootstrap credentials; DATABASE_URL in [env.feature.vars]
+  # points the app at postgresql://blizzard:blizzard@localhost:${BZ_PG_PORT}/blizzard.
+  # The real pg_isready healthcheck is what makes `service up <env> --wait` a
+  # genuine readiness gate. The named volume persists this env's data across
+  # `service down/up <env>` (compose down keeps named volumes); it is namespaced
+  # by COMPOSE_PROJECT_NAME → bws-<env>_postgres-data, so envs never share data.
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: blizzard
+      POSTGRES_PASSWORD: blizzard
+      POSTGRES_DB: blizzard
+    ports:
+      - "${BZ_PG_PORT:-4420}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U blizzard"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+# Per-env named volume holding this env's Postgres data directory. Namespaced by
+# COMPOSE_PROJECT_NAME → bws-<env>_postgres-data, so alpha and beta keep separate
+# data. Remove explicitly (`docker volume rm ...`) for a clean slate.
+volumes:
+  postgres-data:
+    driver: local
