@@ -700,7 +700,7 @@ class TestBuildEffectiveTierTable:
     def test_empty_custom_returns_only_builtins(self) -> None:
         """With no custom tiers, the effective table matches the built-in set."""
         table = build_effective_tier_table({})
-        assert set(table) == {"opus", "sonnet", "haiku"}
+        assert set(table) == {tier.value for tier in ModelTier}
 
     def test_new_custom_tier_added_to_table(self) -> None:
         """A new custom tier label is present in the effective table."""

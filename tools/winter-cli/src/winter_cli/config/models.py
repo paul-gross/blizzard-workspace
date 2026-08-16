@@ -287,7 +287,7 @@ class ModelTiersConfig(BaseModel):
     """Workspace-level model-tier table overrides from ``[model_tiers]``.
 
     Each entry maps a **tier label** to a dict of per-vendor concrete model ids.
-    Built-in tiers (``opus`` / ``sonnet`` / ``haiku``) are the base defaults; a
+    Built-in tiers (``fable`` / ``opus`` / ``sonnet`` / ``haiku``) are the base defaults; a
     ``[model_tiers]`` entry for an existing label overrides that label's vendor
     id(s) while unlisted vendors inherit the built-in value.  A new label
     defines a custom tier that can be referenced anywhere a tier label is valid
@@ -301,11 +301,11 @@ class ModelTiersConfig(BaseModel):
 
         [model_tiers.big-thinker]
         claude = "opus"
-        codex = "gpt-5.4"
-        opencode = "anthropic/claude-opus-4-20250514"
+        codex = "gpt-5.6-sol"
+        opencode = "anthropic/claude-opus-5"
 
         [model_tiers.haiku]
-        opencode = "anthropic/claude-haiku-4-20251201"  # override one vendor
+        opencode = "anthropic/claude-haiku-4-5"  # override one vendor
 
     See ``context/winter-cli/configuration/agents.md`` for the full reference.
     """
@@ -321,7 +321,7 @@ class AgentModelOverridesConfig(BaseModel):
 
     Keyed by canonical agent name.  Each value is either:
 
-    - A string: a tier label (built-in ``'opus'``/``'sonnet'``/``'haiku'`` or a
+    - A string: a tier label (built-in ``'fable'``/``'opus'``/``'sonnet'``/``'haiku'`` or a
       custom label defined in ``[model_tiers]``), applied to all vendors.  Must
       exist in the effective tier table; unknown labels raise ``ConfigError`` at
       config load time.
@@ -340,7 +340,7 @@ class AgentModelOverridesConfig(BaseModel):
 
         [agent_model_overrides]
         reviewer = "haiku"                        # tier, all vendors
-        developer = { claude = "claude-opus-4-20250514" }  # concrete id, claude only
+        developer = { claude = "claude-opus-5" }  # concrete id, claude only
 
     See ``context/winter-cli/configuration/agents.md`` for the full reference.
     """
@@ -647,7 +647,7 @@ class WorkspaceConfig(BaseModel):
     model_tiers: ModelTiersConfig = Field(default_factory=ModelTiersConfig)
     """Workspace-configurable model-tier table from ``[model_tiers]``.
 
-    Layers over the built-in ``opus``/``sonnet``/``haiku`` defaults.  An entry
+    Layers over the built-in ``fable``/``opus``/``sonnet``/``haiku`` defaults.  An entry
     for an existing label overrides that label's vendor id(s); a new label adds
     a custom tier.  The resulting effective table is used for all tier
     resolution during ``winter ws init`` and ``winter doctor``.

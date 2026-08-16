@@ -98,6 +98,23 @@ def test_claude_tier_ids_are_identity_aliases() -> None:
         assert MODEL_TIER_IDS[(tier, "claude")] == tier.value
 
 
+@pytest.mark.parametrize("tier", [t.value for t in ModelTier])
+def test_builtin_tier_renders_for_every_vendor_without_config(tier: str) -> None:
+    """Every built-in tier resolves for every vendor with no ``[model_tiers]`` config.
+
+    A tier missing from the built-in table raises ``RepoError`` at render time,
+    which ``ExtensionAgentService`` swallows into a warning — the agent is then
+    silently absent from every harness's agents dir. Pin the built-in set so a
+    newly-shipped tier (``fable``) cannot regress into that failure.
+    """
+    agent = _PARSER.parse(_SAMPLE_MD.replace("model: sonnet", f"model: {tier}"))
+    _, warn = _warn_sink()
+
+    for renderer in (ClaudeAgentRenderer(), CodexAgentRenderer(), OpenCodeAgentRenderer()):
+        rendered = renderer.render(agent, warn=warn)
+        assert rendered.text
+
+
 # ── CanonicalAgentParser: happy path ─────────────────────────────────────────
 
 
@@ -351,7 +368,7 @@ def test_codex_render_produces_valid_toml() -> None:
     doc = tomllib.loads(r.text)
     assert doc["name"] == "developer"
     assert doc["description"] == "General-purpose developer agent."
-    assert doc["model"] == "gpt-5.4"  # sonnet tier → gpt-5.4 for codex
+    assert doc["model"] == "gpt-5.6-luna"  # sonnet tier → codex id
 
 
 def test_codex_render_roundtrip_toml() -> None:
@@ -425,7 +442,7 @@ def test_opencode_render_produces_valid_yaml_frontmatter() -> None:
     # OpenCode does not have a name frontmatter field — identity is the filename.
     assert "name" not in data
     assert data["description"] == "General-purpose developer agent."
-    assert data["model"] == "anthropic/claude-sonnet-4-20250514"  # sonnet tier → opencode id
+    assert data["model"] == "anthropic/claude-sonnet-5"  # sonnet tier → opencode id
 
 
 def test_opencode_render_includes_body() -> None:

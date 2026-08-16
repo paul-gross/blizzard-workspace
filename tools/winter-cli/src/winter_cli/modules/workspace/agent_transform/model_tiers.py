@@ -1,9 +1,10 @@
 """Model tier enum and the canonical tier → vendor model-id lookup table.
 
-``ModelTier`` carries the three built-in abstraction levels (opus / sonnet / haiku).
+``ModelTier`` carries the four built-in abstraction levels (fable / opus / sonnet / haiku).
 ``MODEL_TIER_IDS`` maps ``(ModelTier, vendor_label)`` to the concrete model-id
-string each harness expects. Claude accepts tier aliases directly; Codex and
-OpenCode ids are verified against vendor documentation (see inline comments).
+string each harness expects. Claude accepts tier aliases directly; each Codex and
+OpenCode id carries its own verification note inline — read those before treating
+a value as current, and re-verify against the vendor's live catalog when editing.
 
 ``build_effective_tier_table`` produces the runtime tier table by merging the
 built-in defaults with workspace-configured overrides/extensions from
@@ -21,8 +22,14 @@ import enum
 
 
 class ModelTier(enum.Enum):
-    """Three built-in capability tiers; names match the Claude Code tier alias vocabulary."""
+    """Four built-in capability tiers; names match the Claude Code tier alias vocabulary.
 
+    Declared most- to least-capable. ``fable`` is the top tier: agents that
+    declare ``model: fable`` resolve through this table like any other tier, so
+    no workspace ``[model_tiers]`` entry is needed to install them.
+    """
+
+    fable = "fable"
     opus = "opus"
     sonnet = "sonnet"
     haiku = "haiku"
@@ -45,19 +52,27 @@ VENDOR_LABELS: frozenset[str] = frozenset({"claude", "codex", "opencode"})
 # `model:` key in the agent's `<vendor>:` override block takes precedence.
 MODEL_TIER_IDS: dict[tuple[ModelTier, str], str] = {
     # Claude Code accepts the tier alias directly as the model identifier.
+    (ModelTier.fable, "claude"): "fable",
     (ModelTier.opus, "claude"): "opus",
     (ModelTier.sonnet, "claude"): "sonnet",
     (ModelTier.haiku, "claude"): "haiku",
-    # Codex: verified against developers.openai.com/codex/subagents (2026-06).
-    # Both opus and sonnet tiers map to gpt-5.4; haiku maps to gpt-5.4-mini.
-    (ModelTier.opus, "codex"): "gpt-5.4",
-    (ModelTier.sonnet, "codex"): "gpt-5.4",
-    (ModelTier.haiku, "codex"): "gpt-5.4-mini",
-    # OpenCode: format per opencode.ai/docs/agents (provider/model-id);
-    # pin dates verifiable via 'opencode models'.
-    (ModelTier.opus, "opencode"): "anthropic/claude-opus-4-20250514",
-    (ModelTier.sonnet, "opencode"): "anthropic/claude-sonnet-4-20250514",
-    (ModelTier.haiku, "opencode"): "anthropic/claude-haiku-4-20250514",
+    # Codex: the sol > terra > luna ranking and this tier mapping are workspace-declared,
+    # not vendor-published; Codex exposes no machine-readable capability order. Each id
+    # was verified present in the local Codex catalog (2026-08-16). The previous
+    # gpt-5.4 mapping is superseded — Codex itself migrates gpt-5.4 -> gpt-5.5.
+    # `sonnet` and `haiku` share luna: luna is the lowest declared rank, and Codex
+    # publishes no smaller 5.6 model to separate them.
+    (ModelTier.fable, "codex"): "gpt-5.6-sol",
+    (ModelTier.opus, "codex"): "gpt-5.6-terra",
+    (ModelTier.sonnet, "codex"): "gpt-5.6-luna",
+    (ModelTier.haiku, "codex"): "gpt-5.6-luna",
+    # OpenCode: format per opencode.ai/docs/agents (provider/model-id).
+    # The 5-series ids carry no date suffix; verifiable via 'opencode models'.
+    # Haiku has no 5-series release, so that tier stays on 4.5.
+    (ModelTier.fable, "opencode"): "anthropic/claude-fable-5",
+    (ModelTier.opus, "opencode"): "anthropic/claude-opus-5",
+    (ModelTier.sonnet, "opencode"): "anthropic/claude-sonnet-5",
+    (ModelTier.haiku, "opencode"): "anthropic/claude-haiku-4-5",
 }
 
 # Built-in tier table in the dict[str, dict[str, str]] shape used by
@@ -73,7 +88,7 @@ def build_effective_tier_table(
 ) -> dict[str, dict[str, str]]:
     """Return the effective tier table: built-in defaults ⊕ workspace config.
 
-    The built-in tiers (opus / sonnet / haiku) are the base.  Entries in
+    The built-in tiers (fable / opus / sonnet / haiku) are the base.  Entries in
     ``custom_tiers`` (parsed from ``[model_tiers]``) layer on top:
 
     - An entry for an **existing built-in label** overrides only the listed

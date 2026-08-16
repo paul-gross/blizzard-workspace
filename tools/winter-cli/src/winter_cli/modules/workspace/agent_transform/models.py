@@ -24,7 +24,7 @@ class CanonicalAgent:
     """Parsed canonical agent — harness-neutral representation.
 
     ``model_tier`` is the tier label string from the agent's ``model:`` field
-    (e.g. ``"sonnet"``, ``"haiku"``, ``"opus"``, or a workspace-defined custom
+    (e.g. ``"sonnet"``, ``"haiku"``, ``"opus"``, ``"fable"``, or a workspace-defined custom
     label like ``"big-thinker"``).  Resolution against the effective tier table
     happens at render time, not at parse time, so custom labels are stored as
     plain strings without enum conversion.

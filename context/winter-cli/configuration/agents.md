@@ -13,19 +13,19 @@ The agent transform pipeline bakes each agent's model into the rendered per-vend
 
 ## The `[model_tiers]` table
 
-`[model_tiers]` maps tier label strings to per-vendor model id strings. It layers over the built-in `MODEL_TIER_IDS` table — built-in entries (`opus`, `sonnet`, `haiku`) are merged per-vendor, new labels are added whole.
+`[model_tiers]` maps tier label strings to per-vendor model id strings. It layers over the built-in `MODEL_TIER_IDS` table — built-in entries (`fable`, `opus`, `sonnet`, `haiku`) are merged per-vendor, new labels are added whole.
 
 ```toml
 # .winter/config.toml  (committed, shared with the team)
 
 [model_tiers.big-thinker]
-claude = "claude-opus-4-20250514"
-codex = "gpt-5.4"
-opencode = "anthropic/claude-opus-4-20250514"
+claude = "claude-opus-5"
+codex = "gpt-5.6-sol"
+opencode = "anthropic/claude-opus-5"
 
 # Override only the opencode id for the built-in haiku tier:
 [model_tiers.haiku]
-opencode = "anthropic/claude-haiku-4-20251201"
+opencode = "anthropic/claude-haiku-4-5"
 ```
 
 ```toml
@@ -33,14 +33,14 @@ opencode = "anthropic/claude-haiku-4-20251201"
 
 # Local override wins for this tier label:
 [model_tiers.big-thinker]
-claude = "claude-sonnet-4-5-20250514"
-codex = "gpt-5.4"
-opencode = "anthropic/claude-sonnet-4-5-20250514"
+claude = "claude-sonnet-5"
+codex = "gpt-5.6-sol"
+opencode = "anthropic/claude-sonnet-5"
 ```
 
 ### Merge rules
 
-- Built-in tier labels (`opus`, `sonnet`, `haiku`) are merged **per-vendor**: only the vendor keys listed in your config entry are overridden; unlisted vendors keep their built-in values. This means a `[model_tiers.haiku]` block that only sets `opencode` leaves `claude` and `codex` at their defaults.
+- Built-in tier labels (`fable`, `opus`, `sonnet`, `haiku`) are merged **per-vendor**: only the vendor keys listed in your config entry are overridden; unlisted vendors keep their built-in values. This means a `[model_tiers.haiku]` block that only sets `opencode` leaves `claude` and `codex` at their defaults.
 - New custom labels are added wholesale from your config entry.
 - `config.local.toml` wins over `config.toml` for the same label (per-label replacement, not per-vendor merge across files).
 
@@ -90,10 +90,10 @@ reviewer = "haiku"
 planner = "big-thinker"
 
 # Per-vendor override — only the listed vendor is affected:
-developer = { claude = "claude-opus-4-20250514" }
+developer = { claude = "claude-opus-5" }
 
 # Concrete model id scoped per-vendor (use inline-table form for vendor-specific ids):
-coder = { codex = "gpt-5.4-experimental", opencode = "anthropic/claude-opus-4-20250514" }
+coder = { codex = "gpt-5.4-experimental", opencode = "anthropic/claude-opus-5" }
 ```
 
 ```toml
@@ -111,7 +111,7 @@ Keys are **canonical agent names** (the `name:` field in the agent's frontmatter
 | Tier string | `"haiku"` | All vendors |
 | Inline table (per-vendor) | `{ claude = "haiku" }` | Only the listed vendor labels |
 
-**Tier string values must be valid tier labels** — either built-in (`"opus"`, `"sonnet"`, `"haiku"`) or defined in `[model_tiers]`. A bare string that does not match any tier label raises `ConfigError` at config load time. Use the per-vendor inline-table form to specify a concrete model id directly.
+**Tier string values must be valid tier labels** — either built-in (`"fable"`, `"opus"`, `"sonnet"`, `"haiku"`) or defined in `[model_tiers]`. A bare string that does not match any tier label raises `ConfigError` at config load time. Use the per-vendor inline-table form to specify a concrete model id directly.
 
 **Per-vendor values are not tier-validated.** An inline-table value such as `{ claude = "some-id" }` is accepted whether `"some-id"` is a tier label or a concrete model id — a non-tier string is treated as a concrete model id for that vendor and is passed through without validation.
 
