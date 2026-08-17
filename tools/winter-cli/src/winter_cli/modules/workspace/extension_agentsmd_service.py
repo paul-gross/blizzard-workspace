@@ -25,20 +25,20 @@ class ExtensionAgentsMdService:
     `AGENTS.winter.md` is gitignored, so adding or removing extensions does not
     dirty the workspace.
 
-    Rendering forks by repo kind. A standalone extension lives at one fixed
-    workspace path, so it renders as an eager `@`-import line — unchanged from
-    before this class learned about project-repo extensions. A project-repo
+    The generated file opens with a single `# Path notation resolution`
+    heading; every bullet under it binds an extension name (the `<name>:`
+    path-notation prefix) to the location that resolves it. Rendering forks
+    by repo kind. A standalone extension lives at one fixed workspace path,
+    so its bullet is an eager `@`-import of its entry point. A project-repo
     extension (a `projects/<name>/` checkout carrying a root `winter-ext.toml`
     with no matching `[[standalone_repository]]` declaration — see
     `RepositoryFactory.get_extension_repos`) has N copies — the source checkout
-    plus one worktree per feature env — so it renders as a routing row
-    instead: name, the literal `<env>/<name>/` worktree-path template, the
-    "resolves the `<name>:` path notation" binding every extension's own
-    `index.md` depends on, the entry-point path, and a one-line description
-    when the manifest declares one — with no `@`. This points an agent at the
-    worktree it is actually in rather than an injected `master` copy, and
-    keeps project entry points off the `injected_bytes` budget the `@`-import
-    graph is measured against. When at least one routing row is rendered, a
+    plus one worktree per feature env — so its bullet carries the literal
+    `<env>/<name>/` entry-point path template (plus the manifest description
+    when one is declared) with no `@`. This points an agent at the worktree it
+    is actually in rather than an injected `master` copy, and keeps project
+    entry points off the `injected_bytes` budget the `@`-import graph is
+    measured against. When at least one project-repo bullet is rendered, a
     one-line note precedes them stating how `<env>` binds and what a
     workspace-root reader (no env in scope) opens instead.
 
@@ -66,8 +66,8 @@ class ExtensionAgentsMdService:
 
         Called once after all standalones are reconciled, with every extension
         repo (standalones plus project-repo extensions) that exists on disk.
-        Standalone entries get an eager `@`-import line; project-repo entries
-        get a routing row. A repo of either kind is eligible only when an entry
+        Standalone entries get an eager `@`-import bullet; project-repo entries
+        get a path-template bullet. A repo of either kind is eligible only when an entry
         point (`index.md`, `AGENTS.md`, then `context/index.md`, in that order)
         exists at its root.
 
@@ -108,13 +108,7 @@ class ExtensionAgentsMdService:
                 # Standalone path lives outside the workspace; can't write a
                 # workspace-relative @-import for it. Skip silently.
                 continue
-            standalone_lines.append(
-                (
-                    repo.name,
-                    f"- **{repo.name}** at `./{relative}/` — resolves the `{repo.name}:` path notation. "
-                    f"@{relative}/{entry_point}",
-                )
-            )
+            standalone_lines.append((repo.name, f"- **{repo.name}**: @{relative}/{entry_point}"))
 
         agents_path = self._config.workspace_root / AGENTS_WINTER_FILENAME
         eligible = [*standalone_lines, *project_rows]
@@ -135,18 +129,21 @@ class ExtensionAgentsMdService:
             )
             return True
 
-        winter_lines = [line for _, line in sorted(standalone_lines)]
+        winter_lines = ["# Path notation resolution", ""]
+        winter_lines.extend(line for _, line in sorted(standalone_lines))
         if project_rows:
-            # `<env>` in the rows below is unbound for a reader with no feature env in
-            # scope (e.g. a subagent spawned from the workspace root per
+            # `<env>` in the bullets below is unbound for a reader with no feature env
+            # in scope (e.g. a subagent spawned from the workspace root per
             # `context/workspace-layout.md` rule 4) — state the binding and the
-            # workspace-root fallback once here rather than repeating it per row.
+            # workspace-root fallback once here rather than repeating it per bullet.
+            if standalone_lines:
+                winter_lines.append("")
             winter_lines.append(
-                "Project-repo routing rows below use `<env>/<name>/` — `<env>` binds to the "
-                "feature-env directory you are working in. Reading this from the workspace "
-                "root, where no env is bound? Open the source checkout at `projects/<name>/` "
-                "instead. See context/winter-cli/configuration/extensions.md#project-repo-extensions."
+                "`<env>` below binds to the feature-env directory you are working in; "
+                "from the workspace root, where no env is bound, read the source "
+                "checkout at `projects/<name>/` instead."
             )
+            winter_lines.append("")
             winter_lines.extend(line for _, line in sorted(project_rows))
         new_agents = "\n".join(winter_lines) + "\n"
         detail = ", ".join(name for name, _ in sorted(eligible))
@@ -198,24 +195,19 @@ class ExtensionAgentsMdService:
         entry_point: str,
         reporter: IInitReporter,
     ) -> str:
-        """Render a project-repo extension's routing row.
+        """Render a project-repo extension's bullet.
 
         No `@`-import: an agent working in a feature env reads the worktree
         it's actually in (`<env>/<name>/`) rather than this injected `master`
-        copy. Carries the same "resolves the `<name>:` path notation" binding
-        a standalone's `@`-import line does — every installed extension's own
-        `index.md` instructs agents to resolve its `winter-X:` prefix via this
-        exact block, so the row must state it too, not just the standalone
-        line. Always names the entry point (so the row also says *what* to
+        copy. Names the full entry-point path (so the bullet says *what* to
         read, not just where); appends the manifest `description` after it
-        when present rather than replacing it.
+        when present.
         """
-        worktree_path = f"<env>/{repo.name}/"
+        line = f"- **{repo.name}**: `<env>/{repo.name}/{entry_point}`"
         description = self._load_description(repo, reporter)
-        detail = f"resolves the `{repo.name}:` path notation. Read `{worktree_path}{entry_point}`"
         if description:
-            detail = f"{detail} — {description}"
-        return f"- **{repo.name}** at `{worktree_path}` — {detail}"
+            line = f"{line} — {description}"
+        return line
 
     def _load_description(self, repo: StandaloneRepository, reporter: IInitReporter) -> str | None:
         manifest_path = repo.path / EXT_MANIFEST

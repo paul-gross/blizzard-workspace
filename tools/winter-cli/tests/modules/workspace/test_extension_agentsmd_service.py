@@ -72,8 +72,8 @@ def test_finalize_agentsmd_writes_agents_winter_for_eligible_repos(
 
     agents_path = WORKSPACE_ROOT / AGENTS_WINTER_FILENAME
     content = fs.files[agents_path]
-    assert "**ext-a**" in content
-    assert "@ext-a/index.md" in content
+    assert content.startswith("# Path notation resolution\n")
+    assert "- **ext-a**: @ext-a/index.md" in content
     assert "**ext-b**" in content
 
 
@@ -245,11 +245,7 @@ def test_finalize_agentsmd_renders_project_repo_as_routing_row(
     assert ok is True
 
     content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
-    assert "**winter-docs**" in content
-    assert "<env>/winter-docs/" in content
-    assert "resolves the `winter-docs:` path notation" in content
-    assert "<env>/winter-docs/index.md" in content
-    assert "Public docs site generator." in content
+    assert "- **winter-docs**: `<env>/winter-docs/index.md` — Public docs site generator." in content
     assert "@" not in content
 
 
@@ -265,10 +261,7 @@ def test_finalize_agentsmd_project_repo_row_falls_back_to_entry_point_without_de
     assert ok is True
 
     content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
-    assert "**winter-docs**" in content
-    assert "<env>/winter-docs/" in content
-    assert "resolves the `winter-docs:` path notation" in content
-    assert "index.md" in content
+    assert "- **winter-docs**: `<env>/winter-docs/index.md`" in content
     assert "@" not in content
 
 
@@ -301,7 +294,7 @@ def test_finalize_agentsmd_no_env_binding_note_when_no_project_rows(
     assert ok is True
 
     content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
-    assert "<env>` binds to the" not in content
+    assert "binds to the feature-env directory" not in content
 
 
 def test_finalize_agentsmd_env_binding_note_present_with_project_rows(
@@ -317,6 +310,6 @@ def test_finalize_agentsmd_env_binding_note_present_with_project_rows(
     assert ok is True
 
     content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
-    assert "<env>` binds to the" in content
+    assert "binds to the feature-env directory" in content
     assert "projects/<name>/" in content
     assert "Docs generator." in content
