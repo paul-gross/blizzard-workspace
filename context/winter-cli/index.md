@@ -1,7 +1,5 @@
 # Winter CLI
 
-The `winter` command is a workspace-level tool for managing worktrees and repositories. It reads its configuration from `.winter/config.toml` and operates across every repository in the workspace at once. Multi-repo operations — init, status, fetch, pull, connect, push, diff — go through the CLI; single-repo work — staging, committing, resolving conflicts, interactive rebase — uses raw git.
-
 This is the top-level hub of the `context/winter-cli/` documentation tree. Enter here first, then open only the single per-topic file that matches your task:
 
 | File | When to read |

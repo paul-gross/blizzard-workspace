@@ -1,6 +1,6 @@
 # Winter CLI — command reference
 
-Every `winter` command group and usage topic, one file each. Read this index, then open only the topic you need. For what the CLI is for, when to use it vs raw git, root flags, and the capability map, see the [hub](../index.md).
+Every `winter` command group and usage topic, one file each. Read this index, then open only the topic you need. What the CLI is for and when to use it instead of raw git are stated in the workspace `AGENTS.md`; for the flags that apply to every command see [root-flags.md](../root-flags.md), and for the capability map see [capabilities.md](./capabilities.md).
 
 ## Routing table
 

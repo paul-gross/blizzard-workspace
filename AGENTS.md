@@ -5,9 +5,12 @@ We are working in a multi-repository, multi-worktree development workspace: seve
 Each of the following files declares fundamental pieces pertinent to every task and is imported eagerly:
 
 - IMPORTANT: @context/project/index.md — workspace-owned project context
-- IMPORTANT: @context/winter-cli/index.md — the winter CLI context hub
 - IMPORTANT: @AGENTS.winter.md — the winter-generated declaration of installed winter extensions
 - IMPORTANT: @AGENTS.local.md — the workspace's local settings
+
+## Winter CLI
+
+The `winter` command manages worktrees and repositories across the whole workspace. Multi-repo operations — init, status, fetch, pull, connect, push, diff — go through it; single-repo work — staging, committing, resolving conflicts, interactive rebase — uses raw git.
 
 ## Feature-environment lifecycle
 
@@ -21,6 +24,7 @@ Never run or exercise a destructive `winter` command against a live environment 
 
 | File | When to read |
 |------|--------------|
+| [context/winter-cli/index.md](./context/winter-cli/index.md) | You need to run a `winter` command, edit `.winter/config.toml`, or install the CLI — the hub for the whole CLI documentation tree. |
 | [context/workspace-layout.md](./context/workspace-layout.md) | You need the workspace directory layout, feature environments, path notation, or layout rules. |
 | [context/worktree-ops.md](./context/worktree-ops.md) | You are performing worktree git operations — creating, pulling, or destroying worktrees. |
 | [context/project/contributing.md](./context/project/contributing.md) | You are merging, pushing, or delivering work — the contributing conventions. |
