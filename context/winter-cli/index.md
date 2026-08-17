@@ -1,18 +1,16 @@
 # Winter CLI
 
-The `winter` command is a workspace-level tool for managing worktrees and repositories. It reads configuration from `.winter/config.toml` and operates across every repo in the workspace at once. This is the hub: read it first, then open the one per-topic file you need.
+The `winter` command is a workspace-level tool for managing worktrees and repositories. It reads its configuration from `.winter/config.toml` and operates across every repository in the workspace at once. Multi-repo operations — init, status, fetch, pull, connect, push, diff — go through the CLI; single-repo work — staging, committing, resolving conflicts, interactive rebase — uses raw git.
 
-**Use the CLI** for multi-repo operations (init, status, fetch, pull, connect, push, diff); **use raw git** for single-repo work (staging, committing, conflicts, interactive rebase). See [usage/index.md](./usage/index.md) for the full command surface.
+This is the top-level hub of the `context/winter-cli/` documentation tree. Enter here first, then open only the single per-topic file that matches your task:
 
-## Routing table
-
-| Topic | Read when… |
-|-------|------------|
-| [Command reference](./usage/index.md) | …you need to run any `winter` command — the per-topic routing index for `ws`, `repo`, `ext`, `dashboard`, `service`, `doctor`, `lint`, `graph`, and `capabilities`. |
-| [Common workflows](./workflows.md) | …you want a ready-made command sequence for a routine multi-step operation — bootstrap, start a feature, merge main, push, tear down. |
-| [Resilience & drift](./resilience.md) | …you hit a flaky-network retry, a hung remote git call, or a config↔filesystem drift warning, and want the cross-cutting behavior behind it. |
-| [Install winter](./setup.md) | …you're installing the `winter` CLI into a workspace. |
-| [Configuration](./configuration/index.md) | …you're editing `.winter/config.toml` — repositories, ports, extensions, capabilities, provision handlers, doctor/lint. The per-concept hub for the whole configuration surface. |
-| [Contracts](./contracts/service-orchestrator.md) | …you're writing or conforming an extension that winter dispatches to — the implementer-facing provider protocols (currently the service orchestrator). |
-| [Root flags](./root-flags.md) | …you need `--verbose`, `--version`, `--service-orchestrator`, or `WINTER_LOG_LEVEL` — the global flags that apply to every command. |
-| [Maintaining these docs](./maintaining.md) | …you're adding, moving, rewriting, or reviewing a file in this tree, and need the placement, routing, and freshness rules that govern it. |
+| File | When to read |
+|------|--------------|
+| [usage/index.md](./usage/index.md) | You need to run any `winter` command — the per-topic routing index covering the full command surface. |
+| [workflows.md](./workflows.md) | You want a ready-made command sequence for a routine multi-step operation: bootstrapping, starting a feature, merging main, pushing, tearing down. |
+| [root-flags.md](./root-flags.md) | You need a global flag that applies to every command, or the `WINTER_LOG_LEVEL` environment variable. |
+| [configuration/index.md](./configuration/index.md) | You are editing `.winter/config.toml` — the per-concept hub for the entire configuration surface. |
+| [contracts/service-orchestrator.md](./contracts/service-orchestrator.md) | You are writing or conforming an extension winter dispatches to — the implementer-facing provider protocols. |
+| [resilience.md](./resilience.md) | You hit a flaky-network retry, a hung remote git call, or a config↔filesystem drift warning and want the cross-cutting behavior behind it. |
+| [setup.md](./setup.md) | You are installing the `winter` CLI into a workspace. |
+| [maintaining.md](./maintaining.md) | You are adding, moving, rewriting, or reviewing a file in this tree — it owns the placement, routing, and freshness rules that govern it. |

@@ -1,35 +1,27 @@
-# Workspace Management
+# Winter workspace
 
-We are working in a **multi-worktree, multi-repository** development workspace, optimized for agentic development. Multiple project repositories are cloned here, and all feature development happens in feature environments comprised of multiple project-specific worktrees — not in the source checkouts. Multiple agents can work in parallel across different feature environments without interfering with each other.
+We are working in a multi-repository, multi-worktree development workspace: several project repositories are cloned into it, and the **winter** framework manages its worktrees, service orchestration, and agent tooling. All feature development happens in feature environments, each composed of per-project worktrees — never in the source checkouts — so multiple agents can work in parallel in different feature environments without interfering with one another. The project repositories carry no knowledge of winter; every piece of workspace configuration lives in the workspace itself.
 
-This workspace is powered by **winter**, a framework that manages the worktrees, service orchestration, and agent tooling. The project repos know nothing about winter — all workspace configuration lives here in the workspace itself.
+Each of the following files declares fundamental pieces pertinent to every task and is imported eagerly:
 
-IMPORTANT: This workspace has fundamental pieces declared in @context/project/index.md that are pertinent to every task.
+- IMPORTANT: @context/project/index.md — workspace-owned project context
+- IMPORTANT: @context/winter-cli/index.md — the winter CLI context hub
+- IMPORTANT: @AGENTS.winter.md — the winter-generated declaration of installed winter extensions
+- IMPORTANT: @AGENTS.local.md — the workspace's local settings
 
-## Winter CLI
+## Feature-environment lifecycle
 
-The `winter` command manages feature environments and repositories across the workspace. Use it instead of manual multi-repo git operations. Use raw git for single-repo work (staging, committing, conflict resolution).
+Bring a feature environment up in order: `winter ws init <env>`, then `winter provision <env>`, then `winter service up <env>`. Never run or exercise an environment that has not been provisioned — provisioning is a required baseline operation, not an optional step. [context/environment-lifecycle.md](./context/environment-lifecycle.md) owns the lifecycle phases and the provision-before-run baseline rule.
 
-IMPORTANT: This workspace has fundamental pieces declared in @context/winter-cli/index.md that are pertinent to every task.
+## Destructive commands
 
-IMPORTANT: A feature environment's lifecycle is `winter ws init <env>` → `winter provision <env>` → `winter service up <env>`. `ws init` is structural only — it does not install dependencies, migrate databases, or seed data, and `service up` starts services against the env as-is. **Never run or exercise an env you have not provisioned**: provisioning is a baseline op, not optional. See [context/environment-lifecycle.md](./context/environment-lifecycle.md).
+Never run or exercise a destructive `winter` command against a live environment you do not intend to mutate. Which commands are destructive, and how to verify one safely, is owned by [Verifying destructive commands safely](./context/worktree-ops.md#verifying-destructive-commands-safely).
 
-IMPORTANT: `ws checkout`, `ws reset --hard`, `ws clean`, and `ws destroy` mutate real worktrees with no scoping narrower than their own `PATTERNS`/`ENV` argument — `ws checkout` in particular has no repo-scoping flag at all, and `ws clean` removes untracked files, which no reflog can restore. **Never run or exercise a destructive `winter` command against a live env you don't intend to mutate**, including through a `--winter`/`--service-orchestrator` core override, which still targets the live workspace. Verify against a throwaway env or scratch workspace, prefer `--dry-run`/`--json` to preview first, and audit every worktree you touched afterward. See [context/worktree-ops.md](./context/worktree-ops.md#verifying-destructive-commands-safely).
+## Further reference
 
-## Key References
-
-| Location | Topic |
-|----------|-------|
-| [context/workspace-layout.md](./context/workspace-layout.md) | Directory layout, feature envs, path notation, and rules |
-| [context/environment-lifecycle.md](./context/environment-lifecycle.md) | Env lifecycle phases (init → provision → service up → destroy) and the provision-before-run baseline rule |
-| [context/worktree-ops.md](./context/worktree-ops.md) | Worktree git operations (create, pull, destroy) |
-| [context/project/contributing.md](./context/project/contributing.md) | Contributing conventions (merge, push, delivery) |
-| [context/github.md](./context/github.md) | GitHub forge, issue labels, and `/wg-issue` skill |
-
-# Winter Extensions
-
-IMPORTANT: This workspace has fundamental pieces declared in @AGENTS.winter.md that are pertinent to every task.
-
-# Local Settings
-
-IMPORTANT: This workspace has fundamental pieces declared in @AGENTS.local.md that are pertinent to every task.
+| File | When to read |
+|------|--------------|
+| [context/workspace-layout.md](./context/workspace-layout.md) | You need the workspace directory layout, feature environments, path notation, or layout rules. |
+| [context/worktree-ops.md](./context/worktree-ops.md) | You are performing worktree git operations — creating, pulling, or destroying worktrees. |
+| [context/project/contributing.md](./context/project/contributing.md) | You are merging, pushing, or delivering work — the contributing conventions. |
+| [context/github.md](./context/github.md) | You are performing a GitHub operation for this project, such as raising an issue. |
