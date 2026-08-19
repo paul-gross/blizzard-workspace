@@ -633,6 +633,6 @@ class ReadRepoRepository:
 
 # Typecheck-time conformance sentinel — Pyright rejects this return if
 # ReadRepoRepository drifts from IReadRepoRepository. See
-# winter-harness:/architecture/repository-pattern.md.
+# winter-context:/architecture/repository-pattern.md.
 def _conforms_read_repo_repository(x: ReadRepoRepository) -> IReadRepoRepository:
     return x

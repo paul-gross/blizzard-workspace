@@ -5,7 +5,7 @@
 # MD028 off: two standalone callouts separated by a blank line are separate blockquotes; the rule reads the gap as one quote's interior
 # MD036 off: a skill quotes the line an agent says to the user as its own emphasized line — a spoken prompt, not a heading substitute
 # MD041 off: not every file here is a document — a SKILL.md opens with YAML frontmatter, and CLAUDE.md is a one-line `@import` shim
-# MD057 off: skills and root routing files address workspace files as `./context/…`, which resolves from the workspace root at install time, not from the file that states it. Modeling that is `winter-harness:/agent-context/scripts/lint_doc_references.py`'s job, and it is contributed to this same `winter lint` run
+# MD057 off: skills and root routing files address workspace files as `./context/…`, which resolves from the workspace root at install time, not from the file that states it. Modeling that is `winter-context:/agent-context/scripts/lint_doc_references.py`'s job, and it is contributed to this same `winter lint` run
 disable = ["MD076", "MD018", "MD033", "MD028", "MD036", "MD041", "MD057"]
 
 [MD004]

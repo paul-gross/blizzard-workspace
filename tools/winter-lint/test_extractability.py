@@ -57,8 +57,8 @@ class ReferenceScanTests(unittest.TestCase):
         self.scanner = ext.ReferenceScanner()
 
     def test_extracts_winter_contexts(self) -> None:
-        line = "see winter-harness:/python/x.md and workspace:/context/y.md and winter:/z"
-        self.assertEqual(self.scanner.references_in_line(line), ["winter-harness", "workspace", "winter"])
+        line = "see winter-context:/python/x.md and workspace:/context/y.md and winter:/z"
+        self.assertEqual(self.scanner.references_in_line(line), ["winter-context", "workspace", "winter"])
 
     def test_ignores_non_winter_schemes(self) -> None:
         self.assertEqual(self.scanner.references_in_line("a https://example.com and file:/tmp/x"), [])

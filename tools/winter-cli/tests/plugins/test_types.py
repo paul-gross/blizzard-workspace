@@ -87,7 +87,7 @@ class TestTuiActionScopesNormalization:
 
 class TestActionInvocationDelegation:
     def _make_invocation(self) -> tuple[ActionInvocation, StandaloneRepoContext]:
-        repo = StandaloneRepository(name="winter-harness", path=Path("/ws/harness"))
+        repo = StandaloneRepository(name="winter-context", path=Path("/ws/harness"))
         ctx = StandaloneRepoContext(repo=repo)
         inv = ActionInvocation(scope=ActionScope.standalone_repository, context=ctx)
         return inv, ctx
@@ -103,7 +103,7 @@ class TestActionInvocationDelegation:
     def test_repo_delegates_to_inner_context(self) -> None:
         inv, ctx = self._make_invocation()
         assert inv.repo is ctx.repo
-        assert inv.repo.name == "winter-harness"
+        assert inv.repo.name == "winter-context"
 
     def test_unknown_attribute_raises_attribute_error(self) -> None:
         inv, _ = self._make_invocation()

@@ -51,7 +51,7 @@ class ServiceManifestCollectorService:
     Accepts only the domain scalars it needs (``workspace_root``,
     ``workspace_service_defs_raw``) rather than the whole ``WorkspaceConfig``
     (per the dependency-injection convention in
-    ``winter-harness:/architecture/dependency-injection.md``).
+    ``winter-context:/architecture/dependency-injection.md``).
 
     Error handling: a malformed ``[[service]]`` block in any source raises
     ``click.ClickException`` (workspace-config errors) or logs a warning and

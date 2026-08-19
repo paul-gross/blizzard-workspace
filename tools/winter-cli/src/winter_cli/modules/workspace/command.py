@@ -1223,11 +1223,11 @@ def repo_remove(ctx: click.Context, target: str, local: bool, output_json: bool)
     \b
     TARGET takes the form '<type>/<name>':
       winter repo remove project/winter
-      winter repo remove standalone/winter-harness
+      winter repo remove standalone/winter-context
     """
     if "/" not in target:
         raise click.ClickException(
-            "Argument must be in the form '<type>/<name>' (e.g. project/winter, standalone/winter-harness)"
+            "Argument must be in the form '<type>/<name>' (e.g. project/winter, standalone/winter-context)"
         )
     kind, _, name = target.partition("/")
     container = cli_ctx(ctx).container

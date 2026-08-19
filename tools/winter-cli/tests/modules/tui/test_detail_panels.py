@@ -45,7 +45,7 @@ from winter_cli.modules.workspace.models.service_model import StandaloneRepoStat
 from winter_cli.plugins.types import DetailPanelContext
 
 _WORKSPACE = Workspace(root_path=Path("/tmp/ws"), service_prefix="t", main_branch="main")
-_REPO = StandaloneRepository(name="winter-harness", path=Path("/tmp/ws/context/harness"))
+_REPO = StandaloneRepository(name="winter-context", path=Path("/tmp/ws/.winter/ext/context"))
 
 
 class _Panel:
@@ -171,8 +171,8 @@ class _ViewApp(App):
 
 def _repo_status_and_history() -> RepoStatusAndHistory:
     status = RepoStatus(
-        name="winter-harness",
-        path="/tmp/ws/context/harness",
+        name="winter-context",
+        path="/tmp/ws/.winter/ext/context",
         main_branch=None,
         branch="main",
         tracking_branch="origin/main",
@@ -272,7 +272,7 @@ class _DetailApp(App):
 
 def _make_standalone_screen(panels: list[Any]) -> StandaloneDetailScreen:
     return StandaloneDetailScreen(
-        repo_name="winter-harness",
+        repo_name="winter-context",
         repo_repo=cast(Any, _FakeRepoRepo(_repo_status_and_history())),
         repo_factory=cast(Any, _FakeRepoFactory()),
         workspace=_WORKSPACE,
@@ -292,7 +292,7 @@ async def test_standalone_detail_shows_repo_and_panel() -> None:
         await pilot.pause()
 
         assert screen._repo_detail is not None
-        assert screen._repo_detail.status.name == "winter-harness"
+        assert screen._repo_detail.status.name == "winter-context"
         # The panel got a standalone (repo-bearing) context, not a worktree one.
         assert len(captured) == 1
         assert captured[0].repo is _REPO
@@ -392,13 +392,13 @@ async def test_enter_on_standalone_row_opens_detail_screen() -> None:
         await app.workers.wait_for_complete()
         await pilot.pause()
         table = screen.query_one("#singletons", StandaloneReposTable)
-        assert table.get_selected_repo() == "winter-harness"
+        assert table.get_selected_repo() == "winter-context"
 
         event = SimpleNamespace(data_table=SimpleNamespace(id="singletons"))
         screen.on_data_table_row_selected(cast(Any, event))
         await pilot.pause()
 
-    assert app.screen_factory.standalone_calls == ["winter-harness"]
+    assert app.screen_factory.standalone_calls == ["winter-context"]
 
 
 @pytest.mark.asyncio

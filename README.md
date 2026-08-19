@@ -130,8 +130,8 @@ implementations you can study and adapt each ship as their own repos, and compos
 - **[winter-workflow](https://github.com/paul-gross/winter-workflow)** — a suite of agentic workflows tuned to different
   kinds of work (one large feature vs. many small ones), with subagent feedback loops that let you build
   human-on-the-loop (HOTL) rather than human-in-the-loop (HITL); adopt it or fork your own
-- **[winter-harness](https://github.com/paul-gross/winter-harness)** — the agentic harness used to develop winter
-  itself, an example of how harness and application separation can work; usable as-is, or a template to fork for your
+- **[winter-context](https://github.com/paul-gross/winter-context)** — the agent-facing context used to develop winter
+  itself, an example of how context and application separation can work; usable as-is, or a template to fork for your
   own
 - **[winter-workspace](https://github.com/paul-gross/winter-workspace)** — the meta-workspace winter itself is built
   with; an example of a real, configured workspace that demonstrates agentic development (see

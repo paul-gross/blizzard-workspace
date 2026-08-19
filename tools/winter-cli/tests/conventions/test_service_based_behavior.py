@@ -1,6 +1,6 @@
 """Convention test — behavior lives in service classes, not free functions.
 
-Convention: `winter-harness:/architecture/service-architecture.md`.
+Convention: `winter-context:/architecture/service-architecture.md`.
 
 Winter code is service-based: behavior lives in injected service classes
 behind Protocol seams; module-level free functions are reserved for pure,
@@ -48,7 +48,7 @@ import pytest
 
 from tests.conventions.conftest import location, walk_src
 
-CONVENTION_DOC = "winter-harness:/architecture/service-architecture.md"
+CONVENTION_DOC = "winter-context:/architecture/service-architecture.md"
 
 
 def _annotation_name(node: ast.expr | None) -> str | None:

@@ -222,7 +222,7 @@ def test_worktrees_json_emits_expected_shape(
 
     # Build mock StandaloneRepository.
     harness_standalone = MagicMock()
-    harness_standalone.name = "winter-harness"
+    harness_standalone.name = "winter-context"
     harness_standalone.path = standalone_dir
 
     handler = _make_worktrees_handler(
@@ -250,8 +250,8 @@ def test_worktrees_json_emits_expected_shape(
     assert st_item["kind"] == "standalone"
     assert st_item["env"] is None
     assert st_item["repo"] is None
-    assert st_item["name"] == "winter-harness"
-    assert st_item["label"] == "winter-harness"
+    assert st_item["name"] == "winter-context"
+    assert st_item["label"] == "winter-context"
     assert st_item["path"] == str(standalone_dir)
 
 
@@ -269,7 +269,7 @@ def test_worktrees_omits_nonexistent_paths(
     winter_repo.name = "winter"
 
     harness_standalone = MagicMock()
-    harness_standalone.name = "winter-harness"
+    harness_standalone.name = "winter-context"
     harness_standalone.path = tmp_path / ".winter" / "ext" / "harness"
 
     handler = _make_worktrees_handler(
@@ -768,7 +768,7 @@ def _drifted_project_snapshot(repo: str = "repo-a", behind: int = 3) -> ProjectC
     )
 
 
-def _clean_standalone_snapshot(repo: str = "winter-harness") -> StandaloneCheckoutSnapshot:
+def _clean_standalone_snapshot(repo: str = "winter-context") -> StandaloneCheckoutSnapshot:
     return StandaloneCheckoutSnapshot(
         repo=repo,
         branch="master",
@@ -779,7 +779,7 @@ def _clean_standalone_snapshot(repo: str = "winter-harness") -> StandaloneChecko
 
 
 def _diverged_standalone_snapshot(
-    repo: str = "winter-harness", *, behind: int = 0, ahead: int = 0, dirty: int = 0
+    repo: str = "winter-context", *, behind: int = 0, ahead: int = 0, dirty: int = 0
 ) -> StandaloneCheckoutSnapshot:
     return StandaloneCheckoutSnapshot(
         repo=repo,

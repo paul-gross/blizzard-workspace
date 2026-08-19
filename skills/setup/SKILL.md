@@ -508,7 +508,7 @@ Then, for each extension that **is not bound to the `service` capability**, **on
 
 1. Tell the user: "Checking `<ext-name>`..."
 2. Read that extension's entry point at the path named in its `AGENTS.winter.md` line — for a standalone, the
-   `@`-imported path (e.g. `./winter-harness/index.md`); for a project-repo extension's routing row, the entry-point
+   `@`-imported path (e.g. `./winter-context/index.md`); for a project-repo extension's routing row, the entry-point
    path named in the row, opened from `<env>/<name>/` (or `projects/<name>/` if reading from the workspace root with no
    env bound).
 3. If the extension has a **"Feature environment setup steps"** section — in the entry point itself, or in the hub the

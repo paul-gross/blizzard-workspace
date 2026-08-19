@@ -102,7 +102,7 @@ the symlinks there), so there is no double-loading across the symlink and copy s
 For each `.md` file under the resolved agents root, winter transforms the canonical agent into a per-harness,
 git-excluded copy at `.claude/agents/<prefix>-<name>.md` (Claude), `.codex/agents/<prefix>-<name>.toml` (Codex), and
 `.opencode/agent/<prefix>-<name>.md` (OpenCode) — not a symlink. See
-`winter-harness:/agent-context/cross-harness-projection.md` for the transform.
+`winter-context:/agent-context/cross-harness-projection.md` for the transform.
 
 The workspace `.gitignore` is updated with a marker-bracketed block per extension:
 
@@ -223,7 +223,7 @@ reading agent is actually working in; a workspace-root reader with no env bound 
 A repo declared as **both** `[[project_repository]]` (with a root `winter-ext.toml`) and `[[standalone_repository]]`
 dedupes to a single extension entry — while both declarations exist, the **standalone** checkout wins (keeping the
 pre-existing eager `@`-import unchanged, since removing the six `[[standalone_repository]]` declarations that currently
-double-declare winter-canon, winter-github, winter-harness, winter-service-tmux, winter-service-docker, and
+double-declare winter-canon, winter-github, winter-context, winter-service-tmux, winter-service-docker, and
 winter-workflow in this workspace is an explicit follow-up, not part of this change) — and `winter ws init` logs a
 warning naming the now-redundant `[[standalone_repository]]` declaration so it can be removed. Once it is removed, the
 project-repo entry takes over automatically and the extension starts rendering as a no-`@` path-template bullet.

@@ -54,7 +54,7 @@ Two ways:
 1. **From a commit** — include `Fixes #N` (or `Closes #N`) in the commit message body. GitHub auto-closes when the
    commit lands on the default branch. A bare `#N` resolves against **the repo the commit lands in**, not the repo the
    issue was filed in — and work here often lands in a different repo than the one tracking it (e.g. a `winter-workflow`
-   issue fixed in `winter-harness`), so a bare `#N` silently links, and may close, the wrong issue while the real one
+   issue fixed in `winter-context`), so a bare `#N` silently links, and may close, the wrong issue while the real one
    stays open. Confirm which repo the issue lives in; when it isn't the commit's repo, scope the reference as
    `paul-gross/<repo>#N` — `Closes paul-gross/winter-workflow#21` to close it (cross-repo auto-close works given push
    access) or `Refs paul-gross/winter-workflow#21` to link without closing.

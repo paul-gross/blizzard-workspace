@@ -408,7 +408,7 @@ class OpenCodeAgentRenderer:
 # ── Conformance sentinels ──────────────────────────────────────────────────────
 # One sentinel per Protocol/adapter pair: Pyright rejects the `return x` if an
 # adapter drifts from IAgentRenderer (e.g. renamed method, wrong signature).
-# See winter-harness:/standards/protocol-conformance.md for the full convention.
+# See winter-context:/standards/protocol-conformance.md for the full convention.
 
 
 def _conforms_claude_renderer(x: ClaudeAgentRenderer) -> IAgentRenderer:

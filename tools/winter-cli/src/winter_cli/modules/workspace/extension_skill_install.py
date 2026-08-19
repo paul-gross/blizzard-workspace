@@ -439,7 +439,7 @@ class SkillFrontmatterGuard:
         return offenders
 
 
-# One sentinel per Protocol/adapter pair (winter-harness:/standards/protocol-conformance.md):
+# One sentinel per Protocol/adapter pair (winter-context:/standards/protocol-conformance.md):
 # both strategies must satisfy InstallSkillStrategy independent of the factory site.
 def _conforms_symlink_skill_strategy(x: SymlinkSkillStrategy) -> InstallSkillStrategy:
     return x

@@ -42,7 +42,7 @@ from winter_cli.plugins.types import (
 )
 
 _WORKSPACE = Workspace(root_path=Path("/tmp/ws"), service_prefix="t", main_branch="main")
-_REPO = StandaloneRepository(name="winter-harness", path=Path("/tmp/ws/context/harness"))
+_REPO = StandaloneRepository(name="winter-context", path=Path("/tmp/ws/.winter/ext/context"))
 
 
 # --- get_selected_repo() -----------------------------------------------------
@@ -164,7 +164,7 @@ async def test_standalone_action_fires_with_repo_context():
         await app.workers.wait_for_complete()
         await pilot.pause()
         table = screen.query_one("#singletons", StandaloneReposTable)
-        assert table.get_selected_repo() == "winter-harness"
+        assert table.get_selected_repo() == "winter-context"
 
         screen._run_plugin_action("probe")
         await app.workers.wait_for_complete()
@@ -177,7 +177,7 @@ async def test_standalone_action_fires_with_repo_context():
     assert inv.scope == ActionScope.standalone_repository
     # Attribute delegation preserves existing handler access patterns.
     assert isinstance(inv.context, StandaloneRepoContext)
-    assert inv.repo.name == "winter-harness"
+    assert inv.repo.name == "winter-context"
 
 
 @pytest.mark.asyncio
@@ -288,7 +288,7 @@ async def test_multiscope_action_fires_standalone_scope_when_singletons_focused(
         table = screen.query_one("#singletons", StandaloneReposTable)
         table.focus()
         await pilot.pause()
-        assert table.get_selected_repo() == "winter-harness"
+        assert table.get_selected_repo() == "winter-context"
 
         screen._run_plugin_action("probe")
         await app.workers.wait_for_complete()
@@ -299,7 +299,7 @@ async def test_multiscope_action_fires_standalone_scope_when_singletons_focused(
     assert isinstance(inv, ActionInvocation)
     assert inv.scope == ActionScope.standalone_repository
     assert isinstance(inv.context, StandaloneRepoContext)
-    assert inv.repo.name == "winter-harness"
+    assert inv.repo.name == "winter-context"
 
 
 @pytest.mark.asyncio

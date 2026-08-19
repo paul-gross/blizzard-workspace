@@ -64,7 +64,7 @@ class WorkspaceLevelSnapshot:
     """Workspace-wide metadata — extensions, orphans, drift findings, and pin state.
 
     `extensions` lists the names of installed standalone repos (extensions),
-    e.g. ``["winter-github", "winter-harness"]``. `drift_missing` names repo
+    e.g. ``["winter-github", "winter-context"]``. `drift_missing` names repo
     directories declared in config but absent on disk; `drift_undeclared` names
     directories present under the projects root but not declared in config.
     `standalone_pins` carries per-standalone pin/lock state for every declared

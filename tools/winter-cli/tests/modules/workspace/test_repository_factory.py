@@ -170,28 +170,28 @@ def test_get_extension_repos_dedupes_repo_declared_as_both_kinds(
     config = workspace_config.model_copy(
         update={
             "project_repos": [
-                ProjectRepositoryConfig(name="winter-harness", url="git@example.com:org/winter-harness.git"),
+                ProjectRepositoryConfig(name="winter-context", url="git@example.com:org/winter-context.git"),
             ],
             "standalone_repos": [
                 StandaloneRepositoryConfig(
-                    name="winter-harness",
-                    url="git@example.com:org/winter-harness.git",
-                    path=".winter/ext/harness",
+                    name="winter-context",
+                    url="git@example.com:org/winter-context.git",
+                    path=".winter/ext/context",
                 ),
             ],
         },
     )
-    main_path = config.workspace_root / "projects" / "winter-harness"
+    main_path = config.workspace_root / "projects" / "winter-context"
     fs = FakeFilesystem(files={main_path / EXT_MANIFEST: ""})
     factory = RepositoryFactory(config, fs=fs)
 
     with caplog.at_level(logging.WARNING):
         repos = factory.get_extension_repos()
 
-    assert [r.name for r in repos] == ["winter-harness"]
-    assert repos[0].path == config.workspace_root / ".winter/ext/harness"
+    assert [r.name for r in repos] == ["winter-context"]
+    assert repos[0].path == config.workspace_root / ".winter/ext/context"
     assert any(
-        "winter-harness" in record.message and "standalone_repository" in record.message for record in caplog.records
+        "winter-context" in record.message and "standalone_repository" in record.message for record in caplog.records
     )
 
 

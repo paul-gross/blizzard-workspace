@@ -50,7 +50,7 @@ accepted as an alias, so an existing doctor probe can be repointed at lint with 
 `line` location fields:
 
 ```json
-{"check": "path-notation", "status": "fail", "message": "non-canonical ref `../harness`", "file": "context/index.md", "line": 12, "remediation": "Use the `winter-harness:` prefix."}
+{"check": "path-notation", "status": "fail", "message": "non-canonical ref `../harness`", "file": "context/index.md", "line": 12, "remediation": "Use the `winter-context:` prefix."}
 {"check": "agent-frontmatter", "status": "warn", "message": "missing `model`", "file": ".claude/agents/wf-developer.md"}
 ```
 
@@ -108,7 +108,7 @@ rest:
 ```bash
 #!/usr/bin/env bash
 # Flag Markdown files that reference the harness with a bare relative path
-# instead of the canonical `winter-harness:` notation.
+# instead of the canonical `winter-context:` notation.
 set -euo pipefail
 
 emit() { printf '{"check":"path-notation","status":"%s","message":"%s","file":"%s","line":%s}\n' "$1" "$2" "$3" "$4"; }
@@ -118,7 +118,7 @@ while IFS= read -r path; do
   # A directory root is recursed; a single changed file is checked directly.
   while IFS= read -r md; do
     while IFS=: read -r line _; do
-      emit fail "use the \`winter-harness:\` prefix" "$md" "$line"
+      emit fail "use the \`winter-context:\` prefix" "$md" "$line"
     done < <(grep -nE '\.\./harness' "$md" || true)
   done < <(find "$path" -type f -name '*.md' 2>/dev/null)
 done <<< "$WINTER_LINT_PATHS"

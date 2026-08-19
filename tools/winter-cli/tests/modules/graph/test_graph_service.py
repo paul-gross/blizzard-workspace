@@ -31,14 +31,14 @@ def _service(
 
 def test_builds_nodes_with_requires_edges() -> None:
     wf = StandaloneRepository(name="winter-workflow", path=WS / "winter-workflow")
-    wh = StandaloneRepository(name="winter-harness", path=WS / "winter-harness")
+    wh = StandaloneRepository(name="winter-context", path=WS / "winter-context")
     files = {wf.path / EXT_MANIFEST: "", wh.path / EXT_MANIFEST: ""}
     config_files = {
         wf.path / EXT_MANIFEST: {"requires": ["winter-product"]},
         wh.path / EXT_MANIFEST: {},
     }
     nodes = {n.name: n.requires for n in _service([wf, wh], files, config_files).build()}
-    assert nodes == {"winter-workflow": ("winter-product",), "winter-harness": ()}
+    assert nodes == {"winter-workflow": ("winter-product",), "winter-context": ()}
 
 
 def test_skips_repo_without_manifest() -> None:
