@@ -67,6 +67,17 @@ class ReferenceScanTests(unittest.TestCase):
         self.assertTrue(ext._MARKER_RE.search("x winter-x:/y <!-- winter-lint:example -->"))
         self.assertTrue(ext._MARKER_RE.search("<!--winter-lint:example-->"))
 
+    def test_marker_exempts_its_whole_block(self) -> None:
+        # `dprint` wraps prose, so the marker lands on the paragraph's last line
+        # while the reference it exempts sits further up.
+        wrapped = ["see winter-x:/y.md for the", "notation. <!-- winter-lint:example -->", "", "winter-x:/z.md"]
+        self.assertEqual(ext._exempt_lines(wrapped), {1, 2})
+
+    def test_marker_alone_in_a_block_exempts_only_itself(self) -> None:
+        # Which is why a table's marker belongs inside a cell: the formatter puts
+        # a blank line between a table and an adjacent comment.
+        self.assertEqual(ext._exempt_lines(["<!-- winter-lint:example -->", "", "| a | b |"]), {1})
+
 
 class CycleTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -111,9 +122,11 @@ class CheckPathsTests(unittest.TestCase):
             # winter-a declares winter-b locally (graph deliberately omits it to
             # prove the owner's requires come from its local manifest).
             self._write(root / "modA" / "winter-ext.toml", 'name = "winter-a"\nrequires = ["winter-b"]\n')
+            # Blank-line separated: the example marker exempts its whole block, so
+            # each case has to be its own block to be judged on its own.
             self._write(
                 root / "modA" / "doc.md",
-                "\n".join(
+                "\n\n".join(
                     [
                         "declared winter-b:/x.md",          # ok (local requires)
                         "self winter-a:/me.md",             # ok
@@ -131,7 +144,7 @@ class CheckPathsTests(unittest.TestCase):
             findings = self.lint.check_paths([root], graph, root)
 
             msgs = sorted((f.file, f.line, f.status) for f in findings)
-            # Three failures: undeclared (modA line 4), unknown (modA line 6), layering (context/guide line 1).
+            # Three failures: undeclared (modA line 7), unknown (modA line 11), layering (context/guide line 1).
             self.assertEqual(len(findings), 3, msgs)
             files = {f.file for f in findings}
             self.assertIn(str(Path("modA") / "doc.md"), files)

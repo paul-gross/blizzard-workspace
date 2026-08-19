@@ -1,10 +1,15 @@
 # Agent configuration
 
-The `[agent_model_overrides]` table lets you retarget which model a workspace uses for any installed extension agent without modifying the agent's committed source. The `[model_tiers]` table lets you remap tier labels to concrete model ids — either overriding built-in tier values or defining entirely new tiers. Changes to either table take effect on the next `winter ws init`.
+The `[agent_model_overrides]` table lets you retarget which model a workspace uses for any installed extension agent
+without modifying the agent's committed source. The `[model_tiers]` table lets you remap tier labels to concrete model
+ids — either overriding built-in tier values or defining entirely new tiers. Changes to either table take effect on the
+next `winter ws init`.
 
 ## When to use these
 
-The agent transform pipeline bakes each agent's model into the rendered per-vendor files during `winter ws init`. By default it uses the agent file's own `model:` tier (or per-harness `model:` override block), resolved through the built-in `MODEL_TIER_IDS` table. The two workspace configuration tables insert additional layers, letting you:
+The agent transform pipeline bakes each agent's model into the rendered per-vendor files during `winter ws init`. By
+default it uses the agent file's own `model:` tier (or per-harness `model:` override block), resolved through the
+built-in `MODEL_TIER_IDS` table. The two workspace configuration tables insert additional layers, letting you:
 
 - Temporarily downgrade a set of agents to a cheaper tier for a cost experiment.
 - Point specific agents at a concrete model id (e.g. a newly released version) workspace-wide.
@@ -13,7 +18,8 @@ The agent transform pipeline bakes each agent's model into the rendered per-vend
 
 ## The `[model_tiers]` table
 
-`[model_tiers]` maps tier label strings to per-vendor model id strings. It layers over the built-in `MODEL_TIER_IDS` table — built-in entries (`fable`, `opus`, `sonnet`, `haiku`) are merged per-vendor, new labels are added whole.
+`[model_tiers]` maps tier label strings to per-vendor model id strings. It layers over the built-in `MODEL_TIER_IDS`
+table — built-in entries (`fable`, `opus`, `sonnet`, `haiku`) are merged per-vendor, new labels are added whole.
 
 ```toml
 # .winter/config.toml  (committed, shared with the team)
@@ -40,17 +46,20 @@ opencode = "anthropic/claude-sonnet-5"
 
 ### Merge rules
 
-- Built-in tier labels (`fable`, `opus`, `sonnet`, `haiku`) are merged **per-vendor**: only the vendor keys listed in your config entry are overridden; unlisted vendors keep their built-in values. This means a `[model_tiers.haiku]` block that only sets `opencode` leaves `claude` and `codex` at their defaults.
+- Built-in tier labels (`fable`, `opus`, `sonnet`, `haiku`) are merged **per-vendor**: only the vendor keys listed in
+  your config entry are overridden; unlisted vendors keep their built-in values. This means a `[model_tiers.haiku]`
+  block that only sets `opencode` leaves `claude` and `codex` at their defaults.
 - New custom labels are added wholesale from your config entry.
-- `config.local.toml` wins over `config.toml` for the same label (per-label replacement, not per-vendor merge across files).
+- `config.local.toml` wins over `config.toml` for the same label (per-label replacement, not per-vendor merge across
+  files).
 
 ### Validation
 
-| Problem | Reported as |
-|---------|-------------|
+| Problem                                                     | Reported as                       |
+| ----------------------------------------------------------- | --------------------------------- |
 | Unknown vendor label (not `claude`, `codex`, or `opencode`) | `ConfigError` at config load time |
-| Empty vendor dict for a label | `ConfigError` at config load time |
-| Non-string or empty model id value | `ConfigError` at config load time |
+| Empty vendor dict for a label                               | `ConfigError` at config load time |
+| Non-string or empty model id value                          | `ConfigError` at config load time |
 
 ### Using custom tiers in agent frontmatter
 
@@ -64,7 +73,10 @@ model: big-thinker
 ---
 ```
 
-If the tier is unknown or lacks a mapping for a vendor (e.g. `codex` is absent from a custom tier entry), `winter ws init` emits a warning and skips that agent; `winter doctor` reports a WARN. This is a render-time non-fatal signal, not a hard abort — other agents still install. Fix the tier reference in the agent's frontmatter or add the missing vendor mapping in `[model_tiers]`.
+If the tier is unknown or lacks a mapping for a vendor (e.g. `codex` is absent from a custom tier entry),
+`winter ws init` emits a warning and skips that agent; `winter doctor` reports a WARN. This is a render-time non-fatal
+signal, not a hard abort — other agents still install. Fix the tier reference in the agent's frontmatter or add the
+missing vendor mapping in `[model_tiers]`.
 
 ### Using custom tiers in `[agent_model_overrides]`
 
@@ -104,16 +116,21 @@ coder = { codex = "gpt-5.4-experimental", opencode = "anthropic/claude-opus-5" }
 reviewer = "opus"
 ```
 
-Keys are **canonical agent names** (the `name:` field in the agent's frontmatter, or the file stem when `name:` is absent). Values are either:
+Keys are **canonical agent names** (the `name:` field in the agent's frontmatter, or the file stem when `name:` is
+absent). Values are either:
 
-| Form | Example | Applies to |
-|------|---------|------------|
-| Tier string | `"haiku"` | All vendors |
+| Form                      | Example                | Applies to                    |
+| ------------------------- | ---------------------- | ----------------------------- |
+| Tier string               | `"haiku"`              | All vendors                   |
 | Inline table (per-vendor) | `{ claude = "haiku" }` | Only the listed vendor labels |
 
-**Tier string values must be valid tier labels** — either built-in (`"fable"`, `"opus"`, `"sonnet"`, `"haiku"`) or defined in `[model_tiers]`. A bare string that does not match any tier label raises `ConfigError` at config load time. Use the per-vendor inline-table form to specify a concrete model id directly.
+**Tier string values must be valid tier labels** — either built-in (`"fable"`, `"opus"`, `"sonnet"`, `"haiku"`) or
+defined in `[model_tiers]`. A bare string that does not match any tier label raises `ConfigError` at config load time.
+Use the per-vendor inline-table form to specify a concrete model id directly.
 
-**Per-vendor values are not tier-validated.** An inline-table value such as `{ claude = "some-id" }` is accepted whether `"some-id"` is a tier label or a concrete model id — a non-tier string is treated as a concrete model id for that vendor and is passed through without validation.
+**Per-vendor values are not tier-validated.** An inline-table value such as `{ claude = "some-id" }` is accepted whether
+`"some-id"` is a tier label or a concrete model id — a non-tier string is treated as a concrete model id for that vendor
+and is passed through without validation.
 
 ## Precedence
 
@@ -139,13 +156,15 @@ The merge model for `[model_tiers]` is **per-label** (whole-label replacement be
 
 `winter ws init` and `winter doctor` validate override entries and agent frontmatter:
 
-| Problem | Reported as |
-|---------|-------------|
-| Bare-string tier in `[agent_model_overrides]` not in effective tier table | `ConfigError` at **config load** time — aborts the running `winter` command |
-| Unknown vendor label in a per-vendor dict value | `ConfigError` at **config load** time |
-| Empty string value in `[agent_model_overrides]` | `ConfigError` at **config load** time |
-| Wrong value type (e.g. integer) in `[agent_model_overrides]` | `ConfigError` at **config load** time |
-| Unknown or incomplete tier in agent `model:` frontmatter | `winter ws init` warns + skips that agent; `winter doctor` WARNs — other agents still install |
-| Agent name in `[agent_model_overrides]` that matches no installed agent | `winter ws init` + `winter doctor` WARN |
+| Problem                                                                   | Reported as                                                                                   |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Bare-string tier in `[agent_model_overrides]` not in effective tier table | `ConfigError` at **config load** time — aborts the running `winter` command                   |
+| Unknown vendor label in a per-vendor dict value                           | `ConfigError` at **config load** time                                                         |
+| Empty string value in `[agent_model_overrides]`                           | `ConfigError` at **config load** time                                                         |
+| Wrong value type (e.g. integer) in `[agent_model_overrides]`              | `ConfigError` at **config load** time                                                         |
+| Unknown or incomplete tier in agent `model:` frontmatter                  | `winter ws init` warns + skips that agent; `winter doctor` WARNs — other agents still install |
+| Agent name in `[agent_model_overrides]` that matches no installed agent   | `winter ws init` + `winter doctor` WARN                                                       |
 
-`winter doctor` also reports a WARN when an on-disk agent copy no longer matches the expected output of the current configuration — including changes to `[model_tiers]`. If you change either table, the doctor probe detects the existing copies as stale until you re-run `winter ws init`.
+`winter doctor` also reports a WARN when an on-disk agent copy no longer matches the expected output of the current
+configuration — including changes to `[model_tiers]`. If you change either table, the doctor probe detects the existing
+copies as stale until you re-run `winter ws init`.

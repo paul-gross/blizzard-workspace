@@ -3,13 +3,22 @@ description: Fetch refs from origin for a feature environment, a standalone repo
 allowed-tools: Bash, Read
 ---
 
-Fetch refs from `origin` for one of: the workspace branch, a standalone repo, or a feature environment. Parse `$ARGUMENTS` to determine which — a single optional name.
+Fetch refs from `origin` for one of: the workspace branch, a standalone repo, or a feature environment. Parse
+`$ARGUMENTS` to determine which — a single optional name.
 
 ## Big picture
 
-A feature environment contains a worktree for every project repo, so fetching one is a multi-repo operation. Use `winter ws fetch` — it fetches every matched worktree's `origin` in parallel and honors pinned-repo rules. Beyond refreshing refs, it also fast-forwards each matched project repo's **source checkout** (`projects/<repo>`) local main to `origin/<main-branch>`, keeping the base `winter ws init` branches new envs off of current (feature worktrees are never touched; a diverged source-checkout main is reported as a failed fetch). For the full reference, start at the CLI hub [context/winter-cli/index.md](./context/winter-cli/index.md), then read the specific topic [context/winter-cli/usage/ws/fetch.md](./context/winter-cli/usage/ws/fetch.md) — plus [context/worktree-ops.md](./context/worktree-ops.md).
+A feature environment contains a worktree for every project repo, so fetching one is a multi-repo operation. Use
+`winter ws fetch` — it fetches every matched worktree's `origin` in parallel and honors pinned-repo rules. Beyond
+refreshing refs, it also fast-forwards each matched project repo's **source checkout** (`projects/<repo>`) local main to
+`origin/<main-branch>`, keeping the base `winter ws init` branches new envs off of current (feature worktrees are never
+touched; a diverged source-checkout main is reported as a failed fetch). For the full reference, start at the CLI hub
+[context/winter-cli/index.md](./context/winter-cli/index.md), then read the specific topic
+[context/winter-cli/usage/ws/fetch.md](./context/winter-cli/usage/ws/fetch.md) — plus
+[context/worktree-ops.md](./context/worktree-ops.md).
 
-Use raw `git fetch` for the workspace branch itself — `winter ws fetch` doesn't operate on it. Standalone repos can be reached via `winter ws fetch --standalone` or with raw git, whichever is more convenient.
+Use raw `git fetch` for the workspace branch itself — `winter ws fetch` doesn't operate on it. Standalone repos can be
+reached via `winter ws fetch --standalone` or with raw git, whichever is more convenient.
 
 ## Dispatch on the argument
 
@@ -51,13 +60,17 @@ winter ws fetch <name>/<repo>          # one specific worktree
 winter ws fetch '<name>/*'             # every worktree in the env (same as bare <name>)
 ```
 
-`PATTERNS` are segment-aware globs over `<env>/<repo>`. `winter ws fetch` includes both pinned and non-pinned worktrees in the matched set.
+`PATTERNS` are segment-aware globs over `<env>/<repo>`. `winter ws fetch` includes both pinned and non-pinned worktrees
+in the matched set.
 
 ## Report
 
-Output a concise summary of what was fetched. For a feature environment, include a per-repo line — what each repo did (new refs, already up to date). The CLI reports each repo as ok/failed; a failed repo most often means its source-checkout main diverged from `origin/<main-branch>` (surface that, since the fast-forward is part of what fetch does):
+Output a concise summary of what was fetched. For a feature environment, include a per-repo line — what each repo did
+(new refs, already up to date). The CLI reports each repo as ok/failed; a failed repo most often means its
+source-checkout main diverged from `origin/<main-branch>` (surface that, since the fast-forward is part of what fetch
+does):
 
-```
+```text
 ## Fetch: <name>
 
 - repo-a: fetched (refs + source main fast-forwarded)

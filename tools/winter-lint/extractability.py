@@ -26,7 +26,8 @@ degraded, graph-less mode.
 Functional vs. illustrative: every reference is treated as a real dependency by
 default. A reference that is only an illustrative example (a conventions doc
 citing another module to show the notation, not to depend on it) is exempted by
-placing the marker `<!-- winter-lint:example -->` on the same line.
+placing the marker `<!-- winter-lint:example -->` in the same block — see
+`_exempt_lines` for why the unit is a block and not a line.
 
 Env contract (from `winter lint`):
   WINTER_CLI            path to the winter CLI to call back into (required)
@@ -76,8 +77,38 @@ _IMPORT_RE = re.compile(r"(?<![A-Za-z0-9_])@([^\s`]+)")
 # (`(@x.md)`, `[t](@x.md)`, `see @x.md.`). A real path never ends in these.
 _IMPORT_TRIM = ".,;:!?)]}>\"'"
 
-# Same-line illustrative-example exemption marker.
+# Illustrative-example exemption marker. Block-scoped — see `_exempt_lines`.
 _MARKER_RE = re.compile(r"<!--\s*winter-lint:\s*example\s*-->", re.IGNORECASE)
+
+
+def _exempt_lines(lines: list[str]) -> set[int]:
+    """1-based line numbers covered by an `<!-- winter-lint:example -->` marker.
+
+    The marker exempts the whole **block** it sits in, not just its own physical
+    line. `dprint` owns where lines break in these docs, so a marker parked at
+    the end of a wrapped paragraph has to cover the reference reflow pushed
+    three lines up; a line is not a stable unit of meaning once the formatter
+    runs. A block is a run of non-blank lines.
+
+    The consequence for tables: the formatter puts a blank line between a table
+    and a comment above or below it, which makes the comment its own block and
+    exempts nothing. Put a table's marker *inside a cell* — cell content
+    survives reformatting, and the row is its own line.
+    """
+    exempt: set[int] = set()
+    start = 0
+    marked = False
+    for index, line in enumerate(lines):
+        if line.strip():
+            marked = marked or bool(_MARKER_RE.search(line))
+            continue
+        if marked:
+            exempt.update(range(start + 1, index + 1))
+        start = index + 1
+        marked = False
+    if marked:
+        exempt.update(range(start + 1, len(lines) + 1))
+    return exempt
 
 
 class GraphError(Exception):
@@ -288,6 +319,7 @@ class ExtractabilityLint:
             except OSError:
                 continue
 
+            exempt = _exempt_lines(lines)
             in_fence = False
             for lineno, line in enumerate(lines, start=1):
                 stripped = line.lstrip()
@@ -298,7 +330,7 @@ class ExtractabilityLint:
                     continue
                 if in_fence:
                     continue
-                if _MARKER_RE.search(line):
+                if lineno in exempt:
                     continue
                 targets = self._scanner.references_in_line(line)
                 targets.extend(

@@ -2,13 +2,21 @@
 
 Git commands for the polyrepo workspace topology. All paths are relative to the workspace root.
 
-> **Tip:** For multi-repo setup and bulk operations, prefer `winter ws init` and the other `winter ws` commands over the raw git sequences below — the CLI is idempotent, reads the workspace config, handles pinned repos, and runs in parallel. See [winter-cli/index.md](./winter-cli/index.md) for the full command reference. The raw git commands here are still useful for single-repo work and for understanding what the CLI does under the hood.
+> **Tip:** For multi-repo setup and bulk operations, prefer `winter ws init` and the other `winter ws` commands over the
+> raw git sequences below — the CLI is idempotent, reads the workspace config, handles pinned repos, and runs in
+> parallel. See [winter-cli/index.md](./winter-cli/index.md) for the full command reference. The raw git commands here
+> are still useful for single-repo work and for understanding what the CLI does under the hood.
 
 ## Pinned repos
 
-Some repos are **pinned** — they always track the remote main branch and never participate in feature branching. Declare pinning by setting `pinned = true` on a `[[project_repository]]` entry in `workspace:/.winter/config.toml`. The main branch comes from the entry's `main_branch` field, falling back to the top-level workspace-wide `main_branch`.
+Some repos are **pinned** — they always track the remote main branch and never participate in feature branching. Declare
+pinning by setting `pinned = true` on a `[[project_repository]]` entry in `workspace:/.winter/config.toml`. The main
+branch comes from the entry's `main_branch` field, falling back to the top-level workspace-wide `main_branch`.
 
-For how each `winter ws` command treats pinned repos — init upstream wiring, connect/disconnect skip, pull from `origin/<main-branch>`, and push exclusion (`--include-pinned`/`--only-pinned`) — see the per-command leaves under [winter-cli/usage/ws/](./winter-cli/usage/ws/index.md); the pinned-scope table in [winter-cli/usage/ws/patterns.md](./winter-cli/usage/ws/patterns.md) is the cross-command summary.
+For how each `winter ws` command treats pinned repos — init upstream wiring, connect/disconnect skip, pull from
+`origin/<main-branch>`, and push exclusion (`--include-pinned`/`--only-pinned`) — see the per-command leaves under
+[winter-cli/usage/ws/](./winter-cli/usage/ws/index.md); the pinned-scope table in
+[winter-cli/usage/ws/patterns.md](./winter-cli/usage/ws/patterns.md) is the cross-command summary.
 
 ## Cloning (source checkouts)
 
@@ -16,7 +24,9 @@ For how each `winter ws` command treats pinned repos — init upstream wiring, c
 winter ws init
 ```
 
-This reads `.winter/config.toml`, clones every declared repo that's missing into `projects/`, applies git identity, writes git-exclude entries, and runs each repo's `cmd` list. Safe to re-run. It also git-excludes the runtime `.winter/logs/` capture dir.
+This reads `.winter/config.toml`, clones every declared repo that's missing into `projects/`, applies git identity,
+writes git-exclude entries, and runs each repo's `cmd` list. Safe to re-run. It also git-excludes the runtime
+`.winter/logs/` capture dir.
 
 Raw equivalent for a single repo:
 
@@ -37,14 +47,23 @@ This command:
 - Copies git identity into each worktree.
 - Writes git-exclude entries.
 - For pinned repos, wires the upstream to `origin/<main-branch>` — see [Pinned repos](#pinned-repos).
-- For non-pinned repos that are **newly added** (worktree absent before this run) and have no upstream: if every non-pinned sibling worktree that already exists agrees on the same upstream, init connects the new worktree to that inferred ref (e.g. `origin/master` or `origin/<feature-branch>`). When siblings diverge or there is no connected sibling to infer from, the worktree is left unconnected — use `winter ws connect` explicitly in that case. See [Connecting a feature environment](#connecting-a-feature-environment-to-a-remote-feature-branch).
+- For non-pinned repos that are **newly added** (worktree absent before this run) and have no upstream: if every
+  non-pinned sibling worktree that already exists agrees on the same upstream, init connects the new worktree to that
+  inferred ref (e.g. `origin/master` or `origin/<feature-branch>`). When siblings diverge or there is no connected
+  sibling to infer from, the worktree is left unconnected — use `winter ws connect` explicitly in that case. See
+  [Connecting a feature environment](#connecting-a-feature-environment-to-a-remote-feature-branch).
 - Runs each repo's `cmd` list.
-- Allocates and persists a stable index for `<name>` so runtime env injection (`WINTER_ENV`, `WINTER_ENV_INDEX`, `WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE`) is collision-free. No env file is written — env is injected at dispatch time. Inspect with `winter env <name>`.
+- Allocates and persists a stable index for `<name>` so runtime env injection (`WINTER_ENV`, `WINTER_ENV_INDEX`,
+  `WINTER_PORT_BASE`, `WINTER_WORKSPACE_PORT_BASE`) is collision-free. No env file is written — env is injected at
+  dispatch time. Inspect with `winter env <name>`.
 - Runs every installed extension's `on_env_init` hook.
 
-Greek letters (`alpha`, `beta`, …) are the convention. The first 10 (`alpha`…`kappa`) are the default `env_aliases` and receive fixed port-offset indices; other names hash into a higher band. Any valid directory name is accepted.
+Greek letters (`alpha`, `beta`, …) are the convention. The first 10 (`alpha`…`kappa`) are the default `env_aliases` and
+receive fixed port-offset indices; other names hash into a higher band. Any valid directory name is accepted.
 
-After this runs, `winter ws init` is structural — it creates the worktrees, allocates the env index, and runs each repo's `cmd` list as a lightweight trust/bootstrap step (e.g. `mise trust`, `direnv allow`), not full dependency installation.
+After this runs, `winter ws init` is structural — it creates the worktrees, allocates the env index, and runs each
+repo's `cmd` list as a lightweight trust/bootstrap step (e.g. `mise trust`, `direnv allow`), not full dependency
+installation.
 
 To bring the environment to a working state, run:
 
@@ -52,7 +71,10 @@ To bring the environment to a working state, run:
 winter provision <name>
 ```
 
-This installs dependencies, provisions resources (databases, queues, buckets), and loads seed data using `[[provision.*]]` handlers declared in `.winter/config.toml` and installed extension `winter-ext.toml` files. See [usage/provision.md](./winter-cli/usage/provision.md) for the full command reference. For any project-specific readiness steps not yet migrated to `[[provision.*]]` handlers, also follow `workspace:/context/project/project-setup.md`.
+This installs dependencies, provisions resources (databases, queues, buckets), and loads seed data using
+`[[provision.*]]` handlers declared in `.winter/config.toml` and installed extension `winter-ext.toml` files. See
+[usage/provision.md](./winter-cli/usage/provision.md) for the full command reference. For any project-specific readiness
+steps not yet migrated to `[[provision.*]]` handlers, also follow `workspace:/context/project/project-setup.md`.
 
 Raw equivalent, per repo:
 
@@ -67,19 +89,34 @@ winter ws connect <name> <feature-branch>             # every non-pinned worktre
 winter ws connect <name>/<repo> <feature-branch>       # just the matched worktree(s)
 ```
 
-The trailing argument is the branch; everything before it is one or more segment-aware `<env>/<repo>` globs (a bare `<name>` matches `<name>/*`), so a single `connect` can target the whole env or one repo. Sets `push.default=upstream` and the upstream (`origin/<feature-branch>`) on each matched non-pinned worktree. The usual shape points every non-pinned repo at the same remote feature branch, but repos in one env may carry independent branch names — `ws status` / `ws pull` / `ws push` each resolve each worktree's target per-worktree from its own tracking config, so a worktree you re-point individually still works. (The env-wide `feature_branch` shown by `ws status` / the dashboard is read from the first *connected* non-pinned repo, so that summary assumes the uniform case; the dashboard additionally appends a `+N` suffix to flag how many other distinct remotes the env spans.) The remote branch is not created yet — that happens on first push:
+The trailing argument is the branch; everything before it is one or more segment-aware `<env>/<repo>` globs (a bare
+`<name>` matches `<name>/*`), so a single `connect` can target the whole env or one repo. Sets `push.default=upstream`
+and the upstream (`origin/<feature-branch>`) on each matched non-pinned worktree. The usual shape points every
+non-pinned repo at the same remote feature branch, but repos in one env may carry independent branch names — `ws status`
+/ `ws pull` / `ws push` each resolve each worktree's target per-worktree from its own tracking config, so a worktree you
+re-point individually still works. (The env-wide `feature_branch` shown by `ws status` / the dashboard is read from the
+first *connected* non-pinned repo, so that summary assumes the uniform case; the dashboard additionally appends a `+N`
+suffix to flag how many other distinct remotes the env spans.) The remote branch is not created yet — that happens on
+first push:
 
 ```bash
 git -C "./<name>/<repo-name>" push -u origin <name>:<feature-branch>
 ```
 
-**If the recorded feature branch is empty when the user asks to push**, do not guess — ask the user which remote branch they want to push to. Once they provide one, run `winter ws connect` before pushing.
+**If the recorded feature branch is empty when the user asks to push**, do not guess — ask the user which remote branch
+they want to push to. Once they provide one, run `winter ws connect` before pushing.
 
-**Before pushing**, ask the user: "Want me to run pre-release checks (lint, format, tests) on the changed repos before pushing?" If a project repo documents pre-release checks in its `CONTRIBUTING.md` or `context/`, run them for every repo with changes and fix any issues before pushing.
+**Before pushing**, ask the user: "Want me to run pre-release checks (lint, format, tests) on the changed repos before
+pushing?" If a project repo documents pre-release checks in its `CONTRIBUTING.md` or `context/`, run them for every repo
+with changes and fix any issues before pushing.
 
-Pinned repos are skipped during connect/disconnect (no feature branch tracking to set/unset) and excluded from `push` by default. See the [Pinned repos](#pinned-repos) section for how to include them.
+Pinned repos are skipped during connect/disconnect (no feature branch tracking to set/unset) and excluded from `push` by
+default. See the [Pinned repos](#pinned-repos) section for how to include them.
 
-**Shortcut for newly-added repos:** If you added a repo to `.winter/config.toml` and its env siblings already all share the same upstream, re-running `winter ws init <env>` will auto-connect the new worktree to that inferred ref — no manual `winter ws connect` needed. Manual connect is only required when siblings have divergent upstreams or there is no connected sibling to infer from.
+**Shortcut for newly-added repos:** If you added a repo to `.winter/config.toml` and its env siblings already all share
+the same upstream, re-running `winter ws init <env>` will auto-connect the new worktree to that inferred ref — no manual
+`winter ws connect` needed. Manual connect is only required when siblings have divergent upstreams or there is no
+connected sibling to infer from.
 
 ## Disconnecting a feature environment
 
@@ -91,11 +128,16 @@ Unsets upstream tracking on each non-pinned repo. With no upstream set, the env 
 
 ## Pulling remote feature-branch commits
 
-`winter ws pull <name>` integrates each worktree's own tracked upstream. For per-repo target resolution, integration modes (`--ff-only`/`--merge`/`--rebase`/`--autostash`), and outcomes, see [winter-cli/usage/ws/pull.md](./winter-cli/usage/ws/pull.md). If a repo diverges, resolve it with raw git in that worktree.
+`winter ws pull <name>` integrates each worktree's own tracked upstream. For per-repo target resolution, integration
+modes (`--ff-only`/`--merge`/`--rebase`/`--autostash`), and outcomes, see
+[winter-cli/usage/ws/pull.md](./winter-cli/usage/ws/pull.md). If a repo diverges, resolve it with raw git in that
+worktree.
 
 ## Destroying a feature environment
 
-`winter ws destroy <name>` is the symmetric counterpart to env creation. For the teardown order, the `--dry-run`/`--force`/`--strict`/`--no-provision-teardown` semantics, and why to prefer it over manual `rm -rf <name>/` + `git worktree remove`, see [winter-cli/usage/ws/destroy.md](./winter-cli/usage/ws/destroy.md).
+`winter ws destroy <name>` is the symmetric counterpart to env creation. For the teardown order, the
+`--dry-run`/`--force`/`--strict`/`--no-provision-teardown` semantics, and why to prefer it over manual
+`rm -rf <name>/` + `git worktree remove`, see [winter-cli/usage/ws/destroy.md](./winter-cli/usage/ws/destroy.md).
 
 Raw equivalent, per repo (without provision teardown, hooks, or stripping the exclude block):
 
@@ -105,27 +147,60 @@ git -C ./projects/<repo-name> worktree remove ../../<name>/<repo-name>
 
 ## Verifying destructive commands safely
 
-`winter ws checkout`, `winter ws reset --hard`, `winter ws clean`, and `winter ws destroy` mutate real worktrees and none of them can be scoped narrower than their own `PATTERNS`/`ENV` argument — a wrong or missing pattern reaches every worktree it matches, not just the one you meant to touch. `ws checkout` in particular has **no repo-scoping flag at all**: it always operates env-wide (see [Adopting a remote feature branch](#adopting-a-remote-feature-branch) below); use `ws reset <env>/<repo> REF` when you need to touch exactly one worktree.
+`winter ws checkout`, `winter ws reset --hard`, `winter ws clean`, and `winter ws destroy` mutate real worktrees and
+none of them can be scoped narrower than their own `PATTERNS`/`ENV` argument — a wrong or missing pattern reaches every
+worktree it matches, not just the one you meant to touch. `ws checkout` in particular has **no repo-scoping flag at
+all**: it always operates env-wide (see [Adopting a remote feature branch](#adopting-a-remote-feature-branch) below);
+use `ws reset <env>/<repo> REF` when you need to touch exactly one worktree.
 
-**`ws clean` needs its own care, because the usual audit will not catch a bad one.** `checkout` and `reset` move refs, so a mistake is normally recoverable from the reflog and detectable by checking where each branch points. `ws clean` removes untracked files inside an env you otherwise intend to keep: nothing restores them, and a branch-position audit sees nothing wrong. (`ws destroy` is also irreversible — it drops databases and deletes the env — but it announces itself by taking the whole env, where a clean leaves the env looking intact.) Preview with `--dry-run` every time the `PATTERNS` are not ones you have run before.
+**`ws clean` needs its own care, because the usual audit will not catch a bad one.** `checkout` and `reset` move refs,
+so a mistake is normally recoverable from the reflog and detectable by checking where each branch points. `ws clean`
+removes untracked files inside an env you otherwise intend to keep: nothing restores them, and a branch-position audit
+sees nothing wrong. (`ws destroy` is also irreversible — it drops databases and deletes the env — but it announces
+itself by taking the whole env, where a clean leaves the env looking intact.) Preview with `--dry-run` every time the
+`PATTERNS` are not ones you have run before.
 
-**Never run or exercise a destructive `winter` command against a live env you don't intend to mutate** — including via `--winter=<path>`/`--service-orchestrator=<path>` core overrides, which still target the live workspace they're invoked from, not a sandbox. To verify destructive-command behavior:
+**Never run or exercise a destructive `winter` command against a live env you don't intend to mutate** — including via
+`--winter=<path>`/`--service-orchestrator=<path>` core overrides, which still target the live workspace they're invoked
+from, not a sandbox. To verify destructive-command behavior:
 
-- Build a throwaway env (`winter ws init <scratch-env>`) or a fully scratch workspace (its own config + throwaway git repos) and exercise the command there.
-- When a throwaway env isn't practical, drive the underlying service classes directly against a scoped, disposable git repo instead of going through the live CLI.
-- Prefer `--dry-run`/`--json` to preview a command's plan before running it for real — every destructive `ws` verb that supports it reports the exact per-repo effect with no side effects.
-- Before finishing, audit every worktree you touched (or could have touched): branch attached where expected, working tree clean unless intentionally left dirty, and the commits you expect are present — not silently stranded off every ref. After a `ws clean`, also confirm no untracked file you meant to keep is gone — read the per-path list the command prints, which is the only record of what it took. `winter ws status --json` reports a per-repo `untracked` count, but it counts one entry per file and cannot see an empty untracked directory, so it is a rough cross-check rather than a match.
+- Build a throwaway env (`winter ws init <scratch-env>`) or a fully scratch workspace (its own config + throwaway git
+  repos) and exercise the command there.
+- When a throwaway env isn't practical, drive the underlying service classes directly against a scoped, disposable git
+  repo instead of going through the live CLI.
+- Prefer `--dry-run`/`--json` to preview a command's plan before running it for real — every destructive `ws` verb that
+  supports it reports the exact per-repo effect with no side effects.
+- Before finishing, audit every worktree you touched (or could have touched): branch attached where expected, working
+  tree clean unless intentionally left dirty, and the commits you expect are present — not silently stranded off every
+  ref. After a `ws clean`, also confirm no untracked file you meant to keep is gone — read the per-path list the command
+  prints, which is the only record of what it took. `winter ws status --json` reports a per-repo `untracked` count, but
+  it counts one entry per file and cannot see an empty untracked directory, so it is a rough cross-check rather than a
+  match.
 
-This came out of a real incident: an agent reproducing a bug ran `winter ws checkout alpha master --force` through the core-override against its own live `alpha` env; `ws checkout` has no repo-scoping flag, so it force-moved every worktree in `alpha`, including the agent's own, and erased a completed, unpushed commit. `--force` bypasses the dirty/abandonment safety gate entirely, so no guard in the CLI would have stopped that specific command — the operating rule above (verify in a throwaway env or scratch workspace, never the live one) is what actually prevents a recurrence.
+This came out of a real incident: an agent reproducing a bug ran `winter ws checkout alpha master --force` through the
+core-override against its own live `alpha` env; `ws checkout` has no repo-scoping flag, so it force-moved every worktree
+in `alpha`, including the agent's own, and erased a completed, unpushed commit. `--force` bypasses the dirty/abandonment
+safety gate entirely, so no guard in the CLI would have stopped that specific command — the operating rule above (verify
+in a throwaway env or scratch workspace, never the live one) is what actually prevents a recurrence.
 
 ## Adopting a remote feature branch
 
-`winter ws checkout <name> <feature-branch>` is an all-or-nothing connect + force-checkout across every non-pinned repo — it re-attaches HEAD onto the env-named branch (moving it off whatever branch a worktree was parked on, or re-attaching a detached one) and force-moves that branch to the target ref (use `--new` for a branch that doesn't exist anywhere yet). It is env-wide with no repo filter. For the `refused-unknown-branch` / `refused-missing-ref` refusals, the dirty/abandonment guard, and what `--force` does and doesn't bypass, see [winter-cli/usage/ws/checkout.md](./winter-cli/usage/ws/checkout.md).
+`winter ws checkout <name> <feature-branch>` is an all-or-nothing connect + force-checkout across every non-pinned repo
+— it re-attaches HEAD onto the env-named branch (moving it off whatever branch a worktree was parked on, or re-attaching
+a detached one) and force-moves that branch to the target ref (use `--new` for a branch that doesn't exist anywhere
+yet). It is env-wide with no repo filter. For the `refused-unknown-branch` / `refused-missing-ref` refusals, the
+dirty/abandonment guard, and what `--force` does and doesn't bypass, see
+[winter-cli/usage/ws/checkout.md](./winter-cli/usage/ws/checkout.md).
 
-To move a single worktree's branch pointer without touching the rest of the env — or without re-attaching a detached HEAD — use `winter ws reset <name>/<repo-name> <ref>` instead; see [winter-cli/usage/ws/reset.md](./winter-cli/usage/ws/reset.md) for the soft/mixed/hard modes and safety-gate details.
+To move a single worktree's branch pointer without touching the rest of the env — or without re-attaching a detached
+HEAD — use `winter ws reset <name>/<repo-name> <ref>` instead; see
+[winter-cli/usage/ws/reset.md](./winter-cli/usage/ws/reset.md) for the soft/mixed/hard modes and safety-gate details.
 
 ## Pushing completed work
 
-`winter ws push [<patterns>]` pushes each matched worktree to its own tracked upstream. For the pattern/scope vocabulary, the per-repo target rule, pinned exclusion (`--include-pinned`/`--only-pinned`), and the `N pinned repo(s) with commits skipped` signal, see [winter-cli/usage/ws/push.md](./winter-cli/usage/ws/push.md) and [winter-cli/usage/ws/patterns.md](./winter-cli/usage/ws/patterns.md).
+`winter ws push [<patterns>]` pushes each matched worktree to its own tracked upstream. For the pattern/scope
+vocabulary, the per-repo target rule, pinned exclusion (`--include-pinned`/`--only-pinned`), and the
+`N pinned repo(s) with commits skipped` signal, see [winter-cli/usage/ws/push.md](./winter-cli/usage/ws/push.md) and
+[winter-cli/usage/ws/patterns.md](./winter-cli/usage/ws/patterns.md).
 
 To push a single standalone repo, use raw git — patterns don't apply to standalone repos.

@@ -9,7 +9,7 @@ You are the workspace guide. Help the user navigate the workspace skill system.
 
 **If `$ARGUMENTS` is empty**, introduce the workspace and list available skills:
 
-```
+```text
 ## Workspace Skills
 
 This workspace manages feature development through git worktrees. Here are the available commands:
@@ -31,33 +31,37 @@ What would you like to do?
 
 **If `$ARGUMENTS` contains text**, interpret the user's intent and suggest the appropriate skill:
 
-| Intent | Route to |
-|--------|----------|
-| Status, overview, "what's going on" | `winter dashboard` (or `winter ws list` / `winter ws status <name>`) |
-| Fetch, update refs | `/ws-fetch [name]` |
-| Pull, rebase down, bring down | `/ws-pull [name]` |
-| Push, send up, ship | `/ws-push [name]` |
-| Take framework/template updates, update from `winter` upstream, sync the workspace with the framework | `/ws-update` |
-| Bring main into an env, update an env against main | `winter ws fetch <name>` then `winter ws merge origin/{main} <name>` |
-| Initialize, bring up after clone, make it work | `/ws-init [target]` |
-| Configure, declare new repo, set git identity | `/ws-setup` |
-| Tear down, destroy, remove an environment | `winter ws destroy <name>` |
-| Adopt a remote feature branch into an env | `winter ws checkout <name> <feature-branch>` |
-| Roll one or more worktrees back to a ref, move a branch pointer (not env-wide, not a tracking change) | `winter ws reset <name>/<repo> <ref>` — scope to `<env>/<repo>`; a bare `<env>` moves *every* non-pinned worktree in it |
-| Remove untracked/scratch files from worktrees, get an env back to a pristine state | `winter ws clean <name>/<repo> --dry-run` first — a bare `<env>` reaches *every* non-pinned worktree, and removed files are unrecoverable. Pair with `winter ws reset` when the goal is a pristine ref: reset restores tracked files, clean removes untracked ones |
-| Remove orphan project clones / broken symlinks left by a deleted repo or env | `winter ws prune` |
+| Intent                                                                                                | Route to                                                                                                                                                                                                                                                           |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Status, overview, "what's going on"                                                                   | `winter dashboard` (or `winter ws list` / `winter ws status <name>`)                                                                                                                                                                                               |
+| Fetch, update refs                                                                                    | `/ws-fetch [name]`                                                                                                                                                                                                                                                 |
+| Pull, rebase down, bring down                                                                         | `/ws-pull [name]`                                                                                                                                                                                                                                                  |
+| Push, send up, ship                                                                                   | `/ws-push [name]`                                                                                                                                                                                                                                                  |
+| Take framework/template updates, update from `winter` upstream, sync the workspace with the framework | `/ws-update`                                                                                                                                                                                                                                                       |
+| Bring main into an env, update an env against main                                                    | `winter ws fetch <name>` then `winter ws merge origin/{main} <name>`                                                                                                                                                                                               |
+| Initialize, bring up after clone, make it work                                                        | `/ws-init [target]`                                                                                                                                                                                                                                                |
+| Configure, declare new repo, set git identity                                                         | `/ws-setup`                                                                                                                                                                                                                                                        |
+| Tear down, destroy, remove an environment                                                             | `winter ws destroy <name>`                                                                                                                                                                                                                                         |
+| Adopt a remote feature branch into an env                                                             | `winter ws checkout <name> <feature-branch>`                                                                                                                                                                                                                       |
+| Roll one or more worktrees back to a ref, move a branch pointer (not env-wide, not a tracking change) | `winter ws reset <name>/<repo> <ref>` — scope to `<env>/<repo>`; a bare `<env>` moves *every* non-pinned worktree in it                                                                                                                                            |
+| Remove untracked/scratch files from worktrees, get an env back to a pristine state                    | `winter ws clean <name>/<repo> --dry-run` first — a bare `<env>` reaches *every* non-pinned worktree, and removed files are unrecoverable. Pair with `winter ws reset` when the goal is a pristine ref: reset restores tracked files, clean removes untracked ones |
+| Remove orphan project clones / broken symlinks left by a deleted repo or env                          | `winter ws prune`                                                                                                                                                                                                                                                  |
 
 Respond with a brief explanation and the exact command to run. For example:
 
 - "pull alpha down" → "To pull remote commits into the alpha environment, run: `/ws-pull alpha`"
 - "push alpha up" → "To push alpha's local commits to its feature branch, run: `/ws-push alpha`"
 - "fetch alpha" → "To refresh refs for the alpha environment, run: `/ws-fetch alpha`"
-- "pull in the latest framework updates" / "update from winter" → "To integrate upstream framework updates into the workspace branch, run: `/ws-update`"
+- "pull in the latest framework updates" / "update from winter" → "To integrate upstream framework updates into the
+  workspace branch, run: `/ws-update`"
 - "what's going on" → "For an overview, run: `winter dashboard` (or `winter ws list` for a quick list)."
 - "I just cloned this, get it working" → "To apply your declared config across the workspace, run: `/ws-init`"
-- "bring up alpha after clone" → "To reconcile the alpha environment against your declared config, run: `/ws-init alpha`"
-- "destroy alpha" / "tear down beta" → "To tear down the environment (fires `on_env_destroy` hooks then removes the worktrees + dir), run: `winter ws destroy alpha`"
-- "check out feature/foo into gamma" → "To adopt an existing remote feature branch into gamma, run: `winter ws fetch gamma && winter ws checkout gamma feature/foo`"
+- "bring up alpha after clone" → "To reconcile the alpha environment against your declared config, run:
+  `/ws-init alpha`"
+- "destroy alpha" / "tear down beta" → "To tear down the environment (fires `on_env_destroy` hooks then removes the
+  worktrees + dir), run: `winter ws destroy alpha`"
+- "check out feature/foo into gamma" → "To adopt an existing remote feature branch into gamma, run:
+  `winter ws fetch gamma && winter ws checkout gamma feature/foo`"
 
 If the intent is unclear, list the available skills and ask the user to clarify.
 

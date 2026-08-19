@@ -1,6 +1,9 @@
 # Extensions
 
-Standalone repositories can opt into contributing skills and agents to the workspace's `.claude/` directory by shipping a `winter-ext.toml` file at the repo root. A project repo (declared via `[[project_repository]]`) can opt in the same way — see [Project-repo extensions](#project-repo-extensions) below for how its eligibility and context delivery differ from a standalone's.
+Standalone repositories can opt into contributing skills and agents to the workspace's `.claude/` directory by shipping
+a `winter-ext.toml` file at the repo root. A project repo (declared via `[[project_repository]]`) can opt in the same
+way — see [Project-repo extensions](#project-repo-extensions) below for how its eligibility and context delivery differ
+from a standalone's.
 
 ## `winter-ext.toml` schema
 
@@ -46,40 +49,64 @@ target  = "2.0"                 # provider-specific routing key (required by the
 
 **`[[service]]` declaration rules:**
 
-- `name` is required and must be unique across all sources (the workspace config and every installed extension). A name collision across sources is a fatal error at `service up` time.
-- `scope` defaults to `"feature-environment"` when omitted. Accepted values: `"feature-environment"` (one instance per active env), `"workspace"` (one shared instance). Unknown scope values are rejected.
+- `name` is required and must be unique across all sources (the workspace config and every installed extension). A name
+  collision across sources is a fatal error at `service up` time.
+- `scope` defaults to `"feature-environment"` when omitted. Accepted values: `"feature-environment"` (one instance per
+  active env), `"workspace"` (one shared instance). Unknown scope values are rejected.
 - `command` is required.
-- `target` is required by the tmux provider (window.pane address, e.g. `"2.0"`). Container-based providers use `image` instead. Unknown keys are rejected.
+- `target` is required by the tmux provider (window.pane address, e.g. `"2.0"`). Container-based providers use `image`
+  instead. Unknown keys are rejected.
 - `ports` is an optional list of integer port numbers the service listens on; used by status rendering.
 - `image` is optional; used by container-based providers.
 
-The extension's `[[service]]` entries are aggregated by `winter service up` alongside any `[[service]]` entries in the workspace's `.winter/config.toml`, deduplication is enforced by name, and the result is written to a temporary TOML file whose path is injected into each provider subprocess as `WINTER_SERVICE_MANIFEST`. See [../contracts/service-orchestrator.md](../contracts/service-orchestrator.md#per-action-env-var-winter_service_manifest) for the full manifest format and consume-or-ignore rule.
+The extension's `[[service]]` entries are aggregated by `winter service up` alongside any `[[service]]` entries in the
+workspace's `.winter/config.toml`, deduplication is enforced by name, and the result is written to a temporary TOML file
+whose path is injected into each provider subprocess as `WINTER_SERVICE_MANIFEST`. See
+[../contracts/service-orchestrator.md](../contracts/service-orchestrator.md#per-action-env-var-winter_service_manifest)
+for the full manifest format and consume-or-ignore rule.
 
-`requires` declares the other winter modules this one references and therefore needs when installed on its own. Each entry is a module name — the `<context>` half of a `<context>:/path` reference. It is the data `winter graph` aggregates and the module-extractability lint check validates references against.
+`requires` declares the other winter modules this one references and therefore needs when installed on its own. Each
+entry is a module name — the `<context>` half of a `<context>:/path` reference. It is the data `winter graph` aggregates
+and the module-extractability lint check validates references against.
 
-The final symlink prefix is resolved with this precedence: `prefix` on the workspace config entry > `prefix` in `winter-ext.toml` > `name` in `winter-ext.toml` > the standalone repo's directory name.
+The final symlink prefix is resolved with this precedence: `prefix` on the workspace config entry > `prefix` in
+`winter-ext.toml` > `name` in `winter-ext.toml` > the standalone repo's directory name.
 
 ## What gets symlinked
 
-When `skills_dir` and `agents_dir` aren't set explicitly, winter searches for them in this order and uses the first that exists:
+When `skills_dir` and `agents_dir` aren't set explicitly, winter searches for them in this order and uses the first that
+exists:
 
 - `skills/` then `.claude/skills/`
 - `agents/` then `.claude/agents/`
 
-That covers both the winter convention (top-level `skills/`/`agents/`) and the Claude Code convention (`.claude/skills/`/`.claude/agents/`), so a vanilla Claude Code repo can be adopted as an extension without modification. Setting `skills_dir`/`agents_dir` explicitly in `winter-ext.toml` skips the fallback and uses exactly the declared path.
+That covers both the winter convention (top-level `skills/`/`agents/`) and the Claude Code convention
+(`.claude/skills/`/`.claude/agents/`), so a vanilla Claude Code repo can be adopted as an extension without
+modification. Setting `skills_dir`/`agents_dir` explicitly in `winter-ext.toml` skips the fallback and uses exactly the
+declared path.
 
-For each subdirectory under the resolved skills root, winter installs the skill into every code-agent vendor's skills directory, choosing the install mechanism from the vendor's capability (the `CodeAgentVendor` enum):
+For each subdirectory under the resolved skills root, winter installs the skill into every code-agent vendor's skills
+directory, choosing the install mechanism from the vendor's capability (the `CodeAgentVendor` enum):
 
-- **Claude Code** (`.claude/skills/<prefix>-<dir>`) and **Codex** (`.codex/skills/<prefix>-<dir>`) get a **relative symlink** to the source.
-- **OpenCode** (`.opencode/skill/<prefix>-<dir>`) gets a **real-directory copy**. OpenCode discovers skills by globbing `skill/**/SKILL.md` and its globber does **not** traverse symlinked directories — a symlink there would be invisible to it, so the skill must be a real directory. The copy is idempotent: on each `winter ws init`, winter content-hashes the source and destination and re-copies (delete-then-copy) only on a mismatch; nothing is persisted. Stale `<prefix>-*` copies with no live source are pruned, mirroring the symlink prune.
+- **Claude Code** (`.claude/skills/<prefix>-<dir>`) and **Codex** (`.codex/skills/<prefix>-<dir>`) get a **relative
+  symlink** to the source.
+- **OpenCode** (`.opencode/skill/<prefix>-<dir>`) gets a **real-directory copy**. OpenCode discovers skills by globbing
+  `skill/**/SKILL.md` and its globber does **not** traverse symlinked directories — a symlink there would be invisible
+  to it, so the skill must be a real directory. The copy is idempotent: on each `winter ws init`, winter content-hashes
+  the source and destination and re-copies (delete-then-copy) only on a mismatch; nothing is persisted. Stale
+  `<prefix>-*` copies with no live source are pruned, mirroring the symlink prune.
 
-`.opencode/skill/` is read only by OpenCode, and OpenCode's read of `.claude/skills` only picks up real directories (not the symlinks there), so there is no double-loading across the symlink and copy sets.
+`.opencode/skill/` is read only by OpenCode, and OpenCode's read of `.claude/skills` only picks up real directories (not
+the symlinks there), so there is no double-loading across the symlink and copy sets.
 
-For each `.md` file under the resolved agents root, winter transforms the canonical agent into a per-harness, git-excluded copy at `.claude/agents/<prefix>-<name>.md` (Claude), `.codex/agents/<prefix>-<name>.toml` (Codex), and `.opencode/agent/<prefix>-<name>.md` (OpenCode) — not a symlink. See `winter-harness:/agent-context/cross-harness-projection.md` for the transform.
+For each `.md` file under the resolved agents root, winter transforms the canonical agent into a per-harness,
+git-excluded copy at `.claude/agents/<prefix>-<name>.md` (Claude), `.codex/agents/<prefix>-<name>.toml` (Codex), and
+`.opencode/agent/<prefix>-<name>.md` (OpenCode) — not a symlink. See
+`winter-harness:/agent-context/cross-harness-projection.md` for the transform.
 
 The workspace `.gitignore` is updated with a marker-bracketed block per extension:
 
-```
+```text
 # >>> winter-backlog (managed by winter)
 /winter-backlog/
 .claude/skills/wsb-*
@@ -91,11 +118,19 @@ The workspace `.gitignore` is updated with a marker-bracketed block per extensio
 
 ## Workspace skills
 
-Besides extension skills from standalone repos, `winter ws init` always projects skills authored directly in the workspace. Projection is always-on: the `prefix` defaults to `"ws"` and the source directory defaults to `skills/` (configurable via `skills_dir`). The workspace skill namespace must be distinct from any `[[standalone_repository]]` `prefix` value — both prune `<prefix>-*` and bare `<prefix>` entries in the same target directories, and a collision is rejected at config load. See [config-files.md — workspace skill prefix](./config-files.md#workspace-skill-prefix) for the full configuration surface.
+Besides extension skills from standalone repos, `winter ws init` always projects skills authored directly in the
+workspace. Projection is always-on: the `prefix` defaults to `"ws"` and the source directory defaults to `skills/`
+(configurable via `skills_dir`). The workspace skill namespace must be distinct from any `[[standalone_repository]]`
+`prefix` value — both prune `<prefix>-*` and bare `<prefix>` entries in the same target directories, and a collision is
+rejected at config load. See [config-files.md — workspace skill prefix](./config-files.md#workspace-skill-prefix) for
+the full configuration surface.
 
 ## Frontmatter convention
 
-Claude Code lets a SKILL.md frontmatter `name` field override the directory name during skill discovery. That defeats the prefix-by-directory-name design, so winter requires extension SKILL.md files to **omit the `name` field** — letting the directory name (which winter controls via the symlink or copy) be authoritative. Winter validates this on install and refuses if any SKILL.md sets `name`. This rule applies equally to workspace-authored skills.
+Claude Code lets a SKILL.md frontmatter `name` field override the directory name during skill discovery. That defeats
+the prefix-by-directory-name design, so winter requires extension SKILL.md files to **omit the `name` field** — letting
+the directory name (which winter controls via the symlink or copy) be authoritative. Winter validates this on install
+and refuses if any SKILL.md sets `name`. This rule applies equally to workspace-authored skills.
 
 ## Extension hooks
 
@@ -108,66 +143,97 @@ on_env_destroy         = "./hooks/destroy-worktree.sh"
 on_workspace_reconcile = "./hooks/reconcile-workspace.sh"
 ```
 
-- `on_env_init` fires after `winter ws init <env>` creates every per-repo worktree and allocates the env index. Use it to provision per-env state (tmux sessions, databases, watchers).
-- `on_env_destroy` fires *before* `winter ws destroy <env>` removes any per-repo worktree or the env directory. Use it to release whatever `on_env_init` provisioned.
-- `on_workspace_reconcile` fires **once per workspace-level reconcile** — specifically `winter ws init` (no target) and `winter ws init --all`. Fires after standalone/extension repos are reconciled so the extension exists on disk, and for the `--all` path, before the per-env loop. Use it for one-time workspace setup that should re-run when the workspace is re-reconciled (e.g. writing workspace-level config files, registering extensions with external tools).
+- `on_env_init` fires after `winter ws init <env>` creates every per-repo worktree and allocates the env index. Use it
+  to provision per-env state (tmux sessions, databases, watchers).
+- `on_env_destroy` fires *before* `winter ws destroy <env>` removes any per-repo worktree or the env directory. Use it
+  to release whatever `on_env_init` provisioned.
+- `on_workspace_reconcile` fires **once per workspace-level reconcile** — specifically `winter ws init` (no target) and
+  `winter ws init --all`. Fires after standalone/extension repos are reconciled so the extension exists on disk, and for
+  the `--all` path, before the per-env loop. Use it for one-time workspace setup that should re-run when the workspace
+  is re-reconciled (e.g. writing workspace-level config files, registering extensions with external tools).
 
-Hook scripts must be **relative paths inside the extension directory** (so the extension owns its scripts; winter resolves them against the extension root).
+Hook scripts must be **relative paths inside the extension directory** (so the extension owns its scripts; winter
+resolves them against the extension root).
 
 ### Hook env-var contract
 
 **Env hooks** (`on_env_init`, `on_env_destroy`) are invoked with:
 
-| Var | Meaning |
-|-----|---------|
-| `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root. |
-| `WINTER_EXT_DIR` | Absolute path to this extension's clone (the dir containing `winter-ext.toml`). |
-| `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension (`wf`, `wst`, …). |
-| `WINTER_EXT_CONFIG_DIR` | Absolute path to this extension's writable config/asset directory (default `.winter/config/<name>/`). |
-| `WINTER_SERVICE_PREFIX` | The resolved workspace-level service-orchestration namespace prefix. Workspace-invariant — present for **every** hook regardless of scope. |
+| Var                          | Meaning                                                                                                                                                                                                                                  |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WINTER_WORKSPACE_DIR`       | Absolute path to the workspace root.                                                                                                                                                                                                     |
+| `WINTER_EXT_DIR`             | Absolute path to this extension's clone (the dir containing `winter-ext.toml`).                                                                                                                                                          |
+| `WINTER_EXT_PREFIX`          | The resolved symlink prefix for this extension (`wf`, `wst`, …).                                                                                                                                                                         |
+| `WINTER_EXT_CONFIG_DIR`      | Absolute path to this extension's writable config/asset directory (default `.winter/config/<name>/`).                                                                                                                                    |
+| `WINTER_SERVICE_PREFIX`      | The resolved workspace-level service-orchestration namespace prefix. Workspace-invariant — present for **every** hook regardless of scope.                                                                                               |
 | `WINTER_WORKSPACE_PORT_BASE` | `base_port + ports_per_env * 0` — the index-0 base, i.e. the port band reserved for workspace-scope services. Present for **every** hook, including `on_workspace_reconcile` (which otherwise gets no `WINTER_ENV*`/`WINTER_PORT_BASE`). |
-| `WINTER_ENV` | The env name (`alpha`, `beta`, …). Env-scoped hooks only. |
-| `WINTER_ENV_INDEX` | The persisted port-offset index for this env (alias envs get fixed slots `1..N`; ad-hoc names hash into the remainder band). Env-scoped hooks only. |
-| `WINTER_PORT_BASE` | `base_port + ports_per_env * WINTER_ENV_INDEX` (defaults: `4000 + 20 * index`). Env-scoped hooks only. |
+| `WINTER_ENV`                 | The env name (`alpha`, `beta`, …). Env-scoped hooks only.                                                                                                                                                                                |
+| `WINTER_ENV_INDEX`           | The persisted port-offset index for this env (alias envs get fixed slots `1..N`; ad-hoc names hash into the remainder band). Env-scoped hooks only.                                                                                      |
+| `WINTER_PORT_BASE`           | `base_port + ports_per_env * WINTER_ENV_INDEX` (defaults: `4000 + 20 * index`). Env-scoped hooks only.                                                                                                                                   |
 
 The hook's **cwd is the env root** (`<workspace>/<env>/`). Hooks should read these env vars rather than parse `argv`.
 
 **Workspace hook** (`on_workspace_reconcile`) is invoked with only:
 
-| Var | Meaning |
-|-----|---------|
-| `WINTER_WORKSPACE_DIR` | Absolute path to the workspace root. |
-| `WINTER_EXT_DIR` | Absolute path to this extension's clone. |
-| `WINTER_EXT_PREFIX` | The resolved symlink prefix for this extension. |
-| `WINTER_EXT_CONFIG_DIR` | Absolute path to this extension's writable config/asset directory. |
+| Var                     | Meaning                                                              |
+| ----------------------- | -------------------------------------------------------------------- |
+| `WINTER_WORKSPACE_DIR`  | Absolute path to the workspace root.                                 |
+| `WINTER_EXT_DIR`        | Absolute path to this extension's clone.                             |
+| `WINTER_EXT_PREFIX`     | The resolved symlink prefix for this extension.                      |
+| `WINTER_EXT_CONFIG_DIR` | Absolute path to this extension's writable config/asset directory.   |
 | `WINTER_SERVICE_PREFIX` | The resolved workspace-level service-orchestration namespace prefix. |
 
 The hook's **cwd is the workspace root**.
 
-**Strict vs non-strict on destroy.** By default, a non-zero exit from a destroy hook is logged and the teardown continues so a broken hook doesn't trap an env on disk. Pass `--strict` to `winter ws destroy` (or set it in CI/scripted use) when a hook failure must surface as a user-actionable error before any worktree is removed.
+**Strict vs non-strict on destroy.** By default, a non-zero exit from a destroy hook is logged and the teardown
+continues so a broken hook doesn't trap an env on disk. Pass `--strict` to `winter ws destroy` (or set it in CI/scripted
+use) when a hook failure must surface as a user-actionable error before any worktree is removed.
 
 ## Project-repo extensions
 
-A `[[project_repository]]` whose `projects/<name>/` root carries a `winter-ext.toml` is extension-eligible in place — no separate `[[standalone_repository]]` clone is needed. Every extension feature (`winter doctor`, `winter lint`, `winter graph`, the capability registry, service-manifest collection, provision handlers, hooks, skills/agents projection) resolves it exactly like a standalone, reading `winter-ext.toml` and everything it declares from the `projects/<name>/` root — the source checkout, never a per-env worktree.
+A `[[project_repository]]` whose `projects/<name>/` root carries a `winter-ext.toml` is extension-eligible in place — no
+separate `[[standalone_repository]]` clone is needed. Every extension feature (`winter doctor`, `winter lint`,
+`winter graph`, the capability registry, service-manifest collection, provision handlers, hooks, skills/agents
+projection) resolves it exactly like a standalone, reading `winter-ext.toml` and everything it declares from the
+`projects/<name>/` root — the source checkout, never a per-env worktree.
 
-Context delivery is the one place a project-repo extension renders differently from a standalone. `AGENTS.winter.md` opens with a single `# Path notation resolution` heading; every bullet under it binds an extension name (its `<name>:` path-notation prefix) to the location that resolves it. A standalone lives at one fixed workspace path, so its bullet is an eager `@`-import of its entry point. A project repo has N copies on disk — the source checkout plus one worktree per feature env — so an eager `@`-import would inject a `master` copy that goes stale against whatever feature branch an agent is actually editing. Instead its bullet carries the literal `<env>/<name>/` entry-point path template, plus the manifest's one-line `description` when one is declared — with no `@`:
+Context delivery is the one place a project-repo extension renders differently from a standalone. `AGENTS.winter.md`
+opens with a single `# Path notation resolution` heading; every bullet under it binds an extension name (its `<name>:`
+path-notation prefix) to the location that resolves it. A standalone lives at one fixed workspace path, so its bullet is
+an eager `@`-import of its entry point. A project repo has N copies on disk — the source checkout plus one worktree per
+feature env — so an eager `@`-import would inject a `master` copy that goes stale against whatever feature branch an
+agent is actually editing. Instead its bullet carries the literal `<env>/<name>/` entry-point path template, plus the
+manifest's one-line `description` when one is declared — with no `@`:
 
-```
+```text
 - **winter-docs**: `<env>/winter-docs/index.md` — Public documentation site generator.
 ```
 
-The entry point itself is resolved the same way for both kinds — `index.md`, then `AGENTS.md`, then `context/index.md`, first match wins (mirroring the `skills_dir`/`agents_dir` default-discovery fallback above) — but only a standalone's entry point is ever `@`-imported; a project repo's is read by the agent directly from the worktree it's in.
+The entry point itself is resolved the same way for both kinds — `index.md`, then `AGENTS.md`, then `context/index.md`,
+first match wins (mirroring the `skills_dir`/`agents_dir` default-discovery fallback above) — but only a standalone's
+entry point is ever `@`-imported; a project repo's is read by the agent directly from the worktree it's in.
 
-**`<env>` binding.** `AGENTS.winter.md` auto-loads into every session via the workspace's `# Winter Extensions` block, including a session with no feature env in scope — `context/workspace-layout.md` mandates subagents spawn from the workspace root, where `<env>` is unbound and no env directory may even exist yet. When one or more project-repo bullets are rendered, `AGENTS.winter.md` carries a one-line note ahead of them: `<env>` binds to the feature-env directory the reading agent is actually working in; a workspace-root reader with no env bound instead opens the source checkout at `projects/<name>/`.
+**`<env>` binding.** `AGENTS.winter.md` auto-loads into every session via the workspace's `# Winter Extensions` block,
+including a session with no feature env in scope — `context/workspace-layout.md` mandates subagents spawn from the
+workspace root, where `<env>` is unbound and no env directory may even exist yet. When one or more project-repo bullets
+are rendered, `AGENTS.winter.md` carries a one-line note ahead of them: `<env>` binds to the feature-env directory the
+reading agent is actually working in; a workspace-root reader with no env bound instead opens the source checkout at
+`projects/<name>/`.
 
-A repo declared as **both** `[[project_repository]]` (with a root `winter-ext.toml`) and `[[standalone_repository]]` dedupes to a single extension entry — while both declarations exist, the **standalone** checkout wins (keeping the pre-existing eager `@`-import unchanged, since removing the six `[[standalone_repository]]` declarations that currently double-declare winter-canon, winter-github, winter-harness, winter-service-tmux, winter-service-docker, and winter-workflow in this workspace is an explicit follow-up, not part of this change) — and `winter ws init` logs a warning naming the now-redundant `[[standalone_repository]]` declaration so it can be removed. Once it is removed, the project-repo entry takes over automatically and the extension starts rendering as a no-`@` path-template bullet.
+A repo declared as **both** `[[project_repository]]` (with a root `winter-ext.toml`) and `[[standalone_repository]]`
+dedupes to a single extension entry — while both declarations exist, the **standalone** checkout wins (keeping the
+pre-existing eager `@`-import unchanged, since removing the six `[[standalone_repository]]` declarations that currently
+double-declare winter-canon, winter-github, winter-harness, winter-service-tmux, winter-service-docker, and
+winter-workflow in this workspace is an explicit follow-up, not part of this change) — and `winter ws init` logs a
+warning naming the now-redundant `[[standalone_repository]]` declaration so it can be removed. Once it is removed, the
+project-repo entry takes over automatically and the extension starts rendering as a no-`@` path-template bullet.
 
 ## `adopt_extensions` modes
 
 The top-level `adopt_extensions` field controls when winter processes a standalone repo's skills and agents:
 
-| Value | Behavior |
-|-------|----------|
-| `winter` (default) | Process only standalone repos that have a `winter-ext.toml` at the repo root. SKILL.md frontmatter is strictly validated. |
-| `all` | Process any standalone repo with `skills/`, `agents/`, `.claude/skills/`, or `.claude/agents/` directories, with or without a manifest. Frontmatter validation downgrades from refuse-to-warn — collisions become the user's problem. |
-| `none` | Skip all extension processing. Standalone repos are still cloned, but no symlinks are created. |
+| Value              | Behavior                                                                                                                                                                                                                              |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `winter` (default) | Process only standalone repos that have a `winter-ext.toml` at the repo root. SKILL.md frontmatter is strictly validated.                                                                                                             |
+| `all`              | Process any standalone repo with `skills/`, `agents/`, `.claude/skills/`, or `.claude/agents/` directories, with or without a manifest. Frontmatter validation downgrades from refuse-to-warn — collisions become the user's problem. |
+| `none`             | Skip all extension processing. Standalone repos are still cloned, but no symlinks are created.                                                                                                                                        |
