@@ -157,9 +157,14 @@ link-anchors = ["README.md"]
 other workspace that installs it; the exemption travels with the repo or it does not travel at all. This surface is for
 when that is not an option.
 
-A name under `repos` / `[lint.ignore.repo]` is checked against the workspace's `[[project_repository]]` declarations, so
-a typo is reported rather than quietly matching nothing. A name that is real but outside the current scope resolves to
-nothing and stays silent — the same judgment a `--changed` run makes about rules it had no chance to exercise.
+Both this table and the `[[project_repository]]` declarations a rule's target is checked against are read from
+`.winter/config.toml` merged with its gitignored `config.local.toml` overlay — the same two-file model the rest of the
+CLI loads — so a repo added with `winter ws repo add --local` is a valid target and a rule may live in either file.
+
+A name under `repos` / `[lint.ignore.repo]` is checked against those declarations, so a typo is reported rather than
+quietly matching nothing. The check is skipped in a workspace that declares no project repositories at all, which is a
+config winter has no business second-guessing. A name that is real but outside the current scope resolves to nothing and
+stays silent — the same judgment a `--changed` run makes about rules it had no chance to exercise.
 
 ### Precedence
 

@@ -1,19 +1,23 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from pathlib import Path
 
+from winter_cli.config.workspace import CONFIG_FILE, LOCAL_CONFIG_FILE, WINTER_DIR
 from winter_cli.core.config_file import ConfigFileReadError, IConfigFileReader
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.lint.models import (
     IgnoredFinding,
     LintFinding,
+    LintIgnoreOrigin,
     LintIgnoreOutcome,
     LintIgnoreRule,
     LintScope,
     LintStatus,
 )
 from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST
+from winter_cli.util import deep_merge
 
 # Source label for the dispatcher's own findings about ignore rules. Shares
 # `core`'s group because this check ships with winter-cli and always runs, the
@@ -37,8 +41,18 @@ WORKSPACE_IGNORE_KEYS = frozenset({"paths", "checks", "repos", "repo"})
 WORKSPACE_REPO_KEYS = frozenset({"paths", "checks"})
 
 # Where the workspace declares its own rules, and the name it reports under.
-WORKSPACE_CONFIG = Path(".winter") / "config.toml"
+# `config.local.toml` is the gitignored overlay every other workspace-config
+# consumer honours — `winter ws repo add --local` writes `[[project_repository]]`
+# there — so a surface that read only the committed file would disagree with the
+# CLI about which repos exist, and silently drop rules written in the overlay.
+WORKSPACE_CONFIG = Path(WINTER_DIR) / CONFIG_FILE
+WORKSPACE_LOCAL_CONFIG = Path(WINTER_DIR) / LOCAL_CONFIG_FILE
 WORKSPACE_OWNER = "workspace"
+
+# How far below the workspace root a project repo can sit: `<repo>` directly
+# under it, or `<env>/<repo>` / `projects/<repo>` one level below. A segment
+# deeper than this is inside a repo, not a repo.
+_REPO_ROOT_MAX_DEPTH = 2
 
 # Directories never worth walking when resolving a rule against the corpus.
 # Mirrors the core file-size check's prune list.
@@ -147,14 +161,17 @@ class LintIgnoreService:
     here — suppressing a finding and suppressing a failure are different
     problems, and this solves only the first.
 
-    Only the repo-owned surface exists today. A repo installable in any winter
-    workspace must lint clean in any winter workspace, so a repo that
-    legitimately carries unresolvable content — templates, fixtures, recorded
-    results — declares that itself, in its own manifest, and ships clean
-    everywhere. The workspace-level mirror (a `[lint.ignore]` in
-    `.winter/config.toml`, for findings in a repo the workspace does not
-    control and has no standing to fix) is deliberately unbuilt until a real
-    third-party case turns up.
+    Two surfaces declare rules. A repo installable in any winter workspace must
+    lint clean in any winter workspace, so a repo that legitimately carries
+    unresolvable content — templates, fixtures, recorded results — declares that
+    itself, in its own manifest, and ships clean everywhere; that is the surface
+    to reach for, and a workspace exempting a repo it owns leaves that repo dirty
+    for everyone else. The workspace mirrors the same table in
+    `.winter/config.toml` for what the first cannot reach: a repo the workspace
+    has no standing to fix from here, or one carrying no manifest to declare
+    anything in. The two union rather than override — a finding is suppressed if
+    any applicable rule matches, and neither surface can un-ignore what the other
+    ignored, because they answer to different owners.
 
     **This service never raises and never fails a run.** Everything that can go
     wrong with an ignore declaration — an unreadable manifest, an unknown key, a
@@ -362,41 +379,69 @@ class LintIgnoreService:
         should still declare its own exemptions in its own manifest, or it ships
         dirty to everyone else who installs it.
         """
-        config_path = self._workspace_root / WORKSPACE_CONFIG
-        if not self._fs.is_file(config_path):
-            return [], []
-        try:
-            data = self._config_file_reader.load(config_path)
-        except ConfigFileReadError as exc:
-            return [], [self._workspace_finding(f"cannot read {WORKSPACE_CONFIG.as_posix()} — {exc}", LintStatus.fail)]
+        data, problems = self._workspace_config()
+        if problems:
+            return [], problems
 
         lint_table = data.get("lint")
         if not isinstance(lint_table, dict):
             # `lint` is also the scalar/list script field; only the table form
             # can carry `ignore`.
             return [], []
+
+        # Checked on this surface for the same reason the repo surface checks it:
+        # a typo'd table name is the failure with no other symptom, because it
+        # produces no rule to go stale and nothing to report it by.
+        diagnostics = [
+            self._workspace_finding(f"unknown key `lint.{key}` — expected one of {_names(LINT_KEYS)}")
+            for key in sorted(lint_table)
+            if key not in LINT_KEYS
+        ]
+
         ignore = lint_table.get("ignore")
         if ignore is None:
-            return [], []
+            return [], diagnostics
         if not isinstance(ignore, dict):
-            return [], [self._workspace_finding("`lint.ignore` must be a table")]
+            diagnostics.append(self._workspace_finding("`lint.ignore` must be a table"))
+            return [], diagnostics
 
-        diagnostics = [
+        diagnostics.extend(
             self._workspace_finding(
                 f"unknown key `lint.ignore.{key}` — expected one of {_names(WORKSPACE_IGNORE_KEYS)}"
             )
             for key in sorted(ignore)
             if key not in WORKSPACE_IGNORE_KEYS
-        ]
+        )
         rules = self._workspace_own_rules(ignore, diagnostics)
         rules.extend(self._workspace_repo_rules(ignore, data, scope_paths, diagnostics))
         return rules, diagnostics
+
+    def _workspace_config(self) -> tuple[dict, list[LintFinding]]:
+        """`.winter/config.toml` merged with its `config.local.toml` overlay.
+
+        The same two-file model `WorkspaceConfigService.load` uses, so a rule and
+        a `[[project_repository]]` declaration are read from wherever the rest of
+        the CLI would read them. An unreadable file is reported rather than
+        raised, and suppresses nothing.
+        """
+        merged: dict = {}
+        for relative in (WORKSPACE_CONFIG, WORKSPACE_LOCAL_CONFIG):
+            path = self._workspace_root / relative
+            if not self._fs.is_file(path):
+                continue
+            try:
+                merged = deep_merge(merged, self._config_file_reader.load(path))
+            except ConfigFileReadError as exc:
+                return {}, [self._workspace_finding(f"cannot read {relative.as_posix()} — {exc}", LintStatus.fail)]
+        return merged, []
 
     def _workspace_own_rules(self, ignore: dict, diagnostics: list[LintFinding]) -> list[LintIgnoreRule]:
         """`paths` / `checks` at the top of the table — the workspace's own files."""
         rules = [
             self._workspace_rule(self._workspace_root, WORKSPACE_OWNER, "lint.ignore", glob, None)
-            for glob in self._globs(ignore.get("paths"), self._workspace_root, "lint.ignore.paths", diagnostics)
+            for glob in self._globs(
+                ignore.get("paths"), self._workspace_root, "lint.ignore.paths", diagnostics, self._workspace_finding
+            )
         ]
         for check, glob in self._check_globs(ignore, self._workspace_root, "lint.ignore", diagnostics):
             rules.append(self._workspace_rule(self._workspace_root, WORKSPACE_OWNER, "lint.ignore", glob, check))
@@ -421,11 +466,19 @@ class LintIgnoreService:
         roots = self._scoped_repo_roots(scope_paths, known | self._named_repos(ignore))
         rules: list[LintIgnoreRule] = []
 
-        for name in self._globs(ignore.get("repos"), self._workspace_root, "lint.ignore.repos", diagnostics):
+        repo_names = self._globs(
+            ignore.get("repos"),
+            self._workspace_root,
+            "lint.ignore.repos",
+            diagnostics,
+            self._workspace_finding,
+            "repo name",
+        )
+        for name in repo_names:
             if not self._known_repo(name, known, "lint.ignore.repos", diagnostics):
                 continue
             for root in roots.get(name, []):
-                rules.append(self._workspace_rule(root, name, "lint.ignore", "**", None, key="repos"))
+                rules.append(self._workspace_rule(root, name, "lint.ignore", "**", None, key="repos", spelled=name))
 
         per_repo = ignore.get("repo")
         if per_repo is None:
@@ -448,7 +501,9 @@ class LintIgnoreService:
             if not self._known_repo(name, known, table, diagnostics):
                 continue
             targets = roots.get(name, [])
-            globs = self._globs(entry.get("paths"), self._workspace_root, f"{table}.paths", diagnostics)
+            globs = self._globs(
+                entry.get("paths"), self._workspace_root, f"{table}.paths", diagnostics, self._workspace_finding
+            )
             checked = self._check_globs(entry, self._workspace_root, table, diagnostics)
             for root in targets:
                 rules.extend(self._workspace_rule(root, name, table, glob, None) for glob in globs)
@@ -463,16 +518,20 @@ class LintIgnoreService:
         glob: str,
         check: str | None,
         key: str | None = None,
+        spelled: str | None = None,
     ) -> LintIgnoreRule:
         return LintIgnoreRule(
             repo=repo,
             repo_root=root,
             glob=glob,
             check=check,
-            origin=self._workspace_root / WORKSPACE_CONFIG,
-            owner=WORKSPACE_OWNER,
-            table=table if check is None else f"{table}.checks",
-            key=key,
+            origin=LintIgnoreOrigin(
+                declared_in=self._workspace_root / WORKSPACE_CONFIG,
+                owner=WORKSPACE_OWNER,
+                table=table if check is None else f"{table}.checks",
+                key=key or ("paths" if check is None else check),
+                spelled=spelled or glob,
+            ),
         )
 
     def _check_globs(
@@ -491,8 +550,10 @@ class LintIgnoreService:
             return []
         out: list[tuple[str, str]] = []
         for check in sorted(checks):
-            for glob in self._globs(checks[check], root, f"{table_name}.checks.{check}", diagnostics):
-                out.append((check, glob))
+            globs = self._globs(
+                checks[check], root, f"{table_name}.checks.{check}", diagnostics, self._workspace_finding
+            )
+            out.extend((check, glob) for glob in globs)
         return out
 
     def _declared_repo_names(self, data: dict) -> set[str]:
@@ -549,19 +610,20 @@ class LintIgnoreService:
     def _scoped_repo_roots(self, scope_paths: list[Path], known: set[str]) -> dict[str, list[Path]]:
         """Repo name → every root this run reaches for it.
 
-        Resolved by looking for a path segment that *is* one of the workspace's
-        declared repo names, rather than by assuming a fixed depth. A repo sits
-        at `<env>/<repo>` as a worktree and `projects/<repo>` as a source
-        checkout, and this reads both without encoding either — so a workspace
-        laid out differently still resolves, and a rule cannot accidentally bind
-        to a directory that merely sits where a repo usually would. The shallowest
-        match wins, which keeps a nested directory sharing a repo's name from
-        capturing paths belonging to the real one.
+        A candidate must satisfy all three of: its name is a declared repo name,
+        it is a directory, and it sits where a repo sits — directly under the
+        workspace root, or one level below that (`<env>/<repo>` for a worktree,
+        `projects/<repo>` for a source checkout). Name alone is not enough. Under
+        `--changed` the scope paths are individual files, and a workspace that
+        vendors the CLI has a file literally named `tools/winter-cli/bin/winter`;
+        matching on name alone bound a rule to that executable, whose corpus walk
+        then failed silently and reported every correct rule as stale with
+        "Delete the rule." The depth bound is what rejects it, and the directory
+        check keeps any other same-named file from taking its place.
 
-        Works for every scope kind, including `--changed`, whose paths are
-        individual files rather than repo directories. One name can yield several
-        roots: under `--all` the same repo is present once per feature env, and a
-        rule about it applies to each.
+        Works for every scope kind. One name can yield several roots: under
+        `--all` the same repo is present once per feature env, and a rule about it
+        applies to each.
         """
         roots: dict[str, list[Path]] = {}
         for path in scope_paths:
@@ -569,10 +631,12 @@ class LintIgnoreService:
             if relative is None:
                 continue
             parts = Path(relative).parts
-            for depth, segment in enumerate(parts, start=1):
+            for depth, segment in enumerate(parts[:_REPO_ROOT_MAX_DEPTH], start=1):
                 if segment not in known:
                     continue
                 root = self._workspace_root.joinpath(*parts[:depth])
+                if not self._fs.is_dir(root):
+                    continue
                 found = roots.setdefault(segment, [])
                 if root not in found:
                     found.append(root)
@@ -589,25 +653,42 @@ class LintIgnoreService:
             remediation="Fix the declaration or remove it. A rule winter cannot read suppresses nothing.",
         )
 
-    def _globs(self, raw: object, root: Path, key: str, diagnostics: list[LintFinding]) -> list[str]:
-        """Coerce a `str | list[str]` ignore entry, reporting anything it has to drop."""
+    def _globs(
+        self,
+        raw: object,
+        root: Path,
+        key: str,
+        diagnostics: list[LintFinding],
+        report: Callable[[str], LintFinding] | None = None,
+        noun: str = "glob",
+    ) -> list[str]:
+        """Coerce a `str | list[str]` ignore entry, reporting anything it has to drop.
+
+        `report` is the calling surface's finding factory, because a diagnostic
+        has to name the file the author can actually edit — the workspace root
+        owns no `winter-ext.toml`, so the repo-owned default would point at a
+        path that does not exist. `noun` names what the entry holds: `repos` is a
+        list of repo names, and telling its author they wrote a bad glob
+        describes the wrong mistake.
+        """
+        emit = report or (lambda message: self._config_finding(root, message))
         if raw is None:
             return []
         if isinstance(raw, str):
             if raw:
                 return [raw]
-            diagnostics.append(self._config_finding(root, f"`{key}` contains an empty glob"))
+            diagnostics.append(emit(f"`{key}` contains an empty {noun}"))
             return []
         if not isinstance(raw, list):
-            diagnostics.append(self._config_finding(root, f"`{key}` must be a glob or a list of globs"))
+            diagnostics.append(emit(f"`{key}` must be a {noun} or a list of {noun}s"))
             return []
-        globs: list[str] = []
+        values: list[str] = []
         for item in raw:
             if isinstance(item, str) and item:
-                globs.append(item)
+                values.append(item)
             else:
-                diagnostics.append(self._config_finding(root, f"`{key}` contains a non-glob entry {item!r}"))
-        return globs
+                diagnostics.append(emit(f"`{key}` contains a non-{noun} entry {item!r}"))
+        return values
 
     def _config_finding(self, root: Path, message: str, status: LintStatus = LintStatus.warn) -> LintFinding:
         return LintFinding(
@@ -705,7 +786,8 @@ class LintIgnoreService:
         """The file that declared `rule` — so a stale one is reported where it can be deleted."""
         if rule.origin is None:
             return self._manifest_relpath(rule.repo_root)
-        return _relative_to(rule.origin, self._workspace_root) or str(rule.origin)
+        declared_in = rule.origin.declared_in
+        return _relative_to(declared_in, self._workspace_root) or str(declared_in)
 
     def _repo_files(self, root: Path) -> list[tuple[str, Path]]:
         """Every path under `root` as `(repo-relative, absolute)` — files and directories.

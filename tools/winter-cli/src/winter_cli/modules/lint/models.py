@@ -42,6 +42,25 @@ class LintFinding:
 
 
 @dataclass(frozen=True)
+class LintIgnoreOrigin:
+    """Where a rule was declared, for a rule not declared by the repo it governs.
+
+    Carried whole rather than as loose optional fields so that rendering a rule
+    never has to re-derive which surface produced it. `spelled` is the value the
+    author actually typed, which is not always the glob: `repos = ["vendored"]`
+    is a repo name that becomes a `**` glob, and a label showing `**` would name
+    neither the repo nor anything its author wrote — and would be identical for
+    every entry in the list.
+    """
+
+    declared_in: Path
+    owner: str
+    table: str
+    key: str
+    spelled: str
+
+
+@dataclass(frozen=True)
 class LintIgnoreRule:
     """One `[lint.ignore]` declaration, from a repo's `winter-ext.toml` or the workspace.
 
@@ -58,30 +77,33 @@ class LintIgnoreRule:
     off for that file permanently, so the day someone genuinely breaks a link in
     it, lint stays silent.
 
-    The last four fields describe *where the rule was written* rather than what
-    it matches, and exist so a workspace-declared rule reports itself honestly
-    instead of impersonating one of the repo's own. They all default to the
-    repo-owned spelling: `origin` is the declaring file (`None` → that repo's
-    `winter-ext.toml`), `owner` the name shown as the rule's author, and
-    `table` / `key` the TOML location as its author actually spelled it, which
-    for a workspace rule about a repo is nested under `lint.ignore.repo."<name>"`.
+    `origin` describes *where the rule was written* rather than what it matches,
+    and is `None` for the repo-owned case — the rule came from `repo_root`'s own
+    `winter-ext.toml`, under the table its `check` already implies. A workspace
+    rule carries one so it reports itself honestly instead of impersonating one
+    of the repo's own.
     """
 
     repo: str
     repo_root: Path
     glob: str
     check: str | None = None
-    origin: Path | None = None
-    owner: str | None = None
-    table: str | None = None
-    key: str | None = None
+    origin: LintIgnoreOrigin | None = None
 
     @property
     def label(self) -> str:
-        """The rule as its author wrote it — shown beside a suppressed finding."""
-        table = self.table or ("lint.ignore" if self.check is None else "lint.ignore.checks")
-        key = self.key or ("paths" if self.check is None else self.check)
-        return f'{self.owner or self.repo} [{table}] {key} = "{self.glob}"'
+        """The rule as its author wrote it — shown beside a suppressed finding.
+
+        This is the *only* rule information either reporter renders, for a
+        suppressed finding and for a stale one alike, so it has to carry enough
+        to tell two rules apart. `spelled` is what makes that true of a shorthand
+        whose glob is synthesized rather than typed.
+        """
+        if self.origin is None:
+            table = "lint.ignore" if self.check is None else "lint.ignore.checks"
+            key = "paths" if self.check is None else self.check
+            return f'{self.repo} [{table}] {key} = "{self.glob}"'
+        return f'{self.origin.owner} [{self.origin.table}] {self.origin.key} = "{self.origin.spelled}"'
 
 
 @dataclass(frozen=True)

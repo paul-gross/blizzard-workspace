@@ -7,7 +7,7 @@ import pytest
 from winter_cli.core.internal.local_filesystem import LocalFilesystem
 from winter_cli.core.internal.tomllib_config_file_reader import TomllibConfigFileReader
 from winter_cli.modules.lint.ignore_service import LintIgnoreService, compile_path_glob
-from winter_cli.modules.lint.models import LintFinding, LintScope, LintScopeKind, LintStatus
+from winter_cli.modules.lint.models import LintFinding, LintIgnoreRule, LintScope, LintScopeKind, LintStatus
 
 # The service reads real manifests and walks a real tree (it resolves rules
 # against the corpus on disk to tell a stale ignore from a live one), so these
@@ -390,6 +390,16 @@ def test_a_symlink_loop_does_not_hang_the_corpus_walk(tmp_path: Path) -> None:
 # the name-resolution below is exercised the way it runs in practice.
 
 
+def _changed_scope(*paths: Path) -> LintScope:
+    """A `--changed` scope: individual files, not repo directories."""
+    return LintScope(kind=LintScopeKind.changed, label="changed (ws)", paths=list(paths))
+
+
+def _owner(rule: LintIgnoreRule) -> str:
+    """Who declared a rule — the repo itself, or the workspace speaking for it."""
+    return rule.repo if rule.origin is None else rule.origin.owner
+
+
 def _workspace_config(workspace: Path, body: str) -> None:
     config = workspace / ".winter" / "config.toml"
     config.parent.mkdir(parents=True, exist_ok=True)
@@ -481,7 +491,7 @@ def test_repos_shorthand_covers_the_whole_repo(tmp_path: Path) -> None:
     outcome = _service(tmp_path).apply(findings, _scope(root))
 
     assert outcome.kept == []
-    assert outcome.ignored[0].rule.label == 'workspace [lint.ignore] repos = "**"'
+    assert outcome.ignored[0].rule.label == 'workspace [lint.ignore] repos = "vendored"'
 
 
 def test_a_workspace_rule_naming_an_undeclared_repo_is_reported(tmp_path: Path) -> None:
@@ -541,7 +551,7 @@ def test_the_two_surfaces_union_rather_than_override(tmp_path: Path) -> None:
     outcome = _service(tmp_path).apply(findings, _scope(root))
 
     assert outcome.kept == []
-    owners = sorted(ignored.rule.owner or ignored.rule.repo for ignored in outcome.ignored)
+    owners = sorted(_owner(ignored.rule) for ignored in outcome.ignored)
     assert owners == ["vendored", "workspace"]
 
 
@@ -553,3 +563,108 @@ def test_no_workspace_config_is_not_an_error(tmp_path: Path) -> None:
 
     assert outcome.kept == [finding]
     assert outcome.diagnostics == []
+
+
+# ── regressions ──────────────────────────────────────────────────────────────
+#
+# Each of these pins a defect the surface shipped with. They are grouped because
+# what they have in common is the shape of the gap: every original test built an
+# `env`-shaped scope of repo directories and asserted on message substrings, so
+# nothing exercised a `--changed`-shaped scope, the config overlay, or where a
+# diagnostic actually points.
+
+
+def test_a_changed_scope_does_not_bind_a_rule_to_a_same_named_file(tmp_path: Path) -> None:
+    # A workspace that vendors the CLI owns a file literally named
+    # `tools/winter-cli/bin/winter`. Matching a repo by name alone bound the rule
+    # to that executable, whose corpus walk then failed silently — reporting every
+    # correct rule as stale, with remediation "Delete the rule."
+    _env_repo(tmp_path, "alpha", "winter", {"context/setup.md": "x"})
+    vendored = tmp_path / "tools" / "winter-cli" / "bin"
+    vendored.mkdir(parents=True)
+    (vendored / "winter").write_text("#!/usr/bin/env bash\n")
+    _workspace_config(
+        tmp_path,
+        '[[project_repository]]\nname = "winter"\n\n'
+        '[lint.ignore.repo."winter".checks]\ndoc-references = ["context/setup.md"]\n',
+    )
+
+    outcome = _service(tmp_path).apply([], _changed_scope(tmp_path / "tools" / "winter-cli" / "bin" / "winter"))
+
+    assert [d.message for d in outcome.diagnostics] == []
+
+
+def test_a_changed_scope_still_binds_a_rule_through_a_files_own_repo(tmp_path: Path) -> None:
+    # The other half of the above: rejecting a same-named file must not cost the
+    # real resolution, whose scope paths are files rather than repo directories.
+    root = _env_repo(tmp_path, "alpha", "winter", {"context/setup.md": "x"})
+    _workspace_config(
+        tmp_path,
+        '[[project_repository]]\nname = "winter"\n\n'
+        '[lint.ignore.repo."winter".checks]\ndoc-references = ["context/setup.md"]\n',
+    )
+    finding = _finding("alpha/winter/context/setup.md", check="doc-references")
+
+    outcome = _service(tmp_path).apply([finding], _changed_scope(root / "context" / "setup.md"))
+
+    assert outcome.kept == []
+
+
+def test_rules_and_repo_declarations_are_read_from_the_local_overlay(tmp_path: Path) -> None:
+    # `winter ws repo add --local` writes `[[project_repository]]` into
+    # `config.local.toml`, and every other config consumer merges it. A surface
+    # reading only the committed file rejected those repos as undeclared and
+    # dropped any rule written in the overlay.
+    root = _env_repo(tmp_path, "alpha", "vendored", {"docs/a.md": "x"})
+    _workspace_config(tmp_path, "")
+    (tmp_path / ".winter" / "config.local.toml").write_text(
+        '[[project_repository]]\nname = "vendored"\n\n[lint.ignore.repo."vendored"]\npaths = ["docs/**"]\n'
+    )
+
+    outcome = _service(tmp_path).apply([_finding("alpha/vendored/docs/a.md")], _scope(root))
+
+    assert outcome.kept == []
+    assert [d.message for d in outcome.diagnostics] == []
+
+
+def test_a_malformed_workspace_value_is_reported_against_the_workspace_config(tmp_path: Path) -> None:
+    # These reported against `winter-ext.toml` at the workspace root — a file that
+    # cannot exist, since owning no manifest is what makes the root the workspace.
+    root = _env_repo(tmp_path, "alpha", "winter", {"context/setup.md": "x"})
+    _workspace_config(tmp_path, "[lint.ignore]\npaths = 7\nrepos = 9\n")
+
+    outcome = _service(tmp_path).apply([], _scope(root))
+
+    assert {d.file for d in outcome.diagnostics} == {".winter/config.toml"}
+    assert any("repo name" in d.message for d in outcome.diagnostics), "`repos` holds names, not globs"
+
+
+def test_each_entry_of_a_repos_list_reports_under_its_own_name(tmp_path: Path) -> None:
+    # Every entry rendered as `repos = "**"`, so a stale warn about one named
+    # nothing — and `label` is the only rule text either reporter emits.
+    _env_repo(tmp_path, "alpha", "vend-a", {"a.md": "x"})
+    _env_repo(tmp_path, "alpha", "vend-b", {"b.md": "x"})
+    _workspace_config(
+        tmp_path,
+        '[[project_repository]]\nname = "vend-a"\n\n[[project_repository]]\nname = "vend-b"\n\n'
+        '[lint.ignore]\nrepos = ["vend-a", "vend-b"]\n',
+    )
+    scope = _scope(tmp_path / "alpha" / "vend-a", tmp_path / "alpha" / "vend-b")
+
+    outcome = _service(tmp_path).apply([_finding("alpha/vend-a/a.md")], scope)
+
+    assert outcome.ignored[0].rule.label == 'workspace [lint.ignore] repos = "vend-a"'
+    stale = [d.message for d in outcome.diagnostics if "stale" in d.message]
+    assert len(stale) == 1
+    assert "vend-b" in stale[0]
+
+
+def test_a_typo_in_the_workspace_lint_table_is_reported(tmp_path: Path) -> None:
+    # `[lint.ignroe]` produced no rule, and therefore nothing to go stale and
+    # nothing to report it by — the failure mode with no other symptom.
+    root = _env_repo(tmp_path, "alpha", "winter", {"context/setup.md": "x"})
+    _workspace_config(tmp_path, '[lint.ignroe.repo."winter"]\npaths = ["context/**"]\n')
+
+    outcome = _service(tmp_path).apply([], _scope(root))
+
+    assert any("unknown key `lint.ignroe`" in d.message for d in outcome.diagnostics)
