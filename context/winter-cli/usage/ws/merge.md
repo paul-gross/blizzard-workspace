@@ -40,7 +40,8 @@ on purpose.
 Exit code is `0` when every selected repo merged cleanly (`up-to-date`, `fast-forwarded`, or
 `merged (merge commit created)`), and `1` if any repo diverged or had a missing source ref. Cross-repo atomicity is not
 provided — if one repo merges cleanly and another diverges, the clean merge stays. Conflicts that abort don't leave a
-merge in progress; use raw `git reset --hard ORIG_HEAD` per repo if you want to undo a fast-forward or merge commit.
+merge in progress; use raw `git -C <workspace-root>/<name>/<repo-name> reset --hard ORIG_HEAD` per repo if you want to
+undo a fast-forward or merge commit.
 
 **When to use `merge` vs `pull`:**
 

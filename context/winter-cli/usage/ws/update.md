@@ -52,16 +52,19 @@ For each in-scope repo `update`:
 
 ## Reviewable lock diff workflow
 
-After `winter ws update` moves a pin, the change appears in `git diff .winter/config.lock` — a clean, reviewable record
-of exactly which commit each pinned repo was bumped to. Commit the lock alongside any other workspace changes to make
-the bump deliberate and reproducible across machines.
+After `winter ws update` moves a pin, the change appears in `git -C <workspace-root> diff .winter/config.lock` — a
+clean, reviewable record of exactly which commit each pinned repo was bumped to. Commit the lock alongside any other
+workspace changes to make the bump deliberate and reproducible across machines.
 
 ```bash
-winter ws update               # re-pin all
-git diff .winter/config.lock   # review what moved
-git add .winter/config.lock
-git commit -m "chore: bump standalone pins"
+winter ws update                                 # re-pin all
+git -C <workspace-root> diff .winter/config.lock # review what moved
+git -C <workspace-root> add .winter/config.lock
+git -C <workspace-root> commit -m "chore: bump standalone pins"
 ```
+
+See [worktree-ops.md](../../../worktree-ops.md) for why `<workspace-root>` is an absolute path, not a trusted cwd, and
+how to resolve it.
 
 ## Errors
 

@@ -35,8 +35,9 @@ it, because that is the unit being removed.
 
 **Ignored files are never removed.** There is no `-x` equivalent on this command, and that is deliberate: in a winter
 worktree the ignored set is the provisioned artifacts, so removing it across matched worktrees would silently turn a
-clean into a full re-provision. When you genuinely want them gone, run `git clean -fdx` in the single worktree you mean,
-where the blast radius is visible.
+clean into a full re-provision. When you genuinely want them gone, run
+`git -C <workspace-root>/<name>/<repo-name> clean -fdx` in the single worktree you mean, where the blast radius is
+visible.
 
 ## Confirmation and previewing
 

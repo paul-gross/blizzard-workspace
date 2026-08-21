@@ -148,6 +148,12 @@ Paths use a `<context>:<path>` prefix to clarify which repo/branch a file lives 
 - `<env>:` — a feature environment (e.g., `alpha:` resolves to a per-repo worktree inside `alpha/`)
 - `<extension-name>:` — a winter extension (e.g., `winter-product:`)
 
+`<workspace-root>` is a separate placeholder, used in raw shell commands rather than in this `<context>:<path>`
+notation: it stands for the workspace root's own absolute filesystem path (as opposed to the `workspace:` prefix above,
+which addresses a file inside it). See
+[worktree-ops.md § Anchor raw git commands with `-C`](./worktree-ops.md#anchor-raw-git-commands-with--c) for how it's
+resolved and used.
+
 ## Rules
 
 1. **Never work in source checkouts directly** — use feature environments for all code changes (see the

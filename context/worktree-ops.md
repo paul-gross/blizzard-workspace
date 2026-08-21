@@ -1,11 +1,36 @@
 # Worktree Operations
 
-Git commands for the polyrepo workspace topology. All paths are relative to the workspace root.
+Git commands for the polyrepo workspace topology. Paths in prose are given relative to the workspace root;
+`<workspace-root>` below is a placeholder for that directory's own absolute path — see
+[workspace-layout.md § Path notation](./workspace-layout.md#path-notation) for where it's registered. Resolve it from
+`winter ws status --json`'s `root_path` field (see
+[winter-cli/usage/ws/status.md](./winter-cli/usage/ws/status.md#json-schema-schema_version-1)), or a per-worktree path
+from `winter ws worktrees --json`'s `path` field (see the `worktrees` row in
+[winter-cli/usage/ws/index.md](./winter-cli/usage/ws/index.md)) — not `pwd`, which depends on the same untrustworthy cwd
+this file warns against.
 
 > **Tip:** For multi-repo setup and bulk operations, prefer `winter ws init` and the other `winter ws` commands over the
 > raw git sequences below — the CLI is idempotent, reads the workspace config, handles pinned repos, and runs in
 > parallel. See [winter-cli/index.md](./winter-cli/index.md) for the full command reference. The raw git commands here
 > are still useful for single-repo work and for understanding what the CLI does under the hood.
+
+## Anchor raw git commands with `-C`
+
+Run every raw, state-mutating git command as `git -C <absolute-path> <verb> …`, resolving `<absolute-path>` from the
+workspace layout (e.g. `<workspace-root>/<name>/<repo-name>` for a worktree, or `<workspace-root>/projects/<repo-name>`
+for a source checkout) rather than trusting the shell's current directory — cwd is not trustworthy agent state: it
+persists across some tool calls, resets across others, and rarely survives context summarization.
+
+**Scope — must use `-C`:** every command that writes to the ref store, index, or config, whether or not it touches the
+working tree: `clone`, `worktree add`/`remove`/`prune`, `add`, `commit`, `push`, `fetch`, `remote add`, `config`,
+`checkout`, `rebase`, `merge`, `reset`, `clean`, `stash push`/`stash pop`, `branch`, … **Recommended**, not required (a
+misread is not a mutation): the read-only commands `status`, `log`, `diff`.
+
+Every fenced git command below follows this convention. An inline code span inside prose that narrates what a
+`winter ws` command does internally — not meant to be copied and run — is exempt.
+
+This convention has not yet been swept into `skills/*/SKILL.md`; a bare command there is a gap still to close, not a
+counter-example to follow.
 
 ## Pinned repos
 
@@ -31,7 +56,7 @@ writes git-exclude entries, and runs each repo's `cmd` list. Safe to re-run. It 
 Raw equivalent for a single repo:
 
 ```bash
-git clone <repo-url> ./projects/<repo-name>
+git -C <workspace-root> clone <repo-url> <workspace-root>/projects/<repo-name>
 ```
 
 ## Creating a feature environment
@@ -79,7 +104,7 @@ steps not yet migrated to `[[provision.*]]` handlers, also follow `workspace:/co
 Raw equivalent, per repo:
 
 ```bash
-git -C ./projects/<repo-name> worktree add ../../<name>/<repo-name> -b <name> <main-branch>
+git -C <workspace-root>/projects/<repo-name> worktree add <workspace-root>/<name>/<repo-name> -b <name> <main-branch>
 ```
 
 ## Connecting a feature environment to a remote feature branch
@@ -100,7 +125,7 @@ suffix to flag how many other distinct remotes the env spans.) The remote branch
 first push:
 
 ```bash
-git -C "./<name>/<repo-name>" push -u origin <name>:<feature-branch>
+git -C <workspace-root>/<name>/<repo-name> push -u origin <name>:<feature-branch>
 ```
 
 **If the recorded feature branch is empty when the user asks to push**, do not guess — ask the user which remote branch
@@ -142,7 +167,7 @@ worktree.
 Raw equivalent, per repo (without provision teardown, hooks, or stripping the exclude block):
 
 ```bash
-git -C ./projects/<repo-name> worktree remove ../../<name>/<repo-name>
+git -C <workspace-root>/projects/<repo-name> worktree remove <workspace-root>/<name>/<repo-name>
 ```
 
 ## Verifying destructive commands safely
