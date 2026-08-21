@@ -160,5 +160,6 @@ Paths use a `<context>:<path>` prefix to clarify which repo/branch a file lives 
    directory is the workspace root. Spawning from a project subdirectory causes the subagent to lose workspace context
    including `AGENTS.md`, agent definitions, and skills.
 5. **Follow the project's contributing conventions when completing work** — see
-   [project/contributing.md](./project/contributing.md). If that file doesn't exist, guide the user to establish one
-   documenting how completed work should be merged, pushed, and delivered for their specific projects.
+   [workspace:/context/project/contributing.md](workspace:/context/project/contributing.md). If that file doesn't exist,
+   guide the user to establish one documenting how completed work should be merged, pushed, and delivered for their
+   specific projects.

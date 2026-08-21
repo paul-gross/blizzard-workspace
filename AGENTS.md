@@ -34,10 +34,10 @@ commands are destructive, and how to verify one safely, is owned by
 
 ## Further reference
 
-| File                                                                 | When to read                                                                                                                       |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| [context/winter-cli/index.md](./context/winter-cli/index.md)         | You need to run a `winter` command, edit `.winter/config.toml`, or install the CLI — the hub for the whole CLI documentation tree. |
-| [context/workspace-layout.md](./context/workspace-layout.md)         | You need the workspace directory layout, feature environments, path notation, or layout rules.                                     |
-| [context/worktree-ops.md](./context/worktree-ops.md)                 | You are performing worktree git operations — creating, pulling, or destroying worktrees.                                           |
-| [context/project/contributing.md](./context/project/contributing.md) | You are merging, pushing, or delivering work — the contributing conventions.                                                       |
-| [context/github.md](./context/github.md)                             | You are performing a GitHub operation for this project, such as raising an issue.                                                  |
+| File                                                                                     | When to read                                                                                                                       |
+| ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| [context/winter-cli/index.md](./context/winter-cli/index.md)                             | You need to run a `winter` command, edit `.winter/config.toml`, or install the CLI — the hub for the whole CLI documentation tree. |
+| [context/workspace-layout.md](./context/workspace-layout.md)                             | You need the workspace directory layout, feature environments, path notation, or layout rules.                                     |
+| [context/worktree-ops.md](./context/worktree-ops.md)                                     | You are performing worktree git operations — creating, pulling, or destroying worktrees.                                           |
+| [workspace:/context/project/contributing.md](workspace:/context/project/contributing.md) | You are merging, pushing, or delivering work — the contributing conventions.                                                       |
+| [context/github.md](./context/github.md)                                                 | You are performing a GitHub operation for this project, such as raising an issue.                                                  |
