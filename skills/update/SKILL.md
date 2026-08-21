@@ -2,6 +2,7 @@
 description: Integrate upstream winter framework updates from the winter remote into the workspace branch
 argument-hint: "[rebase|merge]"
 allowed-tools: Bash, Read, Edit, AskUserQuestion
+disable-model-invocation: true
 ---
 
 # Workspace Update

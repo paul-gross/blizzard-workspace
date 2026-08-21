@@ -1,6 +1,7 @@
 ---
 description: Fetch refs from origin for a feature environment, a standalone repo, or the workspace branch
 allowed-tools: Bash, Read
+disable-model-invocation: true
 ---
 
 Fetch refs from `origin` for one of: the workspace branch, a standalone repo, or a feature environment. Parse

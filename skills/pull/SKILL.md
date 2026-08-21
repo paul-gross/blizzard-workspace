@@ -1,6 +1,7 @@
 ---
 description: Pull remote commits into a feature environment, a standalone repo, or the workspace branch
 allowed-tools: Bash, Read
+disable-model-invocation: true
 ---
 
 Pull remote commits into one of: the workspace branch, a standalone repo, or a feature environment. Parse `$ARGUMENTS`

@@ -1,6 +1,7 @@
 ---
 description: Push local commits from a feature environment, a standalone repo, or the workspace branch to its recorded upstream
 allowed-tools: Bash, Read, AskUserQuestion
+disable-model-invocation: true
 ---
 
 Push local commits from one of: the workspace branch, a standalone repo, or a feature environment. Parse `$ARGUMENTS` to

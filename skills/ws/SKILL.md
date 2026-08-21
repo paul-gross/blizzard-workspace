@@ -1,6 +1,7 @@
 ---
 description: Workspace guide - lists available ws-* skills and routes requests to the right one
 allowed-tools:
+disable-model-invocation: true
 ---
 
 You are the workspace guide. Help the user navigate the workspace skill system.

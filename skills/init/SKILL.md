@@ -1,6 +1,7 @@
 ---
 description: Non-interactive idempotent reconcile of the workspace, a feature environment, or a project repo against .winter/config.toml
 allowed-tools: Bash, Read
+disable-model-invocation: true
 ---
 
 Bring the workspace, a single feature environment, or a single project repo to the state declared in
