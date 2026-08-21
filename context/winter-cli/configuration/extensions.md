@@ -113,8 +113,7 @@ the symlinks there), so there is no double-loading across the symlink and copy s
 
 For each `.md` file under the resolved agents root, winter transforms the canonical agent into a per-harness,
 git-excluded copy at `.claude/agents/<prefix>-<name>.md` (Claude), `.codex/agents/<prefix>-<name>.toml` (Codex), and
-`.opencode/agent/<prefix>-<name>.md` (OpenCode) — not a symlink. See
-`winter-context:/agent-context/cross-harness-projection.md` for the transform.
+`.opencode/agent/<prefix>-<name>.md` (OpenCode) — not a symlink.
 
 The workspace `.gitignore` is updated with a marker-bracketed block per extension:
 
@@ -209,7 +208,7 @@ every extension — `index.md`, then `AGENTS.md`, then `context/index.md`, first
 `skills_dir`/`agents_dir` default-discovery fallback above) — but how that entry point reaches an agent is set by the
 manifest's `load` key.
 
-| `load`  | Bullet                                                           | Cost                                                                                   |
+| `load`  | Bullet <!-- winter-lint:example -->                              | Cost                                                                                   |
 | ------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | `eager` | `- **winter-canon**: @.winter/ext/canon/index.md`                | Injected into every session, with everything it `@`-imports, against `injected_bytes`. |
 | `lazy`  | `- **[winter-canon](.winter/ext/canon/index.md)** — description` | One routing line. The agent follows the link only when the row's subject is in scope.  |

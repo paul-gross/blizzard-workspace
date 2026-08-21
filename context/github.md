@@ -9,8 +9,7 @@ plus the `/wg-issue` skill from the `winter-github` extension.
 - **`gh`** — official GitHub CLI. Auth via `gh auth login --hostname github.com` (interactive) or
   `echo "<token>" | gh auth login --hostname github.com --with-token` (non-interactive). Token is stored in the OS
   keyring.
-- **`/wg-issue`** — drafts and files a GitHub issue in the
-  [AI-native format](../.winter/ext/github/context/issue-format.md).
+- **`/wg-issue`** — drafts and files a GitHub issue in the AI-native format the skill carries.
 - **GitHub API** — reached via `gh api <path>` for operations the CLI doesn't expose directly (bulk relabeling, comment
   edits, repo-setting migrations). No separate token plumbing — `gh api` reuses the same auth context.
 
@@ -39,13 +38,13 @@ winter-ecosystem repo on GitHub, mirror this set before filing the first issue.
 ### Filing
 
 Use `/wg-issue`. The skill drafts from conversation context, confirms the target repo, probes existing labels, and files
-via `gh issue create`. Format spec: [issue-format.md](../.winter/ext/github/context/issue-format.md).
+via `gh issue create`. The skill carries its own format spec.
 
 ### Epics
 
 Large work that decomposes into several child issues is filed as an **epic** — a parent issue with its children linked
-as GitHub sub-issues. The convention (title prefixes, the `type:epic` label, metadata, and link commands) lives in
-[epics.md](../.winter/ext/github/context/epics.md).
+as GitHub sub-issues. The convention (title prefixes, the `type:epic` label, metadata, and link commands) is owned by
+the issue tooling that provides `/wg-issue`.
 
 ### Closing
 
