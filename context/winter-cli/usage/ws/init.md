@@ -45,3 +45,11 @@ assigned (persisted) or what slot a new name would be suggested (hash, before pr
 **Reserved name:** `workspace` cannot be used as a feature environment name — `winter ws init workspace` is rejected
 with an error. `workspace` is a reserved service scope used by `winter service`; see
 [../service.md#workspace-scope](../service.md#workspace-scope).
+
+## Errors
+
+- **`set-upstream-to <ref> failed at <path>: HEAD is detached`** — a worktree's tracking wiring (pinned or inferred)
+  could not be applied because that worktree's HEAD is detached. This fails the repo — and therefore the env — with a
+  non-zero exit; the repo's `cmd` list still runs regardless (upstream wiring is isolated from bootstrap). Re-attach the
+  branch with `winter ws checkout <name> <feature-branch>` (whole env) or `winter ws reset <name>/<repo> <ref>` (single
+  worktree), then re-run `winter ws init <name>`.

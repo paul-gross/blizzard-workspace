@@ -112,12 +112,38 @@ class GitPythonRepository:
         # pushed. Setting the config directly tolerates that pre-push state
         # (the same way `IWriteRepoRepository.set_upstream` does for connect)
         # and is equivalent to `--set-upstream-to` when the remote ref exists.
+        #
+        # Unlike `IWriteRepoRepository.set_upstream`, this method hard-fails on a
+        # detached HEAD rather than falling back and warning — deliberately: this
+        # runs unattended across every repo during `winter ws init`, where a
+        # detached worktree signals something is already wrong and needs surfacing,
+        # not a silent write to a branch name HEAD isn't on. See
+        # `write_repo_repository.py`'s `set_upstream` for the connect-path rationale.
         remote, _, branch = ref.partition("/")
         if not branch:
             raise RepoError(f"set_upstream_to: expected '<remote>/<branch>', got {ref!r}")
         try:
             with git.Repo(str(path)) as r:
-                head = r.active_branch.name
+                try:
+                    head = r.active_branch.name
+                except TypeError as exc:
+                    # GitPython raises TypeError specifically for a detached HEAD
+                    # (see `internal/branch_tracking.py`'s documented split).
+                    raise self._error_factory.from_exception(
+                        exc,
+                        message=f"set-upstream-to {ref} failed at {path}: HEAD is detached",
+                        cwd=path,
+                    ) from exc
+                except ValueError as exc:
+                    # ValueError covers more than an unborn HEAD — e.g. a worktree
+                    # orphaned by a deleted/re-cloned source checkout raises
+                    # `ValueError: Reference at 'HEAD' does not exist`. Surface the
+                    # library's own message rather than asserting one diagnosis.
+                    raise self._error_factory.from_exception(
+                        exc,
+                        message=f"set-upstream-to {ref} failed at {path}: {exc}",
+                        cwd=path,
+                    ) from exc
                 r.git.config(f"branch.{head}.remote", remote)
                 r.git.config(f"branch.{head}.merge", f"refs/heads/{branch}")
         except git.GitCommandError as exc:

@@ -1479,7 +1479,9 @@ class _UpstreamRefusingGitRepository(FakeGitRepository):
     """FakeGitRepository whose set_upstream_to raises — mimics the strict git-128 path.
 
     Exercises the cmd-isolation backstop: even if upstream wiring blows up, the
-    repo's `cmd` bootstrap must still run and the repo must not be marked failed.
+    repo's `cmd` bootstrap must still run — but the repo (and therefore the env)
+    is still marked failed; wiring failures are real per-repo failures, not
+    silently downgraded to a soft skip.
     """
 
     def set_upstream_to(self, path: Path, ref: str) -> None:
@@ -1489,11 +1491,13 @@ class _UpstreamRefusingGitRepository(FakeGitRepository):
 def test_reconcile_env_upstream_failure_does_not_skip_cmd(
     init_reporter: FakeInitReporter,
 ) -> None:
-    """Regression for #156: a failure wiring upstream is isolated from the cmd bootstrap.
+    """A failure wiring upstream is isolated from the cmd bootstrap but still fails the repo.
 
-    Even when `set_upstream_to` raises (the pre-fix git-128 blast radius), the
-    repo is not marked failed and its `cmd` list still runs; the wiring failure
-    surfaces as a soft `upstream_skipped` action rather than a repo error.
+    Even when `set_upstream_to` raises, the repo's `cmd` list still runs — the
+    wiring failure doesn't short-circuit it — but the repo, and therefore the
+    env, is still reported as failed: the failure surfaces via `reporter.repo_error`
+    and `reconcile_env` returns `False`, so a wiring failure like a detached-HEAD
+    worktree is never silently swallowed.
     """
     cfg = _connected_env_config_with_cmd()
     alpha_main = WORKSPACE_ROOT / "projects" / "alpha-repo"
@@ -1520,10 +1524,210 @@ def test_reconcile_env_upstream_failure_does_not_skip_cmd(
     svc = _service(cfg, fs, subprocess, git)
     ok = svc.reconcile_env("myenv", init_reporter)
 
-    assert ok is True
-    assert init_reporter.errors == []
-    # Wiring failure was reported as a soft skip, not a repo error.
-    skipped = [a for a in init_reporter.actions if a[2] == "upstream_skipped"]
-    assert skipped and skipped[0][0] == "beta-repo"
+    assert ok is False
+    # Wiring failure is reported as a real repo error naming the repo.
+    beta_errors = [msg for repo, msg in init_reporter.errors if repo == "beta-repo"]
+    assert beta_errors and "set-upstream-to" in beta_errors[0]
     # The cmd list ran regardless of the upstream failure.
     assert ("beta-repo", "mise trust", 0) in init_reporter.cmds_completed
+
+
+# ── _run_per_repo: unexpected-exception backstop ───────────────────────────
+
+
+class _UnexpectedlyExplodingGitRepository(FakeGitRepository):
+    """`set_user_identity` raises a raw, non-`RepoError` exception for one path.
+
+    Neither `_reconcile_worktree_repo`'s `except (RepoError, OSError)` nor
+    `_wire_upstream_tracking`'s `except RepoError` catches this — it stands in
+    for a genuinely unexpected bug in a leaf git operation, the case
+    `_run_per_repo`'s backstop exists for.
+    """
+
+    def __init__(self, exploding_path: Path) -> None:
+        super().__init__()
+        self._exploding_path = exploding_path
+
+    def set_user_identity(self, path: Path, name: str, email: str) -> None:
+        if path == self._exploding_path:
+            raise ValueError(f"unexpected identity failure at {path}")
+        super().set_user_identity(path, name, email)
+
+
+def test_run_per_repo_reports_unexpected_exception_without_unwinding(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """A repo whose leaf work raises an unanticipated exception fails only that
+    repo — `_run_per_repo` catches it as a backstop, reports it via
+    `reporter.repo_error`, and the sibling repo in the same env still reconciles."""
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=GitIdentity(name="Bot", email="bot@example.com"),
+        project_repos=[
+            ProjectRepositoryConfig(name="alpha-repo", url="git@example.com:org/alpha-repo.git"),
+            ProjectRepositoryConfig(name="beta-repo", url="git@example.com:org/beta-repo.git"),
+        ],
+    )
+    alpha_main = WORKSPACE_ROOT / "projects" / "alpha-repo"
+    beta_main = WORKSPACE_ROOT / "projects" / "beta-repo"
+    alpha_worktree = WORKSPACE_ROOT / "myenv" / "alpha-repo"
+    beta_worktree = WORKSPACE_ROOT / "myenv" / "beta-repo"
+
+    fs = FakeFilesystem(
+        directories=[WORKSPACE_ROOT / "projects", alpha_main, beta_main, alpha_worktree, beta_worktree]
+    )
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    subprocess = FakeSubprocessRunner()
+    git = _UnexpectedlyExplodingGitRepository(exploding_path=alpha_worktree)
+
+    svc = _service(cfg, fs, subprocess, git)
+    ok = svc.reconcile_env("myenv", init_reporter)
+
+    assert ok is False
+    alpha_errors = [msg for repo, msg in init_reporter.errors if repo == "alpha-repo"]
+    assert alpha_errors and "unexpected" in alpha_errors[0]
+    # The sibling repo's identity was still applied — the exploding repo's
+    # failure did not unwind the fan-out.
+    assert (beta_worktree, "Bot", "bot@example.com") in git.identities
+
+
+# ── reconcile_env: unexpected-exception backstop at the env level ──────────
+
+
+class _UnexpectedlyExplodingUpstreamInferenceGitRepository(FakeGitRepository):
+    """`get_tracking_branch` raises a raw, non-`RepoError` exception for one worktree path.
+
+    Stands in for an unguarded `git.InvalidGitRepositoryError` reaching
+    `_infer_env_upstream` — a call that happens in `reconcile_env`'s env-level
+    body *before* `_run_per_repo`'s own per-repo backstop is even reached, so
+    this exercises `reconcile_env`'s own env-level guard instead.
+    """
+
+    def __init__(self, exploding_path: Path) -> None:
+        super().__init__()
+        self._exploding_path = exploding_path
+
+    def get_tracking_branch(self, path: Path) -> str | None:
+        if path == self._exploding_path:
+            raise ValueError(f"not a git repository: {path}")
+        return super().get_tracking_branch(path)
+
+
+def test_reconcile_env_env_level_exception_does_not_unwind_reconcile_all(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """An unexpected exception raised outside `_run_per_repo` — e.g. from
+    `_infer_env_upstream`, called directly in `reconcile_env`'s own body — fails
+    only that env. `reconcile_env`'s own backstop catches and reports it instead
+    of letting it unwind `reconcile_all`'s per-env loop, so a later env still
+    reconciles."""
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=GitIdentity(name="Bot", email="bot@example.com"),
+        project_repos=[
+            ProjectRepositoryConfig(name="demo", url="git@example.com:org/demo.git"),
+        ],
+    )
+    demo_source = WORKSPACE_ROOT / "projects" / "demo"
+    alpha_worktree = WORKSPACE_ROOT / "alpha" / "demo"
+    beta_worktree = WORKSPACE_ROOT / "beta" / "demo"
+
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", demo_source, alpha_worktree, beta_worktree])
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    subprocess = FakeSubprocessRunner()
+
+    git = _UnexpectedlyExplodingUpstreamInferenceGitRepository(exploding_path=alpha_worktree)
+    # `_discover_existing_worktrees` reads `git worktree list` on the source
+    # checkout — alpha is ordered first so its failure is encountered before beta.
+    git.worktree_paths[demo_source] = [demo_source, alpha_worktree, beta_worktree]
+    # beta's own worktree already has an upstream so its inference finds a single
+    # agreeing sibling and reconciles cleanly despite alpha's env-level crash.
+    git.tracking_branches[beta_worktree] = "origin/main"
+
+    svc = _service(cfg, fs, subprocess, git)
+    ok = svc.reconcile_all(init_reporter)
+
+    assert ok is False
+    # alpha's env-level exception was caught and reported by reconcile_env's own
+    # backstop, not left to unwind reconcile_all's per-env loop.
+    alpha_errors = [msg for repo, msg in init_reporter.errors if repo == "alpha"]
+    assert alpha_errors and "unexpected" in alpha_errors[0], init_reporter.errors
+    assert ("alpha", False) in init_reporter.targets_completed
+    # beta still reconciled despite alpha's env-level crash: its own worktree
+    # already agreed with its (single-repo) inferred upstream, so no tracking
+    # write was needed, but its identity step still ran to completion.
+    assert (beta_worktree, "Bot", "bot@example.com") in git.identities
+    assert ("beta", True) in init_reporter.targets_completed
+
+
+# ── reconcile_all: detached HEAD in one env does not skip later envs ───────
+
+
+class _DetachedHeadGitRepository(FakeGitRepository):
+    """`set_upstream_to` raises `RepoError` for one specific worktree path.
+
+    Stands in for the post-fix `GitPythonRepository.set_upstream_to` on a
+    genuinely detached-HEAD worktree — a `RepoError` naming the worktree path,
+    not the uncaught `TypeError` this behavior replaces.
+    """
+
+    def __init__(self, detached_path: Path) -> None:
+        super().__init__()
+        self._detached_path = detached_path
+
+    def set_upstream_to(self, path: Path, ref: str) -> None:
+        if path == self._detached_path:
+            raise RepoError(f"set-upstream-to {ref} failed at {path}: HEAD is detached", cwd=str(path))
+        super().set_upstream_to(path, ref)
+
+
+def test_reconcile_all_continues_past_detached_head_repo_in_earlier_env(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """A detached-HEAD worktree in one env fails that repo — naming the env/repo
+    via the worktree path — but every other env still reconciles and
+    `reconcile_all` exits with `False` rather than crashing partway through."""
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=GitIdentity(name="Bot", email="bot@example.com"),
+        project_repos=[
+            ProjectRepositoryConfig(name="demo", url="git@example.com:org/demo.git", pinned=True),
+        ],
+    )
+    demo_source = WORKSPACE_ROOT / "projects" / "demo"
+    alpha_worktree = WORKSPACE_ROOT / "alpha" / "demo"
+    beta_worktree = WORKSPACE_ROOT / "beta" / "demo"
+
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", demo_source, alpha_worktree, beta_worktree])
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    subprocess = FakeSubprocessRunner()
+
+    git = _DetachedHeadGitRepository(detached_path=alpha_worktree)
+    # `_discover_existing_worktrees` reads `git worktree list` on the source
+    # checkout — "alpha" sorts before "beta" so alpha's failure is encountered
+    # first in the per-env loop.
+    git.worktree_paths[demo_source] = [demo_source, alpha_worktree, beta_worktree]
+
+    svc = _service(cfg, fs, subprocess, git)
+    ok = svc.reconcile_all(init_reporter)
+
+    assert ok is False
+    # alpha's failure names the repo and carries its worktree path (env + repo).
+    alpha_errors = [msg for repo, msg in init_reporter.errors if repo == "demo" and str(alpha_worktree) in msg]
+    assert alpha_errors, init_reporter.errors
+    assert ("alpha", False) in init_reporter.targets_completed
+    # beta still reconciled: its worktree's tracking was wired despite alpha's failure.
+    assert (beta_worktree, "origin/main") in git.upstreams_set
+    assert ("beta", True) in init_reporter.targets_completed

@@ -63,6 +63,14 @@ class InitService:
     wrap-site that catches `(RepoError, OSError)` and routes the failure through
     the reporter. Leaves either return their result or raise. The public reconcile
     entrypoints are aggregators — they collect per-step booleans and never `try`.
+
+    Deliberate carve-out: `_wire_upstream_tracking` is a second wrap-site inside
+    `_reconcile_worktree_repo`'s per-repo task, isolating a tracking-wiring
+    failure (e.g. a detached-HEAD worktree) from `_run_cmds` so the repo's `cmd`
+    bootstrap still runs even when wiring fails — see that method's docstring for
+    why. It reports and returns `bool` rather than raising specifically so its
+    caller can fold that outcome into overall success without skipping the cmd
+    list that follows it in the same `try`.
     """
 
     def __init__(
@@ -113,7 +121,7 @@ class InitService:
             success = False
 
         repos = self._repo_factory.get_project_repos()
-        if not self._run_per_repo(repos, lambda r: self._reconcile_source_checkout(r, reporter)):
+        if not self._run_per_repo(repos, lambda r: self._reconcile_source_checkout(r, reporter), reporter):
             success = False
 
         if self._workspace_skill_svc is not None and not self._workspace_skill_svc.reconcile(reporter):
@@ -136,7 +144,7 @@ class InitService:
         # `_reconcile_standalone` also runs skills/agents projection as its tail
         # step (via `_project_extension`), once the clone/identity/excludes/cmds
         # steps succeed.
-        success = self._run_per_repo(repos, lambda r: self._reconcile_standalone(r, reporter))
+        success = self._run_per_repo(repos, lambda r: self._reconcile_standalone(r, reporter), reporter)
 
         # Skills/agents projection resolves from a project repo's projects/<name>/
         # root identically to a standalone's — `_reconcile_standalone` above
@@ -154,6 +162,7 @@ class InitService:
         if not self._run_per_repo(
             project_extension_repos,
             lambda r: self._project_extension(r, reporter),
+            reporter,
         ):
             success = False
 
@@ -183,7 +192,32 @@ class InitService:
         return success
 
     def reconcile_env(self, name: str, reporter: IInitReporter) -> bool:
+        """Reconcile a single feature env, reporting — never raising — on failure.
+
+        `_reconcile_env_body` runs the actual steps; several of them (index
+        allocation, `mkdir`, inferring the env's upstream from sibling worktrees)
+        happen before `_run_per_repo`'s own backstop is reached, so an unexpected
+        exception there is caught here instead. Without this, a single env's
+        unanticipated failure would unwind `reconcile_all`'s per-env loop and skip
+        every env ordered after it — the same failure shape the `_run_per_repo`
+        backstop closes at the repo level.
+        """
         reporter.target_started(name)
+        try:
+            success = self._reconcile_env_body(name, reporter)
+        except Exception as exc:
+            logger.error(
+                "unexpected error reconciling env %s: %s",
+                name,
+                exc,
+                exc_info=True,
+            )
+            reporter.repo_error(name, f"unexpected error ({type(exc).__name__}): {exc}")
+            success = False
+        reporter.target_completed(name, success)
+        return success
+
+    def _reconcile_env_body(self, name: str, reporter: IInitReporter) -> bool:
         success = True
 
         env_root = self._config.workspace_root / name
@@ -217,6 +251,7 @@ class InitService:
         if not self._run_per_repo(
             ready_repos,
             lambda r: self._reconcile_worktree_repo(r, name, env_root, reporter, inferred_upstream),
+            reporter,
         ):
             success = False
 
@@ -229,10 +264,9 @@ class InitService:
         ):
             success = False
 
-        reporter.target_completed(name, success)
         return success
 
-    def _run_per_repo(self, repos, work_fn) -> bool:
+    def _run_per_repo(self, repos, work_fn, reporter: IInitReporter) -> bool:
         """Fan work_fn(repo) out across the shared GitOpsService thread pool.
 
         Each repo's work runs serially within its own task (clone → identity → excludes →
@@ -240,14 +274,35 @@ class InitService:
         `GitOpsService.PARALLELISM` so a workspace with many repos doesn't overwhelm
         the SSH connection limit on remote git hosts (Codeberg in particular). Reporter
         calls are thread-safe via internal locking.
+
+        `work_fn` is expected to catch its own known failure modes and return `False`
+        rather than raise (see `_reconcile_worktree_repo`'s `except (RepoError,
+        OSError)`). An unexpected exception is still caught here as a backstop: it is
+        reported as that repo's failure via `reporter.repo_error` instead of
+        propagating out of `fut.result()`, which would unwind the caller's env loop —
+        `reconcile_all` accumulates per-env/per-repo failures and keeps going, and that
+        contract only holds if a single repo's work never raises past this point.
         """
         if not repos:
             return True
         success = True
         with self._git_ops.executor() as pool:
-            futures = [pool.submit(work_fn, repo) for repo in repos]
+            futures = {pool.submit(work_fn, repo): repo for repo in repos}
             for fut in as_completed(futures):
-                if not fut.result():
+                repo = futures[fut]
+                try:
+                    ok = fut.result()
+                except Exception as exc:
+                    logger.error(
+                        "unexpected error reconciling repo %s: %s",
+                        repo.name,
+                        exc,
+                        exc_info=True,
+                    )
+                    reporter.repo_error(repo.name, f"unexpected error ({type(exc).__name__}): {exc}")
+                    success = False
+                    continue
+                if not ok:
                     success = False
         return success
 
@@ -485,12 +540,12 @@ class InitService:
 
             self._apply_identity(worktree_path)
             self._write_excludes(worktree_path, repo, reporter, location)
-            self._wire_upstream_tracking(repo, worktree_path, inferred_upstream, reporter, newly_created)
+            wiring_ok = self._wire_upstream_tracking(repo, worktree_path, inferred_upstream, reporter, newly_created)
             self._run_cmds(worktree_path, repo, reporter)
         except (RepoError, OSError) as exc:
             reporter.repo_error(label, str(exc))
             return False
-        return True
+        return wiring_ok
 
     def _wire_upstream_tracking(
         self,
@@ -499,23 +554,26 @@ class InitService:
         inferred_upstream: str | None,
         reporter: IInitReporter,
         newly_created: bool,
-    ) -> None:
+    ) -> bool:
         """Wire pinned + inferred tracking, isolated from the repo's cmd bootstrap.
 
         Tracking config is independent of the repo's `cmd` list (trust/bootstrap
         steps like `mise trust`, `direnv allow`). A failure wiring tracking must
-        not short-circuit `_run_cmds`, so a `RepoError` here is reported as a
-        soft skip and swallowed rather than propagated to the reconcile `try`,
-        which would mark the repo failed and skip its cmds. The tolerant
-        `set_upstream_to` already handles the common unpushed-upstream case
-        without error; this isolation is the backstop for any other wiring
-        failure so the blast radius never reaches the cmd list.
+        not short-circuit `_run_cmds`, so a `RepoError` here is caught rather than
+        left to propagate to the reconcile `try` (which would skip the cmd list
+        entirely). It is still a real per-repo failure — e.g. a worktree with a
+        detached HEAD that `set_upstream_to` can no longer wire — so it is
+        reported via `reporter.repo_error` and this method returns `False`;
+        callers fold that into the repo's overall success/failure while letting
+        `_run_cmds` run regardless.
         """
         try:
             self._configure_pinned_tracking(repo, worktree_path, reporter)
             self._connect_inferred_upstream(repo, worktree_path, inferred_upstream, reporter, newly_created)
         except RepoError as exc:
-            reporter.repo_action(repo.name, str(worktree_path), "upstream_skipped", str(exc))
+            reporter.repo_error(repo.name, str(exc))
+            return False
+        return True
 
     def _infer_env_upstream(
         self,

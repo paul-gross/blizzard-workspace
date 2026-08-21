@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, PropertyMock, call
 
 import git
 import pytest
@@ -287,6 +287,53 @@ def test_set_upstream_to_raises_repo_error_on_git_command_error(
         adapter.set_upstream_to(_REPO_PATH, "origin/main")
 
     assert "set-upstream-to" in ei.value.message
+
+
+def test_set_upstream_to_raises_repo_error_on_detached_head(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    """A detached HEAD makes GitPython's `active_branch` raise `TypeError`.
+
+    `set_upstream_to` must convert that into a `RepoError` naming the worktree
+    path — mirroring `get_tracking_branch`'s handling of the same access —
+    instead of letting `TypeError` escape uncaught.
+    """
+    git_mock = _fake_git_repo(monkeypatch)
+    # `active_branch` is a property on the real GitPython `Repo`; accessing it
+    # itself raises when HEAD is detached (not `.name` afterwards), so the
+    # attribute access on this mock instance must raise too.
+    type(git_mock.Repo.return_value).active_branch = PropertyMock(
+        side_effect=TypeError("HEAD is a detached symbolic reference as it points to 'abc123'")
+    )
+
+    with pytest.raises(RepoError) as ei:
+        adapter.set_upstream_to(_REPO_PATH, "origin/main")
+
+    assert str(_REPO_PATH) in str(ei.value)
+    git_mock.Repo.return_value.git.config.assert_not_called()
+
+
+def test_set_upstream_to_derives_message_from_value_error_instead_of_asserting_detached(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository
+) -> None:
+    """A `ValueError` from `active_branch` isn't always an unborn HEAD.
+
+    A worktree orphaned by a deleted/re-cloned source checkout raises
+    `ValueError: Reference at 'HEAD' does not exist` — a broken worktree, not a
+    detached one. The wrapped message must carry the library's own text instead
+    of asserting one diagnosis ("detached") for every `ValueError`.
+    """
+    git_mock = _fake_git_repo(monkeypatch)
+    type(git_mock.Repo.return_value).active_branch = PropertyMock(
+        side_effect=ValueError("Reference at 'HEAD' does not exist")
+    )
+
+    with pytest.raises(RepoError) as ei:
+        adapter.set_upstream_to(_REPO_PATH, "origin/main")
+
+    assert "Reference at 'HEAD' does not exist" in str(ei.value)
+    assert "detached" not in str(ei.value)
+    git_mock.Repo.return_value.git.config.assert_not_called()
 
 
 # ── set_push_default_upstream ──────────────────────────────────────────────
@@ -622,3 +669,29 @@ def test_add_worktree_no_track_survives_remote_tracking_base(tmp_path: Path) -> 
     with git.Repo(str(worktree_path)) as wt:
         tb = wt.active_branch.tracking_branch()
     assert tb is None
+
+
+# ── set_upstream_to (real-git: detached HEAD) ───────────────────────────────
+#
+# A mocked `active_branch` can only simulate a `TypeError`; this drives a real
+# `git checkout --detach` so the adapter is exercised against GitPython's
+# actual detached-HEAD failure mode rather than a guess at its shape.
+
+
+def test_set_upstream_to_raises_repo_error_on_genuinely_detached_head(tmp_path: Path) -> None:
+    adapter = GitPythonRepository(RepoErrorFactory())
+    repo_path = tmp_path / "demo"
+    r = _configure(git.Repo.init(str(repo_path), initial_branch="main"))
+    (repo_path / "README").write_text("init\n")
+    r.index.add(["README"])
+    commit_sha = r.index.commit("init").hexsha
+    r.git.checkout("--detach", commit_sha)
+
+    with pytest.raises(RepoError) as ei:
+        adapter.set_upstream_to(repo_path, "origin/main")
+
+    assert str(repo_path) in str(ei.value)
+    # No tracking config was written — the write never happens once HEAD can't
+    # be resolved to a branch.
+    with git.Repo(str(repo_path)) as check, check.config_reader() as cr:
+        assert not cr.has_section("branch.main")

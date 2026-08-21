@@ -207,6 +207,15 @@ class WriteRepoRepository(ReadRepoRepository):
                 # still-detached worktree hits this same fallback with no
                 # such attach step, so the config write lands on a branch
                 # name HEAD isn't actually on — warn rather than fail silently.
+                # Deliberately more tolerant than `GitPythonRepository.set_upstream_to`,
+                # which hard-fails the same detached state: `connect` is a direct,
+                # explicit action against one named worktree, so warn-and-write
+                # (rather than refuse) is the right posture here. `set_upstream_to`
+                # runs unattended across every repo during `winter ws init`, where a
+                # detached worktree is a signal something upstream is already wrong
+                # (e.g. a `connect` that hit this same fallback) and silently writing
+                # tracking config to a branch name HEAD isn't on would compound it
+                # across the whole run instead of surfacing it.
                 logger.warning(
                     "set_upstream: %s is detached — writing branch.%s.* tracking config without "
                     "attaching HEAD to it; the worktree stays detached and untracked until something "
