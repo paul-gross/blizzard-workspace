@@ -381,3 +381,175 @@ def test_a_symlink_loop_does_not_hang_the_corpus_walk(tmp_path: Path) -> None:
     outcome = _service(tmp_path).apply([], _scope(root))
 
     assert "matches no file in the repo" in outcome.diagnostics[0].message
+
+
+# ── the workspace surface ────────────────────────────────────────────────────
+#
+# `.winter/config.toml` speaks for repos the workspace cannot fix from here.
+# These build the two-deep layout the real workspace uses (`<env>/<repo>`) so
+# the name-resolution below is exercised the way it runs in practice.
+
+
+def _workspace_config(workspace: Path, body: str) -> None:
+    config = workspace / ".winter" / "config.toml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(body)
+
+
+def _env_repo(workspace: Path, env: str, name: str, files: dict[str, str]) -> Path:
+    root = workspace / env / name
+    for rel, body in files.items():
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(body)
+    return root
+
+
+def test_workspace_rule_suppresses_a_finding_in_a_repo_with_no_manifest(tmp_path: Path) -> None:
+    # The case the surface exists for: core `winter` carries no `winter-ext.toml`,
+    # so it has nowhere of its own to declare an exemption.
+    root = _env_repo(tmp_path, "alpha", "winter", {"context/setup.md": "x"})
+    _workspace_config(
+        tmp_path,
+        '[[project_repository]]\nname = "winter"\n\n'
+        '[lint.ignore.repo."winter".checks]\ndoc-references = ["context/setup.md"]\n',
+    )
+    finding = _finding("alpha/winter/context/setup.md", check="doc-references")
+
+    outcome = _service(tmp_path).apply([finding], _scope(root))
+
+    assert outcome.kept == []
+    assert [ignored.finding for ignored in outcome.ignored] == [finding]
+
+
+def test_workspace_rule_reports_itself_as_the_workspaces_own(tmp_path: Path) -> None:
+    # A workspace rule must not read as if the repo declared it — the label is
+    # how a reader tells which owner made the judgment.
+    root = _env_repo(tmp_path, "alpha", "winter", {"context/setup.md": "x"})
+    _workspace_config(
+        tmp_path,
+        '[[project_repository]]\nname = "winter"\n\n'
+        '[lint.ignore.repo."winter".checks]\ndoc-references = ["context/setup.md"]\n',
+    )
+
+    outcome = _service(tmp_path).apply(
+        [_finding("alpha/winter/context/setup.md", check="doc-references")], _scope(root)
+    )
+
+    assert outcome.ignored[0].rule.label == (
+        'workspace [lint.ignore.repo."winter".checks] doc-references = "context/setup.md"'
+    )
+
+
+def test_workspace_repo_glob_is_repo_relative_so_it_covers_every_env(tmp_path: Path) -> None:
+    # The reason `repo` exists rather than a workspace-relative path: one rule
+    # has to cover the same repo in every feature env.
+    alpha = _env_repo(tmp_path, "alpha", "winter", {"context/setup.md": "x"})
+    beta = _env_repo(tmp_path, "beta", "winter", {"context/setup.md": "x"})
+    _workspace_config(
+        tmp_path,
+        '[[project_repository]]\nname = "winter"\n\n[lint.ignore.repo."winter"]\npaths = ["context/**"]\n',
+    )
+    findings = [_finding("alpha/winter/context/setup.md"), _finding("beta/winter/context/setup.md")]
+
+    outcome = _service(tmp_path).apply(findings, _scope(alpha, beta))
+
+    assert outcome.kept == []
+    assert len(outcome.ignored) == 2
+
+
+def test_workspace_paths_are_workspace_relative(tmp_path: Path) -> None:
+    # Content at the workspace root belongs to no repo, so nothing else can
+    # speak for it — these globs resolve against the workspace itself.
+    (tmp_path / "context").mkdir(parents=True)
+    (tmp_path / "context" / "scratch.md").write_text("x")
+    _workspace_config(tmp_path, '[lint.ignore]\npaths = ["context/scratch.md"]\n')
+
+    outcome = _service(tmp_path).apply([_finding("context/scratch.md")], _scope(tmp_path / "context"))
+
+    assert outcome.kept == []
+
+
+def test_repos_shorthand_covers_the_whole_repo(tmp_path: Path) -> None:
+    root = _env_repo(tmp_path, "alpha", "vendored", {"docs/a.md": "x", "src/b.md": "y"})
+    _workspace_config(
+        tmp_path,
+        '[[project_repository]]\nname = "vendored"\n\n[lint.ignore]\nrepos = ["vendored"]\n',
+    )
+    findings = [_finding("alpha/vendored/docs/a.md"), _finding("alpha/vendored/src/b.md")]
+
+    outcome = _service(tmp_path).apply(findings, _scope(root))
+
+    assert outcome.kept == []
+    assert outcome.ignored[0].rule.label == 'workspace [lint.ignore] repos = "**"'
+
+
+def test_a_workspace_rule_naming_an_undeclared_repo_is_reported(tmp_path: Path) -> None:
+    # The failure the plan calls worst: a typo that silently matches nothing and
+    # is invisible otherwise.
+    root = _env_repo(tmp_path, "alpha", "winter", {"context/setup.md": "x"})
+    _workspace_config(
+        tmp_path,
+        '[[project_repository]]\nname = "winter"\n\n[lint.ignore.repo."wintr"]\npaths = ["context/**"]\n',
+    )
+    finding = _finding("alpha/winter/context/setup.md")
+
+    outcome = _service(tmp_path).apply([finding], _scope(root))
+
+    assert outcome.kept == [finding]
+    assert any("not a declared project repository" in d.message for d in outcome.diagnostics)
+
+
+def test_an_unknown_workspace_ignore_key_is_reported(tmp_path: Path) -> None:
+    root = _env_repo(tmp_path, "alpha", "winter", {"context/setup.md": "x"})
+    _workspace_config(tmp_path, '[lint.ignore]\nnonsense = ["x"]\n')
+
+    outcome = _service(tmp_path).apply([_finding("alpha/winter/context/setup.md")], _scope(root))
+
+    assert any("unknown key `lint.ignore.nonsense`" in d.message for d in outcome.diagnostics)
+
+
+def test_a_stale_workspace_rule_is_reported_against_the_workspace_config(tmp_path: Path) -> None:
+    # It must point at the file that can actually be edited to remove it.
+    root = _env_repo(tmp_path, "alpha", "winter", {"context/setup.md": "x"})
+    _workspace_config(
+        tmp_path,
+        '[[project_repository]]\nname = "winter"\n\n[lint.ignore.repo."winter"]\npaths = ["gone/**"]\n',
+    )
+
+    outcome = _service(tmp_path).apply([], _scope(root))
+
+    stale = [d for d in outcome.diagnostics if "stale ignore rule" in d.message]
+    assert len(stale) == 1
+    assert stale[0].file == ".winter/config.toml"
+
+
+def test_the_two_surfaces_union_rather_than_override(tmp_path: Path) -> None:
+    # Neither owner can un-ignore what the other ignored.
+    root = tmp_path / "alpha" / "vendored"
+    root.mkdir(parents=True)
+    (root / "winter-ext.toml").write_text('name = "vendored"\n\n[lint.ignore.checks]\nlink-anchors = ["own.md"]\n')
+    (root / "own.md").write_text("x")
+    (root / "theirs.md").write_text("x")
+    _workspace_config(
+        tmp_path,
+        '[[project_repository]]\nname = "vendored"\n\n'
+        '[lint.ignore.repo."vendored".checks]\nlink-anchors = ["theirs.md"]\n',
+    )
+    findings = [_finding("alpha/vendored/own.md"), _finding("alpha/vendored/theirs.md")]
+
+    outcome = _service(tmp_path).apply(findings, _scope(root))
+
+    assert outcome.kept == []
+    owners = sorted(ignored.rule.owner or ignored.rule.repo for ignored in outcome.ignored)
+    assert owners == ["vendored", "workspace"]
+
+
+def test_no_workspace_config_is_not_an_error(tmp_path: Path) -> None:
+    root = _env_repo(tmp_path, "alpha", "winter", {"context/setup.md": "x"})
+    finding = _finding("alpha/winter/context/setup.md")
+
+    outcome = _service(tmp_path).apply([finding], _scope(root))
+
+    assert outcome.kept == [finding]
+    assert outcome.diagnostics == []

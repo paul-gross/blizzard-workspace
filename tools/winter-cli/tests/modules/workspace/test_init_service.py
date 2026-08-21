@@ -1576,9 +1576,7 @@ def test_run_per_repo_reports_unexpected_exception_without_unwinding(
     alpha_worktree = WORKSPACE_ROOT / "myenv" / "alpha-repo"
     beta_worktree = WORKSPACE_ROOT / "myenv" / "beta-repo"
 
-    fs = FakeFilesystem(
-        directories=[WORKSPACE_ROOT / "projects", alpha_main, beta_main, alpha_worktree, beta_worktree]
-    )
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", alpha_main, beta_main, alpha_worktree, beta_worktree])
     fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
     fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
     subprocess = FakeSubprocessRunner()

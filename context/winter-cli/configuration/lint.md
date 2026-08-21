@@ -129,8 +129,44 @@ An ignore that nobody can see is a way to hide rot, so:
 that one line. So **no lint script parses ignore config** — scripts stay stateless and independently runnable, which is
 how they are tested — and every future contributed check inherits ignore support for free.
 
-A workspace-level mirror of this surface, for findings in a repo the workspace does *not* control and has no standing to
-fix, is deliberately unbuilt until a real third-party case turns up.
+### The workspace surface
+
+`.winter/config.toml` carries the same table, for the case the repo surface cannot reach: a finding in a repo the
+workspace has no standing to fix from here — vendored, third-party, or a repo with no `winter-ext.toml` of its own to
+declare anything in.
+
+```toml
+[lint.ignore]
+# The workspace's own files. These globs are workspace-relative, because content
+# at the workspace root belongs to no repo and nothing else can speak for it.
+paths = ["context/project/scratch.md"]
+
+# A whole repo, when none of its conventions are ours.
+repos = ["some-vendor-repo"]
+
+# One repo, narrowed. These globs are repo-relative — the only spelling that
+# survives the same repo appearing once per feature env.
+[lint.ignore.repo."some-vendor-repo"]
+paths = ["docs/**"]
+
+[lint.ignore.repo."some-vendor-repo".checks]
+link-anchors = ["README.md"]
+```
+
+**Reach for the repo's own manifest first.** A workspace that exempts a repo it owns leaves that repo dirty in every
+other workspace that installs it; the exemption travels with the repo or it does not travel at all. This surface is for
+when that is not an option.
+
+A name under `repos` / `[lint.ignore.repo]` is checked against the workspace's `[[project_repository]]` declarations, so
+a typo is reported rather than quietly matching nothing. A name that is real but outside the current scope resolves to
+nothing and stays silent — the same judgment a `--changed` run makes about rules it had no chance to exercise.
+
+### Precedence
+
+Union, not override. A finding is suppressed if **any** applicable rule matches, and neither surface can un-ignore what
+the other ignored. The two answer to different owners: a workspace cannot force a finding back on for a repo whose
+author declared it acceptable, and a repo cannot override a workspace's judgment about content it vendored. Making one
+win would only invite a fight over whose config is authoritative.
 
 ## Finding output contract
 

@@ -51,9 +51,11 @@ def lint_command(
 
     A repo suppresses findings it has judged acceptable — a template tree, a
     fixture, recorded results — with a [lint.ignore] table in its own
-    winter-ext.toml. Suppressed findings never fail the run but are always
-    counted in the summary; --show-ignored re-prints them with the rule that
-    matched, and a rule that suppresses nothing is itself reported as a warn.
+    winter-ext.toml; the workspace mirrors that table in .winter/config.toml for
+    a repo it cannot fix from here. Suppressed findings never fail the run but
+    are always counted in the summary; --show-ignored re-prints them with the
+    rule that matched, and a rule that suppresses nothing is itself reported as
+    a warn.
 
     \b
       winter lint                  # the env you're standing in (or every env)

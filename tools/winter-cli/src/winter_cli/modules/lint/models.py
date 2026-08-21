@@ -43,32 +43,45 @@ class LintFinding:
 
 @dataclass(frozen=True)
 class LintIgnoreRule:
-    """One `[lint.ignore]` declaration read from a repo's `winter-ext.toml`.
+    """One `[lint.ignore]` declaration, from a repo's `winter-ext.toml` or the workspace.
 
-    `glob` is **repo-relative**, always — that is what makes the declaration
-    portable: the same manifest suppresses the same findings in a source
-    checkout, in a feature-env worktree, in `.winter/ext/`, and in a stranger's
-    workspace. `repo_root` is the absolute root the glob resolves against for
-    this run, and `repo` is that module's name, carried for reporting.
+    `glob` is **relative to `repo_root`**, always — that is what makes a
+    repo-owned declaration portable: the same manifest suppresses the same
+    findings in a source checkout, in a feature-env worktree, in `.winter/ext/`,
+    and in a stranger's workspace. `repo_root` is the absolute root the glob
+    resolves against for this run, and `repo` is that module's name, carried for
+    reporting.
 
     `check` is `None` for a whole-path rule (`[lint.ignore] paths`) and the
     check name for a narrowed one (`[lint.ignore.checks] <check>`). The narrowed
     form is the one worth reaching for: a blanket path ignore turns every check
     off for that file permanently, so the day someone genuinely breaks a link in
     it, lint stays silent.
+
+    The last four fields describe *where the rule was written* rather than what
+    it matches, and exist so a workspace-declared rule reports itself honestly
+    instead of impersonating one of the repo's own. They all default to the
+    repo-owned spelling: `origin` is the declaring file (`None` → that repo's
+    `winter-ext.toml`), `owner` the name shown as the rule's author, and
+    `table` / `key` the TOML location as its author actually spelled it, which
+    for a workspace rule about a repo is nested under `lint.ignore.repo."<name>"`.
     """
 
     repo: str
     repo_root: Path
     glob: str
     check: str | None = None
+    origin: Path | None = None
+    owner: str | None = None
+    table: str | None = None
+    key: str | None = None
 
     @property
     def label(self) -> str:
         """The rule as its author wrote it — shown beside a suppressed finding."""
-        table = "[lint.ignore]" if self.check is None else "[lint.ignore.checks]"
-        key = "paths" if self.check is None else self.check
-        return f'{self.repo} {table} {key} = "{self.glob}"'
+        table = self.table or ("lint.ignore" if self.check is None else "lint.ignore.checks")
+        key = self.key or ("paths" if self.check is None else self.check)
+        return f'{self.owner or self.repo} [{table}] {key} = "{self.glob}"'
 
 
 @dataclass(frozen=True)

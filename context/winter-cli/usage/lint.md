@@ -62,7 +62,9 @@ running CLI, so it can call back for workspace-wide data it can't derive from it
 — with a `[lint.ignore]` table in its own `winter-ext.toml`, using repo-relative globs. A suppressed finding never fails
 the run, but it is always counted in the summary (`✗ 3 fail / 2 warn / 10 finding(s) / 7 ignored`), `--show-ignored`
 re-prints each one under the rule that matched, and a rule that suppresses nothing is itself reported as a `warn`. The
-declaration lives in the repo, not the workspace, so the repo lints clean in every workspace that installs it — see
+declaration lives in the repo, not the workspace, so the repo lints clean in every workspace that installs it. The
+workspace mirrors the same table in `.winter/config.toml` for a repo it has no standing to fix from here — vendored,
+third-party, or carrying no manifest of its own — and the two surfaces union rather than override. See
 [configuration/lint.md#ignoring-findings](../configuration/lint.md#ignoring-findings).
 
 `--json` emits one NDJSON object per line — one `started` per resolved scope, one `finding` per surviving finding, then
