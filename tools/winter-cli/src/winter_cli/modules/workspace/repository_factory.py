@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import Protocol
 
 from winter_cli.config.models import (
@@ -16,8 +15,6 @@ from winter_cli.modules.workspace.models import (
     ProjectRepository,
     StandaloneRepository,
 )
-
-logger = logging.getLogger(__name__)
 
 _SINGLETON_PATHS: dict[SingletonType, tuple[str, ...]] = {
     SingletonType.workspace: (),
@@ -142,50 +139,28 @@ class RepositoryFactory:
 
         A repo declared as both `[[project_repository]]` (with a root
         `winter-ext.toml`) and `[[standalone_repository]]` dedupes to the
-        standalone entry — not the project-repo entry — with a warning naming
-        the now-redundant `[[standalone_repository]]` declaration. This keeps
+        standalone entry — not the project-repo entry — silently: a double
+        declaration is a supported way to pin an extension to a `path`,
+        `prefix`, or `ref` the project-repo entry has no field for, so it is
+        not something to warn about. Preferring the standalone entry also keeps
         `ExtensionAgentsMdService`'s routing-row fork (which forks on whether
         the resolved path sits under `projects/`) from firing while both
-        declarations exist: the repo keeps rendering as its pre-existing eager
-        `@`-import instead of switching to a no-`@` routing row out from under
-        a workspace that hasn't yet removed the redundant standalone
-        declaration (a follow-up left explicitly out of scope by winter#160).
-        Once the standalone declaration is removed, the project-repo entry
-        takes over automatically.
+        declarations exist: the repo keeps rendering as its eager `@`-import
+        instead of switching to a no-`@` routing row. Drop the standalone
+        declaration and the project-repo entry takes over automatically.
         """
         result: list[StandaloneRepository] = []
         seen: set[str] = set()
-        standalones_by_name: dict[str, StandaloneRepository] = {}
 
         for repo in self.get_standalone_repos():
             result.append(repo)
             seen.add(repo.name)
-            standalones_by_name[repo.name] = repo
 
         for project_repo in self.get_project_repos():
+            if project_repo.name in seen:
+                continue
             manifest_path = project_repo.main_path / EXT_MANIFEST
             if not self._fs.is_file(manifest_path):
-                continue
-            if project_repo.name in seen:
-                redundant = standalones_by_name[project_repo.name]
-                overrides = [
-                    field
-                    for field, value in (("prefix", redundant.prefix), ("ref", redundant.ref))
-                    if value is not None
-                ]
-                override_note = (
-                    f" — note: removing it will also drop its {' and '.join(overrides)} override, which "
-                    "[[project_repository]] has no equivalent field for"
-                    if overrides
-                    else ""
-                )
-                logger.warning(
-                    "%r is declared as both [[project_repository]] (with a root winter-ext.toml) and "
-                    "[[standalone_repository]] — using the standalone checkout as the extension entry "
-                    "until the now-redundant [[standalone_repository]] declaration is removed%s",
-                    project_repo.name,
-                    override_note,
-                )
                 continue
             # `ProjectRepositoryConfig` declares no `config_dir`/`prefix`/`ref`
             # override fields, so there is nothing to carry over for those —

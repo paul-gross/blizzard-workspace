@@ -163,10 +163,10 @@ def test_get_extension_repos_dedupes_repo_declared_as_both_kinds(
 ) -> None:
     """A repo declared as both [[project_repository]] and [[standalone_repository]]
     yields a single extension entry — the standalone checkout, not the project-repo
-    one — with a warning naming the now-redundant [[standalone_repository]]
-    declaration. Keeping the standalone entry (rather than the project-repo entry)
-    while both declarations exist is what keeps `ExtensionAgentsMdService`'s
-    routing-row fork from firing early — see winter#160."""
+    one — and says nothing about it: a double declaration is a supported way to pin
+    an extension to a path/prefix/ref, not a misconfiguration. Keeping the standalone
+    entry (rather than the project-repo entry) is what keeps `ExtensionAgentsMdService`'s
+    routing-row fork from firing while both declarations exist."""
     config = workspace_config.model_copy(
         update={
             "project_repos": [
@@ -190,9 +190,7 @@ def test_get_extension_repos_dedupes_repo_declared_as_both_kinds(
 
     assert [r.name for r in repos] == ["winter-context"]
     assert repos[0].path == config.workspace_root / ".winter/ext/context"
-    assert any(
-        "winter-context" in record.message and "standalone_repository" in record.message for record in caplog.records
-    )
+    assert caplog.records == []
 
 
 def test_get_standalone_repos_excludes_project_repo_extensions(

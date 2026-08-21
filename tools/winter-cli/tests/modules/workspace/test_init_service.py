@@ -1020,8 +1020,8 @@ def test_reconcile_standalones_does_not_double_project_skills_for_dual_declared_
 ) -> None:
     """A repo declared as both [[project_repository]] (with a root winter-ext.toml)
     and [[standalone_repository]] is only projected once, via the standalone loop
-    — `get_extension_repos()` dedupes the project-repo entry away with a warning,
-    so `reconcile_standalones` must not also run projection at the project-repo
+    — `get_extension_repos()` dedupes the project-repo entry away, so
+    `reconcile_standalones` must not also run projection at the project-repo
     checkout path for it.
     """
     standalone_path = WORKSPACE_ROOT / "my-ext"

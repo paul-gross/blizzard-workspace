@@ -243,12 +243,11 @@ reading agent is actually working in; a workspace-root reader with no env bound 
 `projects/<name>/`.
 
 A repo declared as **both** `[[project_repository]]` (with a root `winter-ext.toml`) and `[[standalone_repository]]`
-dedupes to a single extension entry — while both declarations exist, the **standalone** checkout wins (keeping the
-pre-existing eager `@`-import unchanged, since removing the six `[[standalone_repository]]` declarations that currently
-double-declare winter-canon, winter-github, winter-context, winter-service-tmux, winter-service-docker, and
-winter-workflow in this workspace is an explicit follow-up, not part of this change) — and `winter ws init` logs a
-warning naming the now-redundant `[[standalone_repository]]` declaration so it can be removed. Once it is removed, the
-project-repo entry takes over automatically and the extension starts rendering as a no-`@` path-template bullet.
+dedupes to a single extension entry: the **standalone** checkout wins, silently. Double-declaring is a supported way to
+pin an extension to a `path`, `prefix`, or `ref` that `[[project_repository]]` has no field for, so it is not a
+misconfiguration and winter does not warn about it — the repo keeps rendering as its eager `@`-import. Drop the
+`[[standalone_repository]]` declaration and the project-repo entry takes over automatically, rendering the extension as
+a no-`@` path-template bullet instead.
 
 ## `adopt_extensions` modes
 

@@ -144,9 +144,9 @@ class InitService:
         # matching [[standalone_repository]] declaration, e.g. winter-product)
         # still need it run once their source checkout exists on disk. A repo
         # declared as both kinds is already covered by the standalone loop above
-        # (see `RepositoryFactory.get_extension_repos` for the dedupe/warning),
-        # so it is excluded here to avoid double-processing under two different
-        # source paths.
+        # (see `RepositoryFactory.get_extension_repos` for the dedupe), so it is
+        # excluded here to avoid double-processing under two different source
+        # paths.
         standalone_names = {r.name for r in repos}
         project_extension_repos = [
             r for r in extension_repos if r.name not in standalone_names and self._fs.exists(r.path)
