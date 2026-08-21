@@ -47,7 +47,7 @@ and `--changed` are mutually exclusive. A glob matching zero names is a no-op, n
 
 **Core checks** are built into winter-cli and always run; their findings appear under a `[core]` source group. There are
 three built-in core checks: **module extractability** (validates `<context>:/path` dependency direction across the
-ecosystem graph), **file-size** (guards agent-facing markdown files against configurable byte-size thresholds), and
+ecosystem graph), **file-size** (guards agent-facing markdown files against configurable effective-byte thresholds), and
 **required-services** (validates `required_services` entries in provision manifests against the merged service catalog
 from all bound providers). See
 [configuration/lint.md#built-in-core-checks](../configuration/lint.md#built-in-core-checks) for the full description of

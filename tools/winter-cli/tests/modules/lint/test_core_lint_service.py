@@ -174,6 +174,35 @@ def test_non_injected_file_between_thresholds_passes(tmp_ws: Path) -> None:
     assert findings == [], f"Expected no findings for a reference doc under 12 000 bytes; got {findings}"
 
 
+def test_padding_and_rules_do_not_count_toward_the_threshold(tmp_ws: Path) -> None:
+    """A file whose raw size is over the threshold passes when the excess is formatting."""
+    md = tmp_ws / "docs" / "wide-table.md"
+    md.parent.mkdir(parents=True)
+    # 200 content bytes, then 8 000 bytes of table padding and separator rule.
+    md.write_text("x" * 200 + "\n| a" + " " * 4000 + "| b |\n| " + "-" * 4000 + " | --- |\n")
+    assert md.stat().st_size > 6000
+
+    check = FileSizeLintCheck(tmp_ws, FileSizeLintConfig(injected_bytes=6000, reference_bytes=6000))
+    scope = LintScope(kind=LintScopeKind.all, label="all", paths=[tmp_ws])
+    findings = check.check(scope)
+    assert findings == [], f"Expected padding and rules to be normalized away; got {findings}"
+
+
+def test_finding_reports_effective_and_raw_sizes(tmp_ws: Path) -> None:
+    """The message names the effective size that failed and the raw size beside it."""
+    md = tmp_ws / "docs" / "big.md"
+    md.parent.mkdir(parents=True)
+    md.write_text("y" * 7000 + " " * 500)
+    raw = md.stat().st_size
+
+    check = FileSizeLintCheck(tmp_ws, FileSizeLintConfig(injected_bytes=6000, reference_bytes=6000))
+    scope = LintScope(kind=LintScopeKind.all, label="all", paths=[tmp_ws])
+    findings = check.check(scope)
+    assert len(findings) == 1
+    assert "7001 effective bytes" in findings[0].message
+    assert f"({raw} raw)" in findings[0].message
+
+
 def test_threshold_override_via_config(tmp_ws: Path) -> None:
     """A very tight custom threshold flags a file that the default would pass."""
     md = tmp_ws / "small.md"

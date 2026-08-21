@@ -9,6 +9,7 @@ from winter_cli.config.models import FileSizeLintConfig
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.core.subprocess_runner import ISubprocessRunner
 from winter_cli.modules.lint.finding_parser import parse_lint_output
+from winter_cli.modules.lint.markdown_size import effective_bytes
 from winter_cli.modules.lint.models import LintCheckOutcome, LintFinding, LintScope, LintStatus
 from winter_cli.modules.lint.scope_env import WINTER_CLI_VAR, lint_scope_env
 from winter_cli.modules.service.service_catalog_service import ServiceCatalogService
@@ -66,8 +67,13 @@ class FileSizeLintCheck:
     The traversal deduplicates by resolved path so files reachable via both
     ``CLAUDE.md → AGENTS.md`` and directly as ``AGENTS.md`` are counted once.
 
-    Measurement is by UTF-8 byte length (``len(text.encode())``), not token
-    count, so the check is tokenizer-independent and fast.
+    Measurement is by *effective* UTF-8 byte length, not token count, so the
+    check stays tokenizer-independent and fast — but formatting that costs
+    bytes without costing tokens is normalized away first (whitespace runs and
+    repeated rule characters each collapse; see
+    :mod:`winter_cli.modules.lint.markdown_size`).  Thresholds are therefore
+    read as effective bytes, and a table-heavy doc is judged on its content
+    rather than on the formatter's padding.
     """
 
     def __init__(self, workspace_root: Path, config: FileSizeLintConfig) -> None:
@@ -86,19 +92,25 @@ class FileSizeLintCheck:
             threshold = self._config.injected_bytes if is_injected else self._config.reference_bytes
             kind = "injected" if is_injected else "reference"
             try:
-                size = len(md_file.read_bytes())
+                raw_bytes = md_file.read_bytes()
             except OSError:
                 continue
+            size = effective_bytes(raw_bytes.decode("utf-8", errors="replace"))
             if size > threshold:
                 findings.append(
                     LintFinding(
                         source=CORE_SOURCE,
                         check=FILE_SIZE_CHECK,
                         status=LintStatus.fail,
-                        message=(f"{rel}: {size} bytes exceeds the {kind} threshold of {threshold} bytes"),
+                        message=(
+                            f"{rel}: {size} effective bytes ({len(raw_bytes)} raw) "
+                            f"exceeds the {kind} threshold of {threshold} effective bytes"
+                        ),
                         file=rel,
                         remediation=(
-                            f"Trim or split this file to bring it under {threshold} bytes. "
+                            f"Trim or split this file to bring it under {threshold} effective bytes — "
+                            f"whitespace runs and repeated rule characters are already normalized away, "
+                            f"so reformatting alone will not move it. "
                             f"Override the threshold in .winter/config.toml under "
                             f"[core_checks.file_size] {'injected_bytes' if is_injected else 'reference_bytes'}."
                         ),
@@ -196,7 +208,7 @@ class CoreLintService:
     * **extractability** — validates dependency direction across the ecosystem
       graph (``tools/winter-lint/extractability.py``).
     * **file-size** — flags agent-facing markdown files exceeding configurable
-      byte-size thresholds, with a tighter limit for auto-injected files.
+      effective-byte thresholds, with a tighter limit for auto-injected files.
     * **required-services** — validates ``required_services`` references in
       provision manifests against the merged service catalog from all bound
       service-orchestrator providers.

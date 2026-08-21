@@ -29,10 +29,17 @@ The three built-in core checks are:
   and honors the `<!-- winter-lint:example -->` block exemption and fenced-code-block skip. Full rules in
   [tools/winter-lint/README.md](../../../tools/winter-lint/README.md).
 
-- **file-size**: checks agent-facing markdown files against configurable byte-size thresholds. Files in the
-  auto-injected `@import` graph (rooted at `AGENTS.md`, `AGENTS.winter.md`, and the committed `CLAUDE.md` shim in the
-  workspace root) are held to the tighter `injected_bytes` threshold; all other `.md` files in scope are checked against
-  the looser `reference_bytes` threshold. Override thresholds in `.winter/config.toml` under `[core_checks.file_size]`.
+- **file-size**: checks agent-facing markdown files against configurable size thresholds. Files in the auto-injected
+  `@import` graph (rooted at `AGENTS.md`, `AGENTS.winter.md`, and the committed `CLAUDE.md` shim in the workspace root)
+  are held to the tighter `injected_bytes` threshold; all other `.md` files in scope are checked against the looser
+  `reference_bytes` threshold. Override thresholds in `.winter/config.toml` under `[core_checks.file_size]`.
+
+  Both thresholds are measured in **effective bytes**, not raw ones. The check is standing in for token cost, so the two
+  kinds of formatting that inflate a markdown file without adding tokens are normalized away before measuring: every run
+  of whitespace collapses to a single byte (349 spaces of table padding cost one), and every run of four or more of the
+  same non-alphanumeric character collapses to three (`|-------|` measures as `|---|`). A wide, formatter-padded table
+  is therefore judged on the content in its cells, and reflowing or re-padding a file never changes its measured size.
+  Findings report both numbers — `4812 effective bytes (9034 raw)`.
 
 - **required-services**: validates `required_services` entries in `[[provision.resource]]` and `[[provision.data]]`
   handlers (in `.winter/config.toml` and each installed extension's `winter-ext.toml`) against the merged service

@@ -361,6 +361,11 @@ class FileSizeLintConfig(BaseModel):
     ``AGENTS.winter.md``, and the committed ``CLAUDE.md`` shim), and the looser
     ``reference_bytes`` threshold for all other agent-facing markdown.
 
+    Both thresholds are in *effective* bytes: whitespace runs and repeated rule
+    characters collapse before measurement, so table padding and separator rows
+    are counted as the near-zero token cost they are (see
+    :mod:`winter_cli.modules.lint.markdown_size`).
+
     Default values are calibrated to the ~1.5 k-token target from issue #96
     (1 token ≈ 4 bytes → 1 500 tokens ≈ 6 000 bytes for injected files) with a
     2x headroom for reference docs that are consulted on demand rather than
@@ -374,10 +379,10 @@ class FileSizeLintConfig(BaseModel):
     """
 
     injected_bytes: int = 6000
-    """Maximum byte size for files in the auto-injected @import graph (default 6 000)."""
+    """Maximum effective byte size for files in the auto-injected @import graph (default 6 000)."""
 
     reference_bytes: int = 12000
-    """Maximum byte size for non-injected agent-facing markdown files (default 12 000)."""
+    """Maximum effective byte size for non-injected agent-facing markdown files (default 12 000)."""
 
 
 class DashboardConfig(BaseModel):
