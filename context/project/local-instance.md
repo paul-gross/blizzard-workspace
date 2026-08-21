@@ -156,6 +156,6 @@ Ingest takes a source-native token — prefer `blizzard:26`, `blizzard#26`, or t
 
 ## Developing a feature env against this instance's data
 
-Running a feature env's web or CLI against real fleet data — and the SQLite single-writer constraint that rules out a second live daemon on the runner's database — is covered in the `# Local Settings` block of the workspace `AGENTS.md` (`AGENTS.local.md`). That file is **machine-local and gitignored**, so it is present only on a machine that has been set up for it; there is nothing to read there in a fresh clone.
+Running a feature env's web or CLI against hub data — which hub is safe to point it at, and the SQLite single-writer constraint that rules out a second live daemon on the runner's database — is owned by [hub-data-modes.md](./hub-data-modes.md).
 
 The short version, because getting it wrong now reaches a public host: **do not point board or UI development at `https://blizzard.grosscode.net`.** It is the real fleet, and a board served by `ng serve` is a real client.
