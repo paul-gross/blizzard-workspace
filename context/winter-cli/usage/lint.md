@@ -9,6 +9,7 @@ winter lint <env>              # every project worktree in a feature env
 winter lint <repo-or-env> ...  # multiple repo/env names, verified in one run
 winter lint '<glob>'           # every repo/env name matching the glob (e.g. 'winter-*')
 winter lint --changed          # only the dirty / un-pushed files in the current repo
+winter lint --show-ignored     # also re-print what a [lint.ignore] rule suppressed
 winter lint --all --json       # every env's project worktrees, as an NDJSON stream
 ```
 
@@ -57,14 +58,27 @@ env vars — see [configuration/lint.md](../configuration/lint.md). Each check a
 running CLI, so it can call back for workspace-wide data it can't derive from its own scope — see
 [graph.md](./graph.md).
 
-`--json` emits one NDJSON object per line — one `started` per resolved scope, one `finding` per finding, then one
-`finished` per resolved scope:
+**Ignored findings.** A repo suppresses findings it has judged acceptable — a template tree, a fixture, recorded results
+— with a `[lint.ignore]` table in its own `winter-ext.toml`, using repo-relative globs. A suppressed finding never fails
+the run, but it is always counted in the summary (`✗ 3 fail / 2 warn / 10 finding(s) / 7 ignored`), `--show-ignored`
+re-prints each one under the rule that matched, and a rule that suppresses nothing is itself reported as a `warn`. The
+declaration lives in the repo, not the workspace, so the repo lints clean in every workspace that installs it — see
+[configuration/lint.md#ignoring-findings](../configuration/lint.md#ignoring-findings).
+
+`--json` emits one NDJSON object per line — one `started` per resolved scope, one `finding` per surviving finding, then
+one `finished` per resolved scope:
 
 ```json
 {"type": "started", "scope": ..., "label": ..., "paths": [...]}
 {"type": "finding", "source": ..., "check": ..., "status": ..., "message": ..., "file": ..., "line": ..., "remediation": ...}
-{"type": "finished", "contributors": N, "total": N, "fails": N, "warns": N}
+{"type": "ignored", "source": ..., "check": ..., "status": ..., "rule": "<repo> [lint.ignore.checks] <check> = \"<glob>\""}
+{"type": "finished", "contributors": N, "total": N, "fails": N, "warns": N, "ignored": N}
 ```
+
+An `ignored` event carries the same payload as a `finding` plus the `rule` that suppressed it, and is emitted only under
+`--show-ignored` — so a consumer that only knows the original event types keeps reading exactly the findings the run
+stands behind. `total` / `fails` / `warns` count only surviving findings; `ignored` counts the suppressed ones and is
+always present.
 
 `contributors` is the number of lint scripts that ran — `0` means nothing was contributed. Multiple names/a glob fan out
 to one `started`/`finished` pair per resolved name, each with its own findings in between — a single-target run emits

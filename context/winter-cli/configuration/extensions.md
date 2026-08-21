@@ -15,8 +15,19 @@ load = "lazy"                  # optional; "eager" (@-import) or "lazy" (link) â
 skills_dir = "skills"          # optional; explicit path overrides default discovery
 agents_dir = "agents"          # optional; explicit path overrides default discovery
 doctor = "scripts/doctor.sh"   # optional; executable that emits NDJSON probe events for `winter doctor`
-lint = "scripts/lint.sh"       # optional; executable(s) emitting NDJSON findings for `winter lint` (str or list)
+lint = "scripts/lint.sh"       # optional; executable(s) emitting NDJSON findings for `winter lint` (str, list, or [lint] table)
 requires = ["winter-product"]  # optional; other modules this one depends on (see `winter graph`)
+
+# Lint suppression + scripts â€” the table form of `lint`, needed because TOML cannot
+# hold both `lint = [...]` and `[lint.ignore]`. Globs are repo-relative. See lint.md.
+[lint]
+scripts = ["scripts/lint.sh"]  # optional; same meaning as the scalar `lint` above
+
+[lint.ignore]
+paths = ["fixtures/**"]        # optional; every check goes quiet on these paths
+
+[lint.ignore.checks]
+link-anchors = ["fixtures/**"] # optional; silence one check, keep the rest of the file covered
 
 [provides]
 service = "workflow/service"   # this extension provides the `service` capability; entrypoint relative to repo root

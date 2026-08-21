@@ -18,7 +18,7 @@ adopt_extensions = "winter"     # how aggressively standalone repos contribute s
 prefix = "ws"                   # workspace skill namespace (default "ws") — see below
 skills_dir = "skills"           # workspace skills source dir relative to workspace root (default "skills")
 doctor = "context/project/doctor.sh" # optional workspace-level `winter doctor` probe — see doctor.md
-lint = "context/project/lint.sh"     # optional workspace-level `winter lint` check(s) — see lint.md
+lint = "context/project/lint.sh"     # optional workspace-level `winter lint` check(s); str, list, or [lint] table — see lint.md
 
 [capabilities]                  # bind capability slots to provider extensions — see capabilities.md
 service = "winter-service-tmux"

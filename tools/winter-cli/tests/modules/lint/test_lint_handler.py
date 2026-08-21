@@ -8,9 +8,11 @@ import pytest
 from winter_cli.modules.lint.handler import LintHandler, LintParams
 from winter_cli.modules.lint.models import (
     LintFinding,
+    LintIgnoreRule,
     LintScope,
     LintScopeKind,
     LintScopeRequest,
+    LintStatus,
     LintSummary,
 )
 
@@ -48,6 +50,7 @@ class _RecordingReporter:
     def __init__(self) -> None:
         self.started_scopes: list[LintScope] = []
         self.findings: list[LintFinding] = []
+        self.ignored_events: list[tuple[LintFinding, LintIgnoreRule]] = []
         self.summaries: list[LintSummary] = []
 
     def started(self, scope: LintScope) -> None:
@@ -55,6 +58,9 @@ class _RecordingReporter:
 
     def finding(self, finding: LintFinding) -> None:
         self.findings.append(finding)
+
+    def ignored(self, finding: LintFinding, rule: LintIgnoreRule) -> None:
+        self.ignored_events.append((finding, rule))
 
     def finished(self, summary: LintSummary) -> None:
         self.summaries.append(summary)
@@ -154,3 +160,50 @@ def test_multiple_scopes_any_failure_exits_nonzero() -> None:
     assert excinfo.value.code != 0
     # Both scopes still ran despite the first one's success.
     assert svc.run_calls == [repo_a, repo_b]
+
+
+# ── --show-ignored ───────────────────────────────────────────────────────────
+
+_IGNORED = LintFinding(source="wx", check="link-anchors", status=LintStatus.fail, file="app/t.md")
+_RULE = LintIgnoreRule(repo="app", repo_root=Path("/ws/app"), glob="**", check="link-anchors")
+
+
+class _IgnoringLintService:
+    """Emits one suppressed finding per run, mirroring `LintService`'s reporter contract."""
+
+    def run(self, scope: LintScope, reporter: Any) -> LintSummary:
+        reporter.started(scope)
+        reporter.ignored(_IGNORED, _RULE)
+        summary = LintSummary(contributors=1, total=0, fails=0, warns=0, ignored=1)
+        reporter.finished(summary)
+        return summary
+
+
+def _handler_with_ignores() -> tuple[LintHandler, _RecordingReporter]:
+    reporter = _RecordingReporter()
+    scope = LintScope(kind=LintScopeKind.repo, label="repo: app", paths=[Path("/ws/app")])
+    handler = LintHandler(
+        lint_service=_IgnoringLintService(),  # type: ignore[arg-type]
+        scope_resolver=_FakeResolver([scope]),  # type: ignore[arg-type]
+        stream_reporter=reporter,  # type: ignore[arg-type]
+        json_reporter=_RecordingReporter(),  # type: ignore[arg-type]
+    )
+    return handler, reporter
+
+
+def test_suppressed_findings_are_withheld_by_default() -> None:
+    handler, reporter = _handler_with_ignores()
+
+    handler.run(LintParams(scope=LintScopeRequest(names=["app"]), output_json=False))
+
+    assert reporter.ignored_events == []
+    # The count still reaches the reporter, so the run never hides how much it hid.
+    assert reporter.summaries[0].ignored == 1
+
+
+def test_show_ignored_hands_suppressed_findings_to_the_reporter() -> None:
+    handler, reporter = _handler_with_ignores()
+
+    handler.run(LintParams(scope=LintScopeRequest(names=["app"]), output_json=False, show_ignored=True))
+
+    assert reporter.ignored_events == [(_IGNORED, _RULE)]

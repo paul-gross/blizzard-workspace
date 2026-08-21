@@ -42,6 +42,67 @@ class LintFinding:
 
 
 @dataclass(frozen=True)
+class LintIgnoreRule:
+    """One `[lint.ignore]` declaration read from a repo's `winter-ext.toml`.
+
+    `glob` is **repo-relative**, always — that is what makes the declaration
+    portable: the same manifest suppresses the same findings in a source
+    checkout, in a feature-env worktree, in `.winter/ext/`, and in a stranger's
+    workspace. `repo_root` is the absolute root the glob resolves against for
+    this run, and `repo` is that module's name, carried for reporting.
+
+    `check` is `None` for a whole-path rule (`[lint.ignore] paths`) and the
+    check name for a narrowed one (`[lint.ignore.checks] <check>`). The narrowed
+    form is the one worth reaching for: a blanket path ignore turns every check
+    off for that file permanently, so the day someone genuinely breaks a link in
+    it, lint stays silent.
+    """
+
+    repo: str
+    repo_root: Path
+    glob: str
+    check: str | None = None
+
+    @property
+    def label(self) -> str:
+        """The rule as its author wrote it — shown beside a suppressed finding."""
+        table = "[lint.ignore]" if self.check is None else "[lint.ignore.checks]"
+        key = "paths" if self.check is None else self.check
+        return f'{self.repo} {table} {key} = "{self.glob}"'
+
+
+@dataclass(frozen=True)
+class IgnoredFinding:
+    """A finding a `[lint.ignore]` rule suppressed, paired with the rule that did it.
+
+    Suppression is only safe if it stays visible, so the pair travels together:
+    the summary always counts these, and `--show-ignored` re-prints each one
+    under the rule that silenced it.
+    """
+
+    finding: LintFinding
+    rule: LintIgnoreRule
+
+
+@dataclass(frozen=True)
+class LintIgnoreOutcome:
+    """The result of applying every applicable ignore rule to one run's findings.
+
+    `diagnostics` is not a partition of the input — those are findings the
+    filter *emits*, about the ignore configuration itself: a `warn` per rule
+    that suppressed nothing, plus anything it could not use (an unreadable
+    manifest, an unknown key, a wrong-typed value, a malformed glob). A stale or
+    typo'd ignore is a lie about the corpus and is exactly how this feature
+    decays, so the filter that hides findings also reports on itself — through
+    the ordinary reporter channel, which is the only one a default run shows.
+    """
+
+    kept: list[LintFinding]
+    ignored: list[IgnoredFinding]
+    diagnostics: list[LintFinding]
+
+
+@dataclass(frozen=True)
 class LintCheckOutcome:
     """Everything one contributing lint script produced in a single run.
 
@@ -110,12 +171,18 @@ class LintSummary:
 
     `contributors` is the number of lint scripts that ran — zero means the
     workspace contributed no checks, which the reporter surfaces explicitly.
+
+    `total`, `fails`, and `warns` count only the findings that survived
+    `[lint.ignore]` filtering; `ignored` counts the ones it suppressed. A
+    suppressed finding never reaches `fails`, so it cannot fail the run — but it
+    is always counted here, so a run can never quietly hide how much it hid.
     """
 
     contributors: int
     total: int
     fails: int
     warns: int
+    ignored: int = 0
 
     @property
     def exit_code(self) -> int:

@@ -894,6 +894,15 @@ class Container(containers.DeclarativeContainer):
         winter_cli_path=winter_cli_path,
     )
 
+    # Central `[lint.ignore]` filter — applied once to the flattened findings of
+    # every source, so no lint script has to know ignore config exists.
+    lint_ignore_svc = providers.Factory(
+        _lazy("winter_cli.modules.lint.ignore_service:LintIgnoreService"),
+        workspace_root=workspace_config.provided.workspace_root,
+        fs=fs,
+        config_file_reader=config_file_reader,
+    )
+
     lint_scope_resolver = providers.Factory(
         _lazy("winter_cli.modules.lint.scope_resolver:LintScopeResolver"),
         config=workspace_config,
@@ -908,6 +917,7 @@ class Container(containers.DeclarativeContainer):
         core_lint_svc=core_lint_svc,
         workspace_lint_svc=workspace_lint_svc,
         extension_lint_svc=extension_lint_svc,
+        ignore_svc=lint_ignore_svc,
         repo_factory=repo_factory,
     )
 

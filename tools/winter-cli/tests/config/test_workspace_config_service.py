@@ -184,6 +184,22 @@ def test_load_accepts_lint_as_a_list() -> None:
     assert config.lint == ["context/a.sh", "context/b.sh"]
 
 
+def test_load_accepts_lint_as_a_table_of_scripts() -> None:
+    """`[lint] scripts` means what `lint = [...]` means — the spelling `[lint.ignore]` forces.
+
+    TOML cannot hold both `lint = [...]` and `[lint.ignore]`, so a workspace
+    declaring ignore rules writes the table form for both. `ignore` is read
+    off the manifest by `LintIgnoreService`, not resolved here.
+    """
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    svc = _service(fs, {config_path: {"lint": {"scripts": ["context/a.sh"], "ignore": {"paths": ["scratch/**"]}}}})
+
+    config = svc.load()
+
+    assert config.lint == ["context/a.sh"]
+
+
 def test_load_merges_local_overlay() -> None:
     config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
     local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE

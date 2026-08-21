@@ -117,6 +117,13 @@ class ExtensionManifest:
     manifest accepts a single path or a list; a bare string is coerced to a
     one-element tuple. Empty by default.
 
+    `lint` also accepts a **table** form, `[lint] scripts = [...]`, which means
+    the same thing. It exists because `[lint.ignore]` — the suppression rules
+    read by `LintIgnoreService`, not by this loader — makes `lint` a table, and
+    TOML cannot spell both `lint = [...]` and `[lint.ignore]` in one file. A
+    repo that contributes checks *and* declares ignores writes the table form
+    for both.
+
     `provides` maps capability slot names to entrypoint paths relative to the extension
     repo root (e.g. `{"service": "workflow/service"}`). It is the general successor to
     `orchestrate_services`; use `capability_entrypoint` to resolve a slot, which bridges
@@ -246,7 +253,12 @@ class ExtensionManifestLoader:
         doctor_raw = data.get("doctor")
         doctor = doctor_raw if isinstance(doctor_raw, str) and doctor_raw else None
 
-        lint = _coerce_str_tuple(data.get("lint"))
+        lint_raw = data.get("lint")
+        # Table form (`[lint] scripts = [...]`) coexists with `[lint.ignore]`;
+        # the scalar/list form is the original spelling. `ignore` is read by
+        # `LintIgnoreService` straight off the manifest, not resolved here —
+        # its globs mean nothing without the repo root they resolve against.
+        lint = _coerce_str_tuple(lint_raw.get("scripts") if isinstance(lint_raw, dict) else lint_raw)
 
         orchestrate_services_raw = data.get("orchestrate_services")
         orchestrate_services = (

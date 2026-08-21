@@ -124,6 +124,39 @@ def test_load_coerces_lint_to_a_tuple() -> None:
     assert loader_list.load(repo, manifest_path=manifest_path).lint == ("a.py", "b.py")
 
 
+def test_load_reads_lint_scripts_from_the_table_form() -> None:
+    """`[lint] scripts` means the same as `lint = [...]`, and leaves room for `[lint.ignore]`.
+
+    TOML cannot spell both `lint = [...]` and `[lint.ignore]` in one file, so a
+    repo that contributes checks *and* declares ignore rules writes the table
+    form. `ignore` itself is read by `LintIgnoreService`, not here.
+    """
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    loader = ExtensionManifestLoader(
+        config_file_reader=FakeConfigFileReader(
+            {
+                manifest_path: {"lint": {"scripts": ["a.py", "b.py"], "ignore": {"paths": ["templates/**"]}}},
+            }
+        )
+    )
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+    assert loader.load(repo, manifest_path=manifest_path).lint == ("a.py", "b.py")
+
+
+def test_load_treats_an_ignore_only_lint_table_as_no_scripts() -> None:
+    """A repo that only declares ignores contributes no lint script."""
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    loader = ExtensionManifestLoader(
+        config_file_reader=FakeConfigFileReader(
+            {
+                manifest_path: {"lint": {"ignore": {"paths": ["templates/**"]}}},
+            }
+        )
+    )
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+    assert loader.load(repo, manifest_path=manifest_path).lint == ()
+
+
 def test_load_parses_requires_list() -> None:
     """`requires` is a list of module-name strings; preserved in order."""
     manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"

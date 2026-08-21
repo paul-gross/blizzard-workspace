@@ -306,7 +306,13 @@ class WorkspaceConfigService:
             skills_dir=skills_dir,
             capabilities=capabilities,
             doctor=merged.get("doctor") if isinstance(merged.get("doctor"), str) else None,
-            lint=_coerce_str_list(merged.get("lint")),
+            # `lint` accepts the same table form as `winter-ext.toml`
+            # (`[lint] scripts = [...]`), so a workspace that also declares
+            # `[lint.ignore]` — which TOML forces into a table — keeps its
+            # scripts. See configuration/lint.md.
+            lint=_coerce_str_list(
+                merged["lint"].get("scripts") if isinstance(merged.get("lint"), dict) else merged.get("lint")
+            ),
             file_size_lint=file_size_lint,
             keybindings=keybindings,
             dashboard=dashboard,

@@ -16,8 +16,21 @@ from winter_cli.modules.workspace.pattern_match import validate_bare_name_patter
 @click.option("--all", "all_flag", is_flag=True, default=False, help="Lint every feature environment's project repos.")
 @click.option("--changed", is_flag=True, default=False, help="Lint only the dirty / un-pushed files.")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Emit NDJSON lint events instead of a table.")
+@click.option(
+    "--show-ignored",
+    is_flag=True,
+    default=False,
+    help="Re-print findings suppressed by a `[lint.ignore]` rule, with the rule that matched.",
+)
 @click.pass_context
-def lint_command(ctx: click.Context, scopes: tuple[str, ...], all_flag: bool, changed: bool, output_json: bool) -> None:
+def lint_command(
+    ctx: click.Context,
+    scopes: tuple[str, ...],
+    all_flag: bool,
+    changed: bool,
+    output_json: bool,
+    show_ignored: bool,
+) -> None:
     """Run convention lint checks over the project repos in a feature environment.
 
     `winter lint` is a dispatcher — it runs winter's built-in core checks plus
@@ -36,6 +49,12 @@ def lint_command(ctx: click.Context, scopes: tuple[str, ...], all_flag: bool, ch
     optional file:line location. Exit code is 0 when nothing failed (warnings
     allowed), 1 when any check failed anywhere in scope.
 
+    A repo suppresses findings it has judged acceptable — a template tree, a
+    fixture, recorded results — with a [lint.ignore] table in its own
+    winter-ext.toml. Suppressed findings never fail the run but are always
+    counted in the summary; --show-ignored re-prints them with the rule that
+    matched, and a rule that suppresses nothing is itself reported as a warn.
+
     \b
       winter lint                  # the env you're standing in (or every env)
       winter lint alpha            # one env's project repos
@@ -43,6 +62,7 @@ def lint_command(ctx: click.Context, scopes: tuple[str, ...], all_flag: bool, ch
       winter lint 'winter-*'       # every repo/env name matching the glob
       winter lint --all            # every env's project repos
       winter lint --changed        # dirty / un-pushed files only
+      winter lint --show-ignored   # also re-print what [lint.ignore] suppressed
     """
     for scope in scopes:
         validate_bare_name_pattern(scope)
@@ -53,6 +73,6 @@ def lint_command(ctx: click.Context, scopes: tuple[str, ...], all_flag: bool, ch
     invocation_cwd = Path(os.environ.get("WINTER_INVOCATION_CWD") or Path.cwd())
     request = LintScopeRequest(names=list(scopes), all=all_flag, changed=changed, cwd=invocation_cwd)
     try:
-        handler.run(LintParams(scope=request, output_json=output_json))
+        handler.run(LintParams(scope=request, output_json=output_json, show_ignored=show_ignored))
     except LintScopeError as exc:
         raise click.ClickException(str(exc)) from exc

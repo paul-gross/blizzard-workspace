@@ -5,7 +5,12 @@ import sys
 
 import click
 
-from winter_cli.modules.lint.lint_reporter import ILintReporter, JsonLintReporter, StreamLintReporter
+from winter_cli.modules.lint.lint_reporter import (
+    ILintReporter,
+    JsonLintReporter,
+    StreamLintReporter,
+    SuppressedFindingFilter,
+)
 from winter_cli.modules.lint.lint_service import LintService
 from winter_cli.modules.lint.models import LintScopeKind, LintScopeRequest, LintSummary
 from winter_cli.modules.lint.scope_resolver import LintScopeResolver
@@ -15,6 +20,7 @@ from winter_cli.modules.lint.scope_resolver import LintScopeResolver
 class LintParams:
     scope: LintScopeRequest
     output_json: bool
+    show_ignored: bool = False
 
 
 class LintHandler:
@@ -34,7 +40,10 @@ class LintHandler:
 
     def run(self, params: LintParams) -> None:
         scopes = self._scope_resolver.resolve(params.scope)
-        reporter: ILintReporter = self._json_reporter if params.output_json else self._stream_reporter
+        base: ILintReporter = self._json_reporter if params.output_json else self._stream_reporter
+        # Suppressed findings are always counted in the summary; whether they are
+        # also re-printed is this flag's only job.
+        reporter: ILintReporter = base if params.show_ignored else SuppressedFindingFilter(base)
 
         if not scopes:
             # Only reachable when every given scope name/glob matched nothing —

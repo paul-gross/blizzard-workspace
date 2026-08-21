@@ -42,6 +42,96 @@ The three built-in core checks are:
   enforcement; this static lint check is a separate, complementary surface — it validates catalog membership ahead of
   time and runs even when no env is provisioned.
 
+## Ignoring findings
+
+A repo installable in any winter workspace must lint clean in any winter workspace. So a repo that legitimately carries
+unresolvable content — a template tree, a fixture, recorded results — **declares that itself, in its own
+`winter-ext.toml`**, and ships clean everywhere it is installed. A workspace never declares exemptions on behalf of a
+repo it owns; that would leave the repo dirty in every other workspace.
+
+```toml
+name = "winter-benchmark"
+
+[lint.ignore]
+# Whole paths — every check goes quiet here. Repo-relative globs.
+paths = ["environments/workspace-template/**"]
+
+# Narrower, and the form to reach for: silence one check, keep the rest of the
+# file covered.
+[lint.ignore.checks]
+link-anchors = ["environments/workspace-template/**"]
+path-notation = ["results/**"]
+```
+
+Each value takes a single glob or a list. Globs are **repo-relative, always** — that is what makes the declaration
+portable: the same manifest suppresses the same findings in a source checkout, in a feature-env worktree, in
+`.winter/ext/`, and in a stranger's workspace.
+
+Prefer `[lint.ignore.checks]` over `[lint.ignore] paths`. A blanket path ignore on a file turns link checking off there
+permanently, so the day someone genuinely breaks a link in it, lint stays silent. Per-check keeps the other checks live.
+
+### Declaring ignores alongside lint scripts
+
+TOML cannot spell both `lint = [...]` and `[lint.ignore]` in one file, so `lint` also accepts a **table** form. A repo
+that contributes checks *and* declares ignores writes:
+
+```toml
+[lint]
+scripts = ["scripts/lint-agents.py", "scripts/lint-methodology.py"]
+
+[lint.ignore.checks]
+agent-frontmatter = ["fixtures/**"]
+```
+
+`[lint] scripts` means exactly what `lint = [...]` means. Use the scalar/list form when there are no ignore rules.
+
+### Matching semantics
+
+- A finding matches a rule when its `file` resolves under a listed glob **and**, for a `[lint.ignore.checks]` entry, its
+  `check` equals the key.
+- `**` descends recursively and stands for *zero or more* segments, so `<dir>/**` also covers `<dir>` itself and
+  `a/**/b` covers `a/b`. `*` and `?` stay inside one path segment, so `results/*` covers `results/a.md` but not
+  `results/run/a.md` — write `results/**` for a whole tree. Character classes work as in `fnmatch`: `[abc]`, `[a-z]`,
+  `[!abc]` to negate, with a leading `^` a literal member rather than a negation. Every divergence from the plain
+  `fnmatch` used by `lint_doc_references.py`'s `--allow` is this matcher being **narrower**; a suppression rule is the
+  wrong place for a glob that quietly matches more than its author meant.
+- The dispatcher maps each finding's `file` back to its owning repo root — the nearest ancestor carrying a
+  `winter-ext.toml` — to evaluate repo-relative globs. That resolution works identically for every scope, including
+  `--changed`, where the scope is individual files rather than repo directories.
+- A finding with **no `file`** — a module-level failure like an unset `WINTER_CLI` or a `requires` cycle — is never
+  ignorable by a path rule. Those are configuration errors, not content judgments.
+- Suppression is post-hoc: the check still runs and still does the work, so this buys correctness, not speed. A check
+  that *crashes* on a file therefore cannot be silenced by an ignore — suppressing a finding and suppressing a failure
+  are different problems, and this solves only the first.
+
+### Suppression stays visible
+
+An ignore that nobody can see is a way to hide rot, so:
+
+- A suppressed finding never counts toward `fails` and never fails the run, but it is **always** counted in the summary:
+  `✗ 3 fail / 2 warn / 10 finding(s) / 7 ignored`.
+- `winter lint --show-ignored` re-prints suppressed findings in an `[ignored]` block, grouped under the rule that
+  matched each. `--json` emits them as their own `ignored` event type carrying the same payload plus a `rule` field.
+- **A rule that suppresses nothing is itself reported as a `warn`.** A stale ignore is a lie about the corpus, and is
+  exactly how this feature decays. Two cases are reported: a glob matching no path in the repo at all (the tree was
+  renamed or deleted), and a glob whose files this run actually linted without suppressing anything (whatever it hid got
+  fixed, and the rule outlived it). A rule whose paths simply were not linted this run — the common case under
+  `--changed` — is judged neither way and stays silent.
+- **A declaration winter cannot use is reported too**, under the same `lint-ignore` check: an unknown key (`path` for
+  `paths`, `[lint.ignores]` for `[lint.ignore]`), a wrong-typed value, an empty or malformed glob, or a
+  `winter-ext.toml` that will not parse. A typo that never becomes a rule is worse than a stale one — nothing about it
+  is visible otherwise — so none of it is dropped silently. Every one of these failure modes suppresses **nothing**, so
+  a broken ignore reveals findings rather than hiding them, and none of them fails the run or aborts it.
+
+### Where the filter lives
+
+`LintService` flattens core, workspace, and extension findings into one list before reporting, and the filter sits on
+that one line. So **no lint script parses ignore config** — scripts stay stateless and independently runnable, which is
+how they are tested — and every future contributed check inherits ignore support for free.
+
+A workspace-level mirror of this surface, for findings in a repo the workspace does *not* control and has no standing to
+fix, is deliberately unbuilt until a real third-party case turns up.
+
 ## Finding output contract
 
 A lint script follows the **same NDJSON contract as a doctor probe** (see
@@ -89,7 +179,9 @@ lint = "context/project/lint.sh"             # single script
 lint = ["context/project/lint.sh", "context/project/lint_docs.sh"]   # or a list
 ```
 
-`lint` accepts a single path or a list; a bare string is coerced to a one-element list. Paths are **relative to the
+`lint` accepts a single path or a list; a bare string is coerced to a one-element list. It also accepts the
+`[lint] scripts = [...]` table form, for the same reason `winter-ext.toml` does — see
+[Declaring ignores alongside lint scripts](#declaring-ignores-alongside-lint-scripts). Paths are **relative to the
 workspace root** and must point to executable files. They run first, before extension checks, with cwd at the workspace
 root, and their findings appear under a `[project]` source group. Use them for checks this specific workspace owns.
 Ecosystem-general checks meant to travel between workspaces belong in an installed extension instead (the `lint` field
