@@ -10,6 +10,8 @@ from winter_cli.modules.workspace.extension_manifest import (
     DEFAULT_ENTRY_POINT_PATHS,
     EXT_MANIFEST,
     EXTENSION_BLOCK_NAME,
+    ExtensionLoad,
+    ExtensionManifest,
     IExtensionManifestLoader,
 )
 from winter_cli.modules.workspace.init_reporter import IInitReporter
@@ -27,20 +29,34 @@ class ExtensionAgentsMdService:
 
     The generated file opens with a single `# Path notation resolution`
     heading; every bullet under it binds an extension name (the `<name>:`
-    path-notation prefix) to the location that resolves it. Rendering forks
-    by repo kind. A standalone extension lives at one fixed workspace path,
-    so its bullet is an eager `@`-import of its entry point. A project-repo
-    extension (a `projects/<name>/` checkout carrying a root `winter-ext.toml`
-    with no matching `[[standalone_repository]]` declaration — see
-    `RepositoryFactory.get_extension_repos`) has N copies — the source checkout
-    plus one worktree per feature env — so its bullet carries the literal
-    `<env>/<name>/` entry-point path template (plus the manifest description
-    when one is declared) with no `@`. This points an agent at the worktree it
-    is actually in rather than an injected `master` copy, and keeps project
-    entry points off the `injected_bytes` budget the `@`-import graph is
-    measured against. When at least one project-repo bullet is rendered, a
-    one-line note precedes them stating how `<env>` binds and what a
-    workspace-root reader (no env in scope) opens instead.
+    path-notation prefix) to the location that resolves it. A bullet renders in
+    one of three shapes, chosen by the extension's load mode and repo kind:
+
+    - **eager** — `@`-import of the entry point. Always-on context: the import
+      graph is injected into every session and counts against `injected_bytes`.
+    - **lazy standalone** — the extension name linked to its entry point, plus
+      the manifest description when one is declared. The agent follows the link
+      only when the row's subject is in scope, so the entry point costs one
+      routing line rather than its whole transitive import graph.
+    - **lazy project-repo** — the literal `<env>/<name>/` entry-point path
+      template (plus the description) in backticks rather than a link, because
+      `<env>` is not a real path. A project-repo extension (a `projects/<name>/`
+      checkout carrying a root `winter-ext.toml` with no matching
+      `[[standalone_repository]]` declaration — see
+      `RepositoryFactory.get_extension_repos`) has N copies on disk — the source
+      checkout plus one worktree per feature env — so the template points an
+      agent at the worktree it is actually in rather than an injected `master`
+      copy. When at least one such bullet is rendered, a one-line note precedes
+      them stating how `<env>` binds and what a workspace-root reader (no env in
+      scope) opens instead.
+
+    The load mode comes from the manifest's `load` key. Undeclared, it defaults
+    per repo kind — standalones eager, project repos lazy — so the rendering
+    predates the key and is unchanged by adding it. `load = "eager"` on a
+    project repo is refused (reported, then rendered lazily): an eager import
+    there would inject the `master` copy that goes stale against whatever
+    feature branch the reading agent is on, which is the reason project repos
+    render lazily in the first place.
 
     A stale `CLAUDE.winter.md` at the workspace root (written by older versions of
     winter that generated a paired shim) is removed on every run as a migration
@@ -66,10 +82,11 @@ class ExtensionAgentsMdService:
 
         Called once after all standalones are reconciled, with every extension
         repo (standalones plus project-repo extensions) that exists on disk.
-        Standalone entries get an eager `@`-import bullet; project-repo entries
-        get a path-template bullet. A repo of either kind is eligible only when an entry
-        point (`index.md`, `AGENTS.md`, then `context/index.md`, in that order)
-        exists at its root.
+        Each entry renders as an eager `@`-import, a lazy link, or a lazy
+        path-template bullet — see the class docstring for how the manifest's
+        `load` key and the repo kind select between them. A repo of any kind is
+        eligible only when an entry point (`index.md`, `AGENTS.md`, then
+        `context/index.md`, in that order) exists at its root.
 
         Also removes any stale `CLAUDE.winter.md` left by an older version of
         winter (migration cleanup). When no extensions are eligible,
@@ -93,25 +110,34 @@ class ExtensionAgentsMdService:
         if self._config.adopt_extensions == AdoptExtensions.none:
             return True
 
-        standalone_lines: list[tuple[str, str]] = []
+        eager_lines: list[tuple[str, str]] = []
+        lazy_lines: list[tuple[str, str]] = []
         project_rows: list[tuple[str, str]] = []
         for repo in repos:
             entry_point = self._find_entry_point(repo.path)
             if entry_point is None:
                 continue
-            if self._is_project_repo_extension(repo):
-                project_rows.append((repo.name, self._render_project_row(repo, entry_point, reporter)))
+            manifest = self._load_manifest(repo, reporter)
+            description = manifest.description if manifest is not None else None
+            is_project_repo = self._is_project_repo_extension(repo)
+            load = self._resolve_load(repo, manifest, is_project_repo=is_project_repo, reporter=reporter)
+            if is_project_repo:
+                project_rows.append((repo.name, self._render_project_row(repo, entry_point, description)))
                 continue
             try:
                 relative = repo.path.relative_to(self._config.workspace_root).as_posix()
             except ValueError:
                 # Standalone path lives outside the workspace; can't write a
-                # workspace-relative @-import for it. Skip silently.
+                # workspace-relative @-import or link for it. Skip silently.
                 continue
-            standalone_lines.append((repo.name, f"- **{repo.name}**: @{relative}/{entry_point}"))
+            target = f"{relative}/{entry_point}"
+            if load is ExtensionLoad.lazy:
+                lazy_lines.append((repo.name, self._render_lazy_row(repo.name, target, description)))
+            else:
+                eager_lines.append((repo.name, f"- **{repo.name}**: @{target}"))
 
         agents_path = self._config.workspace_root / AGENTS_WINTER_FILENAME
-        eligible = [*standalone_lines, *project_rows]
+        eligible = [*eager_lines, *lazy_lines, *project_rows]
 
         if not eligible:
             if not self._fs.exists(agents_path):
@@ -130,13 +156,19 @@ class ExtensionAgentsMdService:
             return True
 
         winter_lines = ["# Path notation resolution", ""]
-        winter_lines.extend(line for _, line in sorted(standalone_lines))
+        winter_lines.extend(line for _, line in sorted(eager_lines))
+        if lazy_lines:
+            # Lazy bullets carry no `@`, so a blank line keeps them from reading as a
+            # continuation of the eager import block above.
+            if eager_lines:
+                winter_lines.append("")
+            winter_lines.extend(line for _, line in sorted(lazy_lines))
         if project_rows:
             # `<env>` in the bullets below is unbound for a reader with no feature env
             # in scope (e.g. a subagent spawned from the workspace root per
             # `context/workspace-layout.md` rule 4) — state the binding and the
             # workspace-root fallback once here rather than repeating it per bullet.
-            if standalone_lines:
+            if eager_lines or lazy_lines:
                 winter_lines.append("")
             winter_lines.append(
                 "`<env>` below binds to the feature-env directory you are working in; "
@@ -189,33 +221,86 @@ class ExtensionAgentsMdService:
             return False
         return True
 
-    def _render_project_row(
+    def _resolve_load(
         self,
         repo: StandaloneRepository,
-        entry_point: str,
+        manifest: ExtensionManifest | None,
+        *,
+        is_project_repo: bool,
         reporter: IInitReporter,
-    ) -> str:
-        """Render a project-repo extension's bullet.
+    ) -> ExtensionLoad:
+        """Resolve the effective load mode for `repo`.
 
-        No `@`-import: an agent working in a feature env reads the worktree
-        it's actually in (`<env>/<name>/`) rather than this injected `master`
-        copy. Names the full entry-point path (so the bullet says *what* to
-        read, not just where); appends the manifest `description` after it
-        when present.
+        An undeclared `load` falls back to the default for the repo kind —
+        standalones eager, project repos lazy — which is the behavior that
+        predates the key, so existing manifests render unchanged.
+
+        `load = "eager"` on a project repo is refused and downgraded to lazy
+        rather than failing the run: the `@`-import it asks for would inject the
+        `projects/<name>/` master copy, which goes stale against whatever
+        feature branch the reading agent is on. Reported so the manifest gets
+        fixed, non-fatal so one bad key doesn't trap a reconcile.
         """
-        line = f"- **{repo.name}**: `<env>/{repo.name}/{entry_point}`"
-        description = self._load_description(repo, reporter)
+        declared = manifest.load if manifest is not None else None
+        if declared is None:
+            return ExtensionLoad.lazy if is_project_repo else ExtensionLoad.eager
+        if is_project_repo and declared is ExtensionLoad.eager:
+            reporter.repo_error(
+                repo.name,
+                f'{EXT_MANIFEST} — `load = "eager"` is not available to a project-repo extension '
+                f"(it has one copy per feature env; an eager import would inject the stale master "
+                f"copy). Rendering it lazily.",
+            )
+            return ExtensionLoad.lazy
+        return declared
+
+    def _render_lazy_row(self, name: str, target: str, description: str | None) -> str:
+        """Render a lazily-loaded standalone's bullet.
+
+        A markdown link, not an `@`-import: the entry point sits at one fixed
+        workspace-relative path, so the link resolves for a reader anywhere in
+        the workspace and the agent opens it only when it needs to. The
+        extension name *is* the link — naming the path a second time as link
+        text would spend tokens on every row to say what the href already says.
+        Appends the manifest `description` when present; without one the row is
+        the link alone, which says where to read but not when.
+        """
+        line = f"- **[{name}]({target})**"
         if description:
             line = f"{line} — {description}"
         return line
 
-    def _load_description(self, repo: StandaloneRepository, reporter: IInitReporter) -> str | None:
+    def _render_project_row(
+        self,
+        repo: StandaloneRepository,
+        entry_point: str,
+        description: str | None,
+    ) -> str:
+        """Render a project-repo extension's bullet.
+
+        The `<env>/<name>/` path template in backticks rather than a link —
+        `<env>` binds at read time to the worktree the agent is in, so there is
+        no single path to link to. Names the full entry-point path (so the
+        bullet says *what* to read, not just where); appends the manifest
+        `description` after it when present.
+        """
+        line = f"- **{repo.name}**: `<env>/{repo.name}/{entry_point}`"
+        if description:
+            line = f"{line} — {description}"
+        return line
+
+    def _load_manifest(self, repo: StandaloneRepository, reporter: IInitReporter) -> ExtensionManifest | None:
+        """Load `repo`'s `winter-ext.toml`, or None when absent or malformed.
+
+        A malformed manifest is reported and treated as absent so the extension
+        still renders — under its repo-kind defaults — instead of vanishing from
+        the generated file.
+        """
         manifest_path = repo.path / EXT_MANIFEST
         if not self._fs.is_file(manifest_path):
             return None
         try:
-            manifest = self._manifest_loader.load(repo, manifest_path)
+            return self._manifest_loader.load(repo, manifest_path)
         except RepoError as exc:
             reporter.repo_error(repo.name, str(exc))
             return None
-        return manifest.description

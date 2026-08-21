@@ -8,6 +8,7 @@ from tests.conftest import FakeConfigFileReader
 from winter_cli.modules.workspace.extension_manifest import (
     DEFAULT_AGENTS_DIRS,
     DEFAULT_SKILLS_DIRS,
+    ExtensionLoad,
     ExtensionManifestLoader,
 )
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
@@ -30,6 +31,7 @@ def test_load_returns_defaults_when_manifest_path_is_none() -> None:
     assert manifest.orchestrate_services is None
     assert manifest.requires == ()
     assert manifest.provides == {}
+    assert manifest.load is None
 
 
 def test_load_respects_manifest_prefix_and_hooks() -> None:
@@ -458,3 +460,41 @@ def test_load_service_defs_source_uses_resolved_prefix() -> None:
 
     manifest = loader.load(repo, manifest_path=manifest_path)
     assert manifest.service_defs[0].source == "resolved-name"
+
+
+# ── load mode ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("value", ["eager", "lazy"])
+def test_load_parses_declared_load_mode(value: str) -> None:
+    """Both accepted `load` values round-trip to their enum member."""
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader({manifest_path: {"load": value}}))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    manifest = loader.load(repo, manifest_path=manifest_path)
+    assert manifest.load is ExtensionLoad(value)
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_load_leaves_load_undeclared_when_absent_or_empty(value: object) -> None:
+    """Absent or empty means undeclared — the renderer picks the repo-kind default."""
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    data: dict = {} if value is None else {"load": value}
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader({manifest_path: data}))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    manifest = loader.load(repo, manifest_path=manifest_path)
+    assert manifest.load is None
+
+
+@pytest.mark.parametrize("value", ["EAGER", "deferred", True, 3])
+def test_load_raises_repo_error_on_unrecognized_load_value(value: object) -> None:
+    """An unrecognized `load` is a typo the author meant to be honored — raise, don't default."""
+    manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
+    loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader({manifest_path: {"load": value}}))
+    repo = StandaloneRepository(name="my-ext", path=WORKSPACE_ROOT / "my-ext")
+
+    with pytest.raises(RepoError) as excinfo:
+        loader.load(repo, manifest_path=manifest_path)
+    assert "`load` must be one of" in str(excinfo.value)

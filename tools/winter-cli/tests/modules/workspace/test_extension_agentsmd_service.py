@@ -40,19 +40,32 @@ def _seed_extension_with_index(fs: FakeFilesystem, name: str) -> StandaloneRepos
     return StandaloneRepository(name=name, path=ext_path)
 
 
+def _seed_standalone_with_manifest(
+    fs: FakeFilesystem,
+    name: str,
+    **manifest_data: object,
+) -> tuple[StandaloneRepository, dict]:
+    """Plant a standalone extension carrying a winter-ext.toml with the given fields."""
+    repo = _seed_extension_with_index(fs, name)
+    manifest_path = repo.path / EXT_MANIFEST
+    fs.files[manifest_path] = ""
+    return repo, {manifest_path: dict(manifest_data)}
+
+
 def _seed_project_extension(
     fs: FakeFilesystem,
     name: str,
     *,
     entry_point: str = "index.md",
     description: str | None = None,
+    extra_manifest: dict | None = None,
 ) -> tuple[StandaloneRepository, dict]:
     """Plant a project-repo extension under `projects/<name>/` with a winter-ext.toml."""
     ext_path = WORKSPACE_ROOT / "projects" / name
     fs.directories.add(ext_path)
     fs.files[ext_path / entry_point] = "# entry\n"
     manifest_path = ext_path / EXT_MANIFEST
-    manifest_data: dict = {}
+    manifest_data: dict = dict(extra_manifest or {})
     if description is not None:
         manifest_data["description"] = description
     fs.files[manifest_path] = ""
@@ -313,3 +326,161 @@ def test_finalize_agentsmd_env_binding_note_present_with_project_rows(
     assert "binds to the feature-env directory" in content
     assert "projects/<name>/" in content
     assert "Docs generator." in content
+
+
+# ── declared load mode ─────────────────────────────────────────────────────
+
+
+def test_finalize_agentsmd_lazy_standalone_renders_link_instead_of_import(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """`load = "lazy"` swaps a standalone's eager `@`-import for a markdown link."""
+    fs = FakeFilesystem()
+    repo, config_files = _seed_standalone_with_manifest(fs, "ext-lazy", load="lazy")
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+    assert ok is True
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **[ext-lazy](ext-lazy/index.md)**" in content
+    assert "@" not in content
+
+
+def test_finalize_agentsmd_lazy_standalone_appends_description(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """A lazy row carries the manifest description — the trigger for opening the link."""
+    fs = FakeFilesystem()
+    repo, config_files = _seed_standalone_with_manifest(
+        fs, "ext-lazy", load="lazy", description="Conventions for agent-facing markdown."
+    )
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+    assert ok is True
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **[ext-lazy](ext-lazy/index.md)** — Conventions for agent-facing markdown." in content
+
+
+def test_finalize_agentsmd_lazy_standalone_without_description_renders_link_alone(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """`description` is optional — the row degrades to the bare link."""
+    fs = FakeFilesystem()
+    repo, config_files = _seed_standalone_with_manifest(fs, "ext-lazy", load="lazy")
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+    assert ok is True
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **[ext-lazy](ext-lazy/index.md)**\n" in content
+    assert "—" not in content
+
+
+def test_finalize_agentsmd_explicit_eager_standalone_still_imports(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """Declaring the standalone default explicitly changes nothing."""
+    fs = FakeFilesystem()
+    repo, config_files = _seed_standalone_with_manifest(fs, "ext-eager", load="eager")
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+    assert ok is True
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **ext-eager**: @ext-eager/index.md" in content
+
+
+def test_finalize_agentsmd_standalone_defaults_to_eager_without_declared_load(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """A manifest that declares no `load` keeps the pre-existing eager import."""
+    fs = FakeFilesystem()
+    repo, config_files = _seed_standalone_with_manifest(fs, "ext-a", description="Some extension.")
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+    assert ok is True
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **ext-a**: @ext-a/index.md\n" in content
+    # An eager import needs no description — the imported file speaks for itself.
+    assert "Some extension." not in content
+
+
+def test_finalize_agentsmd_project_repo_declaring_lazy_renders_path_template(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """Declaring the project-repo default explicitly changes nothing."""
+    fs = FakeFilesystem()
+    repo, config_files = _seed_project_extension(
+        fs, "winter-docs", description="Docs generator.", extra_manifest={"load": "lazy"}
+    )
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+    assert ok is True
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **winter-docs**: `<env>/winter-docs/index.md` — Docs generator." in content
+    assert init_reporter.errors == []
+
+
+def test_finalize_agentsmd_project_repo_declaring_eager_is_reported_and_downgraded(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """An eager import of a project repo would inject the stale master copy — refuse it."""
+    fs = FakeFilesystem()
+    repo, config_files = _seed_project_extension(fs, "winter-docs", extra_manifest={"load": "eager"})
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+    assert ok is True
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **winter-docs**: `<env>/winter-docs/index.md`" in content
+    assert "@" not in content
+    assert any(name == "winter-docs" and "load" in message for name, message in init_reporter.errors)
+
+
+def test_finalize_agentsmd_malformed_manifest_reports_and_falls_back_to_kind_default(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """An unreadable `load` value is reported, and the extension still renders."""
+    fs = FakeFilesystem()
+    repo, config_files = _seed_standalone_with_manifest(fs, "ext-broken", load="deferred")
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+    assert ok is True
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **ext-broken**: @ext-broken/index.md" in content
+    assert any(name == "ext-broken" for name, _ in init_reporter.errors)
+
+
+def test_finalize_agentsmd_groups_eager_lazy_and_project_rows_in_order(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """All three shapes coexist: eager imports, then lazy links, then the `<env>` rows."""
+    fs = FakeFilesystem()
+    eager = _seed_extension_with_index(fs, "ext-eager")
+    lazy, lazy_files = _seed_standalone_with_manifest(fs, "ext-lazy", load="lazy", description="Lazy one.")
+    project, project_files = _seed_project_extension(fs, "winter-docs", description="Docs generator.")
+    svc = ExtensionAgentsMdService(
+        config=workspace_config, fs=fs, manifest_loader=_manifest_loader({**lazy_files, **project_files})
+    )
+
+    ok = svc.finalize_agentsmd([project, lazy, eager], init_reporter)
+    assert ok is True
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    eager_at = content.index("@ext-eager/index.md")
+    lazy_at = content.index("[ext-lazy](")
+    note_at = content.index("binds to the feature-env directory")
+    project_at = content.index("<env>/winter-docs/index.md")
+    assert eager_at < lazy_at < note_at < project_at

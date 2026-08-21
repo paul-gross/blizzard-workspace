@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import enum
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -27,6 +28,42 @@ HOOK_ON_WORKSPACE_RECONCILE = "on_workspace_reconcile"
 
 EXTENSION_BLOCK_NAME = "winter-extensions"
 EXTENSION_INDEX_FILENAME = "index.md"
+
+
+class ExtensionLoad(enum.Enum):
+    """How an extension's entry point is delivered into `AGENTS.winter.md`.
+
+    Declared as `load` in `winter-ext.toml`. Absent means undeclared — the
+    renderer then picks the default for the extension's repo kind rather than
+    assuming one here, so `ExtensionManifest.load` is `None`, never a default
+    member.
+    """
+
+    eager = "eager"
+    """`@`-import the entry point — always-on context, injected into every session."""
+
+    lazy = "lazy"
+    """Link the entry point — the agent opens it only when its subject is in scope."""
+
+
+def _coerce_load(value: object) -> ExtensionLoad | None:
+    """Coerce the manifest `load` field into an `ExtensionLoad`.
+
+    Absent or empty leaves the field undeclared (`None`). Any other value is
+    something the author wrote deliberately, so a typo raises rather than
+    silently falling back to a default the author didn't ask for — a silent
+    fallback to `eager` would inject context they meant to make lazy.
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, str):
+        try:
+            return ExtensionLoad(value)
+        except ValueError:
+            pass
+    accepted = ", ".join(f'"{member.value}"' for member in ExtensionLoad)
+    raise ConfigError(f"`load` must be one of {accepted}; got {value!r}")
+
 
 # Workspaces commit a stable `# Winter Extensions` section in AGENTS.md (or
 # CLAUDE.md for backward-compat) that imports `@AGENTS.winter.md`; this CLI
@@ -114,10 +151,16 @@ class ExtensionManifest:
     entries (caught and reported at each call site like other manifest errors).
 
     `description` is a one-line, human-readable summary of the extension, used
-    to source the text of a project-repo extension's routing row in
-    `AGENTS.winter.md` (`ExtensionAgentsMdService`). Standalone extensions
-    don't use it — their eager `@`-import needs no description. `None` when
-    absent; the row then renders with the entry-point path alone.
+    to source the text of a lazily-loaded extension's routing row in
+    `AGENTS.winter.md` (`ExtensionAgentsMdService`). An eager `@`-import needs
+    no description and drops it. `None` when absent; the row then renders with
+    the entry-point path alone.
+
+    `load` declares how the entry point reaches an agent — `eager` `@`-imports
+    it into every session, `lazy` renders a link the agent follows only when the
+    row's subject is in scope. `None` when undeclared, which leaves the choice
+    to `ExtensionAgentsMdService`'s per-repo-kind default (standalones eager,
+    project repos lazy). Raises `RepoError` on an unrecognized value.
     """
 
     prefix: str
@@ -132,6 +175,7 @@ class ExtensionManifest:
     implements: dict[str, str] = field(default_factory=dict)
     provision: tuple[ProvisionHandler, ...] = ()
     description: str | None = None
+    load: ExtensionLoad | None = None
     service_defs: tuple[ExtServiceDef, ...] = ()
 
     def capability_entrypoint(self, slot: str) -> str | None:
@@ -239,6 +283,11 @@ class ExtensionManifestLoader:
         description_raw = data.get("description")
         description = description_raw if isinstance(description_raw, str) and description_raw else None
 
+        try:
+            load = _coerce_load(data.get("load"))
+        except ConfigError as exc:
+            raise RepoError(f"reading {EXT_MANIFEST} — {exc}") from exc
+
         return ExtensionManifest(
             prefix=prefix,
             skills_dirs=skills_dirs,
@@ -253,6 +302,7 @@ class ExtensionManifestLoader:
             provision=provision,
             service_defs=service_defs,
             description=description,
+            load=load,
         )
 
 

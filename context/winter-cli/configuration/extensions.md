@@ -10,7 +10,8 @@ from a standalone's.
 ```toml
 name = "winter-backlog"        # default symlink prefix when no override is set
 prefix = "wsb"                 # optional shorter prefix; takes precedence over `name`
-description = "Backlog tooling for winter issues." # optional; one-line summary used by a project-repo extension's AGENTS.winter.md bullet
+description = "Backlog tooling for winter issues." # optional; one-line summary shown on a lazy AGENTS.winter.md bullet
+load = "lazy"                  # optional; "eager" (@-import) or "lazy" (link) — see Context delivery below
 skills_dir = "skills"          # optional; explicit path overrides default discovery
 agents_dir = "agents"          # optional; explicit path overrides default discovery
 doctor = "scripts/doctor.sh"   # optional; executable that emits NDJSON probe events for `winter doctor`
@@ -189,6 +190,31 @@ The hook's **cwd is the workspace root**.
 continues so a broken hook doesn't trap an env on disk. Pass `--strict` to `winter ws destroy` (or set it in CI/scripted
 use) when a hook failure must surface as a user-actionable error before any worktree is removed.
 
+## Context delivery
+
+`AGENTS.winter.md` opens with a single `# Path notation resolution` heading; every bullet under it binds an extension
+name (its `<name>:` path-notation prefix) to the location that resolves it. The entry point is resolved the same way for
+every extension — `index.md`, then `AGENTS.md`, then `context/index.md`, first match wins (mirroring the
+`skills_dir`/`agents_dir` default-discovery fallback above) — but how that entry point reaches an agent is set by the
+manifest's `load` key.
+
+| `load`  | Bullet                                                           | Cost                                                                                   |
+| ------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `eager` | `- **winter-canon**: @.winter/ext/canon/index.md`                | Injected into every session, with everything it `@`-imports, against `injected_bytes`. |
+| `lazy`  | `- **[winter-canon](.winter/ext/canon/index.md)** — description` | One routing line. The agent follows the link only when the row's subject is in scope.  |
+
+Pick `eager` for context every session needs regardless of the task; pick `lazy` for context that only matters when its
+subject is in scope. `description` is what tells a reader whether to follow a lazy link, so an extension that declares
+`load = "lazy"` should declare one too — it is not required, and a row without it renders as the bare link.
+
+**Defaults.** When `load` is absent, the mode falls back to the extension's repo kind — a standalone is `eager`, a
+project repo is `lazy`. That is the behavior that predates the key, so adding it to the schema changed no existing
+workspace's generated file.
+
+**`load = "eager"` is refused for a project repo.** A project repo has N copies on disk (see below), and an eager import
+resolves to exactly one of them. `winter ws init` reports the declaration and renders the bullet lazily rather than
+failing the reconcile.
+
 ## Project-repo extensions
 
 A `[[project_repository]]` whose `projects/<name>/` root carries a `winter-ext.toml` is extension-eligible in place — no
@@ -197,21 +223,17 @@ separate `[[standalone_repository]]` clone is needed. Every extension feature (`
 projection) resolves it exactly like a standalone, reading `winter-ext.toml` and everything it declares from the
 `projects/<name>/` root — the source checkout, never a per-env worktree.
 
-Context delivery is the one place a project-repo extension renders differently from a standalone. `AGENTS.winter.md`
-opens with a single `# Path notation resolution` heading; every bullet under it binds an extension name (its `<name>:`
-path-notation prefix) to the location that resolves it. A standalone lives at one fixed workspace path, so its bullet is
-an eager `@`-import of its entry point. A project repo has N copies on disk — the source checkout plus one worktree per
-feature env — so an eager `@`-import would inject a `master` copy that goes stale against whatever feature branch an
-agent is actually editing. Instead its bullet carries the literal `<env>/<name>/` entry-point path template, plus the
-manifest's one-line `description` when one is declared — with no `@`:
+Context delivery is the one place a project-repo extension renders differently from a standalone. A project repo has N
+copies on disk — the source checkout plus one worktree per feature env — so it defaults to `load = "lazy"` and cannot
+opt into `eager`: an `@`-import would inject the `master` copy, which goes stale against whatever feature branch an
+agent is actually editing.
+
+Its bullet also differs in shape from a lazy standalone's. There is no single path to link to, so it carries the literal
+`<env>/<name>/` entry-point path template in backticks, plus the manifest's one-line `description` when one is declared:
 
 ```text
 - **winter-docs**: `<env>/winter-docs/index.md` — Public documentation site generator.
 ```
-
-The entry point itself is resolved the same way for both kinds — `index.md`, then `AGENTS.md`, then `context/index.md`,
-first match wins (mirroring the `skills_dir`/`agents_dir` default-discovery fallback above) — but only a standalone's
-entry point is ever `@`-imported; a project repo's is read by the agent directly from the worktree it's in.
 
 **`<env>` binding.** `AGENTS.winter.md` auto-loads into every session via the workspace's `# Winter Extensions` block,
 including a session with no feature env in scope — `context/workspace-layout.md` mandates subagents spawn from the
