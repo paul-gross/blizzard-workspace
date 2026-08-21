@@ -35,11 +35,11 @@ detected and offered as usual. Two seed types:
   extension the user wants to set up may not be installed yet: against the installed extensions listed in
   `workspace:/AGENTS.winter.md`, **and** — for one that isn't installed — against any `winter-*` git repository already
   checked out in the workspace but not yet registered (standalone extensions are cloned at the workspace root or a
-  configured `path`, per [context/workspace-layout.md](./context/workspace-layout.md)). A not-yet-installed orchestrator
-  the user has cloned but not wired up still counts. If the named extension is a service orchestrator — installed or not
-  — pre-target it in the **Configure service orchestration** step (which installs it if needed); otherwise pre-target it
-  in the **Run feature-environment setup steps from installed extensions** step. The full detect-and-fill walkthrough
-  still runs start to finish around it.
+  configured `path`, per [workspace:/context/workspace-layout.md](workspace:/context/workspace-layout.md)). A
+  not-yet-installed orchestrator the user has cloned but not wired up still counts. If the named extension is a service
+  orchestrator — installed or not — pre-target it in the **Configure service orchestration** step (which installs it if
+  needed); otherwise pre-target it in the **Run feature-environment setup steps from installed extensions** step. The
+  full detect-and-fill walkthrough still runs start to finish around it.
 
 **Step/area requests — the only thing that narrows.** Narrowing happens **only** when arguments explicitly name one or
 more steps or areas of this walkthrough. Recognized names: `remote`, `repos`, `identity`, `project settings`,
@@ -54,12 +54,12 @@ scope alongside it — as if both names had been given — with two concrete out
 - **Project settings not yet configured:** step 6 runs, but its three-way question is pre-answered to "environment +
   services" — do not re-open it as a live choice, since the user's explicit `services` request already settled it. Step
   6's research covers both the settings facets and the services facet in one pass (see
-  [`context/service-discovery.md`](./context/service-discovery.md)), and step 8 picks the discovered services up from
-  context.
+  [`workspace:/context/service-discovery.md`](workspace:/context/service-discovery.md)), and step 8 picks the discovered
+  services up from context.
 - **Project settings already configured** (check `.winter/config.toml` / `context/project/project-setup.md` as usual):
   step 6 is skipped entirely (nothing new to configure there), and step 8's own discovery step
-  ([`context/setup-service-orchestration.md`](./context/setup-service-orchestration.md) §2, "Fresh discovery") runs the
-  services-only research pass instead — same schema, different entry point.
+  ([`workspace:/context/setup-service-orchestration.md`](workspace:/context/setup-service-orchestration.md) §2, "Fresh
+  discovery") runs the services-only research pass instead — same schema, different entry point.
 
 `project settings` alone does **not** pull in `services` — it stays scoped to the environment (still asking its open
 three-way question) unless the user says otherwise.
@@ -106,9 +106,10 @@ configuring it. Be verbose, be explicit, and be patient.
 
 Before running this skill:
 
-- Read [context/workspace-layout.md](./context/workspace-layout.md) to understand the workspace topology and directory
-  layout
-- Read [context/worktree-ops.md](./context/worktree-ops.md) to understand the exact git commands for this topology
+- Read [workspace:/context/workspace-layout.md](workspace:/context/workspace-layout.md) to understand the workspace
+  topology and directory layout
+- Read [workspace:/context/worktree-ops.md](workspace:/context/worktree-ops.md) to understand the exact git commands for
+  this topology
 
 ## Opening preamble (always send first)
 
@@ -360,9 +361,10 @@ service orchestration, or skip this for now?"**
 
 - "skip" / "later": continue to the next step. Record that service orchestration was **not** selected — the
   service-orchestration step (below) will need to research it from scratch if asked for later.
-- "environment only": tell [context/setup-project-setup.md](./context/setup-project-setup.md) that service discovery is
-  **out of scope** for this run, then follow it — that guide produces both parts. After it's finished, tell the user:
-  "Now applying the new config to all existing worktrees so the `cmd` list runs everywhere..." and run:
+- "environment only": tell [workspace:/context/setup-project-setup.md](workspace:/context/setup-project-setup.md) that
+  service discovery is **out of scope** for this run, then follow it — that guide produces both parts. After it's
+  finished, tell the user: "Now applying the new config to all existing worktrees so the `cmd` list runs everywhere..."
+  and run:
 
   ```bash
   winter ws init --all
@@ -370,12 +372,12 @@ service orchestration, or skip this for now?"**
 
   This reruns each repo's `cmd` list and writes any new `git_excludes` into every clone (source checkouts and feature
   worktrees). Report what changed. Record that service orchestration was **not** selected.
-- "environment + services": tell [context/setup-project-setup.md](./context/setup-project-setup.md) that service
-  discovery **is in scope** for this run, then follow it — in this mode it also researches and reports the application's
-  services (name, scope, start command, ports, and container/image wiring if the project already uses docker) in the
-  same pass as the rest of the project settings. After it's finished, run `winter ws init --all` as above and report
-  what changed. Record that service orchestration **was** selected, and hold onto the discovered service list and wiring
-  findings — the service-orchestration step (below) uses them directly instead of researching again.
+- "environment + services": tell [workspace:/context/setup-project-setup.md](workspace:/context/setup-project-setup.md)
+  that service discovery **is in scope** for this run, then follow it — in this mode it also researches and reports the
+  application's services (name, scope, start command, ports, and container/image wiring if the project already uses
+  docker) in the same pass as the rest of the project settings. After it's finished, run `winter ws init --all` as above
+  and report what changed. Record that service orchestration **was** selected, and hold onto the discovered service list
+  and wiring findings — the service-orchestration step (below) uses them directly instead of researching again.
 
 ### 7. Create the first feature environment (optional)
 
@@ -475,16 +477,16 @@ pre-targeted in this step.
   want to walk through configuring services for the already-installed orchestrator(s)?"**
   - If **no**: continue to the next step.
   - If **yes**: tell them "Now I'll walk you through configuring your service orchestration." Then follow
-    [context/setup-service-orchestration.md](./context/setup-service-orchestration.md).
+    [workspace:/context/setup-service-orchestration.md](workspace:/context/setup-service-orchestration.md).
 - If the user chooses **Specify my own**: ask **one** question — **"What's the git URL of the orchestrator extension?"**
   Once given, tell them "Now I'll walk you through installing and configuring your service orchestration." Then follow
-  [context/setup-service-orchestration.md](./context/setup-service-orchestration.md), passing the URL as a custom
-  orchestrator to install.
+  [workspace:/context/setup-service-orchestration.md](workspace:/context/setup-service-orchestration.md), passing the
+  URL as a custom orchestrator to install.
 - If the user chooses **one or more** of the built-in orchestrators: tell them "Now I'll walk you through installing and
   configuring your service orchestration." Then follow
-  [context/setup-service-orchestration.md](./context/setup-service-orchestration.md). (If the project-settings step
-  already discovered services, that guide picks them up from context automatically — you won't need to ask discovery
-  questions again.)
+  [workspace:/context/setup-service-orchestration.md](workspace:/context/setup-service-orchestration.md). (If the
+  project-settings step already discovered services, that guide picks them up from context automatically — you won't
+  need to ask discovery questions again.)
 
 ### 9. Run feature-environment setup steps from installed extensions
 
@@ -539,7 +541,8 @@ Ask **one** question:
 **"Set up contributing.md now?"**
 
 - "no" or "later": continue.
-- "yes": follow [context/contributing-setup.md](./context/contributing-setup.md) to work with the user.
+- "yes": follow [workspace:/context/contributing-setup.md](workspace:/context/contributing-setup.md) to work with the
+  user.
 
 ### Final report
 

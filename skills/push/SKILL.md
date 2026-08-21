@@ -11,9 +11,10 @@ determine which — a single optional name.
 
 A feature environment contains a worktree for every project repo, so pushing one is a multi-repo operation. Use
 `winter ws push` — it pushes every matched worktree to its tracked upstream in parallel and honors pinned-repo rules.
-For the full reference, start at the CLI hub [context/winter-cli/index.md](./context/winter-cli/index.md), then read the
-specific topic [context/winter-cli/usage/ws/push.md](./context/winter-cli/usage/ws/push.md) — plus
-[context/worktree-ops.md](./context/worktree-ops.md).
+For the full reference, start at the CLI hub
+[workspace:/context/winter-cli/index.md](workspace:/context/winter-cli/index.md), then read the specific topic
+[workspace:/context/winter-cli/usage/ws/push.md](workspace:/context/winter-cli/usage/ws/push.md) — plus
+[workspace:/context/worktree-ops.md](workspace:/context/worktree-ops.md).
 
 Use raw `git push` for the workspace branch itself — `winter ws push` doesn't operate on it. Standalone repos can be
 reached via `winter ws push --standalone` or with raw git, whichever is more convenient.

@@ -14,9 +14,9 @@ git identity) belongs in `/ws-setup`, not here.
 The skill is a thin wrapper over `winter ws init`. It picks the right form, layers in per-environment post-init from
 `workspace:/context/project/project-setup.md`, and halts cleanly on any of the precondition or runtime failures
 enumerated in the **Non-interactivity contract** below. For the underlying primitives, start at the CLI hub
-[context/winter-cli/index.md](./context/winter-cli/index.md), then read the specific topic
-[context/winter-cli/usage/ws/init.md](./context/winter-cli/usage/ws/init.md) — plus
-[context/worktree-ops.md](./context/worktree-ops.md).
+[workspace:/context/winter-cli/index.md](workspace:/context/winter-cli/index.md), then read the specific topic
+[workspace:/context/winter-cli/usage/ws/init.md](workspace:/context/winter-cli/usage/ws/init.md) — plus
+[workspace:/context/worktree-ops.md](workspace:/context/worktree-ops.md).
 
 ## Preflight
 
