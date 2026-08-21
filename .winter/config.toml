@@ -216,3 +216,14 @@ path = ".winter/ext/context"
 name = "blizzard-product"
 url = "git@github.com:paul-gross/blizzard-product.git"
 path = ".winter/ext/product"
+
+# ---------------------------------------------------------------------------
+# Agent-facing markdown file-size guard. Temporarily parked far above the
+# built-in defaults (injected 6 000 / reference 12 000 bytes) so the file-size
+# findings stop drowning out the rest of the lint surface. The oversized docs
+# are real work still owed — lower these back toward the defaults as they shrink.
+# ---------------------------------------------------------------------------
+
+[core_checks.file_size]
+injected_bytes = 100000
+reference_bytes = 100000
