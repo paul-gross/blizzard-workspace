@@ -35,7 +35,7 @@ Its two halves run in different places, and that governs everything below:
 
 This instance's runner declares one origin — `public_url = "http://127.0.0.1:8431"` — and binds loopback, so its panel opens **only from a browser on this machine**. The hub returns the SSO token through the browser, so the declared origin is what that browser follows; a phone or laptop following a loopback origin arrives at itself.
 
-Widening it is `blizzard/docs/deployment.md` §Runner-side federation, which owns the whole procedure — the origin classes that can complete a bounce, the exact-match rule, and the two proxy settings an off-host origin needs. Two facts are local to this machine rather than that doc's:
+Widening it is `blizzard/docs/deployment/human-auth.md` §Runner-side federation, which owns the whole procedure — the origin classes that can complete a bounce, the exact-match rule, and the two proxy settings an off-host origin needs. Two facts are local to this machine rather than that doc's:
 
 - **The reachability half is already built.** `tailscale serve` fronts 8431 on the tailnet and preserves the browser's `Host`, so nothing needs a wider bind — only the tailnet origin added to `public_url`, plus `trusted_proxies = ["127.0.0.1"]` for the address `serve` connects from. Confirm the mapping with `tailscale serve status`.
 - **Changing it costs a fleet worker.** The runner reads its config only at startup, so a widened set takes effect on restart and reaches the hub on the first reconciliation tick after it — and restarting [terminates a running fleet worker](./post-delivery.md).
