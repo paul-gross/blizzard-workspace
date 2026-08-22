@@ -1,9 +1,8 @@
 # Agent configuration
 
-The `[agent_model_overrides]` table lets you retarget which model a workspace uses for any installed extension agent
-without modifying the agent's committed source. The `[model_tiers]` table lets you remap tier labels to concrete model
-ids — either overriding built-in tier values or defining entirely new tiers. Changes to either table take effect on the
-next `winter ws init`.
+The `[agent_model_overrides]` table lets you retarget an installed extension agent's model and reasoning effort without
+modifying its committed source. The `[model_tiers]` table remaps tier labels to concrete model ids — either overriding
+built-in tier values or defining entirely new tiers. Changes to either table take effect on the next `winter ws init`.
 
 ## When to use these
 
@@ -106,6 +105,9 @@ developer = { claude = "claude-opus-5" }
 
 # Concrete model id scoped per-vendor (use inline-table form for vendor-specific ids):
 coder = { codex = "gpt-5.4-experimental", opencode = "anthropic/claude-opus-5" }
+
+# Per-vendor profiles may set a concrete model, native reasoning effort, or both:
+ice-carver = { claude = { model = "sonnet", effort = "high" }, codex = { model = "gpt-5.6-luna", effort = "max" }, opencode = { model = "openai/gpt-5.6-luna", effort = "max" } }
 ```
 
 ```toml
@@ -119,14 +121,20 @@ reviewer = "opus"
 Keys are **canonical agent names** (the `name:` field in the agent's frontmatter, or the file stem when `name:` is
 absent). Values are either:
 
-| Form                      | Example                | Applies to                    |
-| ------------------------- | ---------------------- | ----------------------------- |
-| Tier string               | `"haiku"`              | All vendors                   |
-| Inline table (per-vendor) | `{ claude = "haiku" }` | Only the listed vendor labels |
+| Form                      | Example                            | Applies to                           |
+| ------------------------- | ---------------------------------- | ------------------------------------ |
+| Tier string               | `"haiku"`                          | All vendors                          |
+| Inline table (per-vendor) | `{ claude = "haiku" }`             | Only the listed vendor labels        |
+| Profile map (per-vendor)  | `{ claude = { effort = "high" } }` | Model and/or native reasoning effort |
 
 **Tier string values must be valid tier labels** — either built-in (`"fable"`, `"opus"`, `"sonnet"`, `"haiku"`) or
 defined in `[model_tiers]`. A bare string that does not match any tier label raises `ConfigError` at config load time.
 Use the per-vendor inline-table form to specify a concrete model id directly.
+
+Profiles require at least `model` or `effort`; `model` is a concrete id when present and `effort` is an opaque non-empty
+string. Native effort keys are `effort` (Claude Code), `model_reasoning_effort` (Codex), and `reasoningEffort`
+(OpenCode). An effort-only profile preserves normal model resolution. Workspace profile effort is applied after the
+canonical vendor block and wins over its native effort key; when absent, the canonical key is preserved unchanged.
 
 **Per-vendor values are not tier-validated.** An inline-table value such as `{ claude = "some-id" }` is accepted whether
 `"some-id"` is a tier label or a concrete model id — a non-tier string is treated as a concrete model id for that vendor
@@ -140,12 +148,16 @@ When `winter ws init` resolves an agent's model for a vendor, it applies (highes
 2. **Per-harness override block** — the agent's own `claude:`/`codex:`/`opencode:` `model:` key.
 3. **Effective tier table** — the built-in `MODEL_TIER_IDS` values overlaid by any `[model_tiers]` entries.
 
+Model precedence is unchanged by profiles. Effort precedence is workspace profile effort, then the canonical vendor
+block's native effort key, then harness/session inheritance.
+
 ## Local overlay behaviour
 
 The merge model for `[agent_model_overrides]` is **per-key** (one level deep):
 
 - Entries in `config.local.toml` win over the same-named entries in `config.toml`.
 - Entries in `config.toml` that are absent from `config.local.toml` are kept unchanged.
+- A local entry replaces the complete shared entry for that agent; nested vendor/profile fields are not deep-merged.
 
 The merge model for `[model_tiers]` is **per-label** (whole-label replacement between files):
 
@@ -162,6 +174,7 @@ The merge model for `[model_tiers]` is **per-label** (whole-label replacement be
 | Unknown vendor label in a per-vendor dict value                           | `ConfigError` at **config load** time                                                         |
 | Empty string value in `[agent_model_overrides]`                           | `ConfigError` at **config load** time                                                         |
 | Wrong value type (e.g. integer) in `[agent_model_overrides]`              | `ConfigError` at **config load** time                                                         |
+| Unknown profile key, empty profile, or empty profile model/effort         | `ConfigError` at **config load** time                                                         |
 | Unknown or incomplete tier in agent `model:` frontmatter                  | `winter ws init` warns + skips that agent; `winter doctor` WARNs — other agents still install |
 | Agent name in `[agent_model_overrides]` that matches no installed agent   | `winter ws init` + `winter doctor` WARN                                                       |
 

@@ -26,6 +26,7 @@ from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.provision.manifest import ProvisionHandler, ProvisionManifestParser
 from winter_cli.modules.service.ext_service_manifest import ExtServiceDef, ExtServiceManifestParser
 from winter_cli.modules.workspace.agent_transform.model_tiers import VENDOR_LABELS, build_effective_tier_table
+from winter_cli.modules.workspace.agent_transform.models import AgentModelOverrideProfile
 from winter_cli.util import deep_merge
 
 WINTER_DIR = ".winter"
@@ -114,6 +115,12 @@ class WorkspaceConfigService:
         workspace_root = self._workspace_locator.find_workspace_root()
         raw = self._read_config(workspace_root / WINTER_DIR / CONFIG_FILE)
         overlay = self._read_config(workspace_root / WINTER_DIR / LOCAL_CONFIG_FILE)
+        for filename, source in ((CONFIG_FILE, raw), (LOCAL_CONFIG_FILE, overlay)):
+            overrides = source.get("agent_model_overrides")
+            if overrides is not None and not isinstance(overrides, dict):
+                raise ConfigError(
+                    f"[agent_model_overrides] in {filename} must be a table, got {type(overrides).__name__}"
+                )
         merged = deep_merge(raw, overlay)
 
         singletons: list[SingletonRepository] = [
@@ -540,21 +547,24 @@ class WorkspaceConfigService:
 
         Each entry maps an agent name to either:
         - A string: a tier label (must exist in the effective tier table).
-        - A dict: per-vendor overrides mapping vendor label to a concrete model id.
+        - A dict: per-vendor overrides mapping vendor label to a concrete model id
+          or a profile containing optional model and effort strings.
 
         Raises ``ConfigError`` on invalid value types, unknown vendor labels, or
         a bare string that is not a recognised tier label.
         Agent-name validation (unknown agent) is deferred to ``winter doctor``
         since the known agent set is only available after extension processing.
         """
-        if not isinstance(raw, dict):
+        if raw is None:
             return AgentModelOverridesConfig()
+        if not isinstance(raw, dict):
+            raise ConfigError(f"[agent_model_overrides] must be a table, got {type(raw).__name__}")
 
-        overrides: dict[str, str | dict[str, str]] = {}
+        overrides: dict[str, str | dict[str, str | AgentModelOverrideProfile]] = {}
         for agent_name, value in raw.items():
             agent_key = str(agent_name)
             if isinstance(value, str):
-                if not value:
+                if not value.strip():
                     raise ConfigError(
                         f"[agent_model_overrides] entry {agent_key!r}: "
                         f"value must be a non-empty tier label or a per-vendor table"
@@ -570,7 +580,7 @@ class WorkspaceConfigService:
                     )
                 overrides[agent_key] = value
             elif isinstance(value, dict):
-                per_vendor: dict[str, str] = {}
+                per_vendor: dict[str, str | AgentModelOverrideProfile] = {}
                 for vendor_label, model_value in value.items():
                     vl = str(vendor_label)
                     if vl not in VENDOR_LABELS:
@@ -579,14 +589,45 @@ class WorkspaceConfigService:
                             f"[agent_model_overrides] entry {agent_key!r}: "
                             f"unknown vendor label {vl!r}; valid labels: {valid}"
                         )
-                    if not isinstance(model_value, str) or not model_value:
+                    if isinstance(model_value, str):
+                        if not model_value.strip():
+                            raise ConfigError(
+                                f"[agent_model_overrides] entry {agent_key!r}, vendor {vl!r}: "
+                                "model id must be a non-empty string"
+                            )
+                        per_vendor[vl] = model_value
+                        continue
+                    if not isinstance(model_value, dict):
                         type_name = type(model_value).__name__ if model_value is not None else "null"
                         raise ConfigError(
                             f"[agent_model_overrides] entry {agent_key!r}, "
-                            f"vendor {vl!r}: value must be a non-empty string, "
+                            f"vendor {vl!r}: value must be a non-empty string (model id) or profile table, "
                             f"got {type_name}"
                         )
-                    per_vendor[vl] = model_value
+                    unknown = set(model_value) - {"model", "effort"}
+                    if unknown:
+                        raise ConfigError(
+                            f"[agent_model_overrides] entry {agent_key!r}, vendor {vl!r}: "
+                            f"unknown profile key(s): {', '.join(repr(k) for k in sorted(unknown))}"
+                        )
+                    model = model_value.get("model")
+                    effort = model_value.get("effort")
+                    if model is not None and (not isinstance(model, str) or not model.strip()):
+                        raise ConfigError(
+                            f"[agent_model_overrides] entry {agent_key!r}, vendor {vl!r}: "
+                            "profile model must be a non-empty string"
+                        )
+                    if effort is not None and (not isinstance(effort, str) or not effort.strip()):
+                        raise ConfigError(
+                            f"[agent_model_overrides] entry {agent_key!r}, vendor {vl!r}: "
+                            "profile effort must be a non-empty string"
+                        )
+                    if model is None and effort is None:
+                        raise ConfigError(
+                            f"[agent_model_overrides] entry {agent_key!r}, vendor {vl!r}: "
+                            "profile must contain model or effort"
+                        )
+                    per_vendor[vl] = AgentModelOverrideProfile(model=model, effort=effort)
                 if not per_vendor:
                     raise ConfigError(
                         f"[agent_model_overrides] entry {agent_key!r}: "

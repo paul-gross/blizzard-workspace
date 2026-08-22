@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import enum
+from collections.abc import Mapping
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from winter_cli.modules.workspace.agent_transform.models import AgentFormat
+from winter_cli.modules.workspace.agent_transform.models import AgentFormat, AgentModelOverrideProfile
 
 
 class SingletonType(enum.Enum):
@@ -326,8 +327,9 @@ class AgentModelOverridesConfig(BaseModel):
       exist in the effective tier table; unknown labels raise ``ConfigError`` at
       config load time.
     - A dict: per-vendor overrides mapping vendor label to a concrete model id
-      for that vendor only.  Keys must be valid vendor labels (``'claude'``,
-      ``'codex'``, ``'opencode'``).  Use this form for concrete model ids.
+      or a profile containing optional ``model`` and ``effort`` keys. Profiles
+      must contain at least one of those keys; ``effort`` is an opaque,
+      non-empty native reasoning setting.
 
     Set in ``.winter/config.toml``; individual entries can be overridden for
     local experiments via ``.winter/config.local.toml`` (per-agent key merging
@@ -347,9 +349,8 @@ class AgentModelOverridesConfig(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    overrides: dict[str, str | dict[str, str]] = Field(default_factory=dict)
-    """Per-agent override entries.  String values apply to all vendors; dict
-    values are per-vendor (vendor label → tier name or concrete model id)."""
+    overrides: Mapping[str, str | Mapping[str, str | AgentModelOverrideProfile]] = Field(default_factory=dict)
+    """Per-agent entries: a tier string for all vendors, or per-vendor model ids/profiles."""
 
 
 class FileSizeLintConfig(BaseModel):

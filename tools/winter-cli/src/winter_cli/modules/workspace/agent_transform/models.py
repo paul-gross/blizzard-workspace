@@ -59,10 +59,22 @@ class WorkspaceModelOverride:
     - Per-vendor inline-table form (``coder = { opencode = "haiku" }``) —
       ``is_concrete=True``; ``value`` is a concrete model id passed through
       verbatim even when it happens to collide with a tier label string.
+    - Profile form (``coder = { opencode = { effort = "high" } }``) —
+      ``is_concrete=True``; ``value`` may be absent for effort-only profiles,
+      and ``effort`` carries the opaque native reasoning setting.
     """
 
-    value: str
+    value: str | None
     is_concrete: bool
+    effort: str | None = None
+
+
+@dataclasses.dataclass(frozen=True)
+class AgentModelOverrideProfile:
+    """A vendor-specific workspace profile with optional model and effort."""
+
+    model: str | None = None
+    effort: str | None = None
 
 
 @dataclasses.dataclass(frozen=True)

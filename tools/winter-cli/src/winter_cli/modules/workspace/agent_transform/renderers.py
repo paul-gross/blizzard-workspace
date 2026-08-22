@@ -15,7 +15,7 @@ against ``IAgentRenderer`` without coupling the Protocol module to its adapters.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Protocol
 
 import tomlkit
@@ -24,6 +24,7 @@ import yaml
 from winter_cli.modules.workspace.agent_transform.model_tiers import build_effective_tier_table
 from winter_cli.modules.workspace.agent_transform.models import (
     AgentFieldMap,
+    AgentModelOverrideProfile,
     CanonicalAgent,
     RenderedAgent,
     WorkspaceModelOverride,
@@ -46,12 +47,11 @@ class IAgentRenderer(Protocol):
     typically wire it to ``logger.warning`` so losses are observable without
     halting the build.
 
-    ``workspace_model_override`` is the resolved workspace-level model override
-    for this ``(agent, vendor)`` pair — a ``WorkspaceModelOverride`` carrying
-    either a tier label (bare string from ``[agent_model_overrides]``,
-    validated at config load time) or a concrete model id (from a per-vendor
-    inline-table entry, passed through without tier resolution) — or ``None``
-    when no workspace override applies.  Callers compute this via
+    ``workspace_model_override`` is the resolved workspace-level override for
+    this ``(agent, vendor)`` pair. It carries either a tier label, a concrete
+    model id, and/or an optional profile effort. Effort is applied after the
+    canonical vendor block; an absent profile model falls through to normal
+    model resolution. Callers compute it via
     ``resolve_workspace_model_override`` before invoking ``render``.
 
     ``effective_tier_table`` is the merged tier table (built-in defaults ⊕
@@ -73,19 +73,18 @@ class IAgentRenderer(Protocol):
 
 
 def resolve_workspace_model_override(
-    overrides: dict[str, str | dict[str, str]],
+    overrides: Mapping[str, str | Mapping[str, str | AgentModelOverrideProfile]],
     agent_name: str,
     vendor_label: str,
 ) -> WorkspaceModelOverride | None:
     """Return the workspace-level model override for ``(agent_name, vendor_label)``.
 
     Returns a ``WorkspaceModelOverride`` when an override is configured, or
-    ``None`` when no workspace override applies. A string value in the map
-    applies to all vendors and is returned as a tier label (``is_concrete=False``);
-    a dict value selects the entry for ``vendor_label`` and is returned as a
-    concrete model id (``is_concrete=True``), or ``None`` when that vendor is
-    not listed. The two forms are never conflated, even when a per-vendor
-    value happens to collide with a tier label string.
+    ``None`` when no workspace override applies. A string value applies to all
+    vendors as a tier label (``is_concrete=False``). A per-vendor string is a
+    concrete model id; a profile carries its optional concrete model and effort.
+    Missing profile models deliberately return ``value=None`` so model
+    resolution falls through while effort still projects.
 
     This function is the single lookup point used by both
     ``ExtensionAgentService`` (the installer) and ``AgentProbeService`` (the
@@ -99,6 +98,8 @@ def resolve_workspace_model_override(
     vendor_value = entry.get(vendor_label)
     if vendor_value is None:
         return None
+    if isinstance(vendor_value, AgentModelOverrideProfile):
+        return WorkspaceModelOverride(value=vendor_value.model, is_concrete=True, effort=vendor_value.effort)
     return WorkspaceModelOverride(value=vendor_value, is_concrete=True)
 
 
@@ -116,9 +117,9 @@ def _resolve_model(
 
     1. ``workspace_override``: a tier-label form (``is_concrete=False``) is
        resolved via ``tier_table``; a concrete-id form (``is_concrete=True``,
-       from a per-vendor inline-table entry in ``[agent_model_overrides]``) is
-       passed through verbatim, even when its value happens to collide with a
-       tier label string.  ``None`` skips this layer.
+       from a per-vendor entry in ``[agent_model_overrides]``) is passed through
+       verbatim, even when its value happens to collide with a tier label string.
+       An effort-only profile has no model at this layer. ``None`` skips it.
     2. Per-harness override block's ``model`` key (always a concrete id).
     3. Agent's ``model_tier`` label resolved via ``tier_table``.
 
@@ -135,21 +136,24 @@ def _resolve_model(
     if workspace_override is not None:
         if workspace_override.is_concrete:
             # Per-vendor inline-table entry — always a concrete model id.
-            return workspace_override.value
-        # Bare-string entry — a tier label, resolve to concrete id.
-        vendor_ids = tier_table.get(workspace_override.value)
-        if vendor_ids is None:
-            valid = ", ".join(repr(t) for t in sorted(tier_table))
-            raise RepoError(
-                f"unknown model tier {workspace_override.value!r} in [agent_model_overrides]; "
-                f"valid tier labels: {valid}"
-            )
-        if vendor_label not in vendor_ids:
-            raise RepoError(
-                f"model tier {workspace_override.value!r} has no mapping for vendor {vendor_label!r}; "
-                f"add a {vendor_label!r} entry under [model_tiers.{workspace_override.value}]"
-            )
-        return vendor_ids[vendor_label]
+            if workspace_override.value is not None:
+                return workspace_override.value
+            # An effort-only profile falls through to canonical model resolution.
+        else:
+            # Bare-string entry — a tier label, resolve to concrete id.
+            vendor_ids = tier_table.get(workspace_override.value or "")
+            if vendor_ids is None:
+                valid = ", ".join(repr(t) for t in sorted(tier_table))
+                raise RepoError(
+                    f"unknown model tier {workspace_override.value!r} in [agent_model_overrides]; "
+                    f"valid tier labels: {valid}"
+                )
+            if vendor_label not in vendor_ids:
+                raise RepoError(
+                    f"model tier {workspace_override.value!r} has no mapping for vendor {vendor_label!r}; "
+                    f"add a {vendor_label!r} entry under [model_tiers.{workspace_override.value}]"
+                )
+            return vendor_ids[vendor_label]
     if "model" in override and isinstance(override["model"], str):
         return override["model"]
     tier_label = agent.model_tier
@@ -221,7 +225,8 @@ class ClaudeAgentRenderer:
     copied verbatim.
 
     All common-layer fields are known to Claude Code so no common fields
-    trigger warnings.  Override block fields are passed through as-is.
+    trigger warnings.  Override block fields, including Claude's native
+    ``effort`` key, are passed through as-is.
     """
 
     VENDOR = "claude"
@@ -259,6 +264,8 @@ class ClaudeAgentRenderer:
                 # Already resolved into `model_id`.
                 continue
             fields[key] = value
+        if workspace_model_override is not None and workspace_model_override.effort is not None:
+            fields["effort"] = workspace_model_override.effort
 
         frontmatter = _emit_yaml_frontmatter(fields)
         body_sep = "\n" if agent.body else ""
@@ -326,6 +333,8 @@ class CodexAgentRenderer:
             if key == "model":
                 continue
             doc[key] = value
+        if workspace_model_override is not None and workspace_model_override.effort is not None:
+            doc["model_reasoning_effort"] = workspace_model_override.effort
 
         # Body maps to the `developer_instructions` key per the Codex subagent schema.
         if agent.body:
@@ -347,7 +356,7 @@ class OpenCodeAgentRenderer:
     The body is copied verbatim as the system prompt.
 
     Recognized OpenCode frontmatter keys: ``description``, ``mode``
-    (primary|subagent|all), ``model``, ``temperature``, ``top_p``,
+    (primary|subagent|all), ``model``, ``reasoningEffort``, ``temperature``, ``top_p``,
     ``permission``, ``steps``, ``disable``, ``hidden``, ``color``.  The agent
     identity is carried solely by the filename (``filename_stem``); OpenCode
     does NOT have a ``name`` frontmatter field, so the canonical ``name`` is
@@ -398,6 +407,8 @@ class OpenCodeAgentRenderer:
             if key == "model":
                 continue
             fields[key] = value
+        if workspace_model_override is not None and workspace_model_override.effort is not None:
+            fields["reasoningEffort"] = workspace_model_override.effort
 
         frontmatter = _emit_yaml_frontmatter(fields)
         body_sep = "\n" if agent.body else ""

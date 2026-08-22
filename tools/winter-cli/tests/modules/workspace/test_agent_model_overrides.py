@@ -14,6 +14,7 @@ Plus parse-time validation: invalid vendor label → ``ConfigError``.
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from textwrap import dedent
 from typing import cast
@@ -32,7 +33,7 @@ from winter_cli.modules.workspace.agent_install import ExtensionAgentService
 from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
 from winter_cli.modules.workspace.agent_transform.canonical_parser import CanonicalAgentParser
 from winter_cli.modules.workspace.agent_transform.model_tiers import MODEL_TIER_IDS, ModelTier
-from winter_cli.modules.workspace.agent_transform.models import WorkspaceModelOverride
+from winter_cli.modules.workspace.agent_transform.models import AgentModelOverrideProfile, WorkspaceModelOverride
 from winter_cli.modules.workspace.agent_transform.renderers import (
     ClaudeAgentRenderer,
     CodexAgentRenderer,
@@ -98,7 +99,9 @@ _FRONTMATTER_OVERRIDE_MD = dedent("""\
     """)
 
 
-def _config(overrides: dict[str, str | dict[str, str]] | None = None) -> WorkspaceConfig:
+def _config(
+    overrides: Mapping[str, str | Mapping[str, str | AgentModelOverrideProfile]] | None = None,
+) -> WorkspaceConfig:
     """Build a minimal WorkspaceConfig with an optional override map."""
     cfg = WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,
@@ -366,6 +369,172 @@ class TestPerVendorScoping:
             result = resolve_workspace_model_override(overrides, "reviewer", vendor.vendor_label)
             assert result is None
 
+    def test_profile_resolves_model_and_effort_for_all_vendors(self) -> None:
+        """A profile carries a concrete model and projects native effort keys."""
+        overrides = {
+            "reviewer": {
+                "claude": AgentModelOverrideProfile(model="sonnet", effort="high"),
+                "codex": AgentModelOverrideProfile(model="gpt-5.6-luna", effort="max"),
+                "opencode": AgentModelOverrideProfile(model="openai/gpt-5.6-luna", effort="max"),
+            }
+        }
+        agent = _PARSER.parse(_SONNET_AGENT_MD)
+        for vendor, renderer in (
+            ("claude", ClaudeAgentRenderer()),
+            ("codex", CodexAgentRenderer()),
+            ("opencode", OpenCodeAgentRenderer()),
+        ):
+            _, warn = _warn_sink()
+            rendered = renderer.render(
+                agent,
+                warn=warn,
+                workspace_model_override=resolve_workspace_model_override(overrides, "reviewer", vendor),
+            )
+            document = (
+                tomllib.loads(rendered.text)
+                if vendor == "codex"
+                else yaml.safe_load(_extract_frontmatter(rendered.text))
+            )
+            assert document["model"] == overrides["reviewer"][vendor].model
+            assert (
+                document[{"claude": "effort", "codex": "model_reasoning_effort", "opencode": "reasoningEffort"}[vendor]]
+                == overrides["reviewer"][vendor].effort
+            )
+
+    def test_effort_only_profile_preserves_canonical_model_and_effort_when_unset(self) -> None:
+        """An effort-only profile changes only effort and a missing profile leaves native effort intact."""
+        agent = _PARSER.parse(_SONNET_AGENT_MD.replace("model: sonnet", "model: sonnet\nclaude:\n  effort: low"))
+        _, warn = _warn_sink()
+        profile = AgentModelOverrideProfile(effort="high")
+        rendered = ClaudeAgentRenderer().render(
+            agent,
+            warn=warn,
+            workspace_model_override=WorkspaceModelOverride(value=None, is_concrete=True, effort=profile.effort),
+        )
+        document = yaml.safe_load(_extract_frontmatter(rendered.text))
+        assert document["model"] == "sonnet"
+        assert document["effort"] == "high"
+
+        unchanged = ClaudeAgentRenderer().render(agent, warn=warn)
+        assert yaml.safe_load(_extract_frontmatter(unchanged.text))["effort"] == "low"
+
+    @pytest.mark.parametrize(
+        ("vendor", "renderer", "native_key", "canonical_effort"),
+        [
+            ("claude", ClaudeAgentRenderer(), "effort", "low"),
+            ("codex", CodexAgentRenderer(), "model_reasoning_effort", "low"),
+            ("opencode", OpenCodeAgentRenderer(), "reasoningEffort", "low"),
+        ],
+    )
+    def test_workspace_effort_wins_and_model_only_preserves_native_effort(
+        self, vendor, renderer, native_key: str, canonical_effort: str
+    ) -> None:
+        text = dedent(
+            f"""---
+            name: reviewer
+            description: Reviews code
+            model: sonnet
+            {vendor}:
+              {native_key}: {canonical_effort}
+            ---
+            Body.
+            """
+        )
+        agent = _PARSER.parse(text)
+        _, warn = _warn_sink()
+        workspace = resolve_workspace_model_override(
+            {"reviewer": {vendor: AgentModelOverrideProfile(effort="high")}}, "reviewer", vendor
+        )
+        rendered = renderer.render(agent, warn=warn, workspace_model_override=workspace)
+        document = (
+            tomllib.loads(rendered.text) if vendor == "codex" else yaml.safe_load(_extract_frontmatter(rendered.text))
+        )
+        assert document["model"] == MODEL_TIER_IDS[(ModelTier.sonnet, vendor)]
+        assert document[native_key] == "high"
+
+        model_only = renderer.render(
+            agent,
+            warn=warn,
+            workspace_model_override=resolve_workspace_model_override(
+                {"reviewer": {vendor: AgentModelOverrideProfile(model="model-only")}}, "reviewer", vendor
+            ),
+        )
+        model_only_document = (
+            tomllib.loads(model_only.text)
+            if vendor == "codex"
+            else yaml.safe_load(_extract_frontmatter(model_only.text))
+        )
+        assert model_only_document["model"] == "model-only"
+        assert model_only_document[native_key] == canonical_effort
+
+    @pytest.mark.parametrize(
+        ("vendor", "renderer", "native_key"),
+        [
+            ("claude", ClaudeAgentRenderer(), "effort"),
+            ("codex", CodexAgentRenderer(), "model_reasoning_effort"),
+            ("opencode", OpenCodeAgentRenderer(), "reasoningEffort"),
+        ],
+    )
+    def test_no_workspace_or_canonical_effort_emits_no_native_effort(self, vendor, renderer, native_key: str) -> None:
+        agent = _PARSER.parse(_SONNET_AGENT_MD)
+        _, warn = _warn_sink()
+        rendered = renderer.render(agent, warn=warn)
+        document = (
+            tomllib.loads(rendered.text) if vendor == "codex" else yaml.safe_load(_extract_frontmatter(rendered.text))
+        )
+        assert native_key not in document
+
+    def test_mixed_legacy_and_profile_values_resolve_correctly(self) -> None:
+        agent = _PARSER.parse(_SONNET_AGENT_MD)
+        overrides = {
+            "reviewer": {
+                "claude": "haiku",
+                "codex": AgentModelOverrideProfile(model="gpt-5.6-luna", effort="max"),
+            }
+        }
+        _, warn = _warn_sink()
+        claude = ClaudeAgentRenderer().render(
+            agent,
+            warn=warn,
+            workspace_model_override=resolve_workspace_model_override(overrides, "reviewer", "claude"),
+        )
+        codex = CodexAgentRenderer().render(
+            agent,
+            warn=warn,
+            workspace_model_override=resolve_workspace_model_override(overrides, "reviewer", "codex"),
+        )
+        assert yaml.safe_load(_extract_frontmatter(claude.text))["model"] == "haiku"
+        assert tomllib.loads(codex.text)["model"] == "gpt-5.6-luna"
+        assert tomllib.loads(codex.text)["model_reasoning_effort"] == "max"
+
+    def test_ice_carver_profile_exact_vendor_outcome(self) -> None:
+        agent = _PARSER.parse(_SONNET_AGENT_MD.replace("name: reviewer", "name: ice-carver"))
+        overrides = {
+            "ice-carver": {
+                "claude": AgentModelOverrideProfile(model="sonnet", effort="high"),
+                "codex": AgentModelOverrideProfile(model="gpt-5.6-luna", effort="max"),
+                "opencode": AgentModelOverrideProfile(model="openai/gpt-5.6-luna", effort="max"),
+            }
+        }
+        for vendor, renderer, expected_model, effort_key, expected_effort in (
+            ("claude", ClaudeAgentRenderer(), "sonnet", "effort", "high"),
+            ("codex", CodexAgentRenderer(), "gpt-5.6-luna", "model_reasoning_effort", "max"),
+            ("opencode", OpenCodeAgentRenderer(), "openai/gpt-5.6-luna", "reasoningEffort", "max"),
+        ):
+            _, warn = _warn_sink()
+            rendered = renderer.render(
+                agent,
+                warn=warn,
+                workspace_model_override=resolve_workspace_model_override(overrides, "ice-carver", vendor),
+            )
+            document = (
+                tomllib.loads(rendered.text)
+                if vendor == "codex"
+                else yaml.safe_load(_extract_frontmatter(rendered.text))
+            )
+            assert document["model"] == expected_model
+            assert document[effort_key] == expected_effort
+
 
 # ===========================================================================
 # 4. Local-over-shared precedence
@@ -442,6 +611,74 @@ class TestLocalOverSharedPrecedence:
         # Local wins for reviewer; shared value preserved for developer.
         assert config.agent_model_overrides.overrides["reviewer"] == "opus"
         assert config.agent_model_overrides.overrides["developer"] == "sonnet"
+
+    @pytest.mark.parametrize(
+        ("shared", "local", "expected"),
+        [
+            (
+                {"reviewer": "haiku"},
+                {"reviewer": {"claude": {"effort": "high"}}},
+                {"claude": AgentModelOverrideProfile(effort="high")},
+            ),
+            (
+                {"reviewer": {"claude": {"effort": "high"}, "codex": {"effort": "max"}}},
+                {"reviewer": "opus"},
+                "opus",
+            ),
+        ],
+    )
+    def test_local_entry_replaces_complete_shared_agent_entry(
+        self, shared: dict, local: dict, expected: object
+    ) -> None:
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: "", local_path: ""})
+        config = self._service(
+            fs,
+            {
+                shared_path: {"main_branch": "main", "agent_model_overrides": shared},
+                local_path: {"agent_model_overrides": local},
+            },
+        ).load()
+        assert config.agent_model_overrides.overrides["reviewer"] == expected
+
+    def test_local_partial_profile_drops_shared_vendors_but_keeps_other_agents(self) -> None:
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: "", local_path: ""})
+        config = self._service(
+            fs,
+            {
+                shared_path: {
+                    "main_branch": "main",
+                    "agent_model_overrides": {
+                        "reviewer": {"claude": {"model": "sonnet"}, "codex": "gpt-5.4"},
+                        "developer": "haiku",
+                    },
+                },
+                local_path: {"agent_model_overrides": {"reviewer": {"claude": {"effort": "high"}}}},
+            },
+        ).load()
+        assert config.agent_model_overrides.overrides["reviewer"] == {
+            "claude": AgentModelOverrideProfile(effort="high")
+        }
+        assert config.agent_model_overrides.overrides["developer"] == "haiku"
+
+    @pytest.mark.parametrize("local_value", [[], "haiku", 42])
+    def test_malformed_local_override_table_raises_config_error(self, local_value: object) -> None:
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: "", local_path: ""})
+        service = self._service(
+            fs,
+            {
+                shared_path: {"main_branch": "main", "agent_model_overrides": {"reviewer": "haiku"}},
+                local_path: {"agent_model_overrides": local_value},
+            },
+        )
+
+        with pytest.raises(ConfigError, match=r"config\.local\.toml.*must be a table"):
+            service.load()
 
     def test_no_local_override_uses_shared_value(self) -> None:
         """When local doesn't override, the shared value is used unchanged."""
@@ -821,6 +1058,59 @@ class TestParseTimeValidation:
             "codex": "gpt-5.4",
         }
 
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            {"reviewer": {"claude": {"effort": "high"}}},
+            {"reviewer": {"claude": {"model": "claude-sonnet", "effort": "high"}}},
+            {"reviewer": {"claude": "haiku", "codex": {"effort": "max"}}},
+        ],
+    )
+    def test_valid_profiles_and_mixed_legacy_values_parse(self, raw: dict) -> None:
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: ""})
+        config = self._service(fs, {shared_path: self._shared_config(raw)}).load()
+        parsed = cast(Mapping, config.agent_model_overrides.overrides["reviewer"])
+        reviewer_raw = cast(dict, raw["reviewer"])
+        if isinstance(reviewer_raw.get("claude"), dict):
+            assert isinstance(parsed["claude"], AgentModelOverrideProfile)
+        else:
+            assert parsed["claude"] == "haiku"
+
+    def test_legacy_forms_remain_byte_and_value_compatible(self) -> None:
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: ""})
+        raw = {"reviewer": "haiku", "developer": {"claude": "sonnet", "codex": "gpt-5.4"}}
+        config = self._service(fs, {shared_path: self._shared_config(raw)}).load()
+        assert config.agent_model_overrides.overrides == raw
+
+    @pytest.mark.parametrize("raw", [[], "haiku", 42])
+    def test_non_table_top_level_value_raises_config_error(self, raw: object) -> None:
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: ""})
+        with pytest.raises(ConfigError, match="must be a table"):
+            self._service(fs, {shared_path: self._shared_config(raw)}).load()
+
+    @pytest.mark.parametrize(
+        ("profile", "message"),
+        [
+            ({"unknown": "x"}, "unknown profile key"),
+            ({}, "must contain model or effort"),
+            ({"model": 42}, "profile model"),
+            ({"model": ""}, "profile model"),
+            ({"model": "   "}, "profile model"),
+            ({"effort": 42}, "profile effort"),
+            ({"effort": ""}, "profile effort"),
+            ({"effort": "   "}, "profile effort"),
+        ],
+    )
+    def test_invalid_profile_shapes_raise_config_error(self, profile: dict, message: str) -> None:
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: ""})
+        raw = {"reviewer": {"claude": profile}}
+        with pytest.raises(ConfigError, match=message):
+            self._service(fs, {shared_path: self._shared_config(raw)}).load()
+
     def test_empty_per_vendor_dict_raises_config_error(self) -> None:
         """An empty dict value raises ConfigError."""
         shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
@@ -883,3 +1173,57 @@ class TestInstallerProbeConsistency:
         assert all(r.status == ProbeStatus.pass_ for r in vendor_results), (
             f"expected all vendor probes PASS: {[(r.name, r.message) for r in vendor_results if r.status != ProbeStatus.pass_]}"
         )
+
+    def test_effort_profile_install_probe_change_and_reinstall(self) -> None:
+        fs = FakeFilesystem()
+        config_files: dict[Path, dict] = {}
+        ext = _seed_extension(fs, config_files)
+        initial = _config(overrides={"reviewer": {"claude": AgentModelOverrideProfile(effort="high")}})
+        _install_svc(initial, fs, config_files).process(ext, FakeInitReporter())
+        assert all(
+            r.status == ProbeStatus.pass_
+            for r in _probe_svc(initial, fs, config_files).run([ext])
+            if "agent copies:" in r.name
+        )
+
+        changed = _config(overrides={"reviewer": {"claude": AgentModelOverrideProfile(effort="max")}})
+        stale = _probe_svc(changed, fs, config_files).run([ext])
+        assert any(r.status == ProbeStatus.warn and "stale copy" in r.message for r in stale)
+
+        _install_svc(changed, fs, config_files).process(ext, FakeInitReporter())
+        healed = _probe_svc(changed, fs, config_files).run([ext])
+        assert all(r.status == ProbeStatus.pass_ for r in healed if "agent copies:" in r.name)
+
+    def test_unknown_target_warning_accepts_profile_entry(self) -> None:
+        fs = FakeFilesystem()
+        config_files: dict[Path, dict] = {}
+        ext = _seed_extension(fs, config_files)
+        reporter = FakeInitReporter()
+        _install_svc(
+            _config(overrides={"ghost-agent": {"claude": AgentModelOverrideProfile(effort="high")}}),
+            fs,
+            config_files,
+        ).check_unknown_overrides([ext], reporter)
+        assert any(a[2] == "agent_override_warning" and "ghost-agent" in a[3] for a in reporter.actions)
+
+
+def test_legacy_rendering_has_no_effort_fields() -> None:
+    """Legacy tier and concrete forms retain their pre-profile artifact shape."""
+    agent = _PARSER.parse(_SONNET_AGENT_MD)
+    _, warn = _warn_sink()
+    legacy = {"reviewer": {"claude": "sonnet", "codex": "gpt-5.4", "opencode": "openai/sonnet"}}
+    for vendor, renderer in (
+        ("claude", ClaudeAgentRenderer()),
+        ("codex", CodexAgentRenderer()),
+        ("opencode", OpenCodeAgentRenderer()),
+    ):
+        rendered = renderer.render(
+            agent,
+            warn=warn,
+            workspace_model_override=resolve_workspace_model_override(legacy, "reviewer", vendor),
+        )
+        document = (
+            tomllib.loads(rendered.text) if vendor == "codex" else yaml.safe_load(_extract_frontmatter(rendered.text))
+        )
+        assert document["model"] == legacy["reviewer"][vendor]
+        assert not {"effort", "model_reasoning_effort", "reasoningEffort"} & document.keys()
