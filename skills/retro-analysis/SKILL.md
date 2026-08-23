@@ -64,7 +64,7 @@ blizzard hub chunk show <chunk_id> --json --hub-url "$BZ_HUB_URL"
 ```
 
 From each response, keep:
-- The retrospective content: group `.artifacts` by `(node_name, name)`, take the highest `epoch` entry in each group, then filter to `name=="retrospective"`. The artifact store is an append-only series keyed on the node name (`blizzard-context:/domain/artifacts.md` §"The chunk's artifact series"), so a retried node's earlier epochs are superseded text — including them double-counts a retried chunk and feeds stale text to clustering. A chunk built on the `default` graph (no retrospective node) has none; skip it for clustering but still scan its other artifacts for citations below.
+- The retrospective content: group `.artifacts` by `(node_name, name)`, take the highest `epoch` entry in each group, then filter to `name=="retrospective"`. The artifact store is an append-only series keyed on the node name (`blizzard-context:/domain/artifacts/series.md`), so a retried node's earlier epochs are superseded text — including them double-counts a retried chunk and feeds stale text to clustering. A chunk built on the `default` graph (no retrospective node) has none; skip it for clustering but still scan its other artifacts for citations below.
 - The full `.artifacts[].content` text (every kind, every name, latest epoch per `(node_name, name)`) — the citation-counting input in step 6.
 
 Write the fetched set to a scratch file (e.g. `/tmp/retro-analysis-<range-start>.json`) rather than re-fetching per step; it is not committed.
