@@ -272,12 +272,24 @@ url = "git@github.com:paul-gross/blizzard-product.git"
 path = ".winter/ext/product"
 
 # ---------------------------------------------------------------------------
-# Agent-facing markdown file-size guard. Temporarily parked far above the
-# built-in defaults (injected 6 000 / reference 12 000 bytes) so the file-size
-# findings stop drowning out the rest of the lint surface. The oversized docs
-# are real work still owed — lower these back toward the defaults as they shrink.
+# Lint suppression. `blizzard-discovery` is the frozen design record blizzard was
+# built from — history, not a live artifact (workspace:/context/project/discovery-corpus.md),
+# so its content is never brought into line with winter's conventions. It carries
+# no `winter-ext.toml` to declare that for itself, which is exactly the case the
+# workspace surface exists for, so the whole repo is silenced from here.
 # ---------------------------------------------------------------------------
 
-[core_checks.file_size]
-injected_bytes = 100000
-reference_bytes = 100000
+[lint.ignore]
+repos = ["blizzard-discovery"]
+
+# `blizzard-mock`'s two long READMEs are human-facing docs for the fixture
+# harness and its mock-data corpus, over the file-size check's reference
+# threshold. That threshold stands in for an agent's context budget and neither
+# file is in the injected `@import` graph. `blizzard-mock` carries no
+# `winter-ext.toml` to say so for itself, so the rule sits here — narrowed to
+# the one check, so every other convention stays live in both files.
+[lint.ignore.repo."blizzard-mock".checks]
+file-size = [
+  "src/blizzard_mock/harness/README.md",
+  "src/blizzard_mock/mock_data/README.md",
+]
