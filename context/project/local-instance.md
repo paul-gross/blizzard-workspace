@@ -131,7 +131,9 @@ After a landing on `master`, this runbook is not the whole story — [post-deliv
 
 ## The hub's work sources
 
-Which repos the hub can ingest from is set by `[[work_source]]` blocks in its config, which lives on the host. `blizzard`, `blizzard-mock`, and `blizzard-infra` are already configured. Changing them is a host operation, owned by `blizzard-infra` along with the rule its own tests enforce about how a source must be named.
+Which repos the hub can ingest from is set by `[[work_source]]` blocks in its config, which lives on the host. `blizzard`, `blizzard-mock`, `blizzard-infra`, and `blizzard-context` are configured. Changing them is a host operation, owned by `blizzard-infra` along with the rule its own tests enforce about how a source must be named.
+
+**A committed block is not a live source.** The config is bind-mounted onto the host, so a change reaches the hub only when `blizzard-infra`'s `scripts/deploy.sh` ships `deploy/` — the image channel's unattended updater carries code, never this file. The forge PAT is the other half: it selects its repos explicitly, so a source whose repo the token does not cover fails at ingest with a 404 that reads as a missing issue.
 
 ## Operating the fleet
 
