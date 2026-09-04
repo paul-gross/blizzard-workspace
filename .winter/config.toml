@@ -195,14 +195,34 @@ apply = "mise exec -- uv sync"
 # blizzard (P5) is a uv project with an Angular frontend under web/. Sync the
 # Python virtualenv (daemons, CLI, `blizzard-export-openapi`) and install the
 # frontend node_modules so `mise run gate` / `mise run build` resolve in the
-# worktree. Array form: `uv sync` in the worktree root, then `npm ci` in web/.
-# Only `uv` is mise-managed here (blizzard's `[tools]` pins uv alone), so the
-# npm step is left unwrapped and resolves the ambient node.
+# worktree. Array form: `uv sync` in the worktree root, then the guarded npm
+# step in web/. Only `uv` is mise-managed here (blizzard's `[tools]` pins uv
+# alone), so the npm step is left unwrapped and resolves the ambient node.
+#
+# The npm step is guarded by a lockfile-hash stamp, mirroring blizzard's own
+# `scripts/ci-gate.sh`. Provision runs on every acquire inside a bounded tick, and
+# npm costs minutes on this tree whatever it is asked to do — measured here, `npm
+# ci` 4m09s and `npm install` 3m25s *with nothing to install*. Ungated, provision
+# was killed part-way every acquire and the fleet claimed nothing. Not running npm
+# at all is the only thing that fits, so the stamp is what makes the skip safe:
+# the install is a pure function of the lockfile, and the stamp lives inside
+# node_modules, so it is gone whenever the tree is. It is removed before an
+# install and written only after one succeeds, so a killed install leaves no stamp
+# and the next acquire reinstalls rather than trusting a partial tree.
+#
+# Two known gaps, both needing work beyond this handler. A cold install (changed
+# lockfile, fresh worktree) still exceeds the tick's budget and is destructive,
+# since `npm ci` deletes before it installs. And an acquire hard-resets the
+# tracked lockfile, which the stamp does not observe, so a tenant that mutated
+# node_modules can leave a tree the stamp still calls current.
 # The tmux hub/runner service slots stay commented until P6 fills them.
 [[provision.dependency]]
 scope = "feature-environment"
 project = "blizzard"
-apply = ["mise exec -- uv sync", "cd web && npm ci"]
+apply = [
+  "mise exec -- uv sync",
+  '''cd web && LOCK_HASH="$(sha256sum package-lock.json | cut -d' ' -f1)" && STAMP="node_modules/.package-lock-hash" && if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$LOCK_HASH" ]; then echo "OK: node_modules matches package-lock.json — skipping npm ci."; else rm -f "$STAMP" && npm ci && printf '%s' "$LOCK_HASH" > "$STAMP"; fi''',
+]
 
 # ---------------------------------------------------------------------------
 # Project repositories — worktreed into every feature environment.
