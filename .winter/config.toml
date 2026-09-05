@@ -16,6 +16,12 @@ ports_per_env = 20
 # static pool — see ../runner/blizzard-runner.toml `workspace_envs`. Declaring
 # them as aliases pins r1..r4 to stable, sequential port bands instead of the
 # scattered hash-band slots ad-hoc names would otherwise draw.
+#
+# The runner pool has since grown to r1..r8. r5..r8 are deliberately NOT aliased:
+# they were init'd before this list could name them, so `.winter/state.toml`
+# already persisted their hash-band indices (33/38/16/39) and the persisted index
+# wins. Aliasing them now would only be honored by a re-init, which would move
+# their ports for no gain — the bands they drew collide with nothing.
 env_aliases = ["alpha", "beta", "gamma", "delta", "r1", "r2", "r3", "r4"]
 
 [model_tiers.fable]
@@ -185,12 +191,20 @@ BLIZZARD_MOCK_HARNESS_FENCE = "1"
 # dependency sub-target aborts, and no env can be prepared — so the fleet
 # claims nothing. `mise exec --` re-resolves the toolchain from the handler's
 # own worktree, which is where each project's mise.toml pin lives.
+#
+# `mise trust` leads both handlers because mise's trust store is keyed by
+# absolute path, so every freshly-init'd env's worktrees are untrusted and mise
+# refuses to parse their mise.toml at all — provision aborts at the first
+# handler with "Config files ... are not trusted". Trusting by hand does not
+# scale past the envs that happen to exist today; running it here trusts each
+# worktree the first time it is provisioned. Idempotent and instant, so it costs
+# nothing on the warm path.
 # ---------------------------------------------------------------------------
 
 [[provision.dependency]]
 scope = "feature-environment"
 project = "blizzard-mock"
-apply = "mise exec -- uv sync"
+apply = ["mise trust --quiet", "mise exec -- uv sync"]
 
 # blizzard (P5) is a uv project with an Angular frontend under web/. Sync the
 # Python virtualenv (daemons, CLI, `blizzard-export-openapi`) and install the
@@ -220,6 +234,7 @@ apply = "mise exec -- uv sync"
 scope = "feature-environment"
 project = "blizzard"
 apply = [
+  "mise trust --quiet",
   "mise exec -- uv sync",
   '''cd web && LOCK_HASH="$(sha256sum package-lock.json | cut -d' ' -f1)" && STAMP="node_modules/.package-lock-hash" && if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$LOCK_HASH" ]; then echo "OK: node_modules matches package-lock.json — skipping npm ci."; else rm -f "$STAMP" && npm ci && printf '%s' "$LOCK_HASH" > "$STAMP"; fi''',
 ]
