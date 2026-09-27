@@ -9,7 +9,7 @@ from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
 from winter_cli.modules.workspace.agent_transform.model_tiers import build_effective_tier_table
 from winter_cli.modules.workspace.agent_transform.registry import PARSER, RENDERERS
-from winter_cli.modules.workspace.agent_transform.renderers import resolve_workspace_model_override
+from winter_cli.modules.workspace.agent_transform.renderers import resolve_agent
 from winter_cli.modules.workspace.extension_manifest import (
     EXT_MANIFEST,
     ExtensionManifestLoader,
@@ -85,6 +85,9 @@ class ExtensionAgentService:
             live_names: dict[CodeAgentVendor, set[str]] = {v: set() for v in CodeAgentVendor}
 
             if agents_root is not None:
+                tier_table = build_effective_tier_table(
+                    self._config.model_tiers.tiers, self._config.model_tiers.tier_sources
+                )
                 for entry in self._agent_enumerator.iter_candidate_agent_files(agents_root):
                     try:
                         text = self._fs.read_text(entry)
@@ -104,7 +107,6 @@ class ExtensionAgentService:
                         )
                         continue
 
-                    effective_tier_table = build_effective_tier_table(self._config.model_tiers.tiers)
                     warn = self._make_warn(repo.name, reporter)
                     # Render every vendor before writing any of them: a render
                     # failure partway through must not leave this agent
@@ -114,12 +116,12 @@ class ExtensionAgentService:
                             vendor: RENDERERS[vendor.agent_format].render(
                                 agent,
                                 warn=warn,
-                                workspace_model_override=resolve_workspace_model_override(
-                                    self._config.agent_model_overrides.overrides,
-                                    agent.name,
+                                resolution=resolve_agent(
+                                    agent,
                                     vendor.vendor_label,
+                                    tier_table,
+                                    self._config.agent_model_overrides,
                                 ),
-                                effective_tier_table=effective_tier_table,
                             )
                             for vendor in CodeAgentVendor
                         }
@@ -187,8 +189,8 @@ class ExtensionAgentService:
             return True
 
         known_names = {
-            agent.name
-            for _, agent in self._agent_enumerator.iter_known_agents(repos, mode=self._config.adopt_extensions)
+            known.agent.name
+            for known in self._agent_enumerator.iter_known_agents(repos, mode=self._config.adopt_extensions)
         }
 
         unknown = sorted(name for name in overrides if name not in known_names)

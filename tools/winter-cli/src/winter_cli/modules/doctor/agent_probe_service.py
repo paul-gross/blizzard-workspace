@@ -25,36 +25,18 @@ never incorrectly audited by the symlink probe.
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Iterator
 from pathlib import Path
 
 from winter_cli.config.models import AdoptExtensions, CodeAgentVendor, WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.doctor.models import ProbeResult, ProbeStatus
-from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
-from winter_cli.modules.workspace.agent_transform.model_tiers import build_effective_tier_table
-from winter_cli.modules.workspace.agent_transform.models import CanonicalAgent
-from winter_cli.modules.workspace.agent_transform.registry import PARSER, RENDERERS
-from winter_cli.modules.workspace.agent_transform.renderers import resolve_workspace_model_override
-from winter_cli.modules.workspace.extension_manifest import (
-    EXT_MANIFEST,
-    ExtensionManifestLoader,
-)
-from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
-
-logger = logging.getLogger(__name__)
+from winter_cli.modules.workspace.agent_transform.agent_copy_inspector import AgentCopyInspector, CopyStatus
+from winter_cli.modules.workspace.agent_transform.agent_enumerator import KnownAgent
+from winter_cli.modules.workspace.agent_transform.model_tiers import EffectiveTierTable, build_effective_tier_table
+from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
+from winter_cli.modules.workspace.models import StandaloneRepository
 
 AGENT_SOURCE = "agents"
-
-
-def _noop_warn(field: str, agent_name: str, vendor_label: str) -> None:
-    """No-op warn callback used in the probe's render path.
-
-    The probe never needs to surface lossy-field warnings — it only compares
-    output bytes to detect staleness, and the renderer's output is independent
-    of whether a warning was emitted.
-    """
 
 
 class AgentProbeService:
@@ -73,10 +55,11 @@ class AgentProbeService:
       same ``name`` field; Claude resolves agents by ``name``, so collisions
       cause unpredictable agent selection.
 
-    Renderers and the parser are taken from ``agent_transform.RENDERERS`` and
-    ``agent_transform.PARSER`` — the same instances used by
-    ``ExtensionAgentService`` — so "stale" here is defined identically to what
-    the installer would write.
+    The walk itself — manifest load, agents-dir resolution, parse, resolve,
+    render, and the byte comparison — is delegated to the injected
+    ``AgentCopyInspector``, which uses the same renderers and resolver as
+    ``ExtensionAgentService`` (the installer), so "stale" here is defined
+    identically to what the installer would write.
 
     This is REPORT-ONLY: the probe never mutates or re-syncs. Drift is a
     WARNING, not a hard failure. Run ``winter ws init`` to repair.
@@ -90,23 +73,26 @@ class AgentProbeService:
         config: WorkspaceConfig,
         fs: IFilesystemReader,
         manifest_loader: ExtensionManifestLoader,
-        agent_enumerator: CanonicalAgentEnumerator,
+        agent_copy_inspector: AgentCopyInspector,
     ) -> None:
         self._config = config
         self._fs = fs
         self._manifest_loader = manifest_loader
-        self._agent_enumerator = agent_enumerator
+        self._agent_copy_inspector = agent_copy_inspector
 
     def run(self, standalone_repos: list[StandaloneRepository]) -> list[ProbeResult]:
         if self._config.adopt_extensions == AdoptExtensions.none:
             return []
 
-        effective_tier_table = build_effective_tier_table(self._config.model_tiers.tiers)
+        tier_table = build_effective_tier_table(self._config.model_tiers.tiers, self._config.model_tiers.tier_sources)
+        # One walk for the whole probe run: every check below reads this list,
+        # so an unreadable agent file is logged once, not once per check.
+        known = self._agent_copy_inspector.known_agents(standalone_repos, mode=self._config.adopt_extensions)
         results: list[ProbeResult] = []
         for vendor in CodeAgentVendor:
-            results.extend(self._probe_vendor(vendor, standalone_repos, effective_tier_table))
-        results.extend(self._probe_name_uniqueness(standalone_repos))
-        results.extend(self._probe_override_targets(standalone_repos))
+            results.extend(self._probe_vendor(vendor, standalone_repos, known, tier_table))
+        results.extend(self._probe_name_uniqueness(known))
+        results.extend(self._probe_override_targets(known))
         return results
 
     # ── Per-vendor probe ──────────────────────────────────────────────────
@@ -115,44 +101,56 @@ class AgentProbeService:
         self,
         vendor: CodeAgentVendor,
         standalone_repos: list[StandaloneRepository],
-        effective_tier_table: dict[str, dict[str, str]],
+        known: list[KnownAgent],
+        tier_table: EffectiveTierTable,
     ) -> list[ProbeResult]:
         """Check all extensions for one vendor and emit probe results."""
         agents_dir = self._config.workspace_root / vendor.agents_subpath
 
-        # Build the full expected set: filename → expected bytes.
-        expected: dict[str, bytes] = {}
-        known_prefixes: set[str] = set()
-        all_render_failures: list[tuple[str, str]] = []
-        for repo in standalone_repos:
-            ext_expected, prefix, failures = self._expected_agents_with_prefix(repo, vendor, effective_tier_table)
-            expected.update(ext_expected)
-            all_render_failures.extend(failures)
-            if prefix is not None:
-                known_prefixes.add(prefix)
+        # Installed filename → its expected copy. A later canonical file that
+        # renders to the same filename replaces the earlier one, as the
+        # installer's later write overwrites the earlier copy on disk.
+        expected: dict[str, CopyStatus | None] = {}
+        render_failures: list[tuple[str, str]] = []
+        for copy in self._agent_copy_inspector.inspect(
+            known,
+            vendor,
+            tier_table=tier_table,
+            agent_model_overrides=self._config.agent_model_overrides,
+            agents_dir=agents_dir,
+        ):
+            name = copy.installed_path.name
+            if copy.error is not None:
+                render_failures.append((name, str(copy.error)))
+                continue
+            expected[name] = copy.copy_status
 
-        # Names whose render failed — excluded from the orphan check so a pre-existing
-        # on-disk copy is not mislabelled "orphaned copy" when the real cause is a
-        # tier-resolution error.
-        render_failed_names = {fn for fn, _ in all_render_failures}
+        # Names whose render failed (unknown or incomplete tier) — excluded from
+        # the orphan check so a pre-existing on-disk copy is not mislabelled
+        # "orphaned copy" when the real cause is a tier-resolution error.
+        render_failed_names = {name for name, _ in render_failures}
 
-        # Collect the actual set of <prefix>-* files scoped to known extension prefixes.
-        actual: dict[str, Path] = self._actual_agents(agents_dir, known_prefixes)
+        # The <prefix>-* files on disk, scoped to known extension prefixes.
+        known_prefixes = self._agent_copy_inspector.known_prefixes(standalone_repos, mode=self._config.adopt_extensions)
+        actual = self._actual_agents(agents_dir, known_prefixes)
 
         issues: list[str] = []
 
-        # Check for orphans (in actual but not in expected) and stale copies.
-        for name, actual_path in sorted(actual.items()):
+        # On-disk copies first, in filename order: orphans and stale copies.
+        for name in sorted(actual):
             if name in render_failed_names:
-                continue  # render failed; handled by dedicated WARN below
+                continue
             if name not in expected:
                 issues.append(f"orphaned copy: {name} (no live canonical source)")
                 continue
-            issue = self._check_copy(name, actual_path, expected[name])
-            if issue:
-                issues.append(issue)
+            status = expected[name]
+            if status is CopyStatus.missing:
+                # Listed on disk, so a missing status means its bytes could not be read.
+                issues.append(f"missing copy: {name} (read error)")
+            elif status is CopyStatus.stale:
+                issues.append(f"stale copy: {name} (transform mismatch)")
 
-        # Check for missing copies (in expected but not in actual).
+        # Then expected copies absent from disk.
         for name in sorted(expected):
             if name not in actual:
                 issues.append(f"missing copy: {name} (canonical source exists, copy absent)")
@@ -170,20 +168,19 @@ class AgentProbeService:
                 )
             )
         else:
-            n_agents = len(expected)
             results.append(
                 ProbeResult(
                     source=AGENT_SOURCE,
                     name=label,
                     status=ProbeStatus.pass_,
-                    message=f"{n_agents} agent(s) in sync",
+                    message=f"{len(expected)} agent(s) in sync",
                 )
             )
 
         # Emit a dedicated WARN ProbeResult for each render failure so the real
         # cause (tier label + vendor) reaches the structured output rather than
         # being buried in a log line or mislabelled as an orphaned copy.
-        for _filename, error_msg in sorted(all_render_failures):
+        for _filename, error_msg in sorted(render_failures):
             results.append(
                 ProbeResult(
                     source=AGENT_SOURCE,
@@ -197,90 +194,6 @@ class AgentProbeService:
                 )
             )
         return results
-
-    # ── Expected agents from extensions ──────────────────────────────────
-
-    def _expected_agents_with_prefix(
-        self,
-        repo: StandaloneRepository,
-        vendor: CodeAgentVendor,
-        effective_tier_table: dict[str, dict[str, str]],
-    ) -> tuple[dict[str, bytes], str | None, list[tuple[str, str]]]:
-        """Return ``({filename: expected_bytes}, prefix, render_failures)`` for one extension + vendor.
-
-        Returns ``({}, None, [])`` when the extension doesn't qualify (no manifest
-        in winter mode, no agents dir, manifest load error). Mirrors the
-        permissive approach of the install path.
-
-        ``render_failures`` is a list of ``(filename, error_message)`` for agents
-        whose render raised ``RepoError`` (unknown or incomplete tier).  The
-        caller uses this to exclude those filenames from the orphan check and to
-        emit dedicated WARN ``ProbeResult`` entries.
-        """
-        mode = self._config.adopt_extensions
-        manifest_path = repo.path / EXT_MANIFEST
-        manifest_present = self._fs.is_file(manifest_path)
-
-        if mode == AdoptExtensions.winter and not manifest_present:
-            return {}, None, []
-
-        try:
-            manifest = self._manifest_loader.load(repo, manifest_path if manifest_present else None)
-        except RepoError:
-            return {}, None, []
-
-        agents_root = self._agent_enumerator.resolve_agents_dir(repo.path, manifest.agents_dirs)
-        if agents_root is None:
-            return {}, manifest.prefix, []
-
-        prefix = manifest.prefix
-        renderer = RENDERERS[vendor.agent_format]
-        result: dict[str, bytes] = {}
-        render_failures: list[tuple[str, str]] = []
-
-        for entry in self._agent_enumerator.iter_candidate_agent_files(agents_root):
-            try:
-                text = self._fs.read_text(entry)
-                agent = PARSER.parse(text, default_name=entry.stem)
-            except RepoError as exc:
-                logger.warning(
-                    "agent probe: %s — parse error for %s: %s",
-                    repo.name,
-                    entry.name,
-                    exc,
-                )
-                continue
-
-            ws_override = resolve_workspace_model_override(
-                self._config.agent_model_overrides.overrides,
-                agent.name,
-                vendor.vendor_label,
-            )
-            try:
-                rendered = renderer.render(
-                    agent,
-                    warn=_noop_warn,
-                    workspace_model_override=ws_override,
-                    effective_tier_table=effective_tier_table,
-                )
-            except RepoError as exc:
-                logger.warning(
-                    "agent probe: %s — model resolution error for %s: %s",
-                    repo.name,
-                    entry.name,
-                    exc,
-                )
-                # Compute the expected filename so it can be excluded from the
-                # orphan check — the copy on disk is not an orphan, the tier
-                # resolution just failed for this entry.
-                vendor_suffix = getattr(renderer, "SUFFIX", "")
-                expected_filename = f"{prefix}-{agent.name}{vendor_suffix}"
-                render_failures.append((expected_filename, str(exc)))
-                continue
-            filename = f"{prefix}-{rendered.filename_stem}{rendered.suffix}"
-            result[filename] = rendered.text.encode("utf-8")
-
-        return result, prefix, render_failures
 
     # ── Actual agents in target dir ───────────────────────────────────────
 
@@ -317,28 +230,9 @@ class AgentProbeService:
 
         return result
 
-    # ── Per-copy health check ─────────────────────────────────────────────
-
-    def _check_copy(self, name: str, actual_path: Path, expected_bytes: bytes) -> str | None:
-        """Return an issue description for one copy, or None if healthy.
-
-        The byte comparison uses the same logic as ``ExtensionAgentService._sync_file``
-        so "stale" in the probe means exactly "would be overwritten by the next
-        ``winter ws init`` run".
-        """
-        if not self._fs.is_file(actual_path):
-            return f"missing copy: {name}"
-        try:
-            actual_bytes = self._fs.read_bytes(actual_path)
-        except OSError:
-            return f"missing copy: {name} (read error)"
-        if actual_bytes != expected_bytes:
-            return f"stale copy: {name} (transform mismatch)"
-        return None
-
     # ── Name uniqueness guard ─────────────────────────────────────────────
 
-    def _probe_name_uniqueness(self, standalone_repos: list[StandaloneRepository]) -> list[ProbeResult]:
+    def _probe_name_uniqueness(self, known_agents: list[KnownAgent]) -> list[ProbeResult]:
         """Check that canonical agent ``name`` values are unique across all extensions.
 
         Claude Code resolves agents by the ``name`` frontmatter field, not by
@@ -348,8 +242,8 @@ class AgentProbeService:
         that claim it so the author can rename one agent to avoid the collision.
         """
         name_to_prefixes: dict[str, list[str]] = {}
-        for prefix, agent in self._iter_agents(standalone_repos):
-            name_to_prefixes.setdefault(agent.name, []).append(prefix)
+        for known in known_agents:
+            name_to_prefixes.setdefault(known.agent.name, []).append(known.prefix)
 
         collisions = {name: prefixes for name, prefixes in name_to_prefixes.items() if len(prefixes) > 1}
         if not collisions:
@@ -378,7 +272,7 @@ class AgentProbeService:
 
     # ── Override target validation ────────────────────────────────────────
 
-    def _probe_override_targets(self, standalone_repos: list[StandaloneRepository]) -> list[ProbeResult]:
+    def _probe_override_targets(self, known_agents: list[KnownAgent]) -> list[ProbeResult]:
         """Check that all ``[agent_model_overrides]`` entries target known agent names.
 
         Collects every canonical agent name across all qualifying extensions
@@ -394,7 +288,7 @@ class AgentProbeService:
         if not overrides:
             return []
 
-        known_names = {agent.name for _, agent in self._iter_agents(standalone_repos)}
+        known_names = {known.agent.name for known in known_agents}
         unknown = sorted(name for name in overrides if name not in known_names)
         if not unknown:
             return [
@@ -420,18 +314,6 @@ class AgentProbeService:
                 ),
             )
         ]
-
-    # ── Shared agent traversal ────────────────────────────────────────────
-
-    def _iter_agents(self, repos: list[StandaloneRepository]) -> Iterator[tuple[str, CanonicalAgent]]:
-        """Yield ``(prefix, agent)`` for every qualifying canonical agent across all repos.
-
-        Delegates to the injected ``CanonicalAgentEnumerator`` — the same
-        collaborator ``ExtensionAgentService.check_unknown_overrides`` uses —
-        so the override-target and name-uniqueness probes agree exactly with
-        the installer's unknown-override warning on which agents are "known".
-        """
-        yield from self._agent_enumerator.iter_known_agents(repos, mode=self._config.adopt_extensions)
 
 
 __all__ = ["AGENT_SOURCE", "AgentProbeService"]

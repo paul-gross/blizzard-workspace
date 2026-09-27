@@ -28,8 +28,12 @@ from winter_cli.core.config_file import ConfigError, IConfigFileReader
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.provision.manifest import ProvisionHandler, ProvisionManifestParser
 from winter_cli.modules.service.ext_service_manifest import ExtServiceDef, ExtServiceManifestParser
-from winter_cli.modules.workspace.agent_transform.model_tiers import VENDOR_LABELS, build_effective_tier_table
-from winter_cli.modules.workspace.agent_transform.models import AgentModelOverrideProfile
+from winter_cli.modules.workspace.agent_transform.model_tiers import (
+    VENDOR_LABELS,
+    EffectiveTierTable,
+    build_effective_tier_table,
+)
+from winter_cli.modules.workspace.agent_transform.models import AgentModelOverrideProfile, ConfigSource
 from winter_cli.util import deep_merge
 
 WINTER_DIR = ".winter"
@@ -294,15 +298,19 @@ class WorkspaceConfigService:
 
         space = self._parse_space(merged.get("space"))
 
-        model_tiers = self._parse_model_tiers(merged.get("model_tiers"))
+        model_tiers = self._parse_model_tiers(
+            merged.get("model_tiers"),
+            sources=self._source_map(raw.get("model_tiers"), overlay.get("model_tiers")),
+        )
 
-        # Build effective tier table so agent_model_overrides bare-string values
-        # can be validated against the complete set of known tier labels.
-        effective_tier_table = build_effective_tier_table(model_tiers.tiers)
+        # Build the effective tier table so agent_model_overrides bare-string
+        # values can be validated against the complete set of known tier labels.
+        effective_tier_table = build_effective_tier_table(model_tiers.tiers, model_tiers.tier_sources)
 
         agent_model_overrides = self._parse_agent_model_overrides(
             merged.get("agent_model_overrides"),
-            effective_tier_table=effective_tier_table,
+            tier_table=effective_tier_table,
+            sources=self._source_map(raw.get("agent_model_overrides"), overlay.get("agent_model_overrides")),
         )
 
         return WorkspaceConfig(
@@ -568,7 +576,26 @@ class WorkspaceConfigService:
         return SpaceConfig(**kwargs)
 
     @staticmethod
-    def _parse_model_tiers(raw: object) -> ModelTiersConfig:
+    def _source_map(raw_table: object, overlay_table: object) -> dict[str, ConfigSource]:
+        """Attribute each key of a ``TableField``-merged table to its origin file.
+
+        *raw_table* and *overlay_table* are the same key's value read from the
+        shared and local files respectively, **before** they are merged. Under
+        ``TableField`` semantics a local entry replaces its shared counterpart
+        wholesale, so the local pass simply overwrites the shared attribution
+        for any key present in both.
+        """
+        sources: dict[str, ConfigSource] = {}
+        if isinstance(raw_table, dict):
+            for key in raw_table:
+                sources[str(key)] = ConfigSource.config_toml
+        if isinstance(overlay_table, dict):
+            for key in overlay_table:
+                sources[str(key)] = ConfigSource.config_local_toml
+        return sources
+
+    @staticmethod
+    def _parse_model_tiers(raw: object, *, sources: dict[str, ConfigSource] | None = None) -> ModelTiersConfig:
         """Parse ``[model_tiers]`` into a ``ModelTiersConfig``.
 
         Each entry maps a tier label to a dict of vendor label → concrete model id.
@@ -579,6 +606,9 @@ class WorkspaceConfigService:
         Raises ``ConfigError`` on invalid value types, unknown vendor labels, or
         empty model ids.  Tier-label validation against the effective table is
         the caller's responsibility after merging with built-in defaults.
+
+        *sources* attributes each label to the config file it was read from
+        (see ``_source_map``); defaults to empty when not supplied.
         """
         if not isinstance(raw, dict):
             return ModelTiersConfig()
@@ -614,13 +644,14 @@ class WorkspaceConfigService:
                 )
             tiers[label_key] = per_vendor
 
-        return ModelTiersConfig(tiers=tiers)
+        return ModelTiersConfig(tiers=tiers, tier_sources=sources or {})
 
     @staticmethod
     def _parse_agent_model_overrides(
         raw: object,
         *,
-        effective_tier_table: dict[str, dict[str, str]] | None = None,
+        tier_table: EffectiveTierTable | None = None,
+        sources: dict[str, ConfigSource] | None = None,
     ) -> AgentModelOverridesConfig:
         """Parse ``[agent_model_overrides]`` into an ``AgentModelOverridesConfig``.
 
@@ -633,6 +664,9 @@ class WorkspaceConfigService:
         a bare string that is not a recognised tier label.
         Agent-name validation (unknown agent) is deferred to ``winter doctor``
         since the known agent set is only available after extension processing.
+
+        *sources* attributes each agent key to the config file it was read
+        from (see ``_source_map``); defaults to empty when not supplied.
         """
         if raw is None:
             return AgentModelOverridesConfig()
@@ -649,8 +683,8 @@ class WorkspaceConfigService:
                         f"value must be a non-empty tier label or a per-vendor table"
                     )
                 # Validate that the bare string is a known tier label.
-                if effective_tier_table is not None and value not in effective_tier_table:
-                    valid = ", ".join(repr(t) for t in sorted(effective_tier_table))
+                if tier_table is not None and value not in tier_table:
+                    valid = ", ".join(repr(t) for t in sorted(tier_table.labels()))
                     raise ConfigError(
                         f"[agent_model_overrides] entry {agent_key!r}: "
                         f"{value!r} is not a recognised tier label; valid tier labels: {valid}. "
@@ -721,7 +755,7 @@ class WorkspaceConfigService:
                     f"got {type_name}"
                 )
 
-        return AgentModelOverridesConfig(overrides=overrides)
+        return AgentModelOverridesConfig(overrides=overrides, override_sources=sources or {})
 
     def _read_config(self, path: Path) -> dict:
         if not self._fs.is_file(path):

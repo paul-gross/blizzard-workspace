@@ -21,3 +21,6 @@ class ScreenFactory:
 
     def error_log_screen(self):
         return self._container.error_log_screen()
+
+    def agent_matrix_screen(self):
+        return self._container.agent_matrix_screen()

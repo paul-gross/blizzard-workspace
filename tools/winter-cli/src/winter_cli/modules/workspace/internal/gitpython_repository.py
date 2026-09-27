@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 import git
@@ -16,16 +17,21 @@ class GitPythonRepository:
     Every method wraps `git.GitCommandError` / `git.InvalidGitRepositoryError` /
     `git.NoSuchPathError` via `RepoErrorFactory.from_git` so callers see only
     the winter-defined `RepoError`.
+
+    `clone_env` is layered over the inherited environment for `clone` — the
+    one network operation that can prompt for credentials — so an in-process
+    caller can pass `GIT_TERMINAL_PROMPT=0` to make a prompt fail fast.
     """
 
-    def __init__(self, error_factory: RepoErrorFactory) -> None:
+    def __init__(self, error_factory: RepoErrorFactory, clone_env: Mapping[str, str] | None = None) -> None:
         self._error_factory = error_factory
+        self._clone_env = dict(clone_env) if clone_env is not None else None
 
     # ── Cloning + worktrees ───────────────────────────────────────────────
 
     def clone(self, url: str, dest: Path) -> None:
         try:
-            git.Repo.clone_from(url, str(dest))
+            git.Repo.clone_from(url, str(dest), env=self._clone_env)
         except git.GitCommandError as exc:
             raise self._error_factory.from_git(
                 exc,

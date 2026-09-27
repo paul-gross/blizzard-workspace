@@ -16,9 +16,7 @@ def _make_handler() -> tuple[InitHandler, MagicMock, MagicMock]:
     init_service = MagicMock()
     init_service.reconcile_env.return_value = True
     init_service.reconcile_all.return_value = True
-    init_service.reconcile_projects.return_value = True
-    init_service.reconcile_standalones.return_value = True
-    init_service.run_workspace_reconcile_hooks.return_value = True
+    init_service.reconcile_workspace.return_value = True
 
     reporter_factory = MagicMock()
     reporter_factory.get_init_reporter.return_value = MagicMock()
@@ -68,7 +66,7 @@ def test_workspace_target_does_not_invoke_init_service() -> None:
 
     init_service.reconcile_env.assert_not_called()
     init_service.reconcile_all.assert_not_called()
-    init_service.reconcile_projects.assert_not_called()
+    init_service.reconcile_workspace.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

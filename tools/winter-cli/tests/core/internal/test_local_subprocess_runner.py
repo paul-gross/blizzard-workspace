@@ -15,12 +15,13 @@ def test_run_passes_cmd_cwd_env_to_subprocess(monkeypatch: pytest.MonkeyPatch, t
     fake_subprocess.run.return_value = MagicMock(returncode=0, stdout="hello\n", stderr="")
     monkeypatch.setattr(local_subprocess_runner, "subprocess", fake_subprocess)
 
-    result = LocalSubprocessRunner.run(["echo", "hi"], cwd=tmp_path, env={"K": "V"})
+    result = LocalSubprocessRunner().run(["echo", "hi"], cwd=tmp_path, env={"K": "V"})
 
     fake_subprocess.run.assert_called_once_with(
         ["echo", "hi"],
         cwd=str(tmp_path),
         env={"K": "V"},
+        stdin=None,
         capture_output=True,
         text=True,
         errors="replace",
@@ -35,12 +36,13 @@ def test_run_without_cwd_or_env_passes_none(monkeypatch: pytest.MonkeyPatch) -> 
     fake_subprocess.run.return_value = MagicMock(returncode=0, stdout="", stderr="")
     monkeypatch.setattr(local_subprocess_runner, "subprocess", fake_subprocess)
 
-    result = LocalSubprocessRunner.run(["git", "status"])
+    result = LocalSubprocessRunner().run(["git", "status"])
 
     fake_subprocess.run.assert_called_once_with(
         ["git", "status"],
         cwd=None,
         env=None,
+        stdin=None,
         capture_output=True,
         text=True,
         errors="replace",
@@ -54,7 +56,7 @@ def test_run_returns_failure_result_when_oserror(monkeypatch: pytest.MonkeyPatch
     fake_subprocess.run.side_effect = OSError("no such file")
     monkeypatch.setattr(local_subprocess_runner, "subprocess", fake_subprocess)
 
-    result = LocalSubprocessRunner.run(["does-not-exist"])
+    result = LocalSubprocessRunner().run(["does-not-exist"])
 
     assert result.returncode == -1
     assert result.stdout == ""
@@ -70,7 +72,7 @@ def test_run_decodes_non_utf8_output_instead_of_raising() -> None:
     that succeeded — `git check-ignore` printing a filename from a vendored
     tree is the case that surfaced it.
     """
-    result = LocalSubprocessRunner.run([sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'a\\xffb')"])
+    result = LocalSubprocessRunner().run([sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'a\\xffb')"])
 
     assert result.returncode == 0
     assert "\ufffd" in result.stdout
@@ -82,12 +84,13 @@ def test_call_inherits_stdio_and_returns_exit_code(monkeypatch: pytest.MonkeyPat
     fake_subprocess.run.return_value = MagicMock(returncode=3)
     monkeypatch.setattr(local_subprocess_runner, "subprocess", fake_subprocess)
 
-    code = LocalSubprocessRunner.call(["svc", "up", "alpha"], cwd=tmp_path, env={"K": "V"})
+    code = LocalSubprocessRunner().call(["svc", "up", "alpha"], cwd=tmp_path, env={"K": "V"})
 
     fake_subprocess.run.assert_called_once_with(
         ["svc", "up", "alpha"],
         cwd=str(tmp_path),
         env={"K": "V"},
+        stdin=None,
         check=False,
     )
     assert code == 3
@@ -98,7 +101,7 @@ def test_call_returns_126_on_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_subprocess.run.side_effect = OSError("not executable")
     monkeypatch.setattr(local_subprocess_runner, "subprocess", fake_subprocess)
 
-    assert LocalSubprocessRunner.call(["does-not-exist"]) == 126
+    assert LocalSubprocessRunner().call(["does-not-exist"]) == 126
 
 
 def test_popen_passes_cmd_cwd_env_shell_to_popen(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -122,6 +125,7 @@ def test_popen_passes_cmd_cwd_env_shell_to_popen(monkeypatch: pytest.MonkeyPatch
         cwd=str(tmp_path),
         env={"X": "1"},
         shell=False,
+        stdin=None,
         stdout=fake_subprocess.PIPE,
         stderr=fake_subprocess.STDOUT,
         text=True,
@@ -152,8 +156,38 @@ def test_popen_merge_stderr_false_passes_none_stderr(monkeypatch: pytest.MonkeyP
         cwd=None,
         env=None,
         shell=False,
+        stdin=None,
         stdout=fake_subprocess.PIPE,
         stderr=None,
         text=True,
         bufsize=1,
     )
+
+
+# A child that reports whether it could prompt: stdin at EOF (from /dev/null)
+# and the git prompt switch it sees, plus a caller-supplied variable.
+_PROBE = "import os, sys; print(sys.stdin.read() == '', os.environ.get('GIT_TERMINAL_PROMPT'), os.environ.get('K'))"
+
+
+def test_non_interactive_run_gives_the_child_devnull_stdin_and_no_git_prompt() -> None:
+    runner = LocalSubprocessRunner(non_interactive=True)
+
+    assert runner.run([sys.executable, "-c", _PROBE], env={"K": "V"}).stdout.split() == ["True", "0", "V"]
+
+
+def test_non_interactive_run_layers_over_the_inherited_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("K", "inherited")
+    runner = LocalSubprocessRunner(non_interactive=True)
+
+    assert runner.run([sys.executable, "-c", _PROBE]).stdout.split() == ["True", "0", "inherited"]
+
+
+def test_non_interactive_popen_and_call_give_the_child_devnull_stdin_and_no_git_prompt() -> None:
+    runner = LocalSubprocessRunner(non_interactive=True)
+
+    with runner.popen([sys.executable, "-c", _PROBE], env={"K": "V"}) as proc:
+        assert list(proc.stdout_lines) == ["True 0 V"]
+    exit_if_prompting = (
+        "import os, sys; sys.exit(0 if sys.stdin.read() == '' and os.environ['GIT_TERMINAL_PROMPT'] == '0' else 1)"
+    )
+    assert runner.call([sys.executable, "-c", exit_if_prompting]) == 0

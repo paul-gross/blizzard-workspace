@@ -44,12 +44,7 @@ class InitHandler:
         elif params.target:
             success = self._init_service.reconcile_env(params.target, reporter)
         else:
-            success = self._init_service.reconcile_projects(reporter)
-            if not self._init_service.reconcile_standalones(reporter):
-                success = False
-            # Fire the workspace-level hook once after standalones are present.
-            if not self._init_service.run_workspace_reconcile_hooks(reporter):
-                success = False
+            success = self._init_service.reconcile_workspace(reporter)
 
         if not success:
             sys.exit(1)

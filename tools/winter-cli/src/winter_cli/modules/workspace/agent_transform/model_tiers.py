@@ -6,11 +6,14 @@ string each harness expects. Claude accepts tier aliases directly; each Codex an
 OpenCode id carries its own verification note inline — read those before treating
 a value as current, and re-verify against the vendor's live catalog when editing.
 
-``build_effective_tier_table`` produces the runtime tier table by merging the
-built-in defaults with workspace-configured overrides/extensions from
-``[model_tiers]`` in ``.winter/config.toml``.  All tier resolution should
+``build_effective_tier_table`` produces the runtime ``EffectiveTierTable`` by
+merging the built-in defaults with workspace-configured overrides/extensions
+from ``[model_tiers]`` in ``.winter/config.toml``.  All tier resolution should
 use the effective table; ``MODEL_TIER_IDS`` is the source of truth for the
-built-in defaults and for test assertions against the canonical ids.
+built-in defaults and for test assertions against the canonical ids. It is
+the only tier-merge implementation — ``agent_transform.renderers.resolve_agent``,
+the installer, the doctor copy inspector, and load-time tier-label validation
+all consume it.
 
 A per-harness ``model:`` key in the agent's override block wins over this
 table — callers must apply that override before (or instead of) consulting it.
@@ -18,7 +21,11 @@ table — callers must apply that override before (or instead of) consulting it.
 
 from __future__ import annotations
 
+import dataclasses
 import enum
+from collections.abc import Mapping
+
+from winter_cli.modules.workspace.agent_transform.models import ConfigSource, ModelLayer, SourcedValue
 
 
 class ModelTier(enum.Enum):
@@ -56,54 +63,126 @@ MODEL_TIER_IDS: dict[tuple[ModelTier, str], str] = {
     (ModelTier.opus, "claude"): "opus",
     (ModelTier.sonnet, "claude"): "sonnet",
     (ModelTier.haiku, "claude"): "haiku",
-    # Codex: the sol > terra > luna ranking and this tier mapping are workspace-declared,
-    # not vendor-published; Codex exposes no machine-readable capability order. Each id
-    # was verified present in the local Codex catalog (2026-08-16). The previous
-    # gpt-5.4 mapping is superseded — Codex itself migrates gpt-5.4 -> gpt-5.5.
-    # `sonnet` and `haiku` share luna: luna is the lowest declared rank, and Codex
-    # publishes no smaller 5.6 model to separate them.
-    (ModelTier.fable, "codex"): "gpt-5.6-sol",
-    (ModelTier.opus, "codex"): "gpt-5.6-terra",
-    (ModelTier.sonnet, "codex"): "gpt-5.6-luna",
-    (ModelTier.haiku, "codex"): "gpt-5.6-luna",
+    # Codex: the astra > sol > terra > luna ranking and this tier mapping are
+    # workspace-declared, not vendor-published; Codex exposes no machine-readable
+    # capability order. Each tier maps to its own rank, most- to least-capable.
+    # Each id was verified present in the local Codex catalog (2026-09-27, codex
+    # 0.157.1). The gpt-6 series has no terra release, so the sonnet tier stays on 5.6.
+    (ModelTier.fable, "codex"): "gpt-6-astra",
+    (ModelTier.opus, "codex"): "gpt-6-sol",
+    (ModelTier.sonnet, "codex"): "gpt-5.6-terra",
+    (ModelTier.haiku, "codex"): "gpt-6-luna",
     # OpenCode: format per opencode.ai/docs/agents (provider/model-id).
     # The 5-series ids carry no date suffix; verifiable via 'opencode models'.
     # Haiku has no 5-series release, so that tier stays on 4.5.
-    (ModelTier.fable, "opencode"): "anthropic/claude-fable-5",
-    (ModelTier.opus, "opencode"): "anthropic/claude-opus-5",
+    (ModelTier.fable, "opencode"): "anthropic/claude-fable-5-1",
+    (ModelTier.opus, "opencode"): "anthropic/claude-opus-5-5",
     (ModelTier.sonnet, "opencode"): "anthropic/claude-sonnet-5",
     (ModelTier.haiku, "opencode"): "anthropic/claude-haiku-4-5",
 }
 
-# Built-in tier table in the dict[str, dict[str, str]] shape used by
-# ``build_effective_tier_table`` and the renderers.  Derived from
-# ``MODEL_TIER_IDS`` — the two must remain in sync.
+# Built-in tier table as ``{tier_label: {vendor_label: model_id}}``, the base
+# layer ``build_effective_tier_table`` merges ``[model_tiers]`` onto. Derived
+# from ``MODEL_TIER_IDS`` — the two must remain in sync.
 _BUILTIN_TIER_TABLE: dict[str, dict[str, str]] = {}
 for (_tier, _vendor), _model_id in MODEL_TIER_IDS.items():
     _BUILTIN_TIER_TABLE.setdefault(_tier.value, {})[_vendor] = _model_id
 
 
+@dataclasses.dataclass(frozen=True)
+class TierCell:
+    """One ``(tier label, vendor)`` cell of the effective tier table.
+
+    ``code_default`` is the built-in ``MODEL_TIER_IDS`` value, or ``None`` for
+    a custom label the built-in table does not define. ``tier_override`` is
+    the workspace ``[model_tiers]`` value for this cell, if any, together with
+    the file it was read from. ``effective``/``effective_layer`` name the
+    winning value: ``tier_override`` when present, else ``code_default`` — a
+    cell only exists when at least one of the two is set, so ``effective`` is
+    never absent for a cell that exists.
+    """
+
+    code_default: str | None
+    tier_override: SourcedValue | None
+    effective: str
+    effective_layer: ModelLayer
+
+
+class EffectiveTierTable:
+    """The merged tier table: built-in defaults ⊕ workspace ``[model_tiers]`` config.
+
+    Structured as ``{tier_label: {vendor_label: TierCell}}``. A ``(label,
+    vendor)`` pair absent from the table means neither the built-ins nor the
+    workspace config map that vendor for that label — callers decide how to
+    surface that gap (e.g. a ``null`` JSON cell); this type does not
+    synthesize one.
+    """
+
+    def __init__(self, cells: Mapping[str, Mapping[str, TierCell]]) -> None:
+        self._cells = cells
+
+    def labels(self) -> frozenset[str]:
+        """Every tier label known to the table — built-in or workspace-defined."""
+        return frozenset(self._cells)
+
+    def cell(self, label: str, vendor_label: str) -> TierCell | None:
+        """The cell for ``(label, vendor_label)``, or ``None`` when unmapped."""
+        return self._cells.get(label, {}).get(vendor_label)
+
+    def model_id(self, label: str, vendor_label: str) -> str | None:
+        """The effective model id for ``(label, vendor_label)``, or ``None`` when unmapped."""
+        cell = self.cell(label, vendor_label)
+        return cell.effective if cell is not None else None
+
+    def __contains__(self, label: object) -> bool:
+        return label in self._cells
+
+
 def build_effective_tier_table(
-    custom_tiers: dict[str, dict[str, str]],
-) -> dict[str, dict[str, str]]:
+    tiers: Mapping[str, Mapping[str, str]],
+    tier_sources: Mapping[str, ConfigSource] | None = None,
+) -> EffectiveTierTable:
     """Return the effective tier table: built-in defaults ⊕ workspace config.
 
     The built-in tiers (fable / opus / sonnet / haiku) are the base.  Entries in
-    ``custom_tiers`` (parsed from ``[model_tiers]``) layer on top:
+    ``tiers`` (parsed from ``[model_tiers]``, i.e. ``ModelTiersConfig.tiers``)
+    layer on top:
 
     - An entry for an **existing built-in label** overrides only the listed
       vendor ids; unlisted vendors inherit their built-in default value.
     - An entry for a **new label** adds a new tier; all required vendor ids
       must be provided by the caller (validated by the config parser).
 
-    The result is a dict mapping tier label → dict[vendor_label → model_id].
+    ``tiers`` and ``tier_sources`` are taken as plain mappings — not a
+    ``ModelTiersConfig`` — so this module, which sits below ``config/models.py``
+    in the import graph, never imports it. A label absent from ``tier_sources``
+    (or when ``tier_sources`` is ``None``) defaults to ``ConfigSource.config_toml``,
+    matching ``ModelTiersConfig.source_for``.
     """
-    result: dict[str, dict[str, str]] = {label: dict(vendor_ids) for label, vendor_ids in _BUILTIN_TIER_TABLE.items()}
-    for label, vendor_ids in custom_tiers.items():
-        if label in result:
-            # Built-in tier: merge per-vendor so only listed vendors are replaced.
-            result[label] = {**result[label], **vendor_ids}
-        else:
-            # New custom tier: add directly.
-            result[label] = dict(vendor_ids)
-    return result
+    sources = tier_sources or {}
+    result: dict[str, dict[str, TierCell]] = {}
+    for label in set(_BUILTIN_TIER_TABLE) | set(tiers):
+        builtin_vendor_ids = _BUILTIN_TIER_TABLE.get(label, {})
+        override_vendor_ids = tiers.get(label, {})
+        source = sources.get(label, ConfigSource.config_toml)
+        cells: dict[str, TierCell] = {}
+        for vendor in set(builtin_vendor_ids) | set(override_vendor_ids):
+            code_default = builtin_vendor_ids.get(vendor)
+            override_value = override_vendor_ids.get(vendor)
+            if override_value is not None:
+                cells[vendor] = TierCell(
+                    code_default=code_default,
+                    tier_override=SourcedValue(value=override_value, source=source),
+                    effective=override_value,
+                    effective_layer=ModelLayer.tier_override,
+                )
+            else:
+                assert code_default is not None
+                cells[vendor] = TierCell(
+                    code_default=code_default,
+                    tier_override=None,
+                    effective=code_default,
+                    effective_layer=ModelLayer.code_default,
+                )
+        result[label] = cells
+    return EffectiveTierTable(result)

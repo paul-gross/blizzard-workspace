@@ -20,22 +20,36 @@ from textwrap import dedent
 import pytest
 import yaml
 
-from winter_cli.config.models import CodeAgentVendor
+from winter_cli.config.models import AgentModelOverridesConfig, CodeAgentVendor
 from winter_cli.modules.workspace.agent_transform.canonical_parser import CanonicalAgentParser
-from winter_cli.modules.workspace.agent_transform.model_tiers import MODEL_TIER_IDS, VENDOR_LABELS, ModelTier
-from winter_cli.modules.workspace.agent_transform.models import AgentFormat, RenderedAgent
+from winter_cli.modules.workspace.agent_transform.model_tiers import (
+    MODEL_TIER_IDS,
+    VENDOR_LABELS,
+    EffectiveTierTable,
+    ModelTier,
+    build_effective_tier_table,
+)
+from winter_cli.modules.workspace.agent_transform.models import (
+    AgentFormat,
+    AgentResolution,
+    CanonicalAgent,
+    RenderedAgent,
+)
 from winter_cli.modules.workspace.agent_transform.registry import PARSER as SHARED_PARSER
 from winter_cli.modules.workspace.agent_transform.registry import RENDERERS, renderer_for
 from winter_cli.modules.workspace.agent_transform.renderers import (
     ClaudeAgentRenderer,
     CodexAgentRenderer,
     OpenCodeAgentRenderer,
+    resolve_agent,
 )
 from winter_cli.modules.workspace.models import RepoError
 
 # ── Shared fixtures and helpers ────────────────────────────────────────────────
 
 _PARSER = CanonicalAgentParser()
+_DEFAULT_TIER_TABLE = build_effective_tier_table({})
+_NO_OVERRIDES = AgentModelOverridesConfig()
 
 
 def _warn_sink() -> tuple[list[tuple[str, str, str]], Callable[[str, str, str], None]]:
@@ -46,6 +60,17 @@ def _warn_sink() -> tuple[list[tuple[str, str, str]], Callable[[str, str, str], 
         calls.append((field, agent_name, vendor))
 
     return calls, warn
+
+
+def _resolve(
+    agent: CanonicalAgent,
+    vendor_label: str,
+    *,
+    tier_table: EffectiveTierTable = _DEFAULT_TIER_TABLE,
+    overrides: AgentModelOverridesConfig = _NO_OVERRIDES,
+) -> AgentResolution:
+    """Build the resolution a renderer needs, defaulting to no workspace config."""
+    return resolve_agent(agent, vendor_label, tier_table, overrides)
 
 
 _SAMPLE_MD = dedent("""\
@@ -111,7 +136,7 @@ def test_builtin_tier_renders_for_every_vendor_without_config(tier: str) -> None
     _, warn = _warn_sink()
 
     for renderer in (ClaudeAgentRenderer(), CodexAgentRenderer(), OpenCodeAgentRenderer()):
-        rendered = renderer.render(agent, warn=warn)
+        rendered = renderer.render(agent, warn=warn, resolution=_resolve(agent, renderer.VENDOR))
         assert rendered.text
 
 
@@ -290,7 +315,7 @@ def test_claude_render_produces_valid_yaml_frontmatter() -> None:
     """Rendered Claude MD has parseable YAML frontmatter."""
     agent = _PARSER.parse(_SAMPLE_MD)
     _, warn = _warn_sink()
-    r = ClaudeAgentRenderer().render(agent, warn=warn)
+    r = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude"))
 
     assert r.suffix == ".md"
     assert r.filename_stem == "developer"
@@ -306,7 +331,7 @@ def test_claude_render_includes_body() -> None:
     """Rendered Claude MD contains the original body text."""
     agent = _PARSER.parse(_SAMPLE_MD)
     _, warn = _warn_sink()
-    r = ClaudeAgentRenderer().render(agent, warn=warn)
+    r = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude"))
 
     assert "You are the **Developer**." in r.text
 
@@ -315,7 +340,7 @@ def test_claude_render_no_warnings_for_tools() -> None:
     """Claude renderer does not warn about the tools field."""
     agent = _PARSER.parse(_SAMPLE_MD)
     calls, warn = _warn_sink()
-    ClaudeAgentRenderer().render(agent, warn=warn)
+    ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude"))
 
     assert calls == [], f"unexpected warnings: {calls}"
 
@@ -324,7 +349,7 @@ def test_claude_render_unravels_claude_override_block() -> None:
     """claude: block keys are merged into the top-level frontmatter."""
     agent = _PARSER.parse(_SAMPLE_MD_WITH_OVERRIDES)
     _, warn = _warn_sink()
-    r = ClaudeAgentRenderer().render(agent, warn=warn)
+    r = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude"))
 
     fm = _extract_frontmatter(r.text)
     data = yaml.safe_load(fm)
@@ -335,7 +360,7 @@ def test_claude_block_model_override_beats_tier_table() -> None:
     """A model: in the claude: block overrides the tier-table resolution."""
     agent = _PARSER.parse(_SAMPLE_MD_WITH_OVERRIDES)
     _, warn = _warn_sink()
-    r = ClaudeAgentRenderer().render(agent, warn=warn)
+    r = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude"))
 
     fm = _extract_frontmatter(r.text)
     data = yaml.safe_load(fm)
@@ -346,7 +371,7 @@ def test_claude_render_drops_other_vendor_blocks() -> None:
     """The codex: and opencode: override blocks do not appear in the Claude output."""
     agent = _PARSER.parse(_SAMPLE_MD_WITH_OVERRIDES)
     _, warn = _warn_sink()
-    r = ClaudeAgentRenderer().render(agent, warn=warn)
+    r = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude"))
 
     fm = _extract_frontmatter(r.text)
     data = yaml.safe_load(fm)
@@ -361,21 +386,21 @@ def test_codex_render_produces_valid_toml() -> None:
     """Rendered Codex TOML is parseable by tomllib."""
     agent = _PARSER.parse(_SAMPLE_MD)
     _, warn = _warn_sink()
-    r = CodexAgentRenderer().render(agent, warn=warn)
+    r = CodexAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "codex"))
 
     assert r.suffix == ".toml"
     assert r.filename_stem == "developer"
     doc = tomllib.loads(r.text)
     assert doc["name"] == "developer"
     assert doc["description"] == "General-purpose developer agent."
-    assert doc["model"] == "gpt-5.6-luna"  # sonnet tier → codex id
+    assert doc["model"] == "gpt-5.6-terra"  # sonnet tier → codex id
 
 
 def test_codex_render_roundtrip_toml() -> None:
     """Codex TOML can be round-tripped through tomllib without data loss."""
     agent = _PARSER.parse(_SAMPLE_MD)
     _, warn = _warn_sink()
-    r = CodexAgentRenderer().render(agent, warn=warn)
+    r = CodexAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "codex"))
 
     # Round-trip: dump then parse back.
     doc = tomllib.loads(r.text)
@@ -387,7 +412,7 @@ def test_codex_render_includes_body_as_developer_instructions() -> None:
     """The agent body becomes the 'developer_instructions' key in the Codex TOML."""
     agent = _PARSER.parse(_SAMPLE_MD)
     _, warn = _warn_sink()
-    r = CodexAgentRenderer().render(agent, warn=warn)
+    r = CodexAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "codex"))
 
     doc = tomllib.loads(r.text)
     assert "developer_instructions" in doc
@@ -398,7 +423,7 @@ def test_codex_render_warns_about_tools() -> None:
     """Codex renderer calls warn() for the 'tools' field (no Codex equivalent)."""
     agent = _PARSER.parse(_SAMPLE_MD)
     calls, warn = _warn_sink()
-    CodexAgentRenderer().render(agent, warn=warn)
+    CodexAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "codex"))
 
     tool_warns = [(f, n, v) for f, n, v in calls if f == "tools"]
     assert len(tool_warns) == 1
@@ -410,7 +435,7 @@ def test_codex_render_no_tool_warning_when_tools_absent() -> None:
     text = "---\nname: notool\ndescription: no tools.\n---\n\nBody.\n"
     agent = _PARSER.parse(text)
     calls, warn = _warn_sink()
-    CodexAgentRenderer().render(agent, warn=warn)
+    CodexAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "codex"))
 
     assert all(f != "tools" for f, _, _ in calls)
 
@@ -419,7 +444,7 @@ def test_codex_block_model_override_beats_tier_table() -> None:
     """A model: in the codex: block overrides the tier-table resolution."""
     agent = _PARSER.parse(_SAMPLE_MD_WITH_OVERRIDES)
     _, warn = _warn_sink()
-    r = CodexAgentRenderer().render(agent, warn=warn)
+    r = CodexAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "codex"))
 
     doc = tomllib.loads(r.text)
     assert doc["model"] == "o3"
@@ -432,7 +457,7 @@ def test_opencode_render_produces_valid_yaml_frontmatter() -> None:
     """Rendered OpenCode MD has parseable YAML frontmatter without a name field."""
     agent = _PARSER.parse(_SAMPLE_MD)
     _, warn = _warn_sink()
-    r = OpenCodeAgentRenderer().render(agent, warn=warn)
+    r = OpenCodeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "opencode"))
 
     assert r.suffix == ".md"
     # name is carried as the filename_stem, not the frontmatter.
@@ -449,7 +474,7 @@ def test_opencode_render_includes_body() -> None:
     """Rendered OpenCode MD contains the original body."""
     agent = _PARSER.parse(_SAMPLE_MD)
     _, warn = _warn_sink()
-    r = OpenCodeAgentRenderer().render(agent, warn=warn)
+    r = OpenCodeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "opencode"))
 
     assert "You are the **Developer**." in r.text
 
@@ -458,7 +483,7 @@ def test_opencode_render_warns_about_tools() -> None:
     """OpenCode renderer calls warn() for the 'tools' field."""
     agent = _PARSER.parse(_SAMPLE_MD)
     calls, warn = _warn_sink()
-    OpenCodeAgentRenderer().render(agent, warn=warn)
+    OpenCodeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "opencode"))
 
     tool_warns = [(f, n, v) for f, n, v in calls if f == "tools"]
     assert len(tool_warns) == 1
@@ -469,7 +494,7 @@ def test_opencode_block_model_override_beats_tier_table() -> None:
     """A model: in the opencode: block overrides the tier-table resolution."""
     agent = _PARSER.parse(_SAMPLE_MD_WITH_OVERRIDES)
     _, warn = _warn_sink()
-    r = OpenCodeAgentRenderer().render(agent, warn=warn)
+    r = OpenCodeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "opencode"))
 
     fm = _extract_frontmatter(r.text)
     data = yaml.safe_load(fm)
@@ -480,7 +505,7 @@ def test_opencode_render_drops_other_vendor_blocks() -> None:
     """The claude: and codex: override blocks do not appear in the OpenCode output."""
     agent = _PARSER.parse(_SAMPLE_MD_WITH_OVERRIDES)
     _, warn = _warn_sink()
-    r = OpenCodeAgentRenderer().render(agent, warn=warn)
+    r = OpenCodeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "opencode"))
 
     fm = _extract_frontmatter(r.text)
     data = yaml.safe_load(fm)
@@ -498,9 +523,9 @@ def test_developer_agent_file_parses_and_renders_all_three_harnesses() -> None:
     _, warn_x = _warn_sink()
     _, warn_o = _warn_sink()
 
-    claude_r = ClaudeAgentRenderer().render(agent, warn=warn_c)
-    codex_r = CodexAgentRenderer().render(agent, warn=warn_x)
-    opencode_r = OpenCodeAgentRenderer().render(agent, warn=warn_o)
+    claude_r = ClaudeAgentRenderer().render(agent, warn=warn_c, resolution=_resolve(agent, "claude"))
+    codex_r = CodexAgentRenderer().render(agent, warn=warn_x, resolution=_resolve(agent, "codex"))
+    opencode_r = OpenCodeAgentRenderer().render(agent, warn=warn_o, resolution=_resolve(agent, "opencode"))
 
     # All three produced output.
     assert claude_r.text
@@ -581,27 +606,17 @@ def test_vendor_label_matches_model_tier_id_keys() -> None:
 
 
 def test_resolve_model_unknown_vendor_raises_repo_error() -> None:
-    """_resolve_model raises RepoError when the tier has no mapping for the vendor."""
-    from winter_cli.modules.workspace.agent_transform.model_tiers import build_effective_tier_table
-    from winter_cli.modules.workspace.agent_transform.renderers import _resolve_model
-    from winter_cli.modules.workspace.models import RepoError
-
+    """resolve_agent raises RepoError when the tier has no mapping for the vendor."""
     agent = _PARSER.parse("---\nname: x\ndescription: d\n---\n\nBody.\n")
-    tier_table = build_effective_tier_table({})
     with pytest.raises(RepoError, match="unknown-vendor"):
-        _resolve_model(agent, "unknown-vendor", {}, tier_table=tier_table)
+        resolve_agent(agent, "unknown-vendor", _DEFAULT_TIER_TABLE, _NO_OVERRIDES)
 
 
 def test_resolve_model_unknown_tier_raises_repo_error() -> None:
-    """_resolve_model raises RepoError when the agent's tier label is not in the tier table."""
-    from winter_cli.modules.workspace.agent_transform.model_tiers import build_effective_tier_table
-    from winter_cli.modules.workspace.agent_transform.renderers import _resolve_model
-    from winter_cli.modules.workspace.models import RepoError
-
+    """resolve_agent raises RepoError when the agent's tier label is not in the tier table."""
     agent = _PARSER.parse("---\nname: x\ndescription: d\nmodel: typo-tier\n---\n\nBody.\n")
-    tier_table = build_effective_tier_table({})
     with pytest.raises(RepoError, match="typo-tier"):
-        _resolve_model(agent, "claude", {}, tier_table=tier_table)
+        resolve_agent(agent, "claude", _DEFAULT_TIER_TABLE, _NO_OVERRIDES)
 
 
 # ── Fix D: OpenCode renderer emits mode: subagent by default ──────────────────
@@ -611,7 +626,7 @@ def test_opencode_renderer_emits_mode_subagent_by_default() -> None:
     """OpenCode output always has mode: subagent when the opencode: block has no mode."""
     agent = _PARSER.parse(_SAMPLE_MD)
     _, warn = _warn_sink()
-    r = OpenCodeAgentRenderer().render(agent, warn=warn)
+    r = OpenCodeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "opencode"))
 
     fm = _extract_frontmatter(r.text)
     data = yaml.safe_load(fm)
@@ -632,7 +647,7 @@ def test_opencode_renderer_mode_override_wins() -> None:
         """)
     agent = _PARSER.parse(text)
     _, warn = _warn_sink()
-    r = OpenCodeAgentRenderer().render(agent, warn=warn)
+    r = OpenCodeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "opencode"))
 
     fm = _extract_frontmatter(r.text)
     data = yaml.safe_load(fm)
@@ -646,7 +661,7 @@ def test_codex_warns_tools_when_no_sandbox_mode() -> None:
     """Codex renderer warns about tools when no sandbox_mode in the codex: override."""
     agent = _PARSER.parse(_SAMPLE_MD)
     calls, warn = _warn_sink()
-    CodexAgentRenderer().render(agent, warn=warn)
+    CodexAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "codex"))
 
     tool_warns = [c for c in calls if c[0] == "tools"]
     assert len(tool_warns) == 1
@@ -668,7 +683,7 @@ def test_codex_suppresses_tools_warn_when_sandbox_mode_declared() -> None:
         """)
     agent = _PARSER.parse(text)
     calls, warn = _warn_sink()
-    CodexAgentRenderer().render(agent, warn=warn)
+    CodexAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "codex"))
 
     tool_warns = [c for c in calls if c[0] == "tools"]
     assert not tool_warns, f"unexpected tools warning with sandbox_mode declared: {tool_warns}"
@@ -678,7 +693,7 @@ def test_opencode_warns_tools_when_no_permission() -> None:
     """OpenCode renderer warns about tools when no permission in the opencode: override."""
     agent = _PARSER.parse(_SAMPLE_MD)
     calls, warn = _warn_sink()
-    OpenCodeAgentRenderer().render(agent, warn=warn)
+    OpenCodeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "opencode"))
 
     tool_warns = [c for c in calls if c[0] == "tools"]
     assert len(tool_warns) == 1
@@ -701,7 +716,7 @@ def test_opencode_suppresses_tools_warn_when_permission_declared() -> None:
         """)
     agent = _PARSER.parse(text)
     calls, warn = _warn_sink()
-    OpenCodeAgentRenderer().render(agent, warn=warn)
+    OpenCodeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "opencode"))
 
     tool_warns = [c for c in calls if c[0] == "tools"]
     assert not tool_warns, f"unexpected tools warning with permission declared: {tool_warns}"

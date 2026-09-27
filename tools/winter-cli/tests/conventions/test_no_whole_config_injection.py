@@ -52,6 +52,7 @@ ALLOWED_FILES = frozenset(
         "config/workspace.py",  # defines WorkspaceConfigService + parse_provision (on-demand strict parse of provision_raw)
         "modules/workspace/repository_factory.py",  # builds ProjectRepository from [[project_repository]]
         "modules/workspace/dashboard_snapshot_service.py",  # re-reads config each dashboard poll and rebuilds RepositoryFactory/ReadWorkspaceRepository/Workspace/EnvStatusService
+        "modules/agents/agent_matrix_service.py",  # re-reads config on every `winter agents` build to assemble the tier/agent-override/agent resolution snapshot from build_effective_tier_table and the injected AgentCopyInspector
         # Workspace-lifecycle services — reconcile every declared repo.
         "modules/workspace/init_service.py",
         "modules/workspace/destroy_service.py",

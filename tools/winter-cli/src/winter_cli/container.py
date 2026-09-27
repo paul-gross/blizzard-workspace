@@ -17,9 +17,10 @@ from winter_cli.core.internal.click_cli_input_validation_service import (
 )
 from winter_cli.core.internal.click_cli_output_service import ClickCliOutputService
 from winter_cli.core.internal.local_filesystem import LocalFilesystem
-from winter_cli.core.internal.local_subprocess_runner import LocalSubprocessRunner
+from winter_cli.core.internal.local_subprocess_runner import NON_INTERACTIVE_ENV, LocalSubprocessRunner
 from winter_cli.core.internal.tomllib_config_file_reader import TomllibConfigFileReader
 from winter_cli.modules.workspace.agent_install import ExtensionAgentService
+from winter_cli.modules.workspace.agent_transform.agent_copy_inspector import AgentCopyInspector
 from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
 from winter_cli.modules.workspace.dashboard_snapshot_service import DashboardSnapshotService
 
@@ -92,6 +93,33 @@ def _lazy(target: str) -> Callable[..., Any]:
         return resolved[0](*args, **kwargs)
 
     return make
+
+
+def _fresh_non_interactive_init_service() -> InitService:
+    """An `InitService` from a fresh, non-interactive `Container` — the dashboard's `ws init`.
+
+    The dashboard resolves its container once at launch, so its own `init_svc`
+    would carry the launch-time `WorkspaceConfig` — an init run after a config
+    edit would re-render agent copies from the stale config. Each call therefore
+    builds a fresh `Container`, exactly as a `winter ws init` invocation does,
+    against the same running build.
+
+    No one can answer a prompt from inside the dashboard, so that container runs
+    every child process non-interactively: the subprocess runner gives children
+    `/dev/null` stdin and `GIT_TERMINAL_PROMPT=0`, and a clone gets the same git
+    switch. git's own HTTPS credential prompt is then disabled, and a child that
+    reads stdin (`mise trust`, a hook) sees EOF. A prompt that opens the terminal
+    directly — an ssh passphrase or host-key prompt — is not covered and can still
+    stall the run.
+    """
+    container = Container()
+    container.subprocess_runner.override(providers.Singleton(LocalSubprocessRunner, non_interactive=True))
+    container.git_repo.override(
+        providers.Singleton(
+            GitPythonRepository, error_factory=container.repo_error_factory, clone_env=NON_INTERACTIVE_ENV
+        )
+    )
+    return container.init_svc()
 
 
 class Container(containers.DeclarativeContainer):
@@ -178,9 +206,10 @@ class Container(containers.DeclarativeContainer):
         ),
     )
 
-    # `DashboardSnapshotService._build` rebuilds its own RepositoryFactory per
-    # poll from its own reloaded config — a constructor change here must be
-    # mirrored there too.
+    # `DashboardSnapshotService._build` (per dashboard poll) builds its own
+    # RepositoryFactory from its reloaded config — a constructor change here
+    # must be mirrored there. `AgentMatrixService` gets `repo_factory_for`
+    # below instead, so its wiring lives only here.
     repo_factory = providers.Singleton(
         RepositoryFactory,
         config=workspace_config,
@@ -300,6 +329,13 @@ class Container(containers.DeclarativeContainer):
         CanonicalAgentEnumerator,
         fs=fs,
         manifest_loader=extension_manifest_loader,
+    )
+
+    agent_copy_inspector = providers.Singleton(
+        AgentCopyInspector,
+        fs=fs,
+        manifest_loader=extension_manifest_loader,
+        agent_enumerator=canonical_agent_enumerator,
     )
 
     extension_symlink_svc = providers.Singleton(
@@ -618,7 +654,7 @@ class Container(containers.DeclarativeContainer):
         config=workspace_config,
         fs=fs,
         manifest_loader=extension_manifest_loader,
-        agent_enumerator=canonical_agent_enumerator,
+        agent_copy_inspector=agent_copy_inspector,
     )
 
     doctor_svc = providers.Factory(
@@ -703,6 +739,35 @@ class Container(containers.DeclarativeContainer):
         registry=capability_registry_svc,
         stream_reporter=stream_capability_reporter,
         json_reporter=json_capability_reporter,
+    )
+
+    # ── agents: read-only agent model/effort resolution matrix ──────────────
+
+    agent_matrix_svc = providers.Factory(
+        _lazy("winter_cli.modules.agents.agent_matrix_service:AgentMatrixService"),
+        workspace_config_svc=workspace_config_svc,
+        agent_copy_inspector=agent_copy_inspector,
+        # Built per `build()` from that call's reloaded config, with the same
+        # `fs` the `repo_factory` singleton binding uses.
+        repo_factory_for=providers.Factory(RepositoryFactory, fs=fs).provider,
+    )
+
+    stream_agent_matrix_reporter = providers.Factory(
+        _lazy("winter_cli.modules.agents.matrix_reporter:StreamAgentMatrixReporter"),
+        click=providers.Object(click),
+        cli_output=cli_output_svc,
+    )
+
+    json_agent_matrix_reporter = providers.Factory(
+        _lazy("winter_cli.modules.agents.matrix_reporter:JsonAgentMatrixReporter"),
+        click=providers.Object(click),
+    )
+
+    agents_handler = providers.Factory(
+        _lazy("winter_cli.modules.agents.handler:AgentsHandler"),
+        matrix_svc=agent_matrix_svc,
+        stream_reporter=stream_agent_matrix_reporter,
+        json_reporter=json_agent_matrix_reporter,
     )
 
     service_orchestrator_resolver = providers.Factory(
@@ -1072,4 +1137,22 @@ class Container(containers.DeclarativeContainer):
     error_log_screen = providers.Factory(
         _lazy("winter_cli.modules.tui.screens.error_log:ErrorLogScreen"),
         error_log=error_log_svc,
+    )
+
+    # Each run resolves `InitService` from a fresh, non-interactive Container
+    # (`_fresh_non_interactive_init_service`), so `ws init` from the dashboard
+    # sees the current config rather than this container's launch-time
+    # singleton. A singleton so every Agent matrix screen shares its
+    # one-run-at-a-time lock.
+    ws_init_runner = providers.Singleton(
+        _lazy("winter_cli.modules.tui.ws_init_runner:WorkspaceInitRunner"),
+        init_svc_factory=providers.Object(_fresh_non_interactive_init_service),
+    )
+
+    agent_matrix_screen = providers.Factory(
+        _lazy("winter_cli.modules.tui.screens.agent_matrix:AgentMatrixScreen"),
+        matrix_svc=agent_matrix_svc,
+        error_log=error_log_svc,
+        keybinding_resolver=keybinding_resolver,
+        ws_init_runner=ws_init_runner,
     )

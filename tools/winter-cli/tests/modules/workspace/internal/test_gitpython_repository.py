@@ -46,7 +46,18 @@ def test_clone_calls_clone_from_with_url_and_dest(
 
     adapter.clone("git@example.com:org/repo.git", _DEST_PATH)
 
-    git_mock.Repo.clone_from.assert_called_once_with("git@example.com:org/repo.git", str(_DEST_PATH))
+    git_mock.Repo.clone_from.assert_called_once_with("git@example.com:org/repo.git", str(_DEST_PATH), env=None)
+
+
+def test_clone_passes_the_clone_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    adapter = GitPythonRepository(RepoErrorFactory(), clone_env={"GIT_TERMINAL_PROMPT": "0"})
+
+    adapter.clone("git@example.com:org/repo.git", _DEST_PATH)
+
+    git_mock.Repo.clone_from.assert_called_once_with(
+        "git@example.com:org/repo.git", str(_DEST_PATH), env={"GIT_TERMINAL_PROMPT": "0"}
+    )
 
 
 def test_clone_raises_repo_error_on_git_command_error(

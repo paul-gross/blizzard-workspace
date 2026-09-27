@@ -42,11 +42,11 @@ When a single command spans several reader tasks, it earns one leaf per surface,
 
 ### Paired usage/configuration topics
 
-`doctor`, `lint`, `provision`, and `capabilities` each have **both** a `usage/` page and a `configuration/` page. The
-split is sharp and must stay that way: the `usage/` page owns *running* the command (invocation, flags, how to read its
-output); the `configuration/` page owns *authoring* what the command consumes (the probe / check / handler / binding
-schema). Neither restates the other — each points across the seam. When you change one side, check the other still
-points correctly and does not now duplicate what you moved.
+`doctor`, `lint`, `provision`, `capabilities`, and `agents` each have **both** a `usage/` page and a `configuration/`
+page. The split is sharp and must stay that way: the `usage/` page owns *running* the command (invocation, flags, how to
+read its output); the `configuration/` page owns *authoring* what the command consumes (the probe / check / handler /
+binding schema). Neither restates the other — each points across the seam. When you change one side, check the other
+still points correctly and does not now duplicate what you moved.
 
 ## Hubs and routing
 
@@ -102,8 +102,8 @@ Cite this list when reviewing a change to `context/winter-cli/`:
    / workflow), per the table above?
 2. **Single owner** — is every fact stated once, with the other pages pointing rather than re-describing? Flag a
    duplicated schema, option list, flag set, default, or contract clause.
-3. **Paired topics** — for `doctor` / `lint` / `provision` / `capabilities`, is the usage↔configuration seam clean, with
-   no content bled across?
+3. **Paired topics** — for `doctor` / `lint` / `provision` / `capabilities` / `agents`, is the usage↔configuration seam
+   clean, with no content bled across?
 4. **Routing** — does every new leaf have one read-trigger routing row in its nearest hub, and does every removed leaf
    lose its row? Are the triggers precise enough to discriminate between siblings?
 5. **Hub purity** — does each hub carry only framing and routing, with no leaf detail copied up?

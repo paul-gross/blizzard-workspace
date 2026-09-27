@@ -7,7 +7,11 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from winter_cli.core.config_file import ConfigError
-from winter_cli.modules.workspace.agent_transform.models import AgentFormat, AgentModelOverrideProfile
+from winter_cli.modules.workspace.agent_transform.models import (
+    AgentFormat,
+    AgentModelOverrideProfile,
+    ConfigSource,
+)
 
 
 class SingletonType(enum.Enum):
@@ -303,8 +307,8 @@ class ModelTiersConfig(BaseModel):
 
         [model_tiers.big-thinker]
         claude = "opus"
-        codex = "gpt-5.6-sol"
-        opencode = "anthropic/claude-opus-5"
+        codex = "gpt-6-sol"
+        opencode = "anthropic/claude-opus-5-5"
 
         [model_tiers.haiku]
         opencode = "anthropic/claude-haiku-4-5"  # override one vendor
@@ -316,6 +320,17 @@ class ModelTiersConfig(BaseModel):
 
     tiers: dict[str, dict[str, str]] = Field(default_factory=dict)
     """Per-tier-label entries.  Each value is a dict of vendor label → concrete model id."""
+
+    tier_sources: Mapping[str, ConfigSource] = Field(default_factory=dict)
+    """Which config file each ``tiers`` label was read from, keyed by tier label.
+
+    Populated by ``WorkspaceConfigService.load``; nothing else parses either
+    TOML file. A label absent from this map was not itself read from either
+    file and defaults to ``ConfigSource.config_toml`` via ``source_for``."""
+
+    def source_for(self, label: str) -> ConfigSource:
+        """Return the config file *label* was read from, defaulting to ``config.toml``."""
+        return self.tier_sources.get(label, ConfigSource.config_toml)
 
 
 class AgentModelOverridesConfig(BaseModel):
@@ -343,7 +358,7 @@ class AgentModelOverridesConfig(BaseModel):
 
         [agent_model_overrides]
         reviewer = "haiku"                        # tier, all vendors
-        developer = { claude = "claude-opus-5" }  # concrete id, claude only
+        developer = { claude = "claude-opus-5-5" }  # concrete id, claude only
 
     See ``context/winter-cli/configuration/agents.md`` for the full reference.
     """
@@ -352,6 +367,17 @@ class AgentModelOverridesConfig(BaseModel):
 
     overrides: Mapping[str, str | Mapping[str, str | AgentModelOverrideProfile]] = Field(default_factory=dict)
     """Per-agent entries: a tier string for all vendors, or per-vendor model ids/profiles."""
+
+    override_sources: Mapping[str, ConfigSource] = Field(default_factory=dict)
+    """Which config file each ``overrides`` entry was read from, keyed by agent name.
+
+    Populated by ``WorkspaceConfigService.load``; nothing else parses either
+    TOML file. An agent absent from this map was not itself read from either
+    file and defaults to ``ConfigSource.config_toml`` via ``source_for``."""
+
+    def source_for(self, agent_name: str) -> ConfigSource:
+        """Return the config file *agent_name*'s entry was read from, defaulting to ``config.toml``."""
+        return self.override_sources.get(agent_name, ConfigSource.config_toml)
 
 
 class FileSizeLintConfig(BaseModel):

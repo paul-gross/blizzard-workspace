@@ -13,6 +13,7 @@ below is the **default** for a stable *action id* and can be remapped — see [K
 
 - `r` — refresh. `L` — open the **Log tab** (captured `RepoError` entries with subcommand, args, cwd, and stderr;
   inspect a failure without re-running the command). `q` — quit (workspace) / back (detail screens).
+- `M` — open the **Agent matrix** screen (the same resolved agent model/effort data as `winter agents`).
 - `enter` — drill into the focused row's detail view. `h` / `j` / `k` / `l` — move the detail-screen cursor.
 - `ctrl+k` / `ctrl+j` — jump table focus.
 - `c` — clear the Log tab (Log screen only; not remappable).
@@ -27,6 +28,23 @@ tab and the dashboard keeps showing the last-good state.
 **Limitation:** `[keybindings]` and plugin-contributed screens/actions are resolved once at launch and stay fixed for
 the session — editing `[keybindings]` or a plugin's registered actions requires a restart to take effect, even though
 the plugin's own repo shows up live in the standalone panel like any other standalone.
+
+**Agent matrix screen:** `M` (`workspace.open_agent_matrix`) opens a read-only view of the resolved agent model/effort
+data — the same three tables (Code defaults, Global overrides, Effective matrix) and color legend
+[`winter agents`](./agents.md) prints, with any override matching no installed agent named in a yellow line under the
+effective matrix. Every open re-reads `.winter/config.toml` (with its `config.local.toml` overlay) and the on-disk agent
+copies from scratch, so a config change made while the dashboard is running is visible the next time the screen is
+opened, without a restart. A config load error is shown on the screen and captured in the Log tab. `h`/`j`/`k`/`l` (and
+the arrow keys) move through the tables, crossing from one table's last row to the next. `r` (`agent_matrix.refresh`)
+reloads in place, keeping the focused row. `i` (`agent_matrix.ws_init`) runs the bare `winter ws init` in-process —
+against the current config, not the one the dashboard launched with — which re-renders the workspace's agent copies and
+clears `stale`/`missing`, then reloads; its output stays out of the dashboard, a failure is toasted and captured in the
+Log tab, and a second `i` is refused while a run is in flight. The run is non-interactive — child processes get
+`/dev/null` stdin and `GIT_TERMINAL_PROMPT=0`, so git's HTTPS credential prompt is disabled and a stdin read (a hook, a
+trust prompt) sees EOF; a prompt that opens the terminal directly, such as ssh's, is not covered. A run still going
+after 60s gets a warning toast and continues in the background; `i` stays blocked until it finishes, and its real
+outcome is then reported and the screen reloaded. Its `q` is fixed and, like the Log tab's, is not one of the action ids
+below.
 
 **Tracking glyphs** in the repo rows: `[+N, -N]` shows commits ahead/behind upstream; `[+]` marks an unborn upstream ref
 (the local branch tracks a remote that doesn't exist yet); the pin glyph marks pinned repos.
@@ -80,6 +98,7 @@ is a separate screen whose `q`/`r`/`c` keys are fixed and not part of this table
 | `workspace.refresh`                                                                              | `r`                          | Re-read all git status                               |
 | `workspace.open_log`                                                                             | `L`                          | Open the Log tab                                     |
 | `workspace.cycle_layout`                                                                         | `t`                          | Cycle the dashboard layout                           |
+| `workspace.open_agent_matrix`                                                                    | `M`                          | Open the Agent matrix screen                         |
 | `worktree.open_detail`                                                                           | `<enter>`                    | Drill into the focused worktree / standalone row     |
 | `workspace.jump_prev`                                                                            | `<C-k>`                      | Jump focus to the first table                        |
 | `workspace.jump_next`                                                                            | `<C-j>`                      | Jump focus to the last table                         |
@@ -90,6 +109,8 @@ is a separate screen whose `q`/`r`/`c` keys are fixed and not part of this table
 | `standalone.refresh`                                                                             | `r`                          | Re-read the standalone repo's status                 |
 | `standalone.open_log`                                                                            | `L`                          | Open the Log tab                                     |
 | `standalone.back`                                                                                | `q`                          | Back to the workspace screen                         |
+| `agent_matrix.refresh`                                                                           | `r`                          | Reload the Agent matrix                              |
+| `agent_matrix.ws_init`                                                                           | `i`                          | Run the bare `winter ws init`, then reload           |
 | `plugin.<name>`                                                                                  | the plugin's `TuiAction.key` | Run a plugin-contributed action                      |
 
 A `plugin.<name>` action can declare **several areas** (e.g. the standalone-repos panel and a feature-worktree) and fire

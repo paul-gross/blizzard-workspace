@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Iterator, Mapping
 from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
 from winter_cli.core.subprocess_runner import IStreamingProcess, ISubprocessRunner, SubprocessResult
+
+# Environment a non-interactive child gets on top of its own: git fails a
+# credential prompt instead of reading the terminal.
+NON_INTERACTIVE_ENV: dict[str, str] = {"GIT_TERMINAL_PROMPT": "0"}
 
 
 class _StreamingProcess:
@@ -35,10 +40,26 @@ class LocalSubprocessRunner:
     All `subprocess.run` / `subprocess.Popen` usage is confined here.
     Subprocesses inherit the parent environment unless `env` is supplied;
     callers wanting an empty env pass `env={}`.
+
+    `non_interactive=True` makes every child unable to prompt: stdin comes from
+    `/dev/null` and `GIT_TERMINAL_PROMPT=0` is added to its environment, so a
+    credential or confirmation prompt fails fast instead of waiting on a
+    terminal that no one is watching (an in-process run inside the dashboard).
     """
 
-    @staticmethod
+    def __init__(self, *, non_interactive: bool = False) -> None:
+        self._non_interactive = non_interactive
+
+    def _stdin(self) -> int | None:
+        return subprocess.DEVNULL if self._non_interactive else None
+
+    def _env(self, env: Mapping[str, str] | None) -> dict[str, str] | None:
+        if not self._non_interactive:
+            return dict(env) if env is not None else None
+        return {**(env if env is not None else os.environ), **NON_INTERACTIVE_ENV}
+
     def run(
+        self,
         cmd: list[str],
         *,
         cwd: Path | None = None,
@@ -48,7 +69,8 @@ class LocalSubprocessRunner:
             completed = subprocess.run(
                 cmd,
                 cwd=str(cwd) if cwd is not None else None,
-                env=dict(env) if env is not None else None,
+                env=self._env(env),
+                stdin=self._stdin(),
                 capture_output=True,
                 text=True,
                 # Decode leniently: a subprocess may emit bytes that aren't
@@ -70,8 +92,8 @@ class LocalSubprocessRunner:
             stderr=completed.stderr or "",
         )
 
-    @staticmethod
     def call(
+        self,
         cmd: list[str],
         *,
         cwd: Path | None = None,
@@ -80,7 +102,7 @@ class LocalSubprocessRunner:
         """Run a process with inherited stdio, returning only the exit code.
 
         No `capture_output` and no stream redirection: stdin/stdout/stderr are
-        inherited from this process, so the child writes straight to the
+        inherited from this process (stdin is `/dev/null` when non-interactive), so the child writes straight to the
         terminal (TTY, colors, and stdout/stderr separation preserved). An
         exec failure (missing or non-executable file) surfaces as `126`, the
         shell convention for "command found but not executable".
@@ -89,16 +111,17 @@ class LocalSubprocessRunner:
             completed = subprocess.run(
                 cmd,
                 cwd=str(cwd) if cwd is not None else None,
-                env=dict(env) if env is not None else None,
+                env=self._env(env),
+                stdin=self._stdin(),
                 check=False,
             )
         except OSError:
             return 126
         return completed.returncode
 
-    @staticmethod
     @contextmanager
     def _popen_cm(
+        self,
         cmd: list[str] | str,
         cwd: Path | None,
         env: Mapping[str, str] | None,
@@ -108,8 +131,9 @@ class LocalSubprocessRunner:
         proc = subprocess.Popen(
             cmd,
             cwd=str(cwd) if cwd is not None else None,
-            env=dict(env) if env is not None else None,
+            env=self._env(env),
             shell=shell,
+            stdin=self._stdin(),
             stdout=subprocess.PIPE,
             # When merge_stderr=True (default), merge stderr into stdout so
             # callers see a single interleaved stream (init/destroy hook flow).

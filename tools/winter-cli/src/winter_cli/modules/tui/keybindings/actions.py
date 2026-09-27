@@ -62,6 +62,7 @@ WORKSPACE_ACTIONS: tuple[ActionBinding, ...] = (
     ActionBinding("workspace.refresh", "r", "refresh", "Refresh"),
     ActionBinding("workspace.open_log", "L", "open_log", "Log"),
     ActionBinding("workspace.cycle_layout", "t", "cycle_layout", "Cycle layout"),
+    ActionBinding("workspace.open_agent_matrix", "M", "open_agent_matrix", "Agent matrix"),
     ActionBinding("app.quit", "q", "app.quit", "Quit"),
     # Lives on the workspace screen (the grid's row → detail drill-in) but keeps
     # the issue's `worktree.open_detail` id since it opens a worktree's detail.
@@ -87,11 +88,18 @@ STANDALONE_DETAIL_ACTIONS: tuple[ActionBinding, ...] = (
 )
 
 
+# The Agent matrix screen's `q` (back) stays fixed, like the Log tab's.
+AGENT_MATRIX_ACTIONS: tuple[ActionBinding, ...] = (
+    ActionBinding("agent_matrix.refresh", "r", "refresh", "Refresh"),
+    ActionBinding("agent_matrix.ws_init", "i", "ws_init", "ws init"),
+)
+
+
 def all_builtin_action_ids() -> set[str]:
     """Every built-in action id, across all screens — the unknown-id allowlist."""
     return {
         ab.action_id
-        for group in (WORKSPACE_ACTIONS, WORKTREE_DETAIL_ACTIONS, STANDALONE_DETAIL_ACTIONS)
+        for group in (WORKSPACE_ACTIONS, WORKTREE_DETAIL_ACTIONS, STANDALONE_DETAIL_ACTIONS, AGENT_MATRIX_ACTIONS)
         for ab in group
     }
 

@@ -29,7 +29,8 @@ can each go wrong.
 - **[Agent harness](https://paul-gross.github.io/winter-docs/getting-started/#what-is-harness-engineering)** — bring
   your own harness. The same skills, agents, and context project into Claude Code, Codex, and OpenCode, and none of them
   live in your application repos; `[agent_model_overrides]` and `[model_tiers]` retarget an installed agent's model or
-  reasoning effort workspace-wide, without editing its committed source.
+  reasoning effort workspace-wide, without editing its committed source, and `winter agents` shows which model and
+  effort each agent resolves to, and why.
 - **[Extensibility](https://paul-gross.github.io/winter-docs/extensions/)** — drop in a repo carrying a
   `winter-ext.toml` and it contributes skills, agents, context, services, provision handlers, and checks; capability
   slots and lifecycle hooks keep the core swappable, and

@@ -21,8 +21,9 @@ from tests.conftest import FakeConfigFileReader, FakeFilesystem, FakeInitReporte
 from winter_cli.config.models import AdoptExtensions, CodeAgentVendor, WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.doctor.agent_probe_service import AGENT_SOURCE, AgentProbeService
-from winter_cli.modules.doctor.models import ProbeStatus
+from winter_cli.modules.doctor.models import ProbeResult, ProbeStatus
 from winter_cli.modules.workspace.agent_install import ExtensionAgentService
+from winter_cli.modules.workspace.agent_transform.agent_copy_inspector import AgentCopyInspector
 from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
 from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
 from winter_cli.modules.workspace.models import StandaloneRepository
@@ -80,11 +81,14 @@ def _probe_svc(
     config_files: dict[Path, dict] | None = None,
 ) -> AgentProbeService:
     loader = _manifest_loader(config_files)
+    enumerator = CanonicalAgentEnumerator(fs=cast(IFilesystemReader, fs), manifest_loader=loader)
     return AgentProbeService(
         config=config,
         fs=cast(IFilesystemReader, fs),
         manifest_loader=loader,
-        agent_enumerator=CanonicalAgentEnumerator(fs=cast(IFilesystemReader, fs), manifest_loader=loader),
+        agent_copy_inspector=AgentCopyInspector(
+            fs=cast(IFilesystemReader, fs), manifest_loader=loader, agent_enumerator=enumerator
+        ),
     )
 
 
@@ -768,3 +772,137 @@ You are a planner.
         # The bad-tier agent generates a tier-failure WARN.
         tier_warns = [r for r in results if r.status == ProbeStatus.warn and "nonexistent-tier" in r.message]
         assert tier_warns
+
+
+# ---------------------------------------------------------------------------
+# 11. Copy-issue message shape
+# ---------------------------------------------------------------------------
+
+
+def _agent_named(name: str, description: str = "An agent") -> str:
+    return f"---\nname: {name}\ndescription: {description}\nmodel: sonnet\n---\nBody.\n"
+
+
+def _claude_copy_result(results: list[ProbeResult]) -> ProbeResult:
+    return next(r for r in results if r.name == f"agent copies: {CodeAgentVendor.ClaudeCode.value}")
+
+
+class _UnreadableCopyFilesystem(FakeFilesystem):
+    """FakeFilesystem whose ``read_bytes`` raises ``OSError`` for listed paths."""
+
+    def __init__(self, unreadable: set[Path]) -> None:
+        super().__init__()
+        self.unreadable = unreadable
+
+    def read_bytes(self, path: Path) -> bytes:
+        if path in self.unreadable:
+            raise OSError(f"permission denied: {path}")
+        return super().read_bytes(path)
+
+
+class _UnreadableSourceFilesystem(FakeFilesystem):
+    """FakeFilesystem whose ``read_text`` raises ``OSError`` for paths added to ``unreadable``."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.unreadable: set[Path] = set()
+
+    def read_text(self, path: Path) -> str:
+        if path in self.unreadable:
+            raise OSError(f"permission denied: {path}")
+        return super().read_text(path)
+
+
+class _ReverseListingFilesystem(FakeFilesystem):
+    """FakeFilesystem whose ``iterdir`` lists entries in reverse order, as a real directory listing may."""
+
+    def iterdir(self, path: Path) -> list[Path]:
+        return list(reversed(super().iterdir(path)))
+
+
+class TestCopyIssueMessage:
+    def test_on_disk_issues_sorted_before_missing_copies(self) -> None:
+        """Stale and orphaned copies are listed in on-disk filename order, then missing copies."""
+        fs = FakeFilesystem()
+        config_files: dict[Path, dict] = {}
+        ext = _seed_extension(
+            fs, config_files, agent_files={"alpha.md": _agent_named("alpha"), "zulu.md": _agent_named("zulu")}
+        )
+        cfg = _config()
+        _install_svc(cfg, fs, config_files).process(ext, FakeInitReporter())
+        fs.files[CLAUDE_AGENTS / "wf-alpha.md"] = "tampered\n"
+        del fs.files[CLAUDE_AGENTS / "wf-zulu.md"]
+        fs.files[CLAUDE_AGENTS / "wf-mid.md"] = "left behind\n"
+
+        result = _claude_copy_result(_probe_svc(cfg, fs, config_files).run([ext]))
+
+        assert result.message == (
+            "stale copy: wf-alpha.md (transform mismatch); "
+            "orphaned copy: wf-mid.md (no live canonical source); "
+            "missing copy: wf-zulu.md (canonical source exists, copy absent)"
+        )
+
+    def test_issues_across_extensions_sorted_by_filename_not_repo_order(self) -> None:
+        """Issues from several extensions are ordered by installed filename, whatever the repo or listing order."""
+        fs = _ReverseListingFilesystem()
+        config_files: dict[Path, dict] = {}
+        zz = _seed_extension(fs, config_files, name="zz")
+        aa = _seed_extension(fs, config_files, name="aa")
+        cfg = _config()
+        for ext in (zz, aa):
+            _install_svc(cfg, fs, config_files).process(ext, FakeInitReporter())
+        fs.files[CLAUDE_AGENTS / "zz-reviewer.md"] = "tampered\n"
+        fs.files[CLAUDE_AGENTS / "aa-reviewer.md"] = "tampered\n"
+
+        result = _claude_copy_result(_probe_svc(cfg, fs, config_files).run([zz, aa]))
+
+        assert result.message == (
+            "stale copy: aa-reviewer.md (transform mismatch); stale copy: zz-reviewer.md (transform mismatch)"
+        )
+
+    def test_unreadable_copy_reports_read_error(self) -> None:
+        """A listed copy whose bytes cannot be read is a missing copy with a read-error reason."""
+        fs = _UnreadableCopyFilesystem(unreadable={CLAUDE_AGENTS / "wf-reviewer.md"})
+        config_files: dict[Path, dict] = {}
+        ext = _seed_extension(fs, config_files)
+        cfg = _config()
+        _install_svc(cfg, fs, config_files).process(ext, FakeInitReporter())
+
+        result = _claude_copy_result(_probe_svc(cfg, fs, config_files).run([ext]))
+
+        assert result.message == "missing copy: wf-reviewer.md (read error)"
+
+    def test_unreadable_canonical_source_does_not_abort_the_probe(self) -> None:
+        """A canonical file that raises OSError on read is skipped by every walk; every probe still reports."""
+        fs = _UnreadableSourceFilesystem()
+        config_files: dict[Path, dict] = {}
+        ext = _seed_extension(fs, config_files)
+        cfg = _config()
+        _install_svc(cfg, fs, config_files).process(ext, FakeInitReporter())
+        fs.unreadable.add(EXT_AGENTS / "reviewer.md")
+
+        results = _probe_svc(cfg, fs, config_files).run([ext])
+
+        assert [r.name for r in results] == [
+            *(f"agent copies: {vendor.value}" for vendor in CodeAgentVendor),
+            "agent names: uniqueness",
+        ]
+        assert _claude_copy_result(results).message == "orphaned copy: wf-reviewer.md (no live canonical source)"
+
+    def test_duplicate_installed_name_judged_against_last_render(self) -> None:
+        """Two canonical files rendering to one installed name are judged once, against the last,
+        which is the copy the installer leaves on disk."""
+        fs = FakeFilesystem()
+        config_files: dict[Path, dict] = {}
+        ext = _seed_extension(
+            fs,
+            config_files,
+            agent_files={"a.md": _agent_named("reviewer", "first"), "b.md": _agent_named("reviewer", "second")},
+        )
+        cfg = _config()
+        _install_svc(cfg, fs, config_files).process(ext, FakeInitReporter())
+
+        result = _claude_copy_result(_probe_svc(cfg, fs, config_files).run([ext]))
+
+        assert result.status == ProbeStatus.pass_
+        assert result.message == "1 agent(s) in sync"

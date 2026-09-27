@@ -44,6 +44,7 @@ def test_cli_group_advertises_every_top_level_command() -> None:
     """`winter --help` must still list all top-level commands."""
     ctx = click.Context(_cli_group)
     assert sorted(_cli_group.list_commands(ctx)) == [
+        "agents",
         "capabilities",
         "clean",
         "dashboard",
@@ -92,6 +93,7 @@ def test_bytecode_cache_prefix_defaults_to_home_cache(monkeypatch: pytest.Monkey
 # clean interpreter makes "did importing X pull in the heavy trees?" decidable.
 
 _HEAVY_PREFIXES = (
+    "winter_cli.modules.agents",
     "winter_cli.modules.tui",
     "winter_cli.modules.doctor",
     "winter_cli.modules.lint",

@@ -1,13 +1,22 @@
 """Per-harness renderers that project a ``CanonicalAgent`` into native artifacts.
 
-Each renderer implements ``IAgentRenderer``: given a ``CanonicalAgent`` and an
-injected ``warn`` callable it produces a ``RenderedAgent`` (filename stem, suffix,
-text).  The three concrete renderers handle Claude Code (MD + YAML frontmatter),
-Codex (TOML), and OpenCode (MD + YAML frontmatter).
+Each renderer implements ``IAgentRenderer``: given a ``CanonicalAgent``, an
+injected ``warn`` callable, and a precomputed ``AgentResolution`` it produces a
+``RenderedAgent`` (filename stem, suffix, text).  The three concrete renderers
+handle Claude Code (MD + YAML frontmatter), Codex (TOML), and OpenCode
+(MD + YAML frontmatter). Renderers never resolve a model or effort themselves —
+``resolve_agent`` is the single resolution path, shared by the renderers, the
+installer, and the doctor copy inspector.
 
 Lossy projection rule: any common-layer field the renderer has no mapping for is
 *dropped* and surfaced via ``warn(field, agent_name, vendor_label)`` rather than
 silently omitted.  The caller wires ``warn`` to ``logger.warning``.
+
+``resolve_agent_model_override`` resolves just the ``[agent_model_overrides]``
+layer, independent of a specific agent's own frontmatter. ``resolve_agent``
+builds its override layer by calling it, so a consumer that displays the
+override table on its own — including entries that name no installed agent —
+reads the exact values the renderers project.
 
 Conformance sentinels at the bottom of this module typecheck every adapter
 against ``IAgentRenderer`` without coupling the Protocol module to its adapters.
@@ -21,15 +30,32 @@ from typing import Protocol
 import tomlkit
 import yaml
 
-from winter_cli.modules.workspace.agent_transform.model_tiers import build_effective_tier_table
+from winter_cli.config.models import AgentModelOverridesConfig
+from winter_cli.modules.workspace.agent_transform.model_tiers import EffectiveTierTable
 from winter_cli.modules.workspace.agent_transform.models import (
     AgentFieldMap,
     AgentModelOverrideProfile,
+    AgentModelOverrideValue,
+    AgentResolution,
     CanonicalAgent,
+    EffortLayer,
+    EffortResolution,
+    ModelLayer,
+    ModelResolution,
     RenderedAgent,
+    SourcedValue,
     WorkspaceModelOverride,
 )
 from winter_cli.modules.workspace.models import RepoError
+
+# The frontmatter/override-block key that carries the native reasoning-effort
+# setting for each vendor. Claude and OpenCode use their own vocabulary;
+# Codex's is the published subagent schema key.
+_EFFORT_KEYS: dict[str, str] = {
+    "claude": "effort",
+    "codex": "model_reasoning_effort",
+    "opencode": "reasoningEffort",
+}
 
 # Common-layer fields subject to per-renderer lossiness checking.
 # ``name`` is excluded: every renderer always uses it as ``filename_stem`` and
@@ -47,16 +73,11 @@ class IAgentRenderer(Protocol):
     typically wire it to ``logger.warning`` so losses are observable without
     halting the build.
 
-    ``workspace_model_override`` is the resolved workspace-level override for
-    this ``(agent, vendor)`` pair. It carries either a tier label, a concrete
-    model id, and/or an optional profile effort. Effort is applied after the
-    canonical vendor block; an absent profile model falls through to normal
-    model resolution. Callers compute it via
-    ``resolve_workspace_model_override`` before invoking ``render``.
-
-    ``effective_tier_table`` is the merged tier table (built-in defaults ⊕
-    workspace ``[model_tiers]`` config) as ``{tier_label: {vendor: model_id}}``.
-    When ``None`` the renderer falls back to the built-in defaults only.
+    ``resolution`` is this ``(agent, vendor)`` pair's precomputed
+    ``AgentResolution`` — the effective model and effort, plus every
+    contributing layer. Callers compute it via ``resolve_agent`` before
+    invoking ``render``; the renderer only projects ``resolution.model.effective``
+    and ``resolution.effort.effective``, it never resolves on its own.
     """
 
     def render(
@@ -64,16 +85,78 @@ class IAgentRenderer(Protocol):
         agent: CanonicalAgent,
         *,
         warn: Callable[[str, str, str], None],
-        workspace_model_override: WorkspaceModelOverride | None = None,
-        effective_tier_table: dict[str, dict[str, str]] | None = None,
+        resolution: AgentResolution,
     ) -> RenderedAgent: ...
 
 
-# ── Shared helpers ────────────────────────────────────────────────────────────
+# ── Shared resolver ─────────────────────────────────────────────────────────
 
 
-def resolve_workspace_model_override(
-    overrides: Mapping[str, str | Mapping[str, str | AgentModelOverrideProfile]],
+def resolve_agent(
+    agent: CanonicalAgent,
+    vendor_label: str,
+    tier_table: EffectiveTierTable,
+    agent_model_overrides: AgentModelOverridesConfig,
+) -> AgentResolution:
+    """Return the fully-instrumented model and effort resolution for ``(agent, vendor_label)``.
+
+    The single resolution path shared by the three renderers, the installer
+    (``ExtensionAgentService``), and the doctor copy inspector, so "what model
+    and effort does this agent run on this harness" is answered identically
+    everywhere. Raises ``RepoError`` (not ``ConfigError``) when the agent's own
+    ``model_tier`` label, or an ``[agent_model_overrides]`` tier-label entry,
+    cannot be resolved against ``tier_table`` — these failures root in the
+    agent's own frontmatter or a workspace tier definition resolved against
+    it, not in malformed ``.winter/config.toml``, the same vocabulary
+    ``CanonicalAgentParser`` already uses for frontmatter problems in this
+    pipeline.
+    """
+    override_block = agent.overrides.get(vendor_label, {})
+    model_override, effort_override = resolve_agent_model_override(
+        agent_model_overrides, agent.name, vendor_label, tier_table
+    )
+    model = _resolve_model_layers(
+        agent,
+        vendor_label,
+        override_block,
+        tier_table=tier_table,
+        agent_override=model_override,
+    )
+    effort = _resolve_effort_layers(vendor_label, override_block, agent_override=effort_override)
+    return AgentResolution(model=model, effort=effort)
+
+
+def resolve_agent_model_override(
+    agent_model_overrides: AgentModelOverridesConfig,
+    agent_name: str,
+    vendor_label: str,
+    tier_table: EffectiveTierTable,
+) -> tuple[AgentModelOverrideValue | None, SourcedValue | None]:
+    """Return the ``[agent_model_overrides]`` model/effort layer for one
+    ``(agent_name, vendor_label)`` pair, independent of any agent's own frontmatter.
+
+    The only producer of the agent-override layer: ``resolve_agent`` calls it
+    and blends the result with an agent's own tier/harness-block layers, which
+    requires a parsed ``CanonicalAgent``. Calling it directly serves a consumer
+    that displays the ``[agent_model_overrides]`` table on its own — including
+    entries that name no installed agent, so there is no ``CanonicalAgent`` to
+    resolve against.
+
+    Both return values are ``None`` when no override is configured for
+    ``agent_name``, or when a per-vendor entry does not list ``vendor_label``.
+    Raises ``RepoError`` when a bare-string entry names a tier label
+    ``tier_table`` does not know, or one with no mapping for ``vendor_label``.
+    """
+    workspace_override = _workspace_override_for(agent_model_overrides, agent_name, vendor_label)
+    model = _resolve_agent_override_model_layer(workspace_override, vendor_label, tier_table)
+    effort: SourcedValue | None = None
+    if workspace_override is not None and workspace_override.effort is not None:
+        effort = SourcedValue(value=workspace_override.effort, source=workspace_override.source)
+    return model, effort
+
+
+def _workspace_override_for(
+    agent_model_overrides: AgentModelOverridesConfig,
     agent_name: str,
     vendor_label: str,
 ) -> WorkspaceModelOverride | None:
@@ -81,92 +164,144 @@ def resolve_workspace_model_override(
 
     Returns a ``WorkspaceModelOverride`` when an override is configured, or
     ``None`` when no workspace override applies. A string value applies to all
-    vendors as a tier label (``is_concrete=False``). A per-vendor string is a
-    concrete model id; a profile carries its optional concrete model and effort.
-    Missing profile models deliberately return ``value=None`` so model
-    resolution falls through while effort still projects.
-
-    This function is the single lookup point used by both
-    ``ExtensionAgentService`` (the installer) and ``AgentProbeService`` (the
-    staleness probe) so the two always agree on the resolved override.
+    vendors as a tier label (``is_concrete=False``, ``tier`` set to that label).
+    A per-vendor string is a concrete model id; a profile carries its optional
+    concrete model and effort. Missing profile models deliberately return
+    ``value=None`` so model resolution falls through while effort still
+    projects.
     """
-    entry = overrides.get(agent_name)
+    entry = agent_model_overrides.overrides.get(agent_name)
     if entry is None:
         return None
+    source = agent_model_overrides.source_for(agent_name)
     if isinstance(entry, str):
-        return WorkspaceModelOverride(value=entry, is_concrete=False)
+        return WorkspaceModelOverride(value=entry, is_concrete=False, source=source, tier=entry)
     vendor_value = entry.get(vendor_label)
     if vendor_value is None:
         return None
     if isinstance(vendor_value, AgentModelOverrideProfile):
-        return WorkspaceModelOverride(value=vendor_value.model, is_concrete=True, effort=vendor_value.effort)
-    return WorkspaceModelOverride(value=vendor_value, is_concrete=True)
+        return WorkspaceModelOverride(
+            value=vendor_value.model, is_concrete=True, source=source, effort=vendor_value.effort
+        )
+    return WorkspaceModelOverride(value=vendor_value, is_concrete=True, source=source)
 
 
-def _resolve_model(
+def _resolve_agent_override_model_layer(
+    workspace_override: WorkspaceModelOverride | None,
+    vendor_label: str,
+    tier_table: EffectiveTierTable,
+) -> AgentModelOverrideValue | None:
+    """Return the ``[agent_model_overrides]`` model layer, resolving a bare tier label.
+
+    Raises ``RepoError`` when a bare-string override names a tier label that
+    ``tier_table`` does not know, or that has no mapping for ``vendor_label``.
+    """
+    if workspace_override is None:
+        return None
+    if workspace_override.is_concrete:
+        # Per-vendor inline-table entry — always a concrete model id. An
+        # effort-only profile has no model at this layer.
+        if workspace_override.value is None:
+            return None
+        return AgentModelOverrideValue(value=workspace_override.value, tier=None, source=workspace_override.source)
+    # Bare-string entry — a tier label, resolve to concrete id.
+    label = workspace_override.value or ""
+    if label not in tier_table:
+        valid = ", ".join(repr(t) for t in sorted(tier_table.labels()))
+        raise RepoError(f"unknown model tier {label!r} in [agent_model_overrides]; valid tier labels: {valid}")
+    resolved = tier_table.model_id(label, vendor_label)
+    if resolved is None:
+        raise RepoError(
+            f"model tier {label!r} has no mapping for vendor {vendor_label!r}; "
+            f"add a {vendor_label!r} entry under [model_tiers.{label}]"
+        )
+    return AgentModelOverrideValue(value=resolved, tier=workspace_override.tier, source=workspace_override.source)
+
+
+def _resolve_model_layers(
     agent: CanonicalAgent,
     vendor_label: str,
-    override: dict,
+    override_block: Mapping[str, object],
     *,
-    tier_table: dict[str, dict[str, str]],
-    workspace_override: WorkspaceModelOverride | None = None,
-) -> str:
-    """Return the resolved model-id string for ``vendor_label``.
+    tier_table: EffectiveTierTable,
+    agent_override: AgentModelOverrideValue | None,
+) -> ModelResolution:
+    """Return the full ``ModelResolution`` for ``(agent, vendor_label)``.
 
-    Precedence (highest to lowest):
+    Precedence (highest to lowest): ``[agent_model_overrides]`` (the
+    ``agent_override`` layer ``resolve_agent_model_override`` produced) >
+    per-harness override block's ``model`` key > the agent's own
+    ``model_tier`` label resolved via ``tier_table``.
 
-    1. ``workspace_override``: a tier-label form (``is_concrete=False``) is
-       resolved via ``tier_table``; a concrete-id form (``is_concrete=True``,
-       from a per-vendor entry in ``[agent_model_overrides]``) is passed through
-       verbatim, even when its value happens to collide with a tier label string.
-       An effort-only profile has no model at this layer. ``None`` skips it.
-    2. Per-harness override block's ``model`` key (always a concrete id).
-    3. Agent's ``model_tier`` label resolved via ``tier_table``.
-
-    Raises ``RepoError`` when:
-    - The agent's ``model_tier`` label is not present in ``tier_table``.
-    - A tier label has no mapping for ``vendor_label`` in ``tier_table``.
-
-    ``RepoError`` (not ``ConfigError``) because these failures root in the
-    agent's own frontmatter or a workspace tier definition resolved against
-    it, not in malformed ``.winter/config.toml`` — the same vocabulary
-    ``CanonicalAgentParser`` already uses for frontmatter problems in this
-    pipeline.
+    Raises ``RepoError`` when the agent's ``model_tier`` label is not present
+    in ``tier_table``, or has no mapping for ``vendor_label`` — see
+    ``resolve_agent``.
     """
-    if workspace_override is not None:
-        if workspace_override.is_concrete:
-            # Per-vendor inline-table entry — always a concrete model id.
-            if workspace_override.value is not None:
-                return workspace_override.value
-            # An effort-only profile falls through to canonical model resolution.
-        else:
-            # Bare-string entry — a tier label, resolve to concrete id.
-            vendor_ids = tier_table.get(workspace_override.value or "")
-            if vendor_ids is None:
-                valid = ", ".join(repr(t) for t in sorted(tier_table))
-                raise RepoError(
-                    f"unknown model tier {workspace_override.value!r} in [agent_model_overrides]; "
-                    f"valid tier labels: {valid}"
-                )
-            if vendor_label not in vendor_ids:
-                raise RepoError(
-                    f"model tier {workspace_override.value!r} has no mapping for vendor {vendor_label!r}; "
-                    f"add a {vendor_label!r} entry under [model_tiers.{workspace_override.value}]"
-                )
-            return vendor_ids[vendor_label]
-    if "model" in override and isinstance(override["model"], str):
-        return override["model"]
-    tier_label = agent.model_tier
-    vendor_ids = tier_table.get(tier_label)
-    if vendor_ids is None:
-        valid = ", ".join(repr(t) for t in sorted(tier_table))
-        raise RepoError(f"agent {agent.name!r}: unknown model tier {tier_label!r}; valid tier labels: {valid}")
-    if vendor_label not in vendor_ids:
-        raise RepoError(
-            f"agent {agent.name!r}: model tier {tier_label!r} has no mapping for vendor {vendor_label!r}; "
-            f"add a {vendor_label!r} entry under [model_tiers.{tier_label}]"
-        )
-    return vendor_ids[vendor_label]
+    declared_tier = agent.model_tier
+    tier_cell = tier_table.cell(declared_tier, vendor_label)
+    code_default = tier_cell.code_default if tier_cell is not None else None
+    tier_override = tier_cell.tier_override if tier_cell is not None else None
+
+    harness_value = override_block.get("model")
+    harness_block = harness_value if isinstance(harness_value, str) else None
+
+    if agent_override is not None:
+        effective, effective_layer = agent_override.value, ModelLayer.agent_override
+    elif harness_block is not None:
+        effective, effective_layer = harness_block, ModelLayer.harness_block
+    elif declared_tier not in tier_table:
+        valid = ", ".join(repr(t) for t in sorted(tier_table.labels()))
+        raise RepoError(f"agent {agent.name!r}: unknown model tier {declared_tier!r}; valid tier labels: {valid}")
+    else:
+        resolved = tier_table.model_id(declared_tier, vendor_label)
+        if resolved is None:
+            raise RepoError(
+                f"agent {agent.name!r}: model tier {declared_tier!r} has no mapping for vendor {vendor_label!r}; "
+                f"add a {vendor_label!r} entry under [model_tiers.{declared_tier}]"
+            )
+        assert tier_cell is not None
+        effective, effective_layer = resolved, tier_cell.effective_layer
+
+    return ModelResolution(
+        declared_tier=declared_tier,
+        code_default=code_default,
+        tier_override=tier_override,
+        harness_block=harness_block,
+        agent_override=agent_override,
+        effective=effective,
+        effective_layer=effective_layer,
+    )
+
+
+def _resolve_effort_layers(
+    vendor_label: str,
+    override_block: Mapping[str, object],
+    *,
+    agent_override: SourcedValue | None,
+) -> EffortResolution:
+    """Return the full ``EffortResolution`` for ``vendor_label``.
+
+    Precedence (highest to lowest): ``[agent_model_overrides]`` profile effort
+    > the vendor's native effort key in the agent's override block > inherited
+    (no explicit effort — the harness uses its own default).
+    """
+    native_key = _EFFORT_KEYS[vendor_label]
+    harness_value = override_block.get(native_key)
+    harness_block = harness_value if isinstance(harness_value, str) else None
+
+    if agent_override is not None:
+        effective, effective_layer = agent_override.value, EffortLayer.agent_override
+    elif harness_block is not None:
+        effective, effective_layer = harness_block, EffortLayer.harness_block
+    else:
+        effective, effective_layer = None, EffortLayer.inherited
+
+    return EffortResolution(
+        harness_block=harness_block,
+        agent_override=agent_override,
+        effective=effective,
+        effective_layer=effective_layer,
+    )
 
 
 def _warn_unknown_common_fields(
@@ -238,34 +373,24 @@ class ClaudeAgentRenderer:
         agent: CanonicalAgent,
         *,
         warn: Callable[[str, str, str], None],
-        workspace_model_override: WorkspaceModelOverride | None = None,
-        effective_tier_table: dict[str, dict[str, str]] | None = None,
+        resolution: AgentResolution,
     ) -> RenderedAgent:
-        tier_table = effective_tier_table if effective_tier_table is not None else build_effective_tier_table({})
         override = agent.overrides.get(self.VENDOR, {})
         _warn_unknown_common_fields(agent, self._FIELD_MAP, self.VENDOR, warn)
 
-        model_id = _resolve_model(
-            agent,
-            self.VENDOR,
-            override,
-            tier_table=tier_table,
-            workspace_override=workspace_model_override,
-        )
-
         # Build the frontmatter dict: common fields first, then override extras.
-        fields: dict = {"name": agent.name, "description": agent.description, "model": model_id}
+        fields: dict = {"name": agent.name, "description": agent.description, "model": resolution.model.effective}
         if agent.tools is not None:
             fields["tools"] = agent.tools if agent.tools == "*" else list(agent.tools)
 
         # Unravel the claude: block on top — overrides win, extras are added.
         for key, value in override.items():
             if key == "model":
-                # Already resolved into `model_id`.
+                # Already resolved into `resolution.model.effective`.
                 continue
             fields[key] = value
-        if workspace_model_override is not None and workspace_model_override.effort is not None:
-            fields["effort"] = workspace_model_override.effort
+        if resolution.effort.effective is not None:
+            fields["effort"] = resolution.effort.effective
 
         frontmatter = _emit_yaml_frontmatter(fields)
         body_sep = "\n" if agent.body else ""
@@ -303,10 +428,8 @@ class CodexAgentRenderer:
         agent: CanonicalAgent,
         *,
         warn: Callable[[str, str, str], None],
-        workspace_model_override: WorkspaceModelOverride | None = None,
-        effective_tier_table: dict[str, dict[str, str]] | None = None,
+        resolution: AgentResolution,
     ) -> RenderedAgent:
-        tier_table = effective_tier_table if effective_tier_table is not None else build_effective_tier_table({})
         override = agent.overrides.get(self.VENDOR, {})
         # Suppress the tools-drop warning when the codex: block already declares
         # sandbox_mode — the author has expressed the access-control intent in
@@ -315,26 +438,18 @@ class CodexAgentRenderer:
         suppress = frozenset({"tools"}) if "sandbox_mode" in override else frozenset()
         _warn_unknown_common_fields(agent, self._FIELD_MAP, self.VENDOR, warn, suppress=suppress)
 
-        model_id = _resolve_model(
-            agent,
-            self.VENDOR,
-            override,
-            tier_table=tier_table,
-            workspace_override=workspace_model_override,
-        )
-
         doc = tomlkit.document()
         doc["name"] = agent.name
         doc["description"] = agent.description
-        doc["model"] = model_id
+        doc["model"] = resolution.model.effective
 
         # Merge codex: override block (skip model — already resolved).
         for key, value in override.items():
             if key == "model":
                 continue
             doc[key] = value
-        if workspace_model_override is not None and workspace_model_override.effort is not None:
-            doc["model_reasoning_effort"] = workspace_model_override.effort
+        if resolution.effort.effective is not None:
+            doc["model_reasoning_effort"] = resolution.effort.effective
 
         # Body maps to the `developer_instructions` key per the Codex subagent schema.
         if agent.body:
@@ -376,10 +491,8 @@ class OpenCodeAgentRenderer:
         agent: CanonicalAgent,
         *,
         warn: Callable[[str, str, str], None],
-        workspace_model_override: WorkspaceModelOverride | None = None,
-        effective_tier_table: dict[str, dict[str, str]] | None = None,
+        resolution: AgentResolution,
     ) -> RenderedAgent:
-        tier_table = effective_tier_table if effective_tier_table is not None else build_effective_tier_table({})
         override = agent.overrides.get(self.VENDOR, {})
         # Suppress the tools-drop warning when the opencode: block already declares
         # permission — the author has expressed the access-control intent in
@@ -388,27 +501,19 @@ class OpenCodeAgentRenderer:
         suppress = frozenset({"tools"}) if "permission" in override else frozenset()
         _warn_unknown_common_fields(agent, self._FIELD_MAP, self.VENDOR, warn, suppress=suppress)
 
-        model_id = _resolve_model(
-            agent,
-            self.VENDOR,
-            override,
-            tier_table=tier_table,
-            workspace_override=workspace_model_override,
-        )
-
         # OpenCode frontmatter carries description, model, and mode; name is NOT
         # a recognized OpenCode field — the agent identity lives in the filename.
         # mode defaults to "subagent" so the artifact is spawnable as a subagent
         # per opencode.ai/docs/agents/; a per-block override wins via the merge loop.
-        fields: dict = {"description": agent.description, "model": model_id, "mode": "subagent"}
+        fields: dict = {"description": agent.description, "model": resolution.model.effective, "mode": "subagent"}
 
         # Merge the opencode: override block on top (model already resolved).
         for key, value in override.items():
             if key == "model":
                 continue
             fields[key] = value
-        if workspace_model_override is not None and workspace_model_override.effort is not None:
-            fields["reasoningEffort"] = workspace_model_override.effort
+        if resolution.effort.effective is not None:
+            fields["reasoningEffort"] = resolution.effort.effective
 
         frontmatter = _emit_yaml_frontmatter(fields)
         body_sep = "\n" if agent.body else ""

@@ -198,6 +198,10 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
         app = cast("WinterDashboardApp", self.app)
         app.push_screen(app.screen_factory.error_log_screen())
 
+    def action_open_agent_matrix(self) -> None:
+        app = cast("WinterDashboardApp", self.app)
+        app.push_screen(app.screen_factory.agent_matrix_screen())
+
     def _on_refresh_start(self) -> None:
         with contextlib.suppress(Exception):
             self.query_one("#refresh-status", RefreshStatus).start_refresh()

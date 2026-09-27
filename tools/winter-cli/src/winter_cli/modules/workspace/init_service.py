@@ -316,14 +316,20 @@ class InitService:
         extension_repos = self._repo_factory.get_extension_repos()
         return self._extension_hook_svc.run_workspace_reconcile_hooks(extension_repos, reporter)
 
-    def reconcile_all(self, reporter: IInitReporter) -> bool:
+    def reconcile_workspace(self, reporter: IInitReporter) -> bool:
+        """The bare `winter ws init`: projects/, standalone repos, then the workspace hook."""
         success = self.reconcile_projects(reporter)
         if not self.reconcile_standalones(reporter):
             success = False
         # Fire the workspace-level hook once, after standalones are present on
-        # disk and before the per-env loop so extensions see a consistent state.
+        # disk (and, for `reconcile_all`, before the per-env loop) so extensions
+        # see a consistent state.
         if not self.run_workspace_reconcile_hooks(reporter):
             success = False
+        return success
+
+    def reconcile_all(self, reporter: IInitReporter) -> bool:
+        success = self.reconcile_workspace(reporter)
         for name in self._discover_existing_worktrees():
             if not self.reconcile_env(name, reporter):
                 success = False

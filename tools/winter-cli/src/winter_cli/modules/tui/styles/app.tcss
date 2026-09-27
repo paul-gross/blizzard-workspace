@@ -6,7 +6,8 @@ WorkspaceScreen {
     layout: vertical;
 }
 
-#singletons-label {
+#singletons-label,
+.section-label {
     height: auto;
     padding: 0 1;
     margin-top: 1;
@@ -101,13 +102,15 @@ StandaloneDetailScreen {
     margin-bottom: 1;
 }
 
-#status-bar {
+#status-bar,
+.status-bar {
     height: auto;
     padding: 0 1;
     margin-top: 1;
 }
 
-#legend {
+#legend,
+.legend {
     width: 1fr;
     text-align: center;
 }

@@ -30,15 +30,27 @@ from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.doctor.agent_probe_service import AgentProbeService
 from winter_cli.modules.doctor.models import ProbeStatus
 from winter_cli.modules.workspace.agent_install import ExtensionAgentService
+from winter_cli.modules.workspace.agent_transform.agent_copy_inspector import AgentCopyInspector
 from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
 from winter_cli.modules.workspace.agent_transform.canonical_parser import CanonicalAgentParser
-from winter_cli.modules.workspace.agent_transform.model_tiers import MODEL_TIER_IDS, ModelTier
-from winter_cli.modules.workspace.agent_transform.models import AgentModelOverrideProfile, WorkspaceModelOverride
+from winter_cli.modules.workspace.agent_transform.model_tiers import (
+    MODEL_TIER_IDS,
+    EffectiveTierTable,
+    ModelTier,
+    build_effective_tier_table,
+)
+from winter_cli.modules.workspace.agent_transform.models import (
+    AgentModelOverrideProfile,
+    AgentResolution,
+    CanonicalAgent,
+    ConfigSource,
+)
 from winter_cli.modules.workspace.agent_transform.renderers import (
     ClaudeAgentRenderer,
     CodexAgentRenderer,
     OpenCodeAgentRenderer,
-    resolve_workspace_model_override,
+    _workspace_override_for,
+    resolve_agent,
 )
 from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
 from winter_cli.modules.workspace.models import StandaloneRepository
@@ -55,16 +67,26 @@ EXT_ROOT = WORKSPACE_ROOT / "wf"
 EXT_AGENTS = EXT_ROOT / "agents"
 
 _PARSER = CanonicalAgentParser()
+_DEFAULT_TIER_TABLE = build_effective_tier_table({})
+_NO_OVERRIDES = AgentModelOverridesConfig()
 
 
-def _tier(value: str) -> WorkspaceModelOverride:
-    """Build a bare-string-form workspace override (tier label, resolved via tier table)."""
-    return WorkspaceModelOverride(value=value, is_concrete=False)
+def _resolve(
+    agent: CanonicalAgent,
+    vendor_label: str,
+    *,
+    tier_table: EffectiveTierTable = _DEFAULT_TIER_TABLE,
+    overrides: AgentModelOverridesConfig = _NO_OVERRIDES,
+) -> AgentResolution:
+    """Build the resolution a renderer needs, defaulting to no workspace override config."""
+    return resolve_agent(agent, vendor_label, tier_table, overrides)
 
 
-def _concrete(value: str) -> WorkspaceModelOverride:
-    """Build a per-vendor-form workspace override (concrete model id, passed through)."""
-    return WorkspaceModelOverride(value=value, is_concrete=True)
+def _overrides(
+    overrides: Mapping[str, str | Mapping[str, str | AgentModelOverrideProfile]],
+) -> AgentModelOverridesConfig:
+    """Wrap a raw ``[agent_model_overrides]``-shaped mapping for ``resolve_agent``."""
+    return AgentModelOverridesConfig(overrides=overrides)
 
 
 def _warn_sink():
@@ -122,11 +144,14 @@ def _probe_svc(
     config_files: dict[Path, dict] | None = None,
 ) -> AgentProbeService:
     loader = _manifest_loader(config_files)
+    enumerator = CanonicalAgentEnumerator(fs=cast(IFilesystemReader, fs), manifest_loader=loader)
     return AgentProbeService(
         config=config,
         fs=cast(IFilesystemReader, fs),
         manifest_loader=loader,
-        agent_enumerator=CanonicalAgentEnumerator(fs=cast(IFilesystemReader, fs), manifest_loader=loader),
+        agent_copy_inspector=AgentCopyInspector(
+            fs=cast(IFilesystemReader, fs), manifest_loader=loader, agent_enumerator=enumerator
+        ),
     )
 
 
@@ -185,7 +210,8 @@ class TestTierOverride:
         assert agent.model_tier == "sonnet"
 
         _, warn = _warn_sink()
-        r = ClaudeAgentRenderer().render(agent, warn=warn, workspace_model_override=_tier("haiku"))
+        overrides = _overrides({"reviewer": "haiku"})
+        r = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude", overrides=overrides))
 
         fm = yaml.safe_load(_extract_frontmatter(r.text))
         assert fm["model"] == "haiku", f"expected haiku, got {fm['model']!r}"
@@ -195,7 +221,8 @@ class TestTierOverride:
         agent = _PARSER.parse(_SONNET_AGENT_MD)
 
         _, warn = _warn_sink()
-        r = CodexAgentRenderer().render(agent, warn=warn, workspace_model_override=_tier("haiku"))
+        overrides = _overrides({"reviewer": "haiku"})
+        r = CodexAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "codex", overrides=overrides))
 
         doc = tomllib.loads(r.text)
         expected = MODEL_TIER_IDS[(ModelTier.haiku, "codex")]
@@ -206,7 +233,10 @@ class TestTierOverride:
         agent = _PARSER.parse(_SONNET_AGENT_MD)
 
         _, warn = _warn_sink()
-        r = OpenCodeAgentRenderer().render(agent, warn=warn, workspace_model_override=_tier("haiku"))
+        overrides = _overrides({"reviewer": "haiku"})
+        r = OpenCodeAgentRenderer().render(
+            agent, warn=warn, resolution=_resolve(agent, "opencode", overrides=overrides)
+        )
 
         fm = yaml.safe_load(_extract_frontmatter(r.text))
         expected = MODEL_TIER_IDS[(ModelTier.haiku, "opencode")]
@@ -219,7 +249,8 @@ class TestTierOverride:
         assert agent.overrides.get("claude", {}).get("model") == "claude-opus-4-20250514"
 
         _, warn = _warn_sink()
-        r = ClaudeAgentRenderer().render(agent, warn=warn, workspace_model_override=_tier("haiku"))
+        overrides = _overrides({"reviewer": "haiku"})
+        r = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude", overrides=overrides))
 
         fm = yaml.safe_load(_extract_frontmatter(r.text))
         assert fm["model"] == "haiku"
@@ -227,6 +258,7 @@ class TestTierOverride:
     def test_opus_tier_override_all_three_vendors(self) -> None:
         """Opus-tier workspace override resolves correctly for all three vendors."""
         agent = _PARSER.parse(_SONNET_AGENT_MD)
+        overrides = _overrides({"reviewer": "opus"})
 
         for vendor in CodeAgentVendor:
             _, warn = _warn_sink()
@@ -235,7 +267,7 @@ class TestTierOverride:
                 "codex": CodexAgentRenderer(),
                 "opencode": OpenCodeAgentRenderer(),
             }[vendor.vendor_label]
-            r = renderer.render(agent, warn=warn, workspace_model_override=_tier("opus"))
+            r = renderer.render(agent, warn=warn, resolution=_resolve(agent, vendor.vendor_label, overrides=overrides))
             expected = MODEL_TIER_IDS[(ModelTier.opus, vendor.vendor_label)]
 
             if vendor.vendor_label == "codex":
@@ -256,9 +288,8 @@ class TestConcreteModelOverride:
         """A concrete model id (non-tier string) passes through as-is for claude."""
         agent = _PARSER.parse(_SONNET_AGENT_MD)
         _, warn = _warn_sink()
-        r = ClaudeAgentRenderer().render(
-            agent, warn=warn, workspace_model_override=_concrete("claude-sonnet-4-5-20251201")
-        )
+        overrides = _overrides({"reviewer": {"claude": "claude-sonnet-4-5-20251201"}})
+        r = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude", overrides=overrides))
 
         fm = yaml.safe_load(_extract_frontmatter(r.text))
         assert fm["model"] == "claude-sonnet-4-5-20251201"
@@ -267,7 +298,8 @@ class TestConcreteModelOverride:
         """A concrete model id (non-tier string) passes through as-is for codex."""
         agent = _PARSER.parse(_SONNET_AGENT_MD)
         _, warn = _warn_sink()
-        r = CodexAgentRenderer().render(agent, warn=warn, workspace_model_override=_concrete("gpt-5.4-experimental"))
+        overrides = _overrides({"reviewer": {"codex": "gpt-5.4-experimental"}})
+        r = CodexAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "codex", overrides=overrides))
 
         doc = tomllib.loads(r.text)
         assert doc["model"] == "gpt-5.4-experimental"
@@ -276,18 +308,19 @@ class TestConcreteModelOverride:
         """A concrete model id (non-tier string) passes through as-is for opencode."""
         agent = _PARSER.parse(_SONNET_AGENT_MD)
         _, warn = _warn_sink()
+        overrides = _overrides({"reviewer": {"opencode": "anthropic/claude-opus-5-20260101"}})
         r = OpenCodeAgentRenderer().render(
-            agent, warn=warn, workspace_model_override=_concrete("anthropic/claude-opus-5-20260101")
+            agent, warn=warn, resolution=_resolve(agent, "opencode", overrides=overrides)
         )
 
         fm = yaml.safe_load(_extract_frontmatter(r.text))
         assert fm["model"] == "anthropic/claude-opus-5-20260101"
 
     def test_none_workspace_override_falls_through_to_tier_table(self) -> None:
-        """When workspace_model_override is None, tier table resolution is used."""
+        """When no workspace override is configured, tier table resolution is used."""
         agent = _PARSER.parse(_SONNET_AGENT_MD)
         _, warn = _warn_sink()
-        r = ClaudeAgentRenderer().render(agent, warn=warn, workspace_model_override=None)
+        r = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude"))
 
         fm = yaml.safe_load(_extract_frontmatter(r.text))
         assert fm["model"] == "sonnet"
@@ -299,85 +332,88 @@ class TestConcreteModelOverride:
 
 
 class TestPerVendorScoping:
-    def test_resolve_workspace_model_override_all_vendors_string(self) -> None:
+    def test_workspace_override_for_all_vendors_string(self) -> None:
         """A string override value applies to every vendor as a tier label."""
-        overrides: dict[str, str | dict[str, str]] = {"reviewer": "haiku"}
+        overrides = _overrides({"reviewer": "haiku"})
         for vendor in CodeAgentVendor:
-            result = resolve_workspace_model_override(overrides, "reviewer", vendor.vendor_label)
+            result = _workspace_override_for(overrides, "reviewer", vendor.vendor_label)
             assert result is not None
             assert result.value == "haiku", f"{vendor.vendor_label}: expected 'haiku', got {result.value!r}"
             assert result.is_concrete is False
 
-    def test_resolve_workspace_model_override_per_vendor_dict_hit(self) -> None:
+    def test_workspace_override_for_per_vendor_dict_hit(self) -> None:
         """A dict override value returns the concrete entry for the matching vendor."""
-        overrides: dict[str, str | dict[str, str]] = {
-            "reviewer": {"claude": "claude-opus-4-20250514", "codex": "gpt-5.4"}
-        }
-        claude_result = resolve_workspace_model_override(overrides, "reviewer", "claude")
-        codex_result = resolve_workspace_model_override(overrides, "reviewer", "codex")
+        overrides = _overrides({"reviewer": {"claude": "claude-opus-4-20250514", "codex": "gpt-5.4"}})
+        claude_result = _workspace_override_for(overrides, "reviewer", "claude")
+        codex_result = _workspace_override_for(overrides, "reviewer", "codex")
         assert claude_result is not None and claude_result.value == "claude-opus-4-20250514"
         assert claude_result.is_concrete is True
         assert codex_result is not None and codex_result.value == "gpt-5.4"
         assert codex_result.is_concrete is True
 
-    def test_resolve_workspace_model_override_per_vendor_dict_value_colliding_with_tier_label(self) -> None:
+    def test_workspace_override_for_per_vendor_dict_value_colliding_with_tier_label(self) -> None:
         """A per-vendor concrete id that collides with a tier label name is not tier-resolved."""
-        overrides: dict[str, str | dict[str, str]] = {"coder": {"opencode": "haiku"}}
-        result = resolve_workspace_model_override(overrides, "coder", "opencode")
+        overrides = _overrides({"coder": {"opencode": "haiku"}})
+        result = _workspace_override_for(overrides, "coder", "opencode")
         assert result is not None
         assert result.value == "haiku"
         assert result.is_concrete is True
 
-        agent = _PARSER.parse(_SONNET_AGENT_MD)
+        agent = _PARSER.parse(_SONNET_AGENT_MD.replace("name: reviewer", "name: coder"))
         _, warn = _warn_sink()
-        r = OpenCodeAgentRenderer().render(agent, warn=warn, workspace_model_override=result)
+        r = OpenCodeAgentRenderer().render(
+            agent, warn=warn, resolution=_resolve(agent, "opencode", overrides=overrides)
+        )
         fm = yaml.safe_load(_extract_frontmatter(r.text))
         # Passed through literally as "haiku" — NOT resolved to the haiku tier's
         # opencode model id (anthropic/claude-haiku-4-20250514).
         assert fm["model"] == "haiku"
 
-    def test_resolve_workspace_model_override_per_vendor_dict_miss(self) -> None:
+    def test_workspace_override_for_per_vendor_dict_miss(self) -> None:
         """A dict override returns None for vendors not listed."""
-        overrides: dict[str, str | dict[str, str]] = {"reviewer": {"claude": "haiku"}}
-        assert resolve_workspace_model_override(overrides, "reviewer", "codex") is None
-        assert resolve_workspace_model_override(overrides, "reviewer", "opencode") is None
+        overrides = _overrides({"reviewer": {"claude": "haiku"}})
+        assert _workspace_override_for(overrides, "reviewer", "codex") is None
+        assert _workspace_override_for(overrides, "reviewer", "opencode") is None
 
     def test_per_vendor_override_only_affects_named_vendor(self) -> None:
         """A claude-scoped override changes claude output but not codex."""
         agent = _PARSER.parse(_SONNET_AGENT_MD)
-        overrides: dict[str, str | dict[str, str]] = {"reviewer": {"claude": "haiku"}}
-
-        claude_override = resolve_workspace_model_override(overrides, "reviewer", "claude")
-        codex_override = resolve_workspace_model_override(overrides, "reviewer", "codex")
+        overrides = _overrides({"reviewer": {"claude": "haiku"}})
 
         _, warn_c = _warn_sink()
         _, warn_x = _warn_sink()
-        claude_r = ClaudeAgentRenderer().render(agent, warn=warn_c, workspace_model_override=claude_override)
-        codex_r = CodexAgentRenderer().render(agent, warn=warn_x, workspace_model_override=codex_override)
+        claude_r = ClaudeAgentRenderer().render(
+            agent, warn=warn_c, resolution=_resolve(agent, "claude", overrides=overrides)
+        )
+        codex_r = CodexAgentRenderer().render(
+            agent, warn=warn_x, resolution=_resolve(agent, "codex", overrides=overrides)
+        )
 
         claude_fm = yaml.safe_load(_extract_frontmatter(claude_r.text))
         codex_doc = tomllib.loads(codex_r.text)
 
         assert claude_fm["model"] == "haiku"
-        # codex_override is None → falls through to tier table for sonnet
+        # codex has no override for this agent → falls through to tier table for sonnet
         assert codex_doc["model"] == MODEL_TIER_IDS[(ModelTier.sonnet, "codex")]
 
     def test_unknown_agent_in_overrides_returns_none(self) -> None:
         """An agent name not in the override map returns None for all vendors."""
-        overrides: dict[str, str | dict[str, str]] = {"other-agent": "haiku"}
+        overrides = _overrides({"other-agent": "haiku"})
         for vendor in CodeAgentVendor:
-            result = resolve_workspace_model_override(overrides, "reviewer", vendor.vendor_label)
+            result = _workspace_override_for(overrides, "reviewer", vendor.vendor_label)
             assert result is None
 
     def test_profile_resolves_model_and_effort_for_all_vendors(self) -> None:
         """A profile carries a concrete model and projects native effort keys."""
-        overrides = {
-            "reviewer": {
-                "claude": AgentModelOverrideProfile(model="sonnet", effort="high"),
-                "codex": AgentModelOverrideProfile(model="gpt-5.6-luna", effort="max"),
-                "opencode": AgentModelOverrideProfile(model="openai/gpt-5.6-luna", effort="max"),
+        overrides = _overrides(
+            {
+                "reviewer": {
+                    "claude": AgentModelOverrideProfile(model="sonnet", effort="high"),
+                    "codex": AgentModelOverrideProfile(model="gpt-6-luna", effort="max"),
+                    "opencode": AgentModelOverrideProfile(model="openai/gpt-6-luna", effort="max"),
+                }
             }
-        }
+        )
         agent = _PARSER.parse(_SONNET_AGENT_MD)
         for vendor, renderer in (
             ("claude", ClaudeAgentRenderer()),
@@ -385,37 +421,35 @@ class TestPerVendorScoping:
             ("opencode", OpenCodeAgentRenderer()),
         ):
             _, warn = _warn_sink()
-            rendered = renderer.render(
-                agent,
-                warn=warn,
-                workspace_model_override=resolve_workspace_model_override(overrides, "reviewer", vendor),
-            )
+            rendered = renderer.render(agent, warn=warn, resolution=_resolve(agent, vendor, overrides=overrides))
             document = (
                 tomllib.loads(rendered.text)
                 if vendor == "codex"
                 else yaml.safe_load(_extract_frontmatter(rendered.text))
             )
-            assert document["model"] == overrides["reviewer"][vendor].model
+            reviewer_overrides = overrides.overrides["reviewer"]
+            assert isinstance(reviewer_overrides, Mapping)
+            profile = reviewer_overrides[vendor]
+            assert isinstance(profile, AgentModelOverrideProfile)
+            assert document["model"] == profile.model
             assert (
                 document[{"claude": "effort", "codex": "model_reasoning_effort", "opencode": "reasoningEffort"}[vendor]]
-                == overrides["reviewer"][vendor].effort
+                == profile.effort
             )
 
     def test_effort_only_profile_preserves_canonical_model_and_effort_when_unset(self) -> None:
         """An effort-only profile changes only effort and a missing profile leaves native effort intact."""
         agent = _PARSER.parse(_SONNET_AGENT_MD.replace("model: sonnet", "model: sonnet\nclaude:\n  effort: low"))
         _, warn = _warn_sink()
-        profile = AgentModelOverrideProfile(effort="high")
+        overrides = _overrides({"reviewer": {"claude": AgentModelOverrideProfile(effort="high")}})
         rendered = ClaudeAgentRenderer().render(
-            agent,
-            warn=warn,
-            workspace_model_override=WorkspaceModelOverride(value=None, is_concrete=True, effort=profile.effort),
+            agent, warn=warn, resolution=_resolve(agent, "claude", overrides=overrides)
         )
         document = yaml.safe_load(_extract_frontmatter(rendered.text))
         assert document["model"] == "sonnet"
         assert document["effort"] == "high"
 
-        unchanged = ClaudeAgentRenderer().render(agent, warn=warn)
+        unchanged = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude"))
         assert yaml.safe_load(_extract_frontmatter(unchanged.text))["effort"] == "low"
 
     @pytest.mark.parametrize(
@@ -442,23 +476,16 @@ class TestPerVendorScoping:
         )
         agent = _PARSER.parse(text)
         _, warn = _warn_sink()
-        workspace = resolve_workspace_model_override(
-            {"reviewer": {vendor: AgentModelOverrideProfile(effort="high")}}, "reviewer", vendor
-        )
-        rendered = renderer.render(agent, warn=warn, workspace_model_override=workspace)
+        effort_overrides = _overrides({"reviewer": {vendor: AgentModelOverrideProfile(effort="high")}})
+        rendered = renderer.render(agent, warn=warn, resolution=_resolve(agent, vendor, overrides=effort_overrides))
         document = (
             tomllib.loads(rendered.text) if vendor == "codex" else yaml.safe_load(_extract_frontmatter(rendered.text))
         )
         assert document["model"] == MODEL_TIER_IDS[(ModelTier.sonnet, vendor)]
         assert document[native_key] == "high"
 
-        model_only = renderer.render(
-            agent,
-            warn=warn,
-            workspace_model_override=resolve_workspace_model_override(
-                {"reviewer": {vendor: AgentModelOverrideProfile(model="model-only")}}, "reviewer", vendor
-            ),
-        )
+        model_overrides = _overrides({"reviewer": {vendor: AgentModelOverrideProfile(model="model-only")}})
+        model_only = renderer.render(agent, warn=warn, resolution=_resolve(agent, vendor, overrides=model_overrides))
         model_only_document = (
             tomllib.loads(model_only.text)
             if vendor == "codex"
@@ -478,7 +505,7 @@ class TestPerVendorScoping:
     def test_no_workspace_or_canonical_effort_emits_no_native_effort(self, vendor, renderer, native_key: str) -> None:
         agent = _PARSER.parse(_SONNET_AGENT_MD)
         _, warn = _warn_sink()
-        rendered = renderer.render(agent, warn=warn)
+        rendered = renderer.render(agent, warn=warn, resolution=_resolve(agent, vendor))
         document = (
             tomllib.loads(rendered.text) if vendor == "codex" else yaml.safe_load(_extract_frontmatter(rendered.text))
         )
@@ -486,47 +513,41 @@ class TestPerVendorScoping:
 
     def test_mixed_legacy_and_profile_values_resolve_correctly(self) -> None:
         agent = _PARSER.parse(_SONNET_AGENT_MD)
-        overrides = {
-            "reviewer": {
-                "claude": "haiku",
-                "codex": AgentModelOverrideProfile(model="gpt-5.6-luna", effort="max"),
+        overrides = _overrides(
+            {
+                "reviewer": {
+                    "claude": "haiku",
+                    "codex": AgentModelOverrideProfile(model="gpt-6-luna", effort="max"),
+                }
             }
-        }
+        )
         _, warn = _warn_sink()
         claude = ClaudeAgentRenderer().render(
-            agent,
-            warn=warn,
-            workspace_model_override=resolve_workspace_model_override(overrides, "reviewer", "claude"),
+            agent, warn=warn, resolution=_resolve(agent, "claude", overrides=overrides)
         )
-        codex = CodexAgentRenderer().render(
-            agent,
-            warn=warn,
-            workspace_model_override=resolve_workspace_model_override(overrides, "reviewer", "codex"),
-        )
+        codex = CodexAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "codex", overrides=overrides))
         assert yaml.safe_load(_extract_frontmatter(claude.text))["model"] == "haiku"
-        assert tomllib.loads(codex.text)["model"] == "gpt-5.6-luna"
+        assert tomllib.loads(codex.text)["model"] == "gpt-6-luna"
         assert tomllib.loads(codex.text)["model_reasoning_effort"] == "max"
 
     def test_ice_carver_profile_exact_vendor_outcome(self) -> None:
         agent = _PARSER.parse(_SONNET_AGENT_MD.replace("name: reviewer", "name: ice-carver"))
-        overrides = {
-            "ice-carver": {
-                "claude": AgentModelOverrideProfile(model="sonnet", effort="high"),
-                "codex": AgentModelOverrideProfile(model="gpt-5.6-luna", effort="max"),
-                "opencode": AgentModelOverrideProfile(model="openai/gpt-5.6-luna", effort="max"),
+        overrides = _overrides(
+            {
+                "ice-carver": {
+                    "claude": AgentModelOverrideProfile(model="sonnet", effort="high"),
+                    "codex": AgentModelOverrideProfile(model="gpt-6-luna", effort="max"),
+                    "opencode": AgentModelOverrideProfile(model="openai/gpt-6-luna", effort="max"),
+                }
             }
-        }
+        )
         for vendor, renderer, expected_model, effort_key, expected_effort in (
             ("claude", ClaudeAgentRenderer(), "sonnet", "effort", "high"),
-            ("codex", CodexAgentRenderer(), "gpt-5.6-luna", "model_reasoning_effort", "max"),
-            ("opencode", OpenCodeAgentRenderer(), "openai/gpt-5.6-luna", "reasoningEffort", "max"),
+            ("codex", CodexAgentRenderer(), "gpt-6-luna", "model_reasoning_effort", "max"),
+            ("opencode", OpenCodeAgentRenderer(), "openai/gpt-6-luna", "reasoningEffort", "max"),
         ):
             _, warn = _warn_sink()
-            rendered = renderer.render(
-                agent,
-                warn=warn,
-                workspace_model_override=resolve_workspace_model_override(overrides, "ice-carver", vendor),
-            )
+            rendered = renderer.render(agent, warn=warn, resolution=_resolve(agent, vendor, overrides=overrides))
             document = (
                 tomllib.loads(rendered.text)
                 if vendor == "codex"
@@ -710,6 +731,83 @@ class TestLocalOverSharedPrecedence:
 
         config = svc.load()
         assert config.agent_model_overrides.overrides == {}
+
+
+class TestSourceProvenance:
+    """Per-entry config-source attribution for [agent_model_overrides]."""
+
+    def _service(self, fs: FakeFilesystem, configs: dict[Path, dict]) -> WorkspaceConfigService:
+        return WorkspaceConfigService(
+            workspace_locator=_StubLocator(WORKSPACE_ROOT),
+            fs=fs,
+            config_file_reader=FakeConfigFileReader(configs),
+        )
+
+    def test_shared_only_entry_reports_config_toml(self) -> None:
+        """An override defined only in config.toml is attributed to config.toml."""
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: ""})
+        svc = self._service(
+            fs,
+            {shared_path: {"main_branch": "main", "agent_model_overrides": {"reviewer": "haiku"}}},
+        )
+        config = svc.load()
+        assert config.agent_model_overrides.source_for("reviewer") is ConfigSource.config_toml
+
+    def test_local_only_entry_reports_config_local_toml(self) -> None:
+        """An override defined only in config.local.toml is attributed to config.local.toml."""
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: "", local_path: ""})
+        svc = self._service(
+            fs,
+            {
+                shared_path: {"main_branch": "main"},
+                local_path: {"agent_model_overrides": {"reviewer": "haiku"}},
+            },
+        )
+        config = svc.load()
+        assert config.agent_model_overrides.source_for("reviewer") is ConfigSource.config_local_toml
+
+    def test_local_over_shared_entry_reports_config_local_toml(self) -> None:
+        """An override present in both files is attributed to config.local.toml, the winning file."""
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: "", local_path: ""})
+        svc = self._service(
+            fs,
+            {
+                shared_path: {"main_branch": "main", "agent_model_overrides": {"reviewer": "haiku"}},
+                local_path: {"agent_model_overrides": {"reviewer": "opus"}},
+            },
+        )
+        config = svc.load()
+        assert config.agent_model_overrides.overrides["reviewer"] == "opus"
+        assert config.agent_model_overrides.source_for("reviewer") is ConfigSource.config_local_toml
+
+    def test_entry_missing_from_source_map_defaults_to_config_toml(self) -> None:
+        """An agent name with no recorded source defaults to config.toml."""
+        config = AgentModelOverridesConfig()
+        assert config.source_for("nonexistent-agent") is ConfigSource.config_toml
+
+    def test_unrelated_shared_entry_keeps_its_own_source_after_local_override(self) -> None:
+        """A shared entry not touched by the local overlay keeps reporting config.toml."""
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: "", local_path: ""})
+        svc = self._service(
+            fs,
+            {
+                shared_path: {
+                    "main_branch": "main",
+                    "agent_model_overrides": {"reviewer": "haiku", "developer": "sonnet"},
+                },
+                local_path: {"agent_model_overrides": {"reviewer": "opus"}},
+            },
+        )
+        config = svc.load()
+        assert config.agent_model_overrides.source_for("reviewer") is ConfigSource.config_local_toml
+        assert config.agent_model_overrides.source_for("developer") is ConfigSource.config_toml
 
 
 # ===========================================================================
@@ -1212,16 +1310,13 @@ def test_legacy_rendering_has_no_effort_fields() -> None:
     agent = _PARSER.parse(_SONNET_AGENT_MD)
     _, warn = _warn_sink()
     legacy = {"reviewer": {"claude": "sonnet", "codex": "gpt-5.4", "opencode": "openai/sonnet"}}
+    overrides = _overrides(legacy)
     for vendor, renderer in (
         ("claude", ClaudeAgentRenderer()),
         ("codex", CodexAgentRenderer()),
         ("opencode", OpenCodeAgentRenderer()),
     ):
-        rendered = renderer.render(
-            agent,
-            warn=warn,
-            workspace_model_override=resolve_workspace_model_override(legacy, "reviewer", vendor),
-        )
+        rendered = renderer.render(agent, warn=warn, resolution=_resolve(agent, vendor, overrides=overrides))
         document = (
             tomllib.loads(rendered.text) if vendor == "codex" else yaml.safe_load(_extract_frontmatter(rendered.text))
         )

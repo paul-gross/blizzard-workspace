@@ -23,25 +23,28 @@ import pytest
 import yaml
 
 from tests.conftest import FakeConfigFileReader, FakeFilesystem, FakeInitReporter
-from winter_cli.config.models import ModelTiersConfig, WorkspaceConfig
+from winter_cli.config.models import AgentModelOverridesConfig, ModelTiersConfig, WorkspaceConfig
 from winter_cli.config.workspace import CONFIG_FILE, LOCAL_CONFIG_FILE, WINTER_DIR, WorkspaceConfigService
 from winter_cli.core.config_file import ConfigError
 from winter_cli.core.filesystem import IFilesystemReader
 from winter_cli.modules.doctor.agent_probe_service import AgentProbeService
 from winter_cli.modules.doctor.models import ProbeStatus
 from winter_cli.modules.workspace.agent_install import ExtensionAgentService
+from winter_cli.modules.workspace.agent_transform.agent_copy_inspector import AgentCopyInspector
 from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
 from winter_cli.modules.workspace.agent_transform.canonical_parser import CanonicalAgentParser
 from winter_cli.modules.workspace.agent_transform.model_tiers import (
     MODEL_TIER_IDS,
+    EffectiveTierTable,
     ModelTier,
     build_effective_tier_table,
 )
-from winter_cli.modules.workspace.agent_transform.models import WorkspaceModelOverride
+from winter_cli.modules.workspace.agent_transform.models import AgentResolution, CanonicalAgent, ConfigSource
 from winter_cli.modules.workspace.agent_transform.renderers import (
     ClaudeAgentRenderer,
     CodexAgentRenderer,
     OpenCodeAgentRenderer,
+    resolve_agent,
 )
 from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
@@ -84,6 +87,19 @@ def _extract_frontmatter(text: str) -> str:
     return "\n".join(lines[1:closing])
 
 
+_NO_OVERRIDES = AgentModelOverridesConfig()
+
+
+def _resolve(
+    agent: CanonicalAgent,
+    vendor_label: str,
+    *,
+    tier_table: EffectiveTierTable,
+    overrides: AgentModelOverridesConfig = _NO_OVERRIDES,
+) -> AgentResolution:
+    return resolve_agent(agent, vendor_label, tier_table, overrides)
+
+
 def _config_svc(fs: FakeFilesystem, configs: dict[Path, dict]) -> WorkspaceConfigService:
     return WorkspaceConfigService(
         workspace_locator=_StubLocator(WORKSPACE_ROOT),
@@ -98,11 +114,14 @@ def _probe_svc(
     config_files: dict[Path, dict] | None = None,
 ) -> AgentProbeService:
     loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files or {}))
+    enumerator = CanonicalAgentEnumerator(fs=cast(IFilesystemReader, fs), manifest_loader=loader)
     return AgentProbeService(
         config=config,
         fs=cast(IFilesystemReader, fs),
         manifest_loader=loader,
-        agent_enumerator=CanonicalAgentEnumerator(fs=cast(IFilesystemReader, fs), manifest_loader=loader),
+        agent_copy_inspector=AgentCopyInspector(
+            fs=cast(IFilesystemReader, fs), manifest_loader=loader, agent_enumerator=enumerator
+        ),
     )
 
 
@@ -168,7 +187,9 @@ class TestBuiltinTierOverride:
         agent = _PARSER.parse(_SONNET_AGENT_MD.replace("model: sonnet", "model: haiku"))
 
         _, warn = _warn_sink()
-        r = OpenCodeAgentRenderer().render(agent, warn=warn, effective_tier_table=tier_table)
+        r = OpenCodeAgentRenderer().render(
+            agent, warn=warn, resolution=_resolve(agent, "opencode", tier_table=tier_table)
+        )
 
         fm = yaml.safe_load(_extract_frontmatter(r.text))
         assert fm["model"] == "anthropic/claude-haiku-4-20251201"
@@ -180,8 +201,12 @@ class TestBuiltinTierOverride:
 
         _, warn_c = _warn_sink()
         _, warn_x = _warn_sink()
-        claude_r = ClaudeAgentRenderer().render(agent, warn=warn_c, effective_tier_table=tier_table)
-        codex_r = CodexAgentRenderer().render(agent, warn=warn_x, effective_tier_table=tier_table)
+        claude_r = ClaudeAgentRenderer().render(
+            agent, warn=warn_c, resolution=_resolve(agent, "claude", tier_table=tier_table)
+        )
+        codex_r = CodexAgentRenderer().render(
+            agent, warn=warn_x, resolution=_resolve(agent, "codex", tier_table=tier_table)
+        )
 
         claude_fm = yaml.safe_load(_extract_frontmatter(claude_r.text))
         codex_doc = tomllib.loads(codex_r.text)
@@ -195,7 +220,7 @@ class TestBuiltinTierOverride:
         agent = _PARSER.parse(_SONNET_AGENT_MD)
 
         _, warn = _warn_sink()
-        r = ClaudeAgentRenderer().render(agent, warn=warn, effective_tier_table=tier_table)
+        r = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude", tier_table=tier_table))
 
         fm = yaml.safe_load(_extract_frontmatter(r.text))
         assert fm["model"] == "claude-sonnet-4-5-20251201"
@@ -205,7 +230,7 @@ class TestBuiltinTierOverride:
         tier_table = build_effective_tier_table({})
         for tier in ModelTier:
             for vendor in ("claude", "codex", "opencode"):
-                assert tier_table[tier.value][vendor] == MODEL_TIER_IDS[(tier, vendor)]
+                assert tier_table.model_id(tier.value, vendor) == MODEL_TIER_IDS[(tier, vendor)]
 
 
 # ---------------------------------------------------------------------------
@@ -226,13 +251,13 @@ class TestCustomTierViaOverrideMap:
             }
         )
         agent = _PARSER.parse(_SONNET_AGENT_MD)
+        overrides = AgentModelOverridesConfig(overrides={"reviewer": "big-thinker"})
 
         _, warn = _warn_sink()
         r = ClaudeAgentRenderer().render(
             agent,
             warn=warn,
-            workspace_model_override=WorkspaceModelOverride(value="big-thinker", is_concrete=False),
-            effective_tier_table=tier_table,
+            resolution=_resolve(agent, "claude", tier_table=tier_table, overrides=overrides),
         )
 
         fm = yaml.safe_load(_extract_frontmatter(r.text))
@@ -250,13 +275,13 @@ class TestCustomTierViaOverrideMap:
             }
         )
         agent = _PARSER.parse(_SONNET_AGENT_MD)
+        overrides = AgentModelOverridesConfig(overrides={"reviewer": "big-thinker"})
 
         _, warn = _warn_sink()
         r = CodexAgentRenderer().render(
             agent,
             warn=warn,
-            workspace_model_override=WorkspaceModelOverride(value="big-thinker", is_concrete=False),
-            effective_tier_table=tier_table,
+            resolution=_resolve(agent, "codex", tier_table=tier_table, overrides=overrides),
         )
 
         doc = tomllib.loads(r.text)
@@ -317,7 +342,7 @@ class TestCustomTierInFrontmatter:
         assert agent.model_tier == "big-thinker"
 
         _, warn = _warn_sink()
-        r = ClaudeAgentRenderer().render(agent, warn=warn, effective_tier_table=tier_table)
+        r = ClaudeAgentRenderer().render(agent, warn=warn, resolution=_resolve(agent, "claude", tier_table=tier_table))
 
         fm = yaml.safe_load(_extract_frontmatter(r.text))
         assert fm["model"] == "claude-opus-4-20250514"
@@ -326,9 +351,8 @@ class TestCustomTierInFrontmatter:
         """An agent with model: unknown-tier raises RepoError at render time."""
         tier_table = build_effective_tier_table({})
         agent = _PARSER.parse("---\nname: x\ndescription: d\nmodel: unknown-tier\n---\n\nBody.\n")
-        _, warn = _warn_sink()
         with pytest.raises(RepoError, match="unknown-tier"):
-            ClaudeAgentRenderer().render(agent, warn=warn, effective_tier_table=tier_table)
+            _resolve(agent, "claude", tier_table=tier_table)
 
     def test_custom_tier_missing_vendor_mapping_raises_repo_error(self) -> None:
         """A custom tier without a needed vendor mapping raises RepoError at render time."""
@@ -343,9 +367,8 @@ class TestCustomTierInFrontmatter:
             Body.
             """)
         agent = _PARSER.parse(agent_md)
-        _, warn = _warn_sink()
         with pytest.raises(RepoError, match="codex"):
-            CodexAgentRenderer().render(agent, warn=warn, effective_tier_table=tier_table)
+            _resolve(agent, "codex", tier_table=tier_table)
 
 
 # ---------------------------------------------------------------------------
@@ -453,12 +476,91 @@ class TestLocalOverSharedPrecedenceForModelTiers:
         # The raw config only has opencode for haiku
         assert config.model_tiers.tiers.get("haiku") == {"opencode": "anthropic/claude-haiku-4-20251201"}
         # But the effective tier table merges with built-in, so claude and codex still present
-        from winter_cli.modules.workspace.agent_transform.model_tiers import build_effective_tier_table
+        eff = build_effective_tier_table(config.model_tiers.tiers, config.model_tiers.tier_sources)
+        assert eff.model_id("haiku", "opencode") == "anthropic/claude-haiku-4-20251201"
+        assert eff.model_id("haiku", "claude") == MODEL_TIER_IDS[(ModelTier.haiku, "claude")]
+        assert eff.model_id("haiku", "codex") == MODEL_TIER_IDS[(ModelTier.haiku, "codex")]
 
-        eff = build_effective_tier_table(config.model_tiers.tiers)
-        assert eff["haiku"]["opencode"] == "anthropic/claude-haiku-4-20251201"
-        assert eff["haiku"]["claude"] == MODEL_TIER_IDS[(ModelTier.haiku, "claude")]
-        assert eff["haiku"]["codex"] == MODEL_TIER_IDS[(ModelTier.haiku, "codex")]
+
+# ---------------------------------------------------------------------------
+# 4a. [model_tiers] per-entry config-source provenance
+# ---------------------------------------------------------------------------
+
+
+class TestModelTiersSourceProvenance:
+    def test_shared_only_entry_reports_config_toml(self) -> None:
+        """A tier defined only in config.toml is attributed to config.toml."""
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: ""})
+        svc = _config_svc(
+            fs,
+            {
+                shared_path: {
+                    "main_branch": "main",
+                    "model_tiers": {"my-tier": {"claude": "opus"}},
+                }
+            },
+        )
+        config = svc.load()
+        assert config.model_tiers.source_for("my-tier") is ConfigSource.config_toml
+
+    def test_local_only_entry_reports_config_local_toml(self) -> None:
+        """A tier defined only in config.local.toml is attributed to config.local.toml."""
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: "", local_path: ""})
+        svc = _config_svc(
+            fs,
+            {
+                shared_path: {"main_branch": "main"},
+                local_path: {"model_tiers": {"my-tier": {"claude": "opus"}}},
+            },
+        )
+        config = svc.load()
+        assert config.model_tiers.source_for("my-tier") is ConfigSource.config_local_toml
+
+    def test_local_over_shared_entry_reports_config_local_toml(self) -> None:
+        """A tier present in both files is attributed to config.local.toml, the winning file."""
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: "", local_path: ""})
+        svc = _config_svc(
+            fs,
+            {
+                shared_path: {"main_branch": "main", "model_tiers": {"my-tier": {"claude": "opus"}}},
+                local_path: {"model_tiers": {"my-tier": {"claude": "haiku"}}},
+            },
+        )
+        config = svc.load()
+        assert config.model_tiers.tiers["my-tier"]["claude"] == "haiku"
+        assert config.model_tiers.source_for("my-tier") is ConfigSource.config_local_toml
+
+    def test_entry_missing_from_source_map_defaults_to_config_toml(self) -> None:
+        """A label with no recorded source (e.g. absent entirely) defaults to config.toml."""
+        config = _bare_config()
+        assert config.model_tiers.source_for("nonexistent-tier") is ConfigSource.config_toml
+
+    def test_unrelated_shared_entry_keeps_its_own_source_after_local_override(self) -> None:
+        """A shared entry not touched by the local overlay keeps reporting config.toml."""
+        shared_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+        local_path = WORKSPACE_ROOT / WINTER_DIR / LOCAL_CONFIG_FILE
+        fs = FakeFilesystem(files={shared_path: "", local_path: ""})
+        svc = _config_svc(
+            fs,
+            {
+                shared_path: {
+                    "main_branch": "main",
+                    "model_tiers": {
+                        "tier-a": {"claude": "opus"},
+                        "tier-b": {"claude": "haiku"},
+                    },
+                },
+                local_path: {"model_tiers": {"tier-a": {"claude": "sonnet"}}},
+            },
+        )
+        config = svc.load()
+        assert config.model_tiers.source_for("tier-a") is ConfigSource.config_local_toml
+        assert config.model_tiers.source_for("tier-b") is ConfigSource.config_toml
 
 
 # ---------------------------------------------------------------------------
@@ -581,31 +683,24 @@ class TestMissingVendorMappingInCustomTier:
             {"big-thinker": {"claude": "claude-opus-4-20250514", "codex": "gpt-5.4"}}
         )
         agent = _PARSER.parse(_SONNET_AGENT_MD)
-        _, warn = _warn_sink()
+        overrides = AgentModelOverridesConfig(overrides={"reviewer": "big-thinker"})
         with pytest.raises(RepoError, match="big-thinker"):
-            OpenCodeAgentRenderer().render(
-                agent,
-                warn=warn,
-                workspace_model_override=WorkspaceModelOverride(value="big-thinker", is_concrete=False),
-                effective_tier_table=tier_table,
-            )
+            _resolve(agent, "opencode", tier_table=tier_table, overrides=overrides)
 
     def test_frontmatter_tier_missing_vendor_raises_repo_error(self) -> None:
         """An agent with a frontmatter tier lacking a vendor mapping raises RepoError at render."""
         # smol-tier only has claude
         tier_table = build_effective_tier_table({"smol-tier": {"claude": "haiku"}})
         agent = _PARSER.parse("---\nname: x\ndescription: d\nmodel: smol-tier\n---\n\nBody.\n")
-        _, warn = _warn_sink()
         with pytest.raises(RepoError, match="codex"):
-            CodexAgentRenderer().render(agent, warn=warn, effective_tier_table=tier_table)
+            _resolve(agent, "codex", tier_table=tier_table)
 
     def test_error_message_names_missing_label_and_vendor(self) -> None:
         """RepoError message names both the tier label and missing vendor."""
         tier_table = build_effective_tier_table({"my-tier": {"claude": "opus"}})
         agent = _PARSER.parse("---\nname: x\ndescription: d\nmodel: my-tier\n---\n\nBody.\n")
-        _, warn = _warn_sink()
         try:
-            CodexAgentRenderer().render(agent, warn=warn, effective_tier_table=tier_table)
+            _resolve(agent, "codex", tier_table=tier_table)
             pytest.fail("expected RepoError")
         except RepoError as exc:
             assert "my-tier" in str(exc)
@@ -700,7 +795,7 @@ class TestBuildEffectiveTierTable:
     def test_empty_custom_returns_only_builtins(self) -> None:
         """With no custom tiers, the effective table matches the built-in set."""
         table = build_effective_tier_table({})
-        assert set(table) == {tier.value for tier in ModelTier}
+        assert table.labels() == {tier.value for tier in ModelTier}
 
     def test_new_custom_tier_added_to_table(self) -> None:
         """A new custom tier label is present in the effective table."""
@@ -708,24 +803,24 @@ class TestBuildEffectiveTierTable:
             {"big-thinker": {"claude": "opus", "codex": "gpt-5.4", "opencode": "anthropic/claude-opus-4-20250514"}}
         )
         assert "big-thinker" in table
-        assert table["big-thinker"]["claude"] == "opus"
+        assert table.model_id("big-thinker", "claude") == "opus"
 
     def test_builtin_override_merges_per_vendor(self) -> None:
         """Overriding one vendor for a built-in tier leaves other vendors unchanged."""
         table = build_effective_tier_table({"haiku": {"opencode": "anthropic/claude-haiku-4-20251201"}})
-        assert table["haiku"]["opencode"] == "anthropic/claude-haiku-4-20251201"
+        assert table.model_id("haiku", "opencode") == "anthropic/claude-haiku-4-20251201"
         # Built-in values preserved for unlisted vendors
-        assert table["haiku"]["claude"] == MODEL_TIER_IDS[(ModelTier.haiku, "claude")]
-        assert table["haiku"]["codex"] == MODEL_TIER_IDS[(ModelTier.haiku, "codex")]
+        assert table.model_id("haiku", "claude") == MODEL_TIER_IDS[(ModelTier.haiku, "claude")]
+        assert table.model_id("haiku", "codex") == MODEL_TIER_IDS[(ModelTier.haiku, "codex")]
 
     def test_complete_builtin_override_replaces_all_vendors(self) -> None:
         """Overriding all three vendors for a built-in tier replaces all of them."""
         table = build_effective_tier_table(
             {"opus": {"claude": "new-opus-claude", "codex": "new-opus-codex", "opencode": "new-opus-opencode"}}
         )
-        assert table["opus"]["claude"] == "new-opus-claude"
-        assert table["opus"]["codex"] == "new-opus-codex"
-        assert table["opus"]["opencode"] == "new-opus-opencode"
+        assert table.model_id("opus", "claude") == "new-opus-claude"
+        assert table.model_id("opus", "codex") == "new-opus-codex"
+        assert table.model_id("opus", "opencode") == "new-opus-opencode"
 
 
 # ---------------------------------------------------------------------------

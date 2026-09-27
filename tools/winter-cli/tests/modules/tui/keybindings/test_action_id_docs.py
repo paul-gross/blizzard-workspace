@@ -20,7 +20,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[6]
 _DASHBOARD_MD = _REPO_ROOT / "context" / "winter-cli" / "usage" / "dashboard.md"
 
 # An action id: dotted lowercase segments. Excludes the `plugin.<name>` template.
-_ACTION_ID = re.compile(r"`([a-z]+(?:\.[a-z_]+)+)`")
+_ACTION_ID = re.compile(r"`([a-z_]+(?:\.[a-z_]+)+)`")
 
 
 def _documented_ids() -> set[str]:

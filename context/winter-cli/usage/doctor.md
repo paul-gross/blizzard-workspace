@@ -35,10 +35,11 @@ probe per code-agent vendor, independent of `adopt_extensions`) and checks that 
 **Built-in agent probes** — The **`agent copies: <vendor>`** probe family (one per code-agent vendor) content-compares
 each extension's rendered agent copy under `.claude/agents`, `.codex/agents`, and `.opencode/agent` against what the
 canonical `agents/*.md` source would produce; a `warn` result reports missing copies, stale copies, or orphaned copies
-(source removed) and recommends `winter ws init` to re-sync. A companion **`agent tier: <vendor>`** probe warns per
-agent whose frontmatter `model:` tier fails to resolve, and name-uniqueness / override-target probes catch
-cross-extension `name` collisions and `[agent_model_overrides]` entries that target no known agent. These probes surface
-under an `[agents]` source group.
+(source removed) and recommends `winter ws init` to re-sync. [`winter agents`](./agents.md) shows the same copies'
+per-harness model/effort and `stale`/`missing` state, and names the layer each value came from. A companion
+**`agent tier: <vendor>`** probe warns per agent whose frontmatter `model:` tier fails to resolve, and name-uniqueness /
+override-target probes catch cross-extension `name` collisions and `[agent_model_overrides]` entries that target no
+known agent. These probes surface under an `[agents]` source group.
 
 **Built-in provision probe** validates every `[[provision.*]]` entry declared in `.winter/config.toml` and in each
 installed extension's `winter-ext.toml`. Each bad entry emits one finding under a `[provision]` source group without

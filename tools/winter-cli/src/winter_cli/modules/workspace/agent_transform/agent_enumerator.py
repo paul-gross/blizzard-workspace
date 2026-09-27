@@ -18,8 +18,9 @@ mechanical listing methods below.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import NamedTuple
 
 from winter_cli.config.models import AdoptExtensions
 from winter_cli.core.filesystem import IFilesystemReader
@@ -28,6 +29,14 @@ from winter_cli.modules.workspace.agent_transform.models import CanonicalAgent
 from winter_cli.modules.workspace.agent_transform.registry import PARSER
 from winter_cli.modules.workspace.extension_manifest import EXT_MANIFEST, ExtensionManifestLoader
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
+
+
+class KnownAgent(NamedTuple):
+    """One qualifying, successfully-parsed canonical agent and the extension that ships it."""
+
+    extension: str
+    prefix: str
+    agent: CanonicalAgent
 
 
 class CanonicalAgentEnumerator:
@@ -83,16 +92,17 @@ class CanonicalAgentEnumerator:
         repos: list[StandaloneRepository],
         *,
         mode: AdoptExtensions,
-    ) -> Iterator[tuple[str, CanonicalAgent]]:
-        """Yield ``(prefix, agent)`` for every qualifying, successfully-parsed canonical agent.
+        on_unreadable: Callable[[str, Path, Exception], None] | None = None,
+    ) -> Iterator[KnownAgent]:
+        """Yield a ``KnownAgent`` for every qualifying, successfully-parsed canonical agent.
 
-        Silent-skip on any failure — no manifest (in ``winter`` mode), no
-        agents dir, a manifest that fails to load, or a file that fails to
-        parse. This is the "which agents does this workspace consider known
-        and installed" definition shared by the doctor's
-        name-uniqueness/override-target probes and the installer's
-        unknown-override warning, so the two can never disagree about the
-        answer.
+        Skips any failure — no manifest (in ``winter`` mode), no agents dir, a
+        manifest that fails to load, or a file that fails to read or parse; the
+        last is passed to ``on_unreadable(extension, path, exc)`` when given.
+        This is the single "which agents does this workspace consider known and
+        installed" walk: ``AgentCopyInspector`` (and through it `winter agents`
+        and the doctor's agent probes) and the installer's unknown-override
+        warning all read it, so none of them can disagree about the answer.
         """
         for repo in repos:
             manifest_path = repo.path / EXT_MANIFEST
@@ -110,6 +120,8 @@ class CanonicalAgentEnumerator:
                 try:
                     text = self._fs.read_text(entry)
                     agent = self._parser.parse(text, default_name=entry.stem)
-                except RepoError:
+                except (RepoError, OSError) as exc:
+                    if on_unreadable is not None:
+                        on_unreadable(repo.name, entry, exc)
                     continue
-                yield manifest.prefix, agent
+                yield KnownAgent(extension=repo.name, prefix=manifest.prefix, agent=agent)

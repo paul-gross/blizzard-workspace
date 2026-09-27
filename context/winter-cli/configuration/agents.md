@@ -4,6 +4,9 @@ The `[agent_model_overrides]` table lets you retarget an installed extension age
 modifying its committed source. The `[model_tiers]` table remaps tier labels to concrete model ids — either overriding
 built-in tier values or defining entirely new tiers. Changes to either table take effect on the next `winter ws init`.
 
+To inspect what either table resolves to — per installed agent x harness, with the winning layer and its source file —
+run `winter agents` rather than reading the rendered agent files by hand; see [../usage/agents.md](../usage/agents.md).
+
 ## When to use these
 
 The agent transform pipeline bakes each agent's model into the rendered per-vendor files during `winter ws init`. By
@@ -24,9 +27,9 @@ table — built-in entries (`fable`, `opus`, `sonnet`, `haiku`) are merged per-v
 # .winter/config.toml  (committed, shared with the team)
 
 [model_tiers.big-thinker]
-claude = "claude-opus-5"
-codex = "gpt-5.6-sol"
-opencode = "anthropic/claude-opus-5"
+claude = "claude-opus-5-5"
+codex = "gpt-6-sol"
+opencode = "anthropic/claude-opus-5-5"
 
 # Override only the opencode id for the built-in haiku tier:
 [model_tiers.haiku]
@@ -39,7 +42,7 @@ opencode = "anthropic/claude-haiku-4-5"
 # Local override wins for this tier label:
 [model_tiers.big-thinker]
 claude = "claude-sonnet-5"
-codex = "gpt-5.6-sol"
+codex = "gpt-6-sol"
 opencode = "anthropic/claude-sonnet-5"
 ```
 
@@ -101,13 +104,13 @@ reviewer = "haiku"
 planner = "big-thinker"
 
 # Per-vendor override — only the listed vendor is affected:
-developer = { claude = "claude-opus-5" }
+developer = { claude = "claude-opus-5-5" }
 
 # Concrete model id scoped per-vendor (use inline-table form for vendor-specific ids):
-coder = { codex = "gpt-5.4-experimental", opencode = "anthropic/claude-opus-5" }
+coder = { codex = "gpt-5.4-experimental", opencode = "anthropic/claude-opus-5-5" }
 
 # Per-vendor profiles may set a concrete model, native reasoning effort, or both:
-ice-carver = { claude = { model = "sonnet", effort = "high" }, codex = { model = "gpt-5.6-luna", effort = "max" }, opencode = { model = "openai/gpt-5.6-luna", effort = "max" } }
+ice-carver = { claude = { model = "sonnet", effort = "high" }, codex = { model = "gpt-6-luna", effort = "max" }, opencode = { model = "openai/gpt-6-luna", effort = "max" } }
 ```
 
 ```toml

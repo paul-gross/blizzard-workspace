@@ -42,6 +42,7 @@ from winter_cli.modules.workspace.models import RepoError
 # `winter ws worktrees` path never pays for the `doctor` or `tui` (textual)
 # command trees it doesn't touch. Keep this in sync with the command modules.
 _LAZY_SUBCOMMANDS: dict[str, str] = {
+    "agents": "winter_cli.modules.agents.command:agents_command",
     "capabilities": "winter_cli.modules.capability.command:capabilities_command",
     "clean": "winter_cli.modules.provision.clean_command:clean_command",
     "dashboard": "winter_cli.modules.tui.command:dashboard",
