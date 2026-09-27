@@ -28,44 +28,46 @@ env_aliases = ["alpha", "beta", "gamma", "delta", "r1", "r2", "r3", "r4"]
 opencode = "openai/gpt-6-astra"
 
 [model_tiers.opus]
-claude = "claude-opus-5-5"
 opencode = "openai/gpt-6-sol"
 
 [model_tiers.sonnet]
 opencode = "openai/gpt-6-sol"
 
+[model_tiers.haiku]
+opencode = "openai/gpt-6-luna"
+
 [agent_model_overrides.ice-carver]
-claude = { model = "sonnet", effort = "high" }
-codex = { model = "gpt-6-sol", effort = "high" }
-opencode = { model = "openai/gpt-6-sol", effort = "high" }
+claude = { model = "opus", effort = "low" }
+codex = { model = "gpt-6-sol", effort = "medium" }
+opencode = { model = "openai/gpt-6-sol", effort = "medium" }
 
 [agent_model_overrides.cold-reviewer]
-claude = { model = "claude-opus-5-5", effort = "medium" }
-codex = { model = "gpt-6-sol", effort = "high" }
-opencode = { model = "openai/gpt-6-sol", effort = "high" }
+claude = { model = "opus", effort = "medium" }
+codex = { model = "gpt-6-sol", effort = "medium" }
+opencode = { model = "openai/gpt-6-sol", effort = "medium" }
 
 [agent_model_overrides.plan-reviewer]
-claude = { model = "claude-opus-5-5", effort = "medium" }
-codex = { model = "gpt-6-sol", effort = "high" }
-opencode = { model = "openai/gpt-6-sol", effort = "high" }
+claude = { model = "opus", effort = "medium" }
+codex = { model = "gpt-6-sol", effort = "medium" }
+opencode = { model = "openai/gpt-6-sol", effort = "medium" }
 
 [agent_model_overrides.harness-reviewer]
-claude = { model = "claude-opus-5-5", effort = "medium" }
-codex = { model = "gpt-6-sol", effort = "high" }
-opencode = { model = "openai/gpt-6-sol", effort = "high" }
+claude = { model = "opus", effort = "medium" }
+codex = { model = "gpt-6-sol", effort = "medium" }
+opencode = { model = "openai/gpt-6-sol", effort = "medium" }
 
 [agent_model_overrides.faceted-reviewer]
-claude = { model = "claude-opus-5-5", effort = "medium" }
-codex = { model = "gpt-6-sol", effort = "high" }
-opencode = { model = "openai/gpt-6-sol", effort = "high" }
+claude = { model = "opus", effort = "medium" }
+codex = { model = "gpt-6-sol", effort = "medium" }
+opencode = { model = "openai/gpt-6-sol", effort = "medium" }
 
 [agent_model_overrides.documentation-reviewer]
-claude = { model = "claude-opus-5-5", effort = "low" }
+claude = { model = "opus", effort = "low" }
 codex = { model = "gpt-6-luna", effort = "max" }
 opencode = { model = "openai/gpt-6-luna", effort = "max" }
 
 [agent_model_overrides.context-reviewer]
-claude = { model = "claude-opus-5-5", effort = "low" }
+claude = { model = "opus", effort = "low" }
 codex = { model = "gpt-6-luna", effort = "max" }
 opencode = { model = "openai/gpt-6-luna", effort = "max" }
 
@@ -80,6 +82,7 @@ codex = { model = "gpt-6-luna", effort = "high" }
 opencode = { model = "openai/gpt-6-luna", effort = "high" }
 
 [agent_model_overrides.distiller]
+claude = { model = "opus", effort = "high" }
 codex = { model = "gpt-6-sol" }
 
 [agent_model_overrides.arctic-explorer]
@@ -95,6 +98,7 @@ codex = { model = "gpt-6-luna" }
 codex = { model = "gpt-6-sol" }
 
 [agent_model_overrides.frontend-verifier]
+claude = { model = "opus", effort = "low" }
 codex = { model = "gpt-6-luna" }
 
 [agent_model_overrides.winter-architect]
