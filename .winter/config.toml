@@ -12,17 +12,13 @@ base_port = 4500
 ports_per_env = 20
 
 # Fixed-index env aliases (slots 1..N in list order). The Greek quartet
-# alpha..delta (1-4) is the human's pool; r1..r4 (5-8) is the blizzard runner's
-# static pool — see ../runner/blizzard-runner.toml `workspace_envs`. Declaring
-# them as aliases pins r1..r4 to stable, sequential port bands instead of the
-# scattered hash-band slots ad-hoc names would otherwise draw.
-#
-# The runner pool has since grown to r1..r8. r5..r8 are deliberately NOT aliased:
-# they were init'd before this list could name them, so `.winter/state.toml`
-# already persisted their hash-band indices (33/38/16/39) and the persisted index
-# wins. Aliasing them now would only be honored by a re-init, which would move
-# their ports for no gain — the bands they drew collide with nothing.
-env_aliases = ["alpha", "beta", "gamma", "delta", "r1", "r2", "r3", "r4"]
+# alpha..delta (1-4) is the human's pool; r1..r4 (5-8) is the Claude Code runner's
+# (`runner-local`) static pool and oce1..oce4 (9-12) the OpenCode runner's
+# (`r-chatgpt`) — see each runner's `workspace_envs` in ../runner/ and
+# ../runner-opencode/.
+# Declaring them as aliases pins each pool to stable, sequential port bands instead
+# of the scattered hash-band slots ad-hoc names would otherwise draw.
+env_aliases = ["alpha", "beta", "gamma", "delta", "r1", "r2", "r3", "r4", "oce1", "oce2", "oce3", "oce4"]
 
 [model_tiers.fable]
 opencode = "openai/gpt-6-astra"
