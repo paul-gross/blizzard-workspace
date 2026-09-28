@@ -29,7 +29,7 @@ The fleet is split by subscription: each runner binds exactly one coding harness
 
 | | Claude Code runner | OpenCode runner |
 |---|---|---|
-| `runner_id` | `runner-local` | `r-chatgpt` |
+| `runner_id` | `r-claude` | `r-chatgpt` |
 | Runtime dir | `../runner` | `../runner-opencode` |
 | Harness | `[opencode] enabled = false` | `[claude_code] enabled = false` |
 | Envs (`workspace_envs`) | `r1`–`r4` | `oce1`–`oce4` |
@@ -43,9 +43,11 @@ Each runtime dir holds its own `blizzard-runner.toml`, `data/runner.db`, `worker
 
 **Keep the env pools disjoint.** Nothing at the hub stops two runners holding the same env, so a pool that overlaps the other runner's lets both drive one worktree.
 
-**Which runner a chunk lands on is the harness set's call.** A runner is eligible for a chunk only when it can serve every runner node the chunk can still reach, so a graph whose sessions accept only `claude_code` goes to `runner-local`, one accepting only `opencode` to `r-chatgpt`, and one accepting both to whichever claims first. A session with no harness set runs under the claiming runner's default — its one enabled harness — so it too goes to whichever claims first.
+**Which runner a chunk lands on is the harness set's call.** A runner is eligible for a chunk only when it can serve every runner node the chunk can still reach, so a graph whose sessions accept only `claude_code` goes to `r-claude`, one accepting only `opencode` to `r-chatgpt`, and one accepting both to whichever claims first. A session with no harness set runs under the claiming runner's default — its one enabled harness — so it too goes to whichever claims first.
 
 **Adding or renaming a runner needs a hub-side window.** The hosted hub runs `runner_auth_mode = "enforce"`, and enrollment requires a prior registration, which `enforce` refuses to an unenrolled id — so a new `runner_id` (a rename included) cannot join unaided. The sequence is `blizzard/docs/remote-runner.md` §Enroll: set the host's hub config to `warn` and restart the hub (a `blizzard-infra` host operation), start the runner so it registers, `hub runner pause` it, `hub runner enroll <runner-id>`, write the token to its `.env` as `BZ_HUB_TOKEN`, restart the runner, restore `enforce`, then `hub runner resume` it. Keep the window short — `warn` relaxes enforcement fleet-wide. A **rename** also strands every chunk the hub routes to the old id, so drain the runner first (`hub runner pause` the old id and let its running chunks finish).
+
+Two traps in that sequence. **A new id registers unpaused** — the hub's pause is keyed by id, so the runner can claim on its very first tick, before `hub runner pause` can reach it. Boot it with `max_agents = 0` until `blizzard runner status --dir <runtime-dir>` shows `paused [hub]` (the mirrored brake survives a restart), then restore capacity. **The old id is never retired** — its registration stays in `hub runner list` with its token still resolving, and no verb removes either; keep the pre-rename `.env` out of reach rather than leaving the old token lying beside the new one.
 
 ### Two traps on this machine
 
@@ -55,11 +57,11 @@ Each runtime dir holds its own `blizzard-runner.toml`, `data/runner.db`, `worker
 
 ### Reaching a runner's web surface
 
-Both runners bind loopback. `r-chatgpt` declares one origin, `http://127.0.0.1:8432`, so its panel opens **only from a browser on this machine**; `runner-local` also declares the tailnet origin below. The hub returns the SSO token through the browser, so the declared origin is what that browser follows; a phone or laptop following a loopback origin arrives at itself.
+Both runners bind loopback. `r-chatgpt` declares one origin, `http://127.0.0.1:8432`, so its panel opens **only from a browser on this machine**; `r-claude` also declares the tailnet origin below. The hub returns the SSO token through the browser, so the declared origin is what that browser follows; a phone or laptop following a loopback origin arrives at itself.
 
 Widening it is `blizzard/docs/deployment/human-auth.md` §Runner-side federation, which owns the whole procedure — the origin classes that can complete a bounce, the exact-match rule, and the two proxy settings an off-host origin needs. Two facts are local to this machine rather than that doc's:
 
-- **`runner-local` is already reachable on the tailnet.** `tailscale serve` fronts 8431 and preserves the browser's `Host`, and its `public_url` carries the tailnet origin plus `trusted_proxies = ["127.0.0.1"]` for the address `serve` connects from. Doing the same for `r-chatgpt` means a `serve` mapping for 8432 and the same two keys in its toml. Confirm mappings with `tailscale serve status`.
+- **`r-claude` is already reachable on the tailnet.** `tailscale serve` fronts 8431 and preserves the browser's `Host`, and its `public_url` carries the tailnet origin plus `trusted_proxies = ["127.0.0.1"]` for the address `serve` connects from. Doing the same for `r-chatgpt` means a `serve` mapping for 8432 and the same two keys in its toml. Confirm mappings with `tailscale serve status`.
 - **Changing it costs a fleet worker.** A runner reads its config only at startup, so a widened set takes effect on restart and reaches the hub on the first reconciliation tick after it — and restarting [terminates a running fleet worker](./post-delivery.md).
 
 ## The operator CLI needs a session
@@ -177,7 +179,7 @@ Drive the hub with the venv binary (`../.venv/bin/blizzard`). **Every command be
 
 Every one of these is a pure hub-API client and takes `--hub-url` (default `$BZ_HUB_URL`) — not `--url`.
 
-**Ingest mints a chunk `not_ready`.** It will never be claimed until `chunk promote` moves it to `ready`, so an ingest on its own looks like it worked and then nothing happens. To stage a run deliberately — pinning a non-default graph before any runner can grab it — pause both runners (`runner-local` and `r-chatgpt`) first, then ingest, set the graph, promote, and resume last.
+**Ingest mints a chunk `not_ready`.** It will never be claimed until `chunk promote` moves it to `ready`, so an ingest on its own looks like it worked and then nothing happens. To stage a run deliberately — pinning a non-default graph before any runner can grab it — pause both runners (`r-claude` and `r-chatgpt`) first, then ingest, set the graph, promote, and resume last.
 
 Ingest takes a source-native token — prefer `blizzard:26`, `blizzard#26`, or the issue's own URL pasted in. The `github:<url>` form also works, with a warning.
 

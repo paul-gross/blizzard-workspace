@@ -14,7 +14,7 @@ This is workspace policy, not project policy. [contributing.md § Release publis
 
 ## The rule: landing on `master` means redeploying the runners
 
-A live blizzard hub and two runners drive blizzard's own development — the **instance**, whose deployed surface and commands are in [local-instance.md](./local-instance.md). Its two halves redeploy differently, and only one of them is your job: the **hub** redeploys itself from `master`, and the **runners** — `runner-local` (Claude Code) and `r-chatgpt` (OpenCode), one venv between them — are yours to rebuild by hand.
+A live blizzard hub and two runners drive blizzard's own development — the **instance**, whose deployed surface and commands are in [local-instance.md](./local-instance.md). Its two halves redeploy differently, and only one of them is your job: the **hub** redeploys itself from `master`, and the **runners** — `r-claude` (Claude Code) and `r-chatgpt` (OpenCode), one venv between them — are yours to rebuild by hand.
 
 **Every landing on `master` is followed by a rebuild and a redeploy of both runners, onto exactly the code that just landed.** The fleet dogfoods its own output, so a delivered change that never reaches the running runners is a change the fleet cannot feel. Both run the same venv, so one reinstall changes the code under both; restart only one and the other runs the old code in memory while its installed files are the new wheel. Do not wait to be asked and do not defer it to a later session: the redeploy is the second half of delivering, in the same way that pushing is the second half of committing.
 
@@ -38,7 +38,7 @@ There is no local hub to sequence against. The hosted hub updates on its own sch
 
 ## Restarting the runners, when you are a fleet worker
 
-**If you are a fleet worker, you are running inside one of the runners you are about to restart** — `runner-local` if your env is `r1`–`r4`, `r-chatgpt` if it is `oce1`–`oce4`. Restarting it kills your worker process mid-command. You will not see the output of the restart command, and you get no chance to tidy up first.
+**If you are a fleet worker, you are running inside one of the runners you are about to restart** — `r-claude` if your env is `r1`–`r4`, `r-chatgpt` if it is `oce1`–`oce4`. Restarting it kills your worker process mid-command. You will not see the output of the restart command, and you get no chance to tidy up first.
 
 **This is normal and designed for. Do not treat it as a crash, a mistake, or something to route around.** A graceful runner shutdown marks every in-flight lease for restart-resume, and the runner's first tick after startup re-attaches your session **in place** — the same lease, the same epoch, the same conversation, no retry consumed. What you will observe is simply your next turn arriving after a message like `# The supervisor restarted; continue your task where you left off.`
 
