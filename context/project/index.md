@@ -8,5 +8,5 @@ This workspace develops **blizzard**: an orchestration platform for autonomous f
 | [discovery-corpus.md](./discovery-corpus.md) | You are reading — or tempted to update — `blizzard-discovery`, the design record blizzard was built from |
 | [contributing.md](./contributing.md) | Committing, delivering, or pushing work toward `master` |
 | [post-delivery.md](./post-delivery.md) | Work you were driving has reached `master`, by any delivery path |
-| [local-instance.md](./local-instance.md) | Touching the live instance this workspace dogfoods — a **hosted** hub that redeploys itself from `master`, plus the local runner you redeploy by hand |
+| [local-instance.md](./local-instance.md) | Touching the live instance this workspace dogfoods — a **hosted** hub that redeploys itself from `master`, plus the two local runners you redeploy by hand |
 | [hub-data-modes.md](./hub-data-modes.md) | Running a feature env's board or CLI against hub data, and deciding which hub is safe to point it at |
