@@ -6,9 +6,9 @@ Goal: work in a feature env (`alpha`/`beta`/…) but see realistic — or real �
 
 ## What data is actually reachable
 
-**There is no local hub DB.** `../hub/data/hub.db` exists but is a **frozen snapshot** — the fleet as it stood at the migration, not as it is. The live hub store is on the EC2 host and is not reachable as a file from here at all. `../runner/data/runner.db` is the only live local database.
+**There is no local hub DB.** `../hub/data/hub.db` exists but is a **frozen snapshot** — the fleet as it stood at the migration, not as it is. The live hub store is on the EC2 host and is not reachable as a file from here at all. `../runner/data/runner.db` and `../runner-opencode/data/runner.db` — one per runner — are the only live local databases.
 
-**Hard constraint (runner only):** SQLite is single-writer. The systemd runner holds `../runner/data/runner.db` and runs migrations on boot, so a second daemon writing it concurrently risks lock contention / corruption. **Do not point a live feature-env runner at it while `blizzard-blizzard-runner.service` is up.** This is a data-safety constraint, not a tooling gap — no config mechanism relaxes it.
+**Hard constraint (runner only):** SQLite is single-writer. Each systemd runner holds its own store — `../runner/data/runner.db` (`blizzard-blizzard-runner.service`) and `../runner-opencode/data/runner.db` (`blizzard-blizzard-runner-opencode.service`) — and runs migrations on boot, so a second daemon writing either concurrently risks lock contention / corruption. **Do not point a live feature-env runner at a runner store while its unit is up.** This is a data-safety constraint, not a tooling gap — no config mechanism relaxes it.
 
 Port 8421 answers **nothing** — the local hub unit is stopped and disabled. A dev surface still aimed there fails to connect rather than quietly reaching the wrong fleet.
 
@@ -31,4 +31,4 @@ Pin `BZ_HUB_PORT`, not `BZ_HUB_URL`: the port is the one knob both consumers rea
    ```
    then `BZ_HUB_PORT=4599 npm start`. The best source of realistically *shaped* data available locally — but it is a fixed snapshot, not current fleet state, and drifts further every day. Nothing refreshes it; a fresh one means dumping the store off the host.
 3. **Seeded mock stack — synthetic worlds.** `blizzard-mock-data reset --store hub --url <sqlite>` returns a scratch hub store to clean; richer state seeds through the hub's own HTTP API (ingest → promote, with `blizzard-mock-forge` as the work source). The mock-data `fixture` subgroup (named one-command scenarios) is still stubbed — until it lands, rich synthetic worlds are assembled by hand.
-4. **Avoid:** a second live **runner** against `../runner/data/runner.db` — it spawns real `claude` workers, mutates real worktrees, and claims real chunks from the hosted hub; two runners double-drive the fleet. And avoid client mode against `https://blizzard.grosscode.net` for development — see the rule above; operators inspecting live state by hand (`blizzard hub status`, after `blizzard hub login`) are the exception.
+4. **Avoid:** a second live **runner** against either runner store — it spawns real `claude` or `opencode` workers, mutates real worktrees, and claims real chunks from the hosted hub; two runners double-drive the fleet. And avoid client mode against `https://blizzard.grosscode.net` for development — see the rule above; operators inspecting live state by hand (`blizzard hub status`, after `blizzard hub login`) are the exception.
