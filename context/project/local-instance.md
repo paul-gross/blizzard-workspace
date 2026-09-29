@@ -47,13 +47,15 @@ Each runtime dir holds its own `blizzard-runner.toml`, `data/runner.db`, `worker
 
 **Adding or renaming a runner needs a hub-side window.** The hosted hub runs `runner_auth_mode = "enforce"`, and enrollment requires a prior registration, which `enforce` refuses to an unenrolled id — so a new `runner_id` (a rename included) cannot join unaided. The sequence is `blizzard/docs/remote-runner.md` §Enroll: set the host's hub config to `warn` and restart the hub (a `blizzard-infra` host operation), start the runner so it registers, `hub runner pause` it, `hub runner enroll <runner-id>`, write the token to its `.env` as `BZ_HUB_TOKEN`, restart the runner, restore `enforce`, then `hub runner resume` it. Keep the window short — `warn` relaxes enforcement fleet-wide. A **rename** also strands every chunk the hub routes to the old id, so drain the runner first (`hub runner pause` the old id and let its running chunks finish).
 
-Two traps in that sequence. **A new id registers unpaused** — the hub's pause is keyed by id, so the runner can claim on its very first tick, before `hub runner pause` can reach it. Boot it with `max_agents = 0` until `blizzard runner status --dir <runtime-dir>` shows `paused [hub]` (the mirrored brake survives a restart), then restore capacity. **The old id is never retired** — its registration stays in `hub runner list` with its token still resolving, and no verb removes either; keep the pre-rename `.env` out of reach rather than leaving the old token lying beside the new one.
+Two traps in that sequence. **A new id registers unpaused** — the hub's pause is keyed by id, so the runner can claim on its very first tick, before `hub runner pause` can reach it. Boot it with `max_agents = 0` until `blizzard runner status --dir <runtime-dir>` shows `paused [hub]` (the mirrored brake survives a restart), then restore capacity. **The old id stays live until you retire it** — its registration stays in `hub runner list` with its token still resolving. Once the rename is done and the new id is claiming on its own token, `hub runner retire <old-id>` revokes the old token and refuses its claims and registrations. Expect it to refuse with a 409 listing held chunks even when every one is `done`: a chunk that finishes normally never releases its route. Confirm each listed chunk is `done` or `stopped` in `hub status`, then re-run with `--force` — on a terminal chunk the release only records itself, while a `running` one would go back to the queue. A long list can time out the client mid-release; re-running finishes it. Then delete the pre-rename `.env` rather than leaving the revoked token lying beside the new one.
 
-### Two traps on this machine
+### Traps on this machine
 
 **`blizzard-blizzard-hub.service` is stopped and `disable`d — do not start it.** `../hub/` still exists on disk, but `../hub/data/hub.db` is a copy frozen at the migration, not what the fleet reads. Starting it serves that frozen state on `127.0.0.1:8421` and looks entirely healthy doing so. Nothing refreshes it, and it drifts further every day.
 
 **`127.0.0.1:8421` answers nothing.** Any tool or dev surface still aimed there fails to connect rather than silently reaching the wrong fleet.
+
+**Never kill a runner by a pattern.** `pkill -f "blizzard runner host"` matches both instance runners as well as a feature env's, and a runner exits `0` on SIGTERM, so its unit's `Restart=on-failure` leaves it down — and the fleet worker that ran it dies with its runner, then does it again when the runner restarts and resumes it. Restart a feature env's runner with `winter service restart <env>/runner`; stop a hand-launched one by its pid.
 
 ### Reaching a runner's web surface
 
@@ -176,6 +178,7 @@ Drive the hub with the venv binary (`../.venv/bin/blizzard`). **Every command be
 | Stop a runner claiming new work — e.g. `r-chatgpt` when the OpenAI quota runs out | `hub runner pause <runner-id>` |
 | Let it claim again | `hub runner resume <runner-id>` |
 | One runner's liveness + paused state | `hub runner show <runner-id>` |
+| Retire a runner for good — revoke its token, refuse its claims | `hub runner retire <runner-id>` — see [The two runners](#the-two-runners) for a renamed-away id |
 
 Every one of these is a pure hub-API client and takes `--hub-url` (default `$BZ_HUB_URL`) — not `--url`.
 
