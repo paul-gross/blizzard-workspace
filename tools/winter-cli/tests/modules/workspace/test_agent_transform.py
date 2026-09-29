@@ -467,7 +467,7 @@ def test_opencode_render_produces_valid_yaml_frontmatter() -> None:
     # OpenCode does not have a name frontmatter field — identity is the filename.
     assert "name" not in data
     assert data["description"] == "General-purpose developer agent."
-    assert data["model"] == "anthropic/claude-sonnet-5"  # sonnet tier → opencode id
+    assert data["model"] == "anthropic/claude-sonnet-5-5"  # sonnet tier → opencode id
 
 
 def test_opencode_render_includes_body() -> None:

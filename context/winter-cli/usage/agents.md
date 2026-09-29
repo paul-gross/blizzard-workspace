@@ -126,7 +126,7 @@ One entry per installed agent x harness:
   "harness": "opencode",
   "model": {
     "declared_tier": "sonnet",
-    "code_default": "anthropic/claude-sonnet-5",
+    "code_default": "anthropic/claude-sonnet-5-5",
     "tier_override": null,
     "harness_block": null,
     "agent_override": { "value": "openai/gpt-6-luna", "tier": null, "source": "config.toml" },

@@ -77,7 +77,7 @@ MODEL_TIER_IDS: dict[tuple[ModelTier, str], str] = {
     # Haiku has no 5-series release, so that tier stays on 4.5.
     (ModelTier.fable, "opencode"): "anthropic/claude-fable-5-1",
     (ModelTier.opus, "opencode"): "anthropic/claude-opus-5-5",
-    (ModelTier.sonnet, "opencode"): "anthropic/claude-sonnet-5",
+    (ModelTier.sonnet, "opencode"): "anthropic/claude-sonnet-5-5",
     (ModelTier.haiku, "opencode"): "anthropic/claude-haiku-4-5",
 }
 

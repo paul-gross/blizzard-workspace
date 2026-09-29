@@ -134,7 +134,7 @@ def test_model_code_default() -> None:
         'developer_instructions = "You are a code reviewer.\\n"\n'
     )
     assert fs.read_text(OPENCODE_DEST) == (
-        "---\ndescription: Reviews code changes\nmodel: anthropic/claude-sonnet-5\nmode: subagent\n---\n\n"
+        "---\ndescription: Reviews code changes\nmodel: anthropic/claude-sonnet-5-5\nmode: subagent\n---\n\n"
         "You are a code reviewer.\n"
     )
 
@@ -361,7 +361,7 @@ def test_effort_native_key_only() -> None:
         'developer_instructions = "You are a code reviewer.\\n"\n'
     )
     assert fs.read_text(OPENCODE_DEST) == (
-        "---\ndescription: Reviews code changes\nmodel: anthropic/claude-sonnet-5\nmode: subagent\n"
+        "---\ndescription: Reviews code changes\nmodel: anthropic/claude-sonnet-5-5\nmode: subagent\n"
         "reasoningEffort: high\ncolor: blue\n---\n\nYou are a code reviewer.\n"
     )
 
@@ -401,7 +401,7 @@ def test_effort_workspace_overwrites_native_key() -> None:
         'developer_instructions = "You are a code reviewer.\\n"\n'
     )
     assert fs.read_text(OPENCODE_DEST) == (
-        "---\ndescription: Reviews code changes\nmodel: anthropic/claude-sonnet-5\nmode: subagent\n"
+        "---\ndescription: Reviews code changes\nmodel: anthropic/claude-sonnet-5-5\nmode: subagent\n"
         "reasoningEffort: low\ncolor: blue\n---\n\nYou are a code reviewer.\n"
     )
 
@@ -440,7 +440,7 @@ def test_effort_workspace_without_native_key() -> None:
         'developer_instructions = "You are a code reviewer.\\n"\n'
     )
     assert fs.read_text(OPENCODE_DEST) == (
-        "---\ndescription: Reviews code changes\nmodel: anthropic/claude-sonnet-5\nmode: subagent\n"
+        "---\ndescription: Reviews code changes\nmodel: anthropic/claude-sonnet-5-5\nmode: subagent\n"
         "reasoningEffort: medium\n---\n\nYou are a code reviewer.\n"
     )
 
@@ -534,6 +534,6 @@ def test_effort_only_profile() -> None:
         'developer_instructions = "You are a code reviewer.\\n"\n'
     )
     assert fs.read_text(OPENCODE_DEST) == (
-        "---\ndescription: Reviews code changes\nmodel: anthropic/claude-sonnet-5\nmode: subagent\n"
+        "---\ndescription: Reviews code changes\nmodel: anthropic/claude-sonnet-5-5\nmode: subagent\n"
         "permission:\n  edit: allow\nreasoningEffort: max\n---\n\nYou are a code reviewer.\n"
     )

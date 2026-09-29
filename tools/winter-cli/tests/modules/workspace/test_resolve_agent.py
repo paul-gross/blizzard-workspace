@@ -338,7 +338,7 @@ def test_resolution_carries_every_layer_with_nulls_for_layers_that_do_not_apply(
     assert resolution == AgentResolution(
         model=ModelResolution(
             declared_tier="sonnet",
-            code_default="anthropic/claude-sonnet-5",
+            code_default="anthropic/claude-sonnet-5-5",
             tier_override=SourcedValue(value="openai/gpt-6-luna", source=ConfigSource.config_toml),
             harness_block=None,
             agent_override=AgentModelOverrideValue(

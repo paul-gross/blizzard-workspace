@@ -41,9 +41,9 @@ opencode = "anthropic/claude-haiku-4-5"
 
 # Local override wins for this tier label:
 [model_tiers.big-thinker]
-claude = "claude-sonnet-5"
+claude = "claude-sonnet-5-5"
 codex = "gpt-6-sol"
-opencode = "anthropic/claude-sonnet-5"
+opencode = "anthropic/claude-sonnet-5-5"
 ```
 
 ### Merge rules
