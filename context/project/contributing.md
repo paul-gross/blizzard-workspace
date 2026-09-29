@@ -70,19 +70,17 @@ is.
 
 Default branch: `master` on every repo.
 
-Work reaches `master` **three** ways (D-104). Which one applies is a fact about who is driving, not about the change:
+Work reaches `master` **two** ways. Which one applies is a fact about who is driving, not about the change:
 
-| Path                       | Who drives                                                                | Who lands it                                                                                                                      |
-| -------------------------- | ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| **By hand**                | an agent or human working in a local feature environment, outside a fleet | the agent, through a PR it opens, watches, and rebase-merges on green                                                             |
-| **Fleet, `merge-to-main`** | a runner in this workspace, driving a chunk through its graph             | the hub's `deliver` node lands it — no human step                                                                                 |
-| **Fleet, `open-pr`**       | a runner in this workspace, driving a chunk through its graph             | the hub's `deliver` node parks the chunk on an open PR; a **human** resolves it, and the hub completes the chunk from the outcome |
+| Path                    | Who drives                                                                | Who lands it                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| **By hand**             | an agent or human working in a local feature environment, outside a fleet | the agent, through a PR it opens, watches, and rebase-merges on green                              |
+| **Fleet, `land-pr-ci`** | a runner in this workspace, driving a chunk through its graph             | the hub's `deliver` node opens a PR per repo and merges it with a merge commit on green — no human |
 
-Only the by-hand path is an agent's to drive. Both fleet paths are the same hub-executed `deliver` node in its two
-authored modes, and their mechanics — the modes, the parking, the merge detection — belong to
-`blizzard-context:/workflows/feature-delivery.md` (`bzh:feature-delivery`) and the corpus decisions it rests on. Read
-that before assuming anything about how a chunk lands; do not infer a path from the shape of a merge commit, because
-both fleet modes open a PR and their merge commits are indistinguishable.
+Only the by-hand path is an agent's to drive. The fleet path is a hub-executed `deliver` node, and its mechanics belong
+to `blizzard-context:/workflows/feature-delivery.md` (`bzh:feature-delivery`) — read that before assuming anything about
+how a chunk lands. The two paths leave different history: a fleet landing is a merge commit on `master`, a by-hand
+landing is the branch's own commits with none.
 
 ### The by-hand path
 
