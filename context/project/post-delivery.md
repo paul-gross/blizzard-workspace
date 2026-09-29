@@ -8,7 +8,7 @@ What this workspace owes a change once it has landed on `master`.
 |---------------|------------------------|------------------------|
 | Fleet, `merge-to-main` | the hub's `deliver` node landed it | you are working the `retrospective` node, or any node after `deliver` |
 | Fleet, `open-pr` | a human merged the PR `deliver` parked the chunk on | the hub completed the chunk from that outcome |
-| By hand | you pushed to `origin/master` yourself | the push returned successfully |
+| By hand | your PR merged — or your push to `origin/master` landed, when the user asked for a direct push | the merge or push returned successfully |
 
 This is workspace policy, not project policy. [contributing.md § Release publishing](./contributing.md#release-publishing) covers how blizzard is *released* to the world. This file is about **this workspace's own dogfooding deployment**, which is a different thing entirely.
 
