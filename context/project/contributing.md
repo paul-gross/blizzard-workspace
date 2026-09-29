@@ -41,8 +41,8 @@ When a fix lands in a different repo than the one tracking it, **scope the refer
 `blizzard-context` owns what a change is held to and how it is proven: its [standards](../../.winter/ext/context/standards/index.md) rules, and its [verification matrix](../../.winter/ext/context/verification/blizzard.md) for the per-component commands and the tiers each change owes.
 Run the checks for the repo you touched before you push.
 
-**Assume nothing blocks a bad push.** CI runs the merge gate on a pull request to `master` and again on push to `master`, but of the three delivery paths only the fleet's `open-pr` mode leaves a PR standing long enough for a check to gate anything — the other two put commits on `master` without waiting on one.
-There, CI reports after the fact, so the local run is the only gate there is.
+CI runs the merge gate on a pull request to `master` and again on push to `master`.
+A by-hand PR waits on it before landing; a direct push to `master` does not — there CI reports after the fact, so the local run is the only gate there is.
 
 ## Delivery
 
@@ -52,7 +52,7 @@ Work reaches `master` **three** ways (D-104). Which one applies is a fact about 
 
 | Path | Who drives | Who lands it |
 |------|-----------|--------------|
-| **By hand** | an agent or human working in a local feature environment, outside a fleet | the agent pushes to `origin/master` itself |
+| **By hand** | an agent or human working in a local feature environment, outside a fleet | the agent, through a PR it opens, watches, and rebase-merges on green |
 | **Fleet, `merge-to-main`** | a runner in this workspace, driving a chunk through its graph | the hub's `deliver` node lands it — no human step |
 | **Fleet, `open-pr`** | a runner in this workspace, driving a chunk through its graph | the hub's `deliver` node parks the chunk on an open PR; a **human** resolves it, and the hub completes the chunk from the outcome |
 
@@ -62,12 +62,20 @@ Read that before assuming anything about how a chunk lands; do not infer a path 
 
 ### The by-hand path
 
-These rules are its own:
+**Land** names this whole sequence: when the user says to land work, carry it from branch to `master` and through post-delivery.
+**Push** means only the git push it names — never a PR, a merge, or a landing.
 
-- **No PR, no feature branch** — push completed work directly to `origin/master`.
-- **Rebase onto the latest `origin/master` first**, so history stays linear and carries no merge commits.
-- **One landed unit of work per commit** — one feature or one fix. A feature plus the follow-up fixes to it that never landed is *one* unit: squash it. Keep a genuinely separate concern (a test repair, an unrelated bug) as its own commit.
-- **The push is not the end** — the push starts a deploy to the hosted hub on its own, and still owes a local runner redeploy by hand. Go to [post-delivery.md](./post-delivery.md) once the push lands.
+By default, work lands through a pull request the agent drives to completion:
+
+1. **Curate the branch** — rebase onto the latest `origin/master` and squash to one landed unit of work per commit: one feature or one fix. A feature plus the follow-up fixes to it that never landed is *one* unit; a genuinely separate concern (a test repair, an unrelated bug) stays its own commit.
+2. **Open the PR** — push the curated branch to a feature branch and `gh pr create --base master`.
+3. **Watch it to completion** — `gh pr checks <pr> --watch`. On a red check, fix it, re-curate, force-push, and watch again. A repo that reports no PR checks has nothing to wait on.
+4. **Rebase-merge on green** — `gh pr merge <pr> --rebase`, which puts the branch's curated commits on top of `master` with no merge commit, so history stays linear. First confirm the branch still sits on the latest `origin/master`; if `master` moved, rebase again, force-push, and watch again, so what lands is what CI proved. Not `--squash`: it rewrites the commit message from the PR title and collapses deliberately separate commits. Afterward the landed commits carry new SHAs, so resync the worktree from `origin/master` rather than pushing the old branch again.
+5. **Landing is not the end** — it starts a deploy to the hosted hub on its own, and still owes a local runner redeploy by hand. Go to [post-delivery.md](./post-delivery.md) once it lands.
+
+A merge commit (`--merge`) is the exception, not the default: take one only when grouping a multi-commit branch under it tells a clearer story than landing the commits flat.
+
+**Push directly to `origin/master` only when the user explicitly asks.** Curate the same way first; with no PR, nothing gates the push but your local checks, and post-delivery is owed just the same.
 
 See [`workspace:/context/worktree-ops.md`](../worktree-ops.md) for the exact git commands per worktree (sync, push, complete).
 
