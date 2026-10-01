@@ -299,7 +299,14 @@ class _InterruptOnIterRunner:
     def run(self, cmd: list[str], *, cwd: Path | None = None, env: Mapping[str, str] | None = None) -> SubprocessResult:
         raise AssertionError("unexpected run call")
 
-    def call(self, cmd: list[str], *, cwd: Path | None = None, env: Mapping[str, str] | None = None) -> int:
+    def call(
+        self,
+        cmd: list[str],
+        *,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        detach_trace: bool = False,
+    ) -> int:
         raise AssertionError("unexpected call")
 
     @contextmanager
@@ -331,7 +338,14 @@ class _InterruptOnPopenRunner:
     def run(self, cmd: list[str], *, cwd: Path | None = None, env: Mapping[str, str] | None = None) -> SubprocessResult:
         raise AssertionError("unexpected run call")
 
-    def call(self, cmd: list[str], *, cwd: Path | None = None, env: Mapping[str, str] | None = None) -> int:
+    def call(
+        self,
+        cmd: list[str],
+        *,
+        cwd: Path | None = None,
+        env: Mapping[str, str] | None = None,
+        detach_trace: bool = False,
+    ) -> int:
         raise AssertionError("unexpected call")
 
     @contextmanager

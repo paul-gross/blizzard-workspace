@@ -50,7 +50,9 @@ class ISubprocessRunner(Protocol):
         parent and return only its exit code. Nothing is captured or
         re-rendered, so the child's output reaches the terminal unmodified.
         Used by `winter service` to dispatch to an orchestrator entrypoint and
-        pass its output and exit code straight through.
+        pass its output and exit code straight through. `detach_trace=True`
+        strips `TRACEPARENT` and `TRACESTATE` from the child's environment, so a long-running
+        launch (a service) never attaches to the caller's trace.
     """
 
     def run(
@@ -67,6 +69,7 @@ class ISubprocessRunner(Protocol):
         *,
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
+        detach_trace: bool = False,
     ) -> int: ...
 
     def popen(

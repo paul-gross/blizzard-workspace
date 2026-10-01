@@ -5,11 +5,12 @@ import click
 from winter_cli.cli_context import cli_ctx
 from winter_cli.modules.provision.handler import ProvisionParams
 from winter_cli.modules.provision.manifest import ProvisionAction
+from winter_cli.modules.workspace.env_target import EnvTargetDeclaration
 from winter_cli.modules.workspace.pattern_match import validate_env_pattern
 
 
 @click.command("clean")
-@click.argument("patterns", nargs=-1, required=True)
+@click.argument("patterns", nargs=-1, required=True, callback=EnvTargetDeclaration())
 @click.option(
     "--stage",
     "subtarget",

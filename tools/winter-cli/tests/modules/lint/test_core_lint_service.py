@@ -12,6 +12,7 @@ import pytest
 from tests.conftest import FakeFilesystem, FakeSubprocessRunner
 from winter_cli.config.models import FileSizeLintConfig
 from winter_cli.core.internal.local_subprocess_runner import LocalSubprocessRunner
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.core.subprocess_runner import IStreamingProcess, ISubprocessRunner, SubprocessResult
 from winter_cli.modules.lint.core_lint_service import (
     CORE_SOURCE,
@@ -131,7 +132,7 @@ def tmp_ws(tmp_path: Path) -> Path:
 def real_runner() -> LocalSubprocessRunner:
     """A real subprocess runner, for the gitignore-discovery tests below whose
     correctness lives in parsing real `git`/`check-ignore` output."""
-    return LocalSubprocessRunner()
+    return LocalSubprocessRunner(NoopCommandTracer())
 
 
 class FakeGitIgnoreRepository:
@@ -533,8 +534,9 @@ class _CountingSubprocessRunner:
         *,
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
+        detach_trace: bool = False,
     ) -> int:
-        return self._inner.call(cmd, cwd=cwd, env=env)
+        return self._inner.call(cmd, cwd=cwd, env=env, detach_trace=detach_trace)
 
     def popen(
         self,

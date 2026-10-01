@@ -8,11 +8,12 @@ import click
 from winter_cli.cli_context import cli_ctx
 from winter_cli.modules.lint.handler import LintParams
 from winter_cli.modules.lint.models import LintScopeError, LintScopeRequest
+from winter_cli.modules.workspace.env_target import EnvTargetDeclaration
 from winter_cli.modules.workspace.pattern_match import validate_bare_name_pattern
 
 
 @click.command("lint")
-@click.argument("scopes", nargs=-1)
+@click.argument("scopes", nargs=-1, callback=EnvTargetDeclaration(discovered_only=True))
 @click.option("--all", "all_flag", is_flag=True, default=False, help="Lint every feature environment's project repos.")
 @click.option("--changed", is_flag=True, default=False, help="Lint only the dirty / un-pushed files.")
 @click.option("--json", "output_json", is_flag=True, default=False, help="Emit NDJSON lint events instead of a table.")

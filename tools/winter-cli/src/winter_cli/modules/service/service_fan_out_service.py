@@ -220,4 +220,6 @@ class ServiceFanOutService:
         merged = apply_provisioned_env(merged, provisioned_env)
         if extra_env:
             merged = {**merged, **extra_env}
-        return self._subprocess_runner.call(cmd, cwd=self._workspace_root, env=merged)
+        # `up` launches long-running services: they never inherit the caller's trace, so a
+        # service never attaches spans to a step that has ended.
+        return self._subprocess_runner.call(cmd, cwd=self._workspace_root, env=merged, detach_trace=action == "up")

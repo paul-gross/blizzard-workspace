@@ -8,6 +8,10 @@ call inside `winter_cli` becomes visible. Equivalent to `WINTER_LOG_LEVEL=DEBUG`
 `--json` stdout stays pure JSON. `WINTER_LOG_LEVEL=<LEVEL>` (e.g. `INFO`, `WARNING`) selects a coarser level without the
 flag.
 
+`--verbose` and `WINTER_LOG_LEVEL` also route the `opentelemetry` logger's records, such as a failed trace export,
+through the same stderr handler at the same level. Without either, those records are discarded; see
+[tracing.md](./tracing.md).
+
 `winter --service-orchestrator=<path-or-name> service …` overrides the service orchestrator for a single
 `winter service` invocation — points dispatch at a local extension directory or a registered name instead of the
 registry-resolved (bound or sole-provider) extension. See

@@ -7,6 +7,12 @@ from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
 from winter_cli.core.subprocess_runner import IStreamingProcess, ISubprocessRunner, SubprocessResult
+from winter_cli.core.tracing import ITracePropagator
+
+# The W3C trace-context variable a child process reads its parent span from.
+TRACEPARENT_ENV = "TRACEPARENT"
+# Its companion: vendor trace state travels with the trace context it belongs to.
+TRACESTATE_ENV = "TRACESTATE"
 
 # Environment a non-interactive child gets on top of its own: git fails a
 # credential prompt instead of reading the terminal.
@@ -45,18 +51,39 @@ class LocalSubprocessRunner:
     `/dev/null` and `GIT_TERMINAL_PROMPT=0` is added to its environment, so a
     credential or confirmation prompt fails fast instead of waiting on a
     terminal that no one is watching (an in-process run inside the dashboard).
+
+    Every child's environment carries the active trace context: the propagator writes
+    `TRACEPARENT` into it when tracing is on, and with tracing off the environment passes
+    through exactly as supplied (an absent `env` stays absent). `TRACESTATE` travels with
+    `TRACEPARENT`. A detached `call` instead has both removed, tracing on or off.
     """
 
-    def __init__(self, *, non_interactive: bool = False) -> None:
+    def __init__(self, trace_propagator: ITracePropagator, *, non_interactive: bool = False) -> None:
+        self._trace_propagator = trace_propagator
         self._non_interactive = non_interactive
 
     def _stdin(self) -> int | None:
         return subprocess.DEVNULL if self._non_interactive else None
 
-    def _env(self, env: Mapping[str, str] | None) -> dict[str, str] | None:
-        if not self._non_interactive:
-            return dict(env) if env is not None else None
-        return {**(env if env is not None else os.environ), **NON_INTERACTIVE_ENV}
+    def _env(self, env: Mapping[str, str] | None, *, detach_trace: bool = False) -> dict[str, str] | None:
+        child = dict(env) if env is not None else None
+        if detach_trace:
+            child = dict(os.environ if child is None else child)
+            child.pop(TRACEPARENT_ENV, None)
+            child.pop(TRACESTATE_ENV, None)
+        else:
+            carrier: dict[str, str] = {}
+            self._trace_propagator.inject(carrier)
+            if TRACEPARENT_ENV in carrier:
+                child = dict(os.environ if child is None else child)
+                child[TRACEPARENT_ENV] = carrier[TRACEPARENT_ENV]
+                if TRACESTATE_ENV in carrier:
+                    child[TRACESTATE_ENV] = carrier[TRACESTATE_ENV]
+                else:
+                    child.pop(TRACESTATE_ENV, None)
+        if self._non_interactive:
+            return {**(os.environ if child is None else child), **NON_INTERACTIVE_ENV}
+        return child
 
     def run(
         self,
@@ -98,6 +125,7 @@ class LocalSubprocessRunner:
         *,
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
+        detach_trace: bool = False,
     ) -> int:
         """Run a process with inherited stdio, returning only the exit code.
 
@@ -105,13 +133,14 @@ class LocalSubprocessRunner:
         inherited from this process (stdin is `/dev/null` when non-interactive), so the child writes straight to the
         terminal (TTY, colors, and stdout/stderr separation preserved). An
         exec failure (missing or non-executable file) surfaces as `126`, the
-        shell convention for "command found but not executable".
+        shell convention for "command found but not executable". `detach_trace`
+        removes `TRACEPARENT` from the child's environment.
         """
         try:
             completed = subprocess.run(
                 cmd,
                 cwd=str(cwd) if cwd is not None else None,
-                env=self._env(env),
+                env=self._env(env, detach_trace=detach_trace),
                 stdin=self._stdin(),
                 check=False,
             )

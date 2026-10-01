@@ -12,6 +12,7 @@ from winter_cli.modules.service.handler import ServiceParams
 from winter_cli.modules.service.models import LogOptions, parse_since_until
 from winter_cli.modules.service.service_readiness_service import DEFAULT_WAIT_TIMEOUT_S
 from winter_cli.modules.service.status_models import StatusOptions
+from winter_cli.modules.workspace.env_target import EnvTargetDeclaration
 
 
 def _load_spec_action_summaries() -> dict[str, str]:
@@ -171,7 +172,7 @@ def service_group() -> None:
 
 
 @service_group.command("up", short_help=_HELP_UP)
-@click.argument("patterns", nargs=-1, required=True)
+@click.argument("patterns", nargs=-1, required=True, callback=EnvTargetDeclaration())
 @click.option(
     "--wait",
     is_flag=True,
@@ -220,7 +221,7 @@ service_group.add_command(up_cmd, name="start")
 
 
 @service_group.command("down", short_help=_HELP_DOWN)
-@click.argument("patterns", nargs=-1, required=True)
+@click.argument("patterns", nargs=-1, required=True, callback=EnvTargetDeclaration())
 @click.pass_context
 def down_cmd(ctx: click.Context, patterns: tuple[str, ...]) -> None:
     """Stop services matching <env>/<service> PATTERNS.
@@ -241,7 +242,7 @@ service_group.add_command(down_cmd, name="stop")
 
 
 @service_group.command("status", short_help=_HELP_STATUS)
-@click.argument("patterns", nargs=-1)
+@click.argument("patterns", nargs=-1, callback=EnvTargetDeclaration())
 @click.option("--json", "as_json", is_flag=True, default=False, help="Emit the structured status document as JSON.")
 @click.pass_context
 def status_cmd(ctx: click.Context, patterns: tuple[str, ...], as_json: bool) -> None:
@@ -264,7 +265,7 @@ def status_cmd(ctx: click.Context, patterns: tuple[str, ...], as_json: bool) -> 
 
 
 @service_group.command("restart", short_help=_HELP_RESTART)
-@click.argument("patterns", nargs=-1, required=True)
+@click.argument("patterns", nargs=-1, required=True, callback=EnvTargetDeclaration())
 @click.pass_context
 def restart_cmd(ctx: click.Context, patterns: tuple[str, ...]) -> None:
     """Restart every service matching <env>/<service> PATTERNS.
@@ -297,7 +298,7 @@ def _validate_tail(ctx: click.Context, param: click.Parameter, value: str) -> in
 
 
 @service_group.command("logs", short_help=_HELP_LOGS)
-@click.argument("patterns", nargs=-1, required=True)
+@click.argument("patterns", nargs=-1, required=True, callback=EnvTargetDeclaration())
 @click.option("-f", "--follow", is_flag=True, default=False, help="Stream until interrupted.")
 @click.option(
     "-n",

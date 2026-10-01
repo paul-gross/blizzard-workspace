@@ -77,6 +77,63 @@ def test_container_factory_resolves_a_fresh_init_service_per_run(tmp_workspace_r
     assert first._config is not second._config
 
 
+def test_fresh_container_binds_the_launching_containers_tracer_instance(tmp_workspace_root: Path) -> None:
+    """A process has one tracer: the dashboard's fresh `ws init` Container reuses the launching one's."""
+    from dependency_injector import providers
+
+    from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
+
+    launching = Container()
+    launching_tracer = NoopCommandTracer()
+    launching.command_tracer.override(providers.Object(launching_tracer))
+
+    factory = launching.ws_init_runner()._init_svc_factory
+    first, second = factory.build_container(), factory.build_container()
+
+    assert first is not second
+    assert first.command_tracer() is launching_tracer
+    assert second.command_tracer() is launching_tracer
+
+
+def test_fresh_container_does_not_select_its_own_tracer(tmp_workspace_root: Path) -> None:
+    """With no override on the launching Container the fresh one still holds the launching instance."""
+    launching = Container()
+
+    fresh = launching.ws_init_runner()._init_svc_factory.build_container()
+
+    assert fresh.command_tracer() is launching.command_tracer()
+
+
+def test_a_child_of_the_fresh_container_gets_the_launching_command_spans_traceparent(
+    tmp_workspace_root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With tracing on, an init child carries the trace id and span id of the boundary's command span."""
+    from dependency_injector import providers
+    from opentelemetry import trace
+
+    from winter_cli.core.tracing import TracingSettings
+
+    monkeypatch.setattr(trace, "_TRACER_PROVIDER", None)
+    monkeypatch.setattr(trace._TRACER_PROVIDER_SET_ONCE, "_done", False)
+    monkeypatch.delenv("TRACEPARENT", raising=False)
+    launching = Container()
+    launching.tracing_settings.override(providers.Object(TracingSettings(otlp_endpoint="http://127.0.0.1:9")))
+    tracer = launching.command_tracer()
+    tracer.start_command("winter dashboard")
+    try:
+        context = trace.get_current_span().get_span_context()
+        fresh = launching.ws_init_runner()._init_svc_factory.build_container()
+
+        result = fresh.subprocess_runner().run(
+            [sys.executable, "-c", "import os; print(os.environ.get('TRACEPARENT', ''))"]
+        )
+    finally:
+        tracer.end_command(None)
+
+    _version, trace_id, span_id, _flags = result.stdout.strip().split("-")
+    assert (trace_id, span_id) == (trace.format_trace_id(context.trace_id), trace.format_span_id(context.span_id))
+
+
 # A child that reports whether it could prompt: stdin at EOF and the git prompt switch it sees.
 _PROBE = "import os, sys; print(sys.stdin.read() == '', os.environ.get('GIT_TERMINAL_PROMPT'))"
 

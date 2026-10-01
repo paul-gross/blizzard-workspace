@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+from dependency_injector import providers
+
 from winter_cli.container import Container
 from winter_cli.modules.workspace.agent_install import ExtensionAgentService
 from winter_cli.modules.workspace.drift import DriftWarningService
@@ -80,3 +83,69 @@ def test_container_resolves_restack_providers(container: Container) -> None:
     assert isinstance(container.env_restack_plan_svc(), EnvRestackPlanService)
     assert isinstance(container.env_restack_svc(), EnvRestackService)
     assert isinstance(container.restack_handler(), RestackHandler)
+
+
+def test_container_binds_the_noop_command_tracer_by_default(container: Container) -> None:
+    from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
+    from winter_cli.core.tracing import TracingSettings
+
+    assert isinstance(container.command_tracer(), NoopCommandTracer)
+    assert container.command_tracer() is container.command_tracer()
+    assert container.tracing_settings() == TracingSettings()
+
+
+def test_container_binds_the_opentelemetry_tracer_when_an_endpoint_is_set(
+    container: Container, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from opentelemetry import trace
+
+    from winter_cli.core.internal.otel_command_tracer import OtelCommandTracer
+    from winter_cli.core.tracing import TracingSettings
+
+    monkeypatch.setattr(trace, "_TRACER_PROVIDER", None)
+    monkeypatch.setattr(trace._TRACER_PROVIDER_SET_ONCE, "_done", False)
+    container.tracing_settings.override(providers.Object(TracingSettings(otlp_endpoint="http://localhost:4318")))
+
+    tracer = container.command_tracer()
+
+    assert isinstance(tracer, OtelCommandTracer)
+    assert container.command_tracer() is tracer
+
+
+def test_container_keeps_the_noop_tracer_when_the_sdk_is_disabled(container: Container) -> None:
+    from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
+    from winter_cli.core.tracing import TracingSettings
+
+    container.tracing_settings.override(
+        providers.Object(TracingSettings(otlp_endpoint="http://localhost:4318", sdk_disabled=True))
+    )
+
+    assert isinstance(container.command_tracer(), NoopCommandTracer)
+
+
+def test_container_falls_back_to_the_noop_tracer_when_the_adapter_constructor_raises(
+    container: Container, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from winter_cli.core.internal import otel_command_tracer
+    from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
+    from winter_cli.core.tracing import TracingSettings
+
+    def explode(self: object, settings: TracingSettings) -> None:
+        raise RuntimeError("adapter construction failed")
+
+    monkeypatch.setattr(otel_command_tracer.OtelCommandTracer, "__init__", explode)
+    container.tracing_settings.override(providers.Object(TracingSettings(otlp_endpoint="http://localhost:4318")))
+
+    tracer = container.command_tracer()
+
+    assert isinstance(tracer, NoopCommandTracer)
+    tracer.start_command("winter ws init")
+    tracer.end_command(None)
+    assert caplog.records == []
+
+    with caplog.at_level("DEBUG", logger="winter_cli.core.internal.unavailable_command_tracer"):
+        tracer.export()
+
+    assert [record.levelname for record in caplog.records] == ["DEBUG"]
+    assert caplog.records[0].exc_info is not None
+    assert "adapter construction failed" in str(caplog.records[0].exc_info[1])

@@ -293,6 +293,9 @@ class ServiceDispatchService:
         self._reporter.invalid_restart_pattern("; ".join(parts))
 
     def _call_provider(self, provider: ResolvedCapability, action: str, positionals: list[str]) -> int:
+        """Run one provider action; `up` and `restart` start long-running services, so they carry no trace context."""
         cmd = [str(provider.entrypoint), action, *positionals]
         merged = build_provider_env(provider, self._workspace_root, self._service_prefix)
-        return self._subprocess_runner.call(cmd, cwd=self._workspace_root, env=merged)
+        return self._subprocess_runner.call(
+            cmd, cwd=self._workspace_root, env=merged, detach_trace=action in ("up", "restart")
+        )

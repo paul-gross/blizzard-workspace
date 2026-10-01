@@ -10,7 +10,13 @@ import click
 import pytest
 
 from winter_cli import cli as cli_module
-from winter_cli.cli import LazyGroup, _bytecode_cache_prefix, _cli_group, _configure_logging
+from winter_cli.cli import (
+    LazyGroup,
+    _bytecode_cache_prefix,
+    _cli_group,
+    _configure_logging,
+    _silence_opentelemetry_diagnostics,
+)
 
 # ── LazyGroup (lazy subcommand imports) ──────────────────────────────────────
 
@@ -100,11 +106,15 @@ _HEAVY_PREFIXES = (
     "winter_cli.modules.graph",
 )
 
+# Third-party package roots that must stay out of the import graph: `textual` (the
+# dashboard) and `opentelemetry` (tracing is opt-in, so it costs nothing until switched on).
+_HEAVY_PACKAGES = ("textual", "opentelemetry")
+
 
 def _heavy_modules_after_importing(target: str) -> list[str]:
     code = (
         f"import {target}, sys\n"
-        f"heavy = [m for m in sys.modules if m == 'textual' or m.startswith('textual.')"
+        f"heavy = [m for m in sys.modules if m.split('.')[0] in {_HEAVY_PACKAGES!r}"
         f" or m.startswith({_HEAVY_PREFIXES!r})]\n"
         "print('\\n'.join(sorted(heavy)))\n"
     )
@@ -112,15 +122,16 @@ def _heavy_modules_after_importing(target: str) -> list[str]:
     return [line for line in out.stdout.splitlines() if line]
 
 
-def test_importing_cli_does_not_pull_doctor_tui_or_textual() -> None:
+def test_importing_cli_does_not_pull_doctor_tui_textual_or_opentelemetry() -> None:
     """Importing the CLI entry module must not drag in the doctor / tui (textual)
-    / lint trees — they belong only to their own commands."""
+    / lint trees — they belong only to their own commands — nor `opentelemetry`."""
     assert _heavy_modules_after_importing("winter_cli.cli") == []
 
 
-def test_importing_container_does_not_pull_doctor_tui_or_textual() -> None:
+def test_importing_container_does_not_pull_doctor_tui_textual_or_opentelemetry() -> None:
     """The DI container is built on every invocation (including the hot
-    `winter ws` path), so importing it must not pull the textual / probe trees."""
+    `winter ws` path), so importing it must not pull the textual / probe trees,
+    nor `opentelemetry`."""
     assert _heavy_modules_after_importing("winter_cli.container") == []
 
 
@@ -144,12 +155,18 @@ class TestConfigureLogging:
     """Unit tests for _configure_logging — isolate by resetting the logger after each test."""
 
     def setup_method(self) -> None:
-        """Reset the winter_cli logger to a clean state before each test."""
+        """Reset the winter_cli and opentelemetry loggers to a clean state before each test."""
         self._logger = logging.getLogger("winter_cli")
         self._orig_level = self._logger.level
         self._orig_handlers = self._logger.handlers[:]
         self._logger.handlers.clear()
         self._logger.setLevel(logging.NOTSET)
+        self._otel_logger = logging.getLogger("opentelemetry")
+        self._orig_otel_level = self._otel_logger.level
+        self._orig_otel_handlers = self._otel_logger.handlers[:]
+        self._orig_otel_propagate = self._otel_logger.propagate
+        self._otel_logger.handlers.clear()
+        self._otel_logger.setLevel(logging.NOTSET)
 
     def teardown_method(self) -> None:
         """Restore logger state after each test."""
@@ -157,6 +174,11 @@ class TestConfigureLogging:
         for h in self._orig_handlers:
             self._logger.addHandler(h)
         self._logger.setLevel(self._orig_level)
+        self._otel_logger.handlers.clear()
+        for h in self._orig_otel_handlers:
+            self._otel_logger.addHandler(h)
+        self._otel_logger.setLevel(self._orig_otel_level)
+        self._otel_logger.propagate = self._orig_otel_propagate
 
     def test_verbose_flag_attaches_debug_handler_on_stderr(self) -> None:
         """--verbose / -v wires a stderr StreamHandler at DEBUG."""
@@ -204,6 +226,36 @@ class TestConfigureLogging:
         """An empty WINTER_LOG_LEVEL (set but blank) is treated as not set."""
         _configure_logging(verbose=False, log_level_env="")
         assert len(self._logger.handlers) == 0
+
+    def test_verbose_routes_opentelemetry_records_to_the_same_stderr_handler(self) -> None:
+        """--verbose surfaces `opentelemetry` diagnostics through winter's own stderr handler."""
+        _configure_logging(verbose=True, log_level_env=None)
+        assert self._otel_logger.handlers == self._logger.handlers
+        assert self._otel_logger.level == logging.DEBUG
+
+    def test_env_var_routes_opentelemetry_records_at_the_requested_level(self) -> None:
+        """WINTER_LOG_LEVEL surfaces `opentelemetry` diagnostics at that level."""
+        _configure_logging(verbose=False, log_level_env="ERROR")
+        assert self._otel_logger.handlers == self._logger.handlers
+        assert self._otel_logger.level == logging.ERROR
+
+    def test_neither_flag_nor_env_leaves_the_opentelemetry_logger_untouched(self) -> None:
+        _configure_logging(verbose=False, log_level_env=None)
+        assert self._otel_logger.handlers == []
+
+    def test_silencing_gives_opentelemetry_a_null_handler_and_stops_propagation(self) -> None:
+        _silence_opentelemetry_diagnostics()
+        assert [type(h) for h in self._otel_logger.handlers] == [logging.NullHandler]
+        assert self._otel_logger.propagate is False
+
+    def test_verbose_after_silencing_still_reaches_stderr_only_through_winters_handler(self) -> None:
+        _silence_opentelemetry_diagnostics()
+        _configure_logging(verbose=True, log_level_env=None)
+        stream_handlers = [
+            h for h in self._otel_logger.handlers if isinstance(h, logging.StreamHandler) and h.stream is sys.stderr
+        ]
+        assert len(stream_handlers) == 1
+        assert self._otel_logger.propagate is False
 
 
 # ── Config-error boundary ────────────────────────────────────────────────────

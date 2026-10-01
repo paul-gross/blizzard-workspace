@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from tests.otlp_receiver import HangingEndpoint, OtlpReceiver, refused_endpoint
 from winter_cli.config.models import (
     AdoptExtensions,
     ProjectRepositoryConfig,
@@ -459,6 +460,7 @@ class FakeSubprocessRunner:
         self.popen_merge_stderr: list[bool] = []
         self.call_calls: list[tuple[list[str], Path | None]] = []
         self.call_envs: list[Any] = []
+        self.call_detach_trace: list[bool] = []
 
     @staticmethod
     def _key(cmd: list[str] | str) -> str:
@@ -484,9 +486,11 @@ class FakeSubprocessRunner:
         *,
         cwd: Path | None = None,
         env: Any = None,
+        detach_trace: bool = False,
     ) -> int:
         self.call_calls.append((list(cmd), cwd))
         self.call_envs.append(env)
+        self.call_detach_trace.append(detach_trace)
         return self._call_responses.get(self._key(cmd), 0)
 
     @contextmanager
@@ -720,3 +724,29 @@ class FakeConfigLockRepository:
         merged = dict(self.entries)
         merged[entry.name] = entry
         self.write(merged.values())
+
+
+# ── Tracing endpoints ────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def otlp_receiver() -> Iterator[OtlpReceiver]:
+    """A localhost OTLP/HTTP receiver that decodes each export request it gets."""
+    receiver = OtlpReceiver()
+    receiver.start()
+    yield receiver
+    receiver.stop()
+
+
+@pytest.fixture
+def hanging_endpoint() -> Iterator[HangingEndpoint]:
+    """A localhost socket that accepts connections and never answers."""
+    endpoint = HangingEndpoint()
+    yield endpoint
+    endpoint.stop()
+
+
+@pytest.fixture
+def refused_otlp_endpoint() -> str:
+    """A localhost endpoint whose port is closed."""
+    return refused_endpoint()

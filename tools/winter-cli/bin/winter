@@ -16,6 +16,18 @@
 # worktree `.git` files against `process.cwd()` (not the worktree's
 # location), so we anchor cwd at the well-known two-deep location the
 # workspace's git layout was built around.
+#
+# Launch time: the first statement exports WINTER_LAUNCH_TIME (the instant this
+# shim started) so the CLI's tracing span covers the launcher gap — the mise
+# and uv startup before Python runs. Bash < 5 has no EPOCHREALTIME; there the
+# variable is simply not exported and the span starts at command dispatch.
+
+# Must stay the first statement so the instant is as early as the shim can
+# take it. The :- default keeps the read safe under `set -u` on a bash without
+# EPOCHREALTIME.
+if [[ -n "${EPOCHREALTIME:-}" ]]; then
+  export WINTER_LAUNCH_TIME="$EPOCHREALTIME"
+fi
 
 set -euo pipefail
 
@@ -23,7 +35,7 @@ set -euo pipefail
 # propagate. install.sh reads this (via grep, not by sourcing) to compare
 # against the currently-installed shim and refuses to downgrade it — see
 # install.sh. Not tied to the Python CLI's own package version.
-WINTER_SHIM_VERSION=1
+WINTER_SHIM_VERSION=2
 
 # Bootstrap: `winter init` breaks the chicken-and-egg on a fresh clone, where
 # `.winter/config.toml` doesn't exist yet so the root-detection below has

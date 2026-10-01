@@ -165,6 +165,20 @@ This lets a provider honour the caller's timeout in its own up-time readiness ga
 without winter needing to expose a separate flag for it. `down` and `status` never set `WINTER_SERVICE_TIMEOUT`. A
 provider that predates this contract or does not implement it ignores the env var — its presence is never an error.
 
+## Trace context: `TRACEPARENT`
+
+`TRACESTATE` accompanies `TRACEPARENT` everywhere this section describes it.
+
+On `up` and `restart`, the provider's environment holds no `TRACEPARENT` and no `TRACESTATE`. Winter removes both
+variables from the environment it builds for the provider, whether or not winter itself is tracing and whatever winter
+inherited from its caller. A provider starts its services in a trace-free environment, so those services begin their own
+traces and never attach spans to the step that launched them.
+
+On `down`, `status`, `logs`, `describe`, and `catalog`, the provider's environment follows winter's own: `TRACEPARENT`
+is the winter command's span when tracing is on, with its own `TRACESTATE` or none, and the caller's values pass through
+unchanged when tracing is off. See [../tracing.md](../tracing.md#propagation-to-child-processes) for the tracing
+behavior.
+
 ## Per-action parameters
 
 The always-present vars above — the five base-contract vars, including `WINTER_SERVICE_PREFIX` — are exported on every

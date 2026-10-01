@@ -3,6 +3,7 @@ from __future__ import annotations
 import click
 
 from winter_cli.cli_context import cli_ctx
+from winter_cli.modules.workspace.env_target import EnvTargetDeclaration
 from winter_cli.modules.workspace.handlers import (
     DestroyParams,
     EnvCheckoutParams,
@@ -124,7 +125,7 @@ def ws_group():
 
 
 @ws_group.command("init")
-@click.argument("target", required=False)
+@click.argument("target", required=False, callback=EnvTargetDeclaration())
 @click.option(
     "--all",
     "all_flag",
@@ -148,7 +149,7 @@ def ws_init(ctx: click.Context, target: str | None, all_flag: bool, output_json:
 
 
 @ws_group.command("destroy")
-@click.argument("patterns", nargs=-1, required=True)
+@click.argument("patterns", nargs=-1, required=True, callback=EnvTargetDeclaration())
 @click.option(
     "--force",
     is_flag=True,
@@ -273,7 +274,7 @@ def ws_worktrees(ctx: click.Context, output_json: bool, with_status: bool):
 
 
 @ws_group.command("status")
-@click.argument("patterns", nargs=-1)
+@click.argument("patterns", nargs=-1, callback=EnvTargetDeclaration())
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
 @click.option(
     "--fetch",
@@ -304,7 +305,13 @@ def ws_status(ctx: click.Context, patterns: tuple[str, ...], output_json: bool, 
 
 
 @ws_group.command("connect")
-@click.argument("args", nargs=-1, required=True, metavar="PATTERNS... FEATURE_BRANCH")
+@click.argument(
+    "args",
+    nargs=-1,
+    required=True,
+    metavar="PATTERNS... FEATURE_BRANCH",
+    callback=EnvTargetDeclaration(trailing_non_targets=1),
+)
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
 def ws_connect(ctx: click.Context, args: tuple[str, ...], output_json: bool):
@@ -336,7 +343,7 @@ def ws_connect(ctx: click.Context, args: tuple[str, ...], output_json: bool):
 
 
 @ws_group.command("disconnect")
-@click.argument("patterns", nargs=-1, required=True)
+@click.argument("patterns", nargs=-1, required=True, callback=EnvTargetDeclaration())
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
 def ws_disconnect(ctx: click.Context, patterns: tuple[str, ...], output_json: bool):
@@ -363,7 +370,7 @@ def ws_disconnect(ctx: click.Context, patterns: tuple[str, ...], output_json: bo
 
 
 @ws_group.command("checkout")
-@click.argument("env")
+@click.argument("env", callback=EnvTargetDeclaration())
 @click.argument("feature_branch")
 @click.option("--force", is_flag=True, default=False, help="Bypass dirty / abandonment safety checks.")
 @click.option(
@@ -419,7 +426,9 @@ def ws_checkout(ctx: click.Context, env: str, feature_branch: str, force: bool, 
 
 
 @ws_group.command("reset")
-@click.argument("args", nargs=-1, required=True, metavar="PATTERNS... REF")
+@click.argument(
+    "args", nargs=-1, required=True, metavar="PATTERNS... REF", callback=EnvTargetDeclaration(trailing_non_targets=1)
+)
 @click.option(
     "--soft",
     "soft",
@@ -529,7 +538,7 @@ def ws_reset(
 
 
 @ws_group.command("clean")
-@click.argument("patterns", nargs=-1, required=True)
+@click.argument("patterns", nargs=-1, required=True, callback=EnvTargetDeclaration())
 @click.option(
     "--force",
     is_flag=True,
@@ -606,7 +615,9 @@ def ws_clean(
 
 
 @ws_group.command("restack")
-@click.argument("args", nargs=-1, required=True, metavar="ENV... BASE")
+@click.argument(
+    "args", nargs=-1, required=True, metavar="ENV... BASE", callback=EnvTargetDeclaration(trailing_non_targets=1)
+)
 @click.option(
     "--cut",
     "cut",
@@ -685,7 +696,7 @@ def ws_restack(
 
 
 @ws_group.command("fetch")
-@click.argument("patterns", nargs=-1)
+@click.argument("patterns", nargs=-1, callback=EnvTargetDeclaration())
 @click.option(
     "--standalone",
     is_flag=True,
@@ -741,7 +752,7 @@ def ws_fetch(
 
 
 @ws_group.command("pull")
-@click.argument("patterns", nargs=-1)
+@click.argument("patterns", nargs=-1, callback=EnvTargetDeclaration())
 @click.option(
     "--standalone",
     is_flag=True,
@@ -869,7 +880,7 @@ def ws_update(ctx: click.Context, repos: tuple[str, ...], autostash: bool, outpu
 
 @ws_group.command("merge")
 @click.argument("source_ref")
-@click.argument("patterns", nargs=-1)
+@click.argument("patterns", nargs=-1, callback=EnvTargetDeclaration())
 @click.option(
     "--standalone",
     is_flag=True,
@@ -1007,7 +1018,7 @@ def ws_merge(
 
 
 @ws_group.command("push")
-@click.argument("patterns", nargs=-1)
+@click.argument("patterns", nargs=-1, callback=EnvTargetDeclaration())
 @click.option(
     "--standalone",
     is_flag=True,
@@ -1124,7 +1135,7 @@ def ws_prune(ctx: click.Context, dry_run: bool, force: bool, output_json: bool):
 
 
 @ws_group.command("index")
-@click.argument("name")
+@click.argument("name", callback=EnvTargetDeclaration())
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
 def ws_index(ctx: click.Context, name: str, output_json: bool):
@@ -1152,7 +1163,7 @@ def ws_index(ctx: click.Context, name: str, output_json: bool):
 
 
 @ws_group.command("diff")
-@click.argument("patterns", nargs=-1)
+@click.argument("patterns", nargs=-1, callback=EnvTargetDeclaration())
 @click.option("--staged", is_flag=True, help="Show staged changes (index vs HEAD).")
 @click.option("--branch", is_flag=True, help="Show full branch diff (HEAD vs main).")
 @click.option("--no-headers", is_flag=True, help="Omit repo separator headers.")

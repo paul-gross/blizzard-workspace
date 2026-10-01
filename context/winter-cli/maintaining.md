@@ -20,7 +20,7 @@ Three surfaces, each a hub that routes to leaves, split by **who reads the fact 
 | `contracts/`     | The **implementer** building a provider winter dispatches to — the wire protocol it conforms to.                 | (routed from the top [hub](./index.md))            |
 
 Plus the top [hub](./index.md), which routes directly to the cross-cutting leaves — `workflows.md`, `resilience.md`,
-`root-flags.md`, `setup.md` — each described there by its read-trigger.
+`root-flags.md`, `setup.md`, `tracing.md` — each described there by its read-trigger.
 
 ## Where each fact belongs
 
@@ -33,6 +33,7 @@ File a fact by the reader's task, not by the subsystem that implements it.
 | The wire protocol a provider implements — invocation, injected env, stdout formats, exit codes | `contracts/`                        | `usage/`, `configuration/` (link to it) |
 | A multi-command operating sequence (bootstrap, start a feature, tear down)                     | `workflows.md`                      | individual command leaves               |
 | Cross-cutting runtime behavior (retry, hung-call timeout, config↔filesystem drift)             | `resilience.md`                     | individual command leaves               |
+| Tracing behavior — the span, propagation to children, export cost, content                     | `tracing.md`                        | individual command pages                |
 | Framing of the topic + the routing table                                                       | the nearest hub `index.md`          | (nothing else belongs in a hub)         |
 
 When a single command spans several reader tasks, it earns one leaf per surface, each pointing at the others:

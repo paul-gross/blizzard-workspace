@@ -18,7 +18,10 @@ from winter_cli.core.internal.click_cli_input_validation_service import (
 from winter_cli.core.internal.click_cli_output_service import ClickCliOutputService
 from winter_cli.core.internal.local_filesystem import LocalFilesystem
 from winter_cli.core.internal.local_subprocess_runner import NON_INTERACTIVE_ENV, LocalSubprocessRunner
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.core.internal.tomllib_config_file_reader import TomllibConfigFileReader
+from winter_cli.core.internal.unavailable_command_tracer import UnavailableCommandTracer
+from winter_cli.core.tracing import ICommandTracer, TracingSettings
 from winter_cli.modules.workspace.agent_install import ExtensionAgentService
 from winter_cli.modules.workspace.agent_transform.agent_copy_inspector import AgentCopyInspector
 from winter_cli.modules.workspace.agent_transform.agent_enumerator import CanonicalAgentEnumerator
@@ -37,6 +40,7 @@ from winter_cli.modules.workspace.env_reset_service import EnvResetService
 from winter_cli.modules.workspace.env_restack_plan_service import EnvRestackPlanService
 from winter_cli.modules.workspace.env_restack_service import EnvRestackService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
+from winter_cli.modules.workspace.env_target import EnvNameDiscovery, EnvTargetService
 from winter_cli.modules.workspace.extension_agentsmd_service import ExtensionAgentsMdService
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
 from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
@@ -95,8 +99,24 @@ def _lazy(target: str) -> Callable[..., Any]:
     return make
 
 
-def _fresh_non_interactive_init_service() -> InitService:
-    """An `InitService` from a fresh, non-interactive `Container` — the dashboard's `ws init`.
+def _select_command_tracer(settings: TracingSettings) -> ICommandTracer:
+    """The process's one tracer: the OpenTelemetry adapter when tracing is on, else the no-op.
+
+    The adapter is reached through `_lazy`, so a process with tracing off never imports
+    `opentelemetry`. Tracing never changes a command's outcome, so any failure to import the
+    SDK or construct the adapter (a malformed generic SDK variable raises at import) falls
+    back to the no-op; the failure surfaces only at debug level.
+    """
+    if not settings.enabled:
+        return NoopCommandTracer()
+    try:
+        return _lazy("winter_cli.core.internal.otel_command_tracer:OtelCommandTracer")(settings)
+    except Exception as exc:
+        return UnavailableCommandTracer(exc)
+
+
+class FreshInitServiceFactory:
+    """Builds an `InitService` from a fresh, non-interactive `Container` — the dashboard's `ws init`.
 
     The dashboard resolves its container once at launch, so its own `init_svc`
     would carry the launch-time `WorkspaceConfig` — an init run after a config
@@ -111,15 +131,29 @@ def _fresh_non_interactive_init_service() -> InitService:
     reads stdin (`mise trust`, a hook) sees EOF. A prompt that opens the terminal
     directly — an ssh passphrase or host-key prompt — is not covered and can still
     stall the run.
+
+    A process has exactly one tracer, so every fresh container binds the launching
+    container's tracer instance instead of making its own selection.
     """
-    container = Container()
-    container.subprocess_runner.override(providers.Singleton(LocalSubprocessRunner, non_interactive=True))
-    container.git_repo.override(
-        providers.Singleton(
-            GitPythonRepository, error_factory=container.repo_error_factory, clone_env=NON_INTERACTIVE_ENV
+
+    def __init__(self, command_tracer: ICommandTracer) -> None:
+        self._command_tracer = command_tracer
+
+    def build_container(self) -> Container:
+        container = Container()
+        container.command_tracer.override(providers.Object(self._command_tracer))
+        container.subprocess_runner.override(
+            providers.Singleton(LocalSubprocessRunner, trace_propagator=self._command_tracer, non_interactive=True)
         )
-    )
-    return container.init_svc()
+        container.git_repo.override(
+            providers.Singleton(
+                GitPythonRepository, error_factory=container.repo_error_factory, clone_env=NON_INTERACTIVE_ENV
+            )
+        )
+        return container
+
+    def __call__(self) -> InitService:
+        return self.build_container().init_svc()
 
 
 class Container(containers.DeclarativeContainer):
@@ -133,7 +167,18 @@ class Container(containers.DeclarativeContainer):
     # the standard library. See core/{filesystem,config_file,subprocess_runner}.py.
     fs = providers.Singleton(LocalFilesystem)
     config_file_reader = providers.Singleton(TomllibConfigFileReader)
-    subprocess_runner = providers.Singleton(LocalSubprocessRunner)
+
+    # Tracing seam. `tracing_settings` is a value slot: the CLI boundary overwrites it
+    # with `container.tracing_settings.override()` once it has read the launch-time
+    # environment. `command_tracer` is the single binding point for the process's one
+    # tracer, selected from the settings; every Container built after the boundary's binds
+    # that same instance.
+    tracing_settings = providers.Object(TracingSettings())
+    command_tracer = providers.Singleton(_select_command_tracer, settings=tracing_settings)
+
+    # Every child process the runner starts gets the active trace context through
+    # the tracer (`ITracePropagator`).
+    subprocess_runner = providers.Singleton(LocalSubprocessRunner, trace_propagator=command_tracer)
 
     # Workspace-root discovery seam — lets WorkspaceConfigService accept a
     # locator instead of reaching `Path.cwd()` directly. Tests substitute a
@@ -238,6 +283,24 @@ class Container(containers.DeclarativeContainer):
         env_aliases=workspace_config.provided.env_aliases,
         envs_per_workspace=workspace_config.provided.envs_per_workspace,
         registry=env_index_registry,
+    )
+
+    # The env-target declaration on each command positional resolves this service while click
+    # parses the invoked command. Discovery is handed over as a provider, so nothing about the
+    # workspace is resolved until tracing is on and a target needs discovery: a glob, or any
+    # name under `discovered_only` (lint), which runs discovery for literal names too.
+    env_name_discovery = providers.Factory(
+        EnvNameDiscovery,
+        workspace_repo=worktree_repo,
+        repo_factory=repo_factory,
+        workspace=workspace,
+    )
+
+    env_target_service = providers.Factory(
+        EnvTargetService,
+        annotator=command_tracer,
+        tracing_enabled=tracing_settings.provided.enabled,
+        discovery_factory=env_name_discovery.provider,
     )
 
     drift_warning_svc = providers.Factory(
@@ -1140,13 +1203,15 @@ class Container(containers.DeclarativeContainer):
     )
 
     # Each run resolves `InitService` from a fresh, non-interactive Container
-    # (`_fresh_non_interactive_init_service`), so `ws init` from the dashboard
-    # sees the current config rather than this container's launch-time
+    # (`FreshInitServiceFactory`, handed this container's tracer), so `ws init` from
+    # the dashboard sees the current config rather than this container's launch-time
     # singleton. A singleton so every Agent matrix screen shares its
     # one-run-at-a-time lock.
+    fresh_init_service_factory = providers.Singleton(FreshInitServiceFactory, command_tracer=command_tracer)
+
     ws_init_runner = providers.Singleton(
         _lazy("winter_cli.modules.tui.ws_init_runner:WorkspaceInitRunner"),
-        init_svc_factory=providers.Object(_fresh_non_interactive_init_service),
+        init_svc_factory=fresh_init_service_factory,
     )
 
     agent_matrix_screen = providers.Factory(

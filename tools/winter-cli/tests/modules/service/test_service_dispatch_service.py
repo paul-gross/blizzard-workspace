@@ -14,13 +14,16 @@ from tests.conftest import (
     FakeSpecLoader,
     FakeSubprocessRunner,
 )
-from winter_cli.core.subprocess_runner import SubprocessResult
+from winter_cli.core.internal.local_subprocess_runner import LocalSubprocessRunner
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
+from winter_cli.core.subprocess_runner import ISubprocessRunner, SubprocessResult
+from winter_cli.core.tracing import ITracePropagator
 from winter_cli.modules.capability.capability_registry_service import CapabilityRegistryService
 from winter_cli.modules.capability.models import CapabilitySlot, ResolvedCapability
 from winter_cli.modules.service.describe_parser import DescribeResultParser
 from winter_cli.modules.service.orchestrator_resolver import ServiceOrchestratorResolver
 from winter_cli.modules.service.service_dispatch_service import ServiceDispatchService
-from winter_cli.modules.service.service_fan_out_service import ServiceFanOutService
+from winter_cli.modules.service.service_fan_out_service import FanOutCell, ServiceFanOutService
 from winter_cli.modules.service.service_provider_index import ServiceDescribeService
 from winter_cli.modules.service.service_reporter import IServiceReporter
 from winter_cli.modules.service.service_status_matrix_service import ServiceStatusMatrixService
@@ -39,7 +42,7 @@ class _FakeEnvProvisionerService:
         return {}
 
 
-def _matrix_svc(runner: FakeSubprocessRunner, assignments: dict[str, int] | None = None) -> ServiceStatusMatrixService:
+def _matrix_svc(runner: ISubprocessRunner, assignments: dict[str, int] | None = None) -> ServiceStatusMatrixService:
     describe_svc = ServiceDescribeService(
         subprocess_runner=runner,
         describe_parser=DescribeResultParser(),
@@ -120,7 +123,7 @@ class _StubResolver:
 
 
 def _dispatch_svc(
-    runner: FakeSubprocessRunner,
+    runner: ISubprocessRunner,
     providers: list[ResolvedCapability],
     *,
     assignments: dict[str, int] | None = None,
@@ -161,7 +164,7 @@ def _configured_registry_and_resolver() -> tuple[CapabilityRegistryService, Serv
     )
 
 
-def _fan_out_svc(runner: FakeSubprocessRunner) -> ServiceFanOutService:
+def _fan_out_svc(runner: ISubprocessRunner) -> ServiceFanOutService:
     """Build a ServiceFanOutService."""
     return ServiceFanOutService(
         subprocess_runner=runner,
@@ -682,3 +685,111 @@ def test_dispatch_down_best_effort_continues_across_cells_multi_provider() -> No
     call_cmds = [tuple(c[0]) for c in runner.call_calls]
     assert (_EP_A, "down", "alpha") in call_cmds
     assert (_EP_B, "down", "alpha") in call_cmds
+
+
+# ── launches detach from the caller's trace ──────────────────────────────────
+
+_CALLER_TRACEPARENT = "00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01"
+_PROPAGATED_TRACEPARENT = "00-11111111111111111111111111111111-2222222222222222-01"
+_UNSET = "<unset>"
+
+
+class _FixedPropagator:
+    """A propagator that always injects one fixed `TRACEPARENT`: tracing on, without the SDK."""
+
+    def inject(self, env: dict[str, str]) -> None:
+        env["TRACEPARENT"] = _PROPAGATED_TRACEPARENT
+
+
+def _propagators() -> dict[str, ITracePropagator]:
+    return {"tracing-off": NoopCommandTracer(), "tracing-on": _FixedPropagator()}
+
+
+def _recording_provider(tmp_path: Path) -> tuple[ResolvedCapability, Path]:
+    """A provider whose entrypoint appends `<action> <TRACEPARENT-or-unset>` to a log file."""
+    log = tmp_path / "provider.log"
+    entrypoint = tmp_path / "provider"
+    entrypoint.write_text(f'#!/bin/sh\nprintf \'%s %s\\n\' "$1" "${{TRACEPARENT-{_UNSET}}}" >> {log}\n')
+    entrypoint.chmod(0o755)
+    return _provider("winter-service-tmux", entrypoint, tmp_path), log
+
+
+def _launches(log: Path) -> list[tuple[str, str]]:
+    return [(action, traceparent) for action, traceparent in (line.split() for line in log.read_text().splitlines())]
+
+
+def test_up_and_restart_calls_are_marked_detached_and_the_other_actions_are_not() -> None:
+    runner = FakeSubprocessRunner()
+    service = _service(runner)
+
+    service.dispatch("up", ["alpha"])
+    service.dispatch("restart", ["alpha/api"])
+    service.dispatch("down", ["beta"])
+
+    actions = [cmd[1] for cmd, _cwd in runner.call_calls]
+    assert list(zip(actions, runner.call_detach_trace, strict=True)) == [
+        ("up", True),
+        ("restart", True),
+        ("down", False),
+    ]
+
+
+@pytest.mark.parametrize("tracing", ["tracing-off", "tracing-on"])
+def test_fan_out_up_launches_with_no_traceparent(tracing: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRACEPARENT", _CALLER_TRACEPARENT)
+    provider, log = _recording_provider(tmp_path)
+    fan_out = ServiceFanOutService(
+        subprocess_runner=LocalSubprocessRunner(_propagators()[tracing]),
+        workspace_root=tmp_path,
+        service_prefix=SERVICE_PREFIX,
+    )
+
+    assert fan_out.up([FanOutCell(provider=provider, scope="alpha", positional="alpha")]) == 0
+
+    assert _launches(log) == [("up", _UNSET)]
+
+
+@pytest.mark.parametrize("tracing", ["tracing-off", "tracing-on"])
+def test_dispatch_restart_launches_with_no_traceparent(
+    tracing: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TRACEPARENT", _CALLER_TRACEPARENT)
+    provider, log = _recording_provider(tmp_path)
+    runner = LocalSubprocessRunner(_propagators()[tracing])
+    service = ServiceDispatchService(
+        subprocess_runner=runner,
+        orchestrator_resolver=_StubResolver([provider]),  # type: ignore[arg-type]
+        fan_out_service=_fan_out_svc(runner),
+        describe_service=ServiceDescribeService(
+            subprocess_runner=runner,
+            describe_parser=DescribeResultParser(),
+            workspace_root=tmp_path,
+            service_prefix=SERVICE_PREFIX,
+        ),
+        matrix_service=_matrix_svc(runner, {"alpha": 1}),
+        workspace_root=tmp_path,
+        service_prefix=SERVICE_PREFIX,
+    )
+
+    assert service.dispatch("restart", ["alpha/api"]) == 0
+
+    assert _launches(log) == [("restart", _UNSET)]
+
+
+@pytest.mark.parametrize(
+    ("tracing", "expected"), [("tracing-off", _CALLER_TRACEPARENT), ("tracing-on", _PROPAGATED_TRACEPARENT)]
+)
+def test_fan_out_down_keeps_the_trace_context(
+    tracing: str, expected: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TRACEPARENT", _CALLER_TRACEPARENT)
+    provider, log = _recording_provider(tmp_path)
+    fan_out = ServiceFanOutService(
+        subprocess_runner=LocalSubprocessRunner(_propagators()[tracing]),
+        workspace_root=tmp_path,
+        service_prefix=SERVICE_PREFIX,
+    )
+
+    assert fan_out.down([FanOutCell(provider=provider, scope="alpha", positional="alpha")]) == 0
+
+    assert _launches(log) == [("down", expected)]

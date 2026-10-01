@@ -31,6 +31,7 @@ from tests.conftest import (
 )
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.internal.local_subprocess_runner import LocalSubprocessRunner
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.core.subprocess_runner import SubprocessResult
 from winter_cli.modules.capability.capability_registry_service import CapabilityRegistryService
 from winter_cli.modules.capability.models import CapabilitySlot, ResolvedCapability
@@ -1281,7 +1282,7 @@ def _real_matrix_svc(
     from winter_cli.modules.workspace.env_band_resolver_service import EnvBandResolverService
     from winter_cli.modules.workspace.env_provisioner import EnvProvisionerService
 
-    runner = LocalSubprocessRunner()
+    runner = LocalSubprocessRunner(NoopCommandTracer())
     reg = _FakeEnvIndexRegistry(assignments)
     ws_config = _fake_ws_config(base_port=4000, ports_per_env=20)
     provisioner = EnvProvisionerService(

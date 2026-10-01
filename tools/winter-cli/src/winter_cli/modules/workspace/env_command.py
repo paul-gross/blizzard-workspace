@@ -41,10 +41,11 @@ import shlex
 import click
 
 from winter_cli.cli_context import cli_ctx
+from winter_cli.modules.workspace.env_target import EnvTargetDeclaration
 
 
 @click.command("env")
-@click.argument("scope")
+@click.argument("scope", callback=EnvTargetDeclaration())
 @click.option(
     "--resolve",
     "resolve",
