@@ -17,15 +17,16 @@ Its two halves run in different places, and that governs everything below:
 `../runner` and `../runner-opencode` are siblings of the directory holding `.winter/config.toml`. Paths below are
 relative to the workspace root.
 
-| Piece          | Location / value                                                                                                                                                                                                                                                                                               |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Hub**        | **`https://blizzard.grosscode.net`** — health `GET /api/health`, readiness `GET /api/ready`. GitHub OAuth; reads need a session                                                                                                                                                                                |
-| Hub deployment | Owned end to end by the **`paul-gross/blizzard-infra`** repo (private; worktreed here only on a machine whose `config.local.toml` declares it). It holds the host, the image channel, the updater, rollback, and the operator entry points. Go there for anything about the host — none of it is restated here |
-| Runners        | Two, split by harness — see [The two runners](#the-two-runners) for each one's id, runtime dir, port, envs, and unit                                                                                                                                                                                           |
-| Venv           | `../.venv` — the `blizzard` binary **both runners** run, and the operator CLI; installed from a **built wheel**, not editable                                                                                                                                                                                  |
-| Wheel source   | built from `projects/blizzard` (the source checkout on `master`) → `dist/blizzard-*.whl`                                                                                                                                                                                                                       |
-| Forge          | **real GitHub** — owner `paul-gross`; the hub's token lives on the host, never in this repo                                                                                                                                                                                                                    |
-| Supervision    | two systemd **user** units, one per runner (unit files in `~/.config/systemd/user/`)                                                                                                                                                                                                                           |
+| Piece           | Location / value                                                                                                                                                                                                                                                                                               |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hub**         | **`https://blizzard.grosscode.net`** — health `GET /api/health`, readiness `GET /api/ready`. GitHub OAuth; reads need a session                                                                                                                                                                                |
+| Hub deployment  | Owned end to end by the **`paul-gross/blizzard-infra`** repo (private; worktreed here only on a machine whose `config.local.toml` declares it). It holds the host, the image channel, the updater, rollback, and the operator entry points. Go there for anything about the host — none of it is restated here |
+| Runners         | Two, split by harness — see [The two runners](#the-two-runners) for each one's id, runtime dir, port, envs, and unit                                                                                                                                                                                           |
+| Venv            | `../.venv` — the `blizzard` binary **both runners** run, and the operator CLI; installed from a **built wheel**, not editable                                                                                                                                                                                  |
+| Wheel source    | built from `projects/blizzard` (the source checkout on `master`) → `dist/blizzard-*.whl`                                                                                                                                                                                                                       |
+| Forge           | **real GitHub** — owner `paul-gross`; the hub's token lives on the host, never in this repo                                                                                                                                                                                                                    |
+| Supervision     | two systemd **user** units, one per runner (unit files in `~/.config/systemd/user/`)                                                                                                                                                                                                                           |
+| Trace collector | `../otel-collector` — a docker compose OpenTelemetry Collector on `127.0.0.1:4318` that forwards both runners' spans to Honeycomb; see [The runners' trace collector](#the-runners-trace-collector)                                                                                                            |
 
 ### The two runners
 
@@ -33,17 +34,18 @@ The fleet is split by subscription: each runner binds exactly one coding harness
 its plan's quota runs out while the other keeps working. Both share `workspace_root` = this workspace,
 `hub_url = "https://blizzard.grosscode.net"`, `base_branch = master`, and the venv.
 
-|                         | Claude Code runner                                | OpenCode runner                                    |
-| ----------------------- | ------------------------------------------------- | -------------------------------------------------- |
-| `runner_id`             | `r-claude`                                        | `r-chatgpt`                                        |
-| Runtime dir             | `../runner`                                       | `../runner-opencode`                               |
-| Harness                 | `[opencode] enabled = false`                      | `[claude_code] enabled = false`                    |
-| Envs (`workspace_envs`) | `r1`–`r4`                                         | `oce1`–`oce4`                                      |
-| `max_agents`            | 2                                                 | 1                                                  |
-| Port / `public_url`     | `127.0.0.1:8431`, plus the tailnet origin         | `127.0.0.1:8432`, loopback only                    |
-| Subscription sampled    | `anthropic`                                       | `openai`                                           |
-| Systemd unit            | `blizzard-blizzard-runner.service`                | `blizzard-blizzard-runner-opencode.service`        |
-| Hub token               | `../runner/.env` (unit drop-in `EnvironmentFile`) | `../runner-opencode/.env` (unit `EnvironmentFile`) |
+|                         | Claude Code runner                                                      | OpenCode runner                                    |
+| ----------------------- | ----------------------------------------------------------------------- | -------------------------------------------------- |
+| `runner_id`             | `r-claude`                                                              | `r-chatgpt`                                        |
+| Runtime dir             | `../runner`                                                             | `../runner-opencode`                               |
+| Harness                 | `[opencode] enabled = false`                                            | `[claude_code] enabled = false`                    |
+| Envs (`workspace_envs`) | `r1`–`r4`                                                               | `oce1`–`oce4`                                      |
+| `max_agents`            | 2                                                                       | 1                                                  |
+| Port / `public_url`     | `127.0.0.1:8431`, plus the tailnet origin                               | `127.0.0.1:8432`, loopback only                    |
+| Subscription sampled    | `anthropic`                                                             | `openai`                                           |
+| Systemd unit            | `blizzard-blizzard-runner.service`                                      | `blizzard-blizzard-runner-opencode.service`        |
+| Hub token               | `../runner/.env` (unit drop-in `EnvironmentFile`)                       | `../runner-opencode/.env` (unit `EnvironmentFile`) |
+| Trace export            | `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` in `../runner/.env` | the same, in `../runner-opencode/.env`             |
 
 Each runtime dir holds its own `blizzard-runner.toml`, `data/runner.db`, `worker-settings.json`, and OpenCode worker
 config. Health is `GET /api/health` on each port.
@@ -75,6 +77,60 @@ when every one is `done`: a chunk that finishes normally never releases its rout
 or `stopped` in `hub status`, then re-run with `--force` — on a terminal chunk the release only records itself, while a
 `running` one would go back to the queue. A long list can time out the client mid-release; re-running finishes it. Then
 delete the pre-rename `.env` rather than leaving the revoked token lying beside the new one.
+
+### The runners' trace collector
+
+Both runners tell their closed leases into the hub's step traces (`blizzard/docs/deployment/tracing.md` §Runner spans).
+The hosted hub's collector accepts only the hub on its own compose network, so the runners send to a collector of their
+own on this machine, which forwards to the same Honeycomb `blizzard` environment as the hub's. The runner spans land in
+the `blizzard-runner` dataset beside the hub's `blizzard-hub`.
+
+**Keep it up.** A runner whose collector is down keeps claiming and working — tracing never blocks a tick — so a dead
+collector fails silently: spans stop arriving and nothing else changes. Each failed export reaches the hub's event log
+as `trace-export-failed`, and the sweep's cursor holds until the collector is back.
+
+| Piece       | Value                                                                                                        |
+| ----------- | ------------------------------------------------------------------------------------------------------------ |
+| Runtime dir | `../otel-collector` — `compose.yaml`, `otel-collector.yaml`, `collector.env`                                 |
+| Image       | `otel/opentelemetry-collector:0.162.0`, pinned to match `blizzard-infra`'s hosted collector                  |
+| Listens     | `127.0.0.1:4318`, OTLP over HTTP — loopback only, nothing off this machine reaches it                        |
+| Secret      | `HONEYCOMB_API_KEY` in `collector.env` (mode `0600`), an ingest key for the Honeycomb `blizzard` environment |
+| Supervision | docker `restart: unless-stopped`; `docker.service` is enabled, so it comes back after a reboot on its own    |
+| Senders     | each runner's `.env` sets `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318`                                |
+
+`otel-collector.yaml` is `blizzard-infra`'s `deploy/otel-collector.yaml` with only its comments changed, and
+`compose.yaml` is that repo's `otel-collector` service with `ports: ["127.0.0.1:4318:4318"]` in place of `expose` and no
+network. Recreate the dir from there if it is ever lost; never commit `collector.env`.
+
+Operate it from `../otel-collector`:
+
+```bash
+docker compose up -d                       # bring it up (also after editing either yaml)
+docker compose restart                     # restart it (also after rotating the key in collector.env)
+docker compose ps                          # is it running
+docker compose logs --since 10m            # exporter errors — a bad key reads as a 401 from api.honeycomb.io
+docker run --rm -e HONEYCOMB_API_KEY=x -v "$PWD/otel-collector.yaml:/c.yaml:ro" \
+  otel/opentelemetry-collector:0.162.0 validate --config=/c.yaml   # check a config edit before applying it
+```
+
+Restarting the collector costs the runners nothing — no runner restart, no worker interrupted. Changing a runner's
+`.env` is different: a runner reads its environment only at startup, so it takes a runner restart, which
+[terminates the fleet workers it holds](./post-delivery.md).
+
+**Confirm both runners are reporting:**
+
+```bash
+for d in ../runner ../runner-opencode; do ../.venv/bin/blizzard runner traces status --dir "$d"; done
+```
+
+Each should read `tracing: on, exporting to http://127.0.0.1:4318`, with a recent `last export` and `last error: none`.
+`tracing: off` means the runner started without the endpoint in its `.env`. A lasting `last error` means the collector
+is down or rejecting. Leases close only when work finishes, so an idle runner shows an old `last export` and is still
+healthy.
+
+**After an outage longer than the sweep's lag cap**, the runner skips the window it fell behind on and reports
+`trace-window-skipped`. Tell it again with `blizzard runner traces replay --dir <runtime-dir> --since … --until …`. The
+backend dedupes on span ids, so overlapping a window that already arrived is harmless.
 
 ### Traps on this machine
 
@@ -195,6 +251,10 @@ for port in 8431 8432; do curl -s "http://127.0.0.1:$port/api/health" | jq -r .v
 A `.dirty` suffix means the wheel was built from a tree with uncommitted changes, which for a redeploy of `master` means
 something is wrong with the source checkout. The hosted hub answers the same question with `0.1.0.dev<run>`, stamped by
 CI from the workflow run.
+
+Last, confirm both runners still export traces — `blizzard runner traces status` on each, per
+[Confirm both runners are reporting](#the-runners-trace-collector) — and that `docker compose ps` in `../otel-collector`
+shows the collector up. A runner restart never touches the collector, but it is the moment a dropped `.env` line shows.
 
 ### Re-minting changed graphs
 
