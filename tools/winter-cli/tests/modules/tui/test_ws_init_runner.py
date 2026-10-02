@@ -148,7 +148,7 @@ def test_init_clones_with_the_git_prompt_disabled(tmp_workspace_root: Path, monk
     seen: list[Mapping[str, str] | None] = []
     monkeypatch.setattr(git.Repo, "clone_from", lambda url, dest, env=None, **_: seen.append(env))
 
-    _dashboard_init_service()._git_repo.clone("https://example.invalid/r.git", tmp_workspace_root / "r")
+    _dashboard_init_service()._git_repo.clone("https://example.invalid/r.git", tmp_workspace_root / "r", repo_name="r")
 
     assert len(seen) == 1
     assert seen[0] is not None

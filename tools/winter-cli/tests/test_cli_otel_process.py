@@ -28,6 +28,21 @@ def workspace(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture
+def workspace_with_repo(tmp_path: Path) -> Path:
+    """A workspace whose one project repo has a source checkout, so `ws status` opens a `git status` span."""
+    (tmp_path / ".winter").mkdir()
+    (tmp_path / ".winter" / "config.toml").write_text(
+        'main_branch = "master"\n\n[[project_repository]]\nname = "demo"\nurl = "git@example.com:org/demo.git"\n'
+    )
+    checkout = tmp_path / "projects" / "demo"
+    checkout.mkdir(parents=True)
+    git = ["git", "-C", str(checkout), "-c", "user.name=test", "-c", "user.email=test@example.com"]
+    subprocess.run([*git, "init", "-q", "-b", "master"], check=True)
+    subprocess.run([*git, "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "root"], check=True)
+    return tmp_path
+
+
 def _winter(
     workspace: Path, *argv: str, python_flags: tuple[str, ...] = (), **env: str
 ) -> subprocess.CompletedProcess[str]:
@@ -130,6 +145,23 @@ def test_a_failing_command_exports_error_status_and_type_only(workspace: Path, o
     assert span.status.message == ""
 
 
+# ── Inner spans ride the one exit export ─────────────────────────────────────
+
+
+def test_a_command_with_inner_spans_sends_exactly_one_request_holding_them_all(
+    workspace_with_repo: Path, otlp_receiver: OtlpReceiver
+) -> None:
+    result = _winter(workspace_with_repo, "ws", "status", WINTER_OTEL_EXPORTER_OTLP_ENDPOINT=otlp_receiver.endpoint)
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+    assert len(otlp_receiver.requests) == 1
+    spans = {span.name: span for span in otlp_receiver.requests[0].spans}
+    assert {"winter ws status", "git status"} <= spans.keys()
+    assert spans["git status"].trace_id == spans["winter ws status"].trace_id
+    assert spans["git status"].parent_span_id == spans["winter ws status"].span_id
+
+
 # ── A misbehaving endpoint never disturbs the command ────────────────────────
 
 
@@ -137,6 +169,15 @@ def test_a_hanging_endpoint_keeps_the_exit_code_and_leaves_stderr_empty(
     workspace: Path, hanging_endpoint: HangingEndpoint
 ) -> None:
     result = _winter(workspace, "capabilities", WINTER_OTEL_EXPORTER_OTLP_ENDPOINT=hanging_endpoint.endpoint)
+
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+
+def test_a_hanging_endpoint_keeps_the_exit_code_and_stderr_of_a_command_with_inner_spans(
+    workspace_with_repo: Path, hanging_endpoint: HangingEndpoint
+) -> None:
+    result = _winter(workspace_with_repo, "ws", "status", WINTER_OTEL_EXPORTER_OTLP_ENDPOINT=hanging_endpoint.endpoint)
 
     assert result.returncode == 0
     assert result.stderr == ""

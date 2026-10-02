@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import FakeCommandEntryRunner, FakeServiceReporter, FakeSubprocessRunner
+from tests.conftest import FakeCommandEntryRunner, FakeOperationTracer, FakeServiceReporter, FakeSubprocessRunner
 from winter_cli.config.models import (
     EnvCommandEntry,
     EnvVarBands,
@@ -36,6 +36,8 @@ from winter_cli.config.models import (
     SingletonType,
     WorkspaceConfig,
 )
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
+from winter_cli.core.tracing import ATTR_PROVIDER, ATTR_SCOPE, IOperationTracer
 from winter_cli.modules.capability.models import CapabilitySlot, ResolvedCapability
 from winter_cli.modules.service.service_fan_out_service import FanOutCell, ServiceFanOutService
 from winter_cli.modules.workspace.env_band_resolver_service import COMMAND_PLACEHOLDER, EnvBandResolverService
@@ -85,11 +87,12 @@ def _cell(provider: ResolvedCapability, scope: str = "alpha", positional: str | 
     return FanOutCell(provider=provider, scope=scope, positional=positional if positional is not None else scope)
 
 
-def _make_fan_out(runner: FakeSubprocessRunner) -> ServiceFanOutService:
+def _make_fan_out(runner: FakeSubprocessRunner, tracer: IOperationTracer | None = None) -> ServiceFanOutService:
     return ServiceFanOutService(
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=tracer or NoopCommandTracer(),
     )
 
 
@@ -323,6 +326,7 @@ def test_up_injects_provisioned_env_vars_when_provisioner_present() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
         env_provisioner=_FakeProvisioner(),
     )
 
@@ -353,6 +357,7 @@ def test_down_injects_provisioned_env_vars_when_provisioner_present() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
         env_provisioner=_FakeProvisioner(),
     )
 
@@ -425,6 +430,7 @@ def test_up_provisions_each_unique_scope_once() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
         env_provisioner=provisioner,
     )
 
@@ -496,6 +502,7 @@ def test_up_runs_a_command_entry_exactly_once_per_unique_scope() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
         env_provisioner=provisioner,
     )
 
@@ -515,6 +522,7 @@ def test_down_never_runs_a_command_entry() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
         env_provisioner=provisioner,
     )
 
@@ -548,6 +556,7 @@ def test_up_propagates_a_command_failure_instead_of_degrading() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
         env_provisioner=provisioner,
         reporter=reporter,
     )
@@ -584,6 +593,7 @@ def test_up_propagates_a_malformed_command_instead_of_degrading() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
         env_provisioner=provisioner,
         reporter=reporter,
     )
@@ -611,6 +621,7 @@ def test_status_style_template_error_still_degrades_on_up() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
         env_provisioner=provisioner,
         reporter=reporter,
     )
@@ -647,6 +658,7 @@ def test_up_workspace_scope_injects_workspace_band_only() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
         env_provisioner=_BandProvisioner(),
     )
 
@@ -678,6 +690,7 @@ def test_up_feature_scope_injects_both_bands_feature_wins_collision() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
         env_provisioner=_BandProvisioner(),
     )
 
@@ -709,6 +722,7 @@ def test_provision_error_does_not_raise_on_up_or_down() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
         env_provisioner=_ErrorProvisioner(),
         reporter=reporter,  # type: ignore[arg-type]
     )
@@ -729,3 +743,76 @@ def test_provision_error_does_not_raise_on_up_or_down() -> None:
     call_cmds = [tuple(c[0]) for c in runner.call_calls]
     assert (_EP_A, "up", "alpha") in call_cmds
     assert (_EP_A, "down", "alpha") in call_cmds
+
+
+# ── spans ─────────────────────────────────────────────────────────────────────
+
+
+def test_up_opens_a_provider_span_per_cell_including_the_workspace_cell() -> None:
+    """One `service provider up` span per FanOutCell: per pattern, and the implicit workspace cell too."""
+    tracer = FakeOperationTracer()
+    svc = _make_fan_out(FakeSubprocessRunner(), tracer)
+
+    svc.up(
+        [
+            _cell(_pa(), scope="workspace"),
+            _cell(_pa(), scope="alpha", positional="alpha/api"),
+            _cell(_pa(), scope="alpha", positional="alpha/web"),
+            _cell(_pb(), scope="alpha"),
+        ]
+    )
+
+    assert [(span.name, span.attributes) for span in tracer.spans] == [
+        ("service provider up", {ATTR_PROVIDER: "provider-a", ATTR_SCOPE: "workspace"}),
+        ("service provider up", {ATTR_PROVIDER: "provider-a", ATTR_SCOPE: "alpha"}),
+        ("service provider up", {ATTR_PROVIDER: "provider-a", ATTR_SCOPE: "alpha"}),
+        ("service provider up", {ATTR_PROVIDER: "provider-b", ATTR_SCOPE: "alpha"}),
+    ]
+    assert not any(span.failed for span in tracer.spans)
+
+
+def test_down_opens_a_provider_down_span_per_cell() -> None:
+    tracer = FakeOperationTracer()
+    svc = _make_fan_out(FakeSubprocessRunner(), tracer)
+
+    svc.down([_cell(_pa()), _cell(_pb(), scope="workspace")])
+
+    assert [(span.name, span.attributes) for span in tracer.spans] == [
+        ("service provider down", {ATTR_PROVIDER: "provider-a", ATTR_SCOPE: "alpha"}),
+        ("service provider down", {ATTR_PROVIDER: "provider-b", ATTR_SCOPE: "workspace"}),
+    ]
+
+
+def test_a_non_zero_up_exit_marks_its_span_failed_and_no_later_cell_opens_one() -> None:
+    tracer = FakeOperationTracer()
+    svc = _make_fan_out(FakeSubprocessRunner(call_responses={_UP_A: 5}), tracer)
+
+    svc.up([_cell(_pa()), _cell(_pb())])
+
+    [span] = tracer.spans
+    assert span.failed is True
+    assert span.error_type is None
+
+
+def test_a_non_zero_down_exit_marks_only_its_own_span_failed() -> None:
+    tracer = FakeOperationTracer()
+    svc = _make_fan_out(FakeSubprocessRunner(call_responses={_DOWN_A: 4}), tracer)
+
+    svc.down([_cell(_pa()), _cell(_pb())])
+
+    assert [span.failed for span in tracer.spans] == [True, False]
+
+
+def test_a_provider_span_is_open_while_the_provider_runs() -> None:
+    """The span is the active one for the provider call, so the runner's child inherits it."""
+    tracer = FakeOperationTracer()
+    opened_before_call: list[int] = []
+
+    class _Runner(FakeSubprocessRunner):
+        def call(self, cmd, **kwargs):  # type: ignore[no-untyped-def]
+            opened_before_call.append(len(tracer.spans))
+            return super().call(cmd, **kwargs)
+
+    _make_fan_out(_Runner(), tracer).up([_cell(_pa())])
+
+    assert opened_before_call == [1]

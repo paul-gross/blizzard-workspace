@@ -442,14 +442,14 @@ class WorkspaceSyncService:
 
         # Only the kind matters here: a branch pin ff's to origin/<ref> (new HEAD
         # is read post-ff), a tag/commit pin is held. The resolved commit is unused.
-        kind, _commit = self._git_repo.resolve_ref(repo.path, repo.ref)
+        kind, _commit = self._git_repo.resolve_ref(repo.path, repo.ref, repo_name=repo.name, env=None)
 
         if kind is RefKind.branch:
             # Moving pin — ff-only advance to origin/<ref>.
             #
             # Dirty guard: refuse if tree is dirty and autostash not set. This
             # mirrors the guard in init's _apply_standalone_pin and update_pins.
-            is_clean = self._git_repo.is_worktree_clean(repo.path)
+            is_clean = self._git_repo.is_worktree_clean(repo.path, repo_name=repo.name, env=None)
             if not is_clean and not autostash:
                 msg = f"branch pin {repo.name!r} has uncommitted changes; commit/stash or pass --autostash"
                 return RepoSyncOutcome(
@@ -465,7 +465,7 @@ class WorkspaceSyncService:
             # the ff-only safety guarantee: no local commits are lost.
             if not is_clean:
                 try:
-                    self._git_repo.stash_push(repo.path)
+                    self._git_repo.stash_push(repo.path, repo_name=repo.name, env=None)
                 except RepoError as exc:
                     return RepoSyncOutcome(
                         repo_name=repo.name,
@@ -478,7 +478,7 @@ class WorkspaceSyncService:
 
             if not is_clean:
                 try:
-                    self._git_repo.stash_pop(repo.path)
+                    self._git_repo.stash_pop(repo.path, repo_name=repo.name, env=None)
                 except RepoError as pop_exc:
                     logger.warning(
                         "stash pop failed for %s after branch-pin ff; stash '%s' needs manual resolution: %s",
@@ -489,7 +489,7 @@ class WorkspaceSyncService:
 
             # If the ff succeeded and HEAD moved, rewrite the lock.
             if outcome.sync_result == SyncResult.fast_forwarded:
-                new_head = self._git_repo.get_head_commit(repo.path)
+                new_head = self._git_repo.get_head_commit(repo.path, repo_name=repo.name, env=None)
                 return self._rewrite_lock_and_report(repo, kind, new_head)
             return outcome
         else:
@@ -610,7 +610,7 @@ class WorkspaceSyncService:
             logger.warning("Fetch failed for standalone %s: %s", repo.name, exc)
 
         # Step 2: dirty guard.
-        is_clean = self._git_repo.is_worktree_clean(repo.path)
+        is_clean = self._git_repo.is_worktree_clean(repo.path, repo_name=repo.name, env=None)
         if not is_clean and not autostash:
             return _report(
                 SyncResult.pin_error,
@@ -620,7 +620,7 @@ class WorkspaceSyncService:
         stashed = False
         if not is_clean and autostash:
             try:
-                self._git_repo.stash_push(repo.path)
+                self._git_repo.stash_push(repo.path, repo_name=repo.name, env=None)
                 stashed = True
             except RepoError as exc:
                 return _report(SyncResult.pin_error, str(exc))
@@ -628,13 +628,13 @@ class WorkspaceSyncService:
         try:
             # Step 3: resolve ref.
             try:
-                kind, commit = self._git_repo.resolve_ref(repo.path, repo.ref)
+                kind, commit = self._git_repo.resolve_ref(repo.path, repo.ref, repo_name=repo.name, env=None)
             except RepoError as exc:
                 logger.warning("resolve_ref failed for standalone %s: %s", repo.name, exc)
                 return _report(SyncResult.pin_error, str(exc))
 
             # Step 4: up-to-date check (no checkout, no lock churn).
-            current_head = self._git_repo.get_head_commit(repo.path)
+            current_head = self._git_repo.get_head_commit(repo.path, repo_name=repo.name, env=None)
             existing_lock = self._config_lock_repo.read() if self._config_lock_repo else {}
             existing_entry = existing_lock.get(repo.name)
             if commit == current_head and existing_entry is not None and existing_entry.commit == commit:
@@ -644,9 +644,9 @@ class WorkspaceSyncService:
             # Step 5: checkout and rewrite lock.
             try:
                 if kind is RefKind.branch:
-                    self._git_repo.checkout_branch(repo.path, repo.ref)
+                    self._git_repo.checkout_branch(repo.path, repo.ref, repo_name=repo.name, env=None)
                 else:
-                    self._git_repo.checkout_detached(repo.path, commit)
+                    self._git_repo.checkout_detached(repo.path, commit, repo_name=repo.name, env=None)
             except RepoError as exc:
                 return _report(SyncResult.pin_error, str(exc))
 
@@ -665,7 +665,7 @@ class WorkspaceSyncService:
         finally:
             if stashed:
                 try:
-                    self._git_repo.stash_pop(repo.path)
+                    self._git_repo.stash_pop(repo.path, repo_name=repo.name, env=None)
                 except RepoError as pop_exc:
                     logger.warning(
                         "stash pop failed for %s; leftover stash at '%s' needs manual resolution: %s",

@@ -115,6 +115,7 @@ def test_reconcile_projects_clones_missing_repo(
     assert ok is True
     # Clone was invoked through IGitRepository.
     assert git.clones == [("git@example.com:org/demo.git", WORKSPACE_ROOT / "projects" / "demo")]
+    assert git.repo_names_for("clone") == ["demo"]
     # Identity applied.
     assert git.identities == [(WORKSPACE_ROOT / "projects" / "demo", "Bot", "bot@example.com")]
     # Reporter saw the high-level events.
@@ -326,7 +327,7 @@ def test_run_per_repo_caps_parallelism_via_git_ops_executor(
 class _ExplodingGitRepository(FakeGitRepository):
     """FakeGitRepository whose clone raises RepoError — exercises the per-repo wrap site."""
 
-    def clone(self, url: str, dest: Path) -> None:  # type: ignore[override]
+    def clone(self, url: str, dest: Path, *, repo_name: str) -> None:
         raise RepoError(f"boom cloning {url}")
 
 
@@ -1484,7 +1485,7 @@ class _UpstreamRefusingGitRepository(FakeGitRepository):
     silently downgraded to a soft skip.
     """
 
-    def set_upstream_to(self, path: Path, ref: str) -> None:
+    def set_upstream_to(self, path: Path, ref: str, *, repo_name: str, env: str | None) -> None:
         raise RepoError(f"set-upstream-to {ref} failed at {path}", cwd=str(path))
 
 
@@ -1548,10 +1549,10 @@ class _UnexpectedlyExplodingGitRepository(FakeGitRepository):
         super().__init__()
         self._exploding_path = exploding_path
 
-    def set_user_identity(self, path: Path, name: str, email: str) -> None:
+    def set_user_identity(self, path: Path, name: str, email: str, *, repo_name: str, env: str | None) -> None:
         if path == self._exploding_path:
             raise ValueError(f"unexpected identity failure at {path}")
-        super().set_user_identity(path, name, email)
+        super().set_user_identity(path, name, email, repo_name=repo_name, env=env)
 
 
 def test_run_per_repo_reports_unexpected_exception_without_unwinding(
@@ -1609,10 +1610,10 @@ class _UnexpectedlyExplodingUpstreamInferenceGitRepository(FakeGitRepository):
         super().__init__()
         self._exploding_path = exploding_path
 
-    def get_tracking_branch(self, path: Path) -> str | None:
+    def get_tracking_branch(self, path: Path, *, repo_name: str, env: str | None) -> str | None:
         if path == self._exploding_path:
             raise ValueError(f"not a git repository: {path}")
-        return super().get_tracking_branch(path)
+        return super().get_tracking_branch(path, repo_name=repo_name, env=env)
 
 
 def test_reconcile_env_env_level_exception_does_not_unwind_reconcile_all(
@@ -1681,10 +1682,10 @@ class _DetachedHeadGitRepository(FakeGitRepository):
         super().__init__()
         self._detached_path = detached_path
 
-    def set_upstream_to(self, path: Path, ref: str) -> None:
+    def set_upstream_to(self, path: Path, ref: str, *, repo_name: str, env: str | None) -> None:
         if path == self._detached_path:
             raise RepoError(f"set-upstream-to {ref} failed at {path}: HEAD is detached", cwd=str(path))
-        super().set_upstream_to(path, ref)
+        super().set_upstream_to(path, ref, repo_name=repo_name, env=env)
 
 
 def test_reconcile_all_continues_past_detached_head_repo_in_earlier_env(
@@ -1729,3 +1730,65 @@ def test_reconcile_all_continues_past_detached_head_repo_in_earlier_env(
     # beta still reconciled: its worktree's tracking was wired despite alpha's failure.
     assert (beta_worktree, "origin/main") in git.upstreams_set
     assert ("beta", True) in init_reporter.targets_completed
+
+
+def test_reconcile_env_names_the_env_on_worktree_calls_and_none_on_source_checkout_calls(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """Every git call init makes on a feature worktree names its env; the source checkout's names none.
+
+    Every call, worktree or source checkout, names the repo it acts for.
+    """
+    cfg = _two_repo_config()
+    alpha_main = WORKSPACE_ROOT / "projects" / "alpha-repo"
+    beta_main = WORKSPACE_ROOT / "projects" / "beta-repo"
+    alpha_worktree = WORKSPACE_ROOT / "myenv" / "alpha-repo"
+    beta_worktree = WORKSPACE_ROOT / "myenv" / "beta-repo"
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", alpha_main, beta_main, alpha_worktree])
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    git = FakeGitRepository()
+    git.local_branches[alpha_main] = ["myenv"]
+    git.local_branches[beta_main] = ["main"]
+    git.tracking_branches[alpha_worktree] = "origin/master"
+
+    svc = _service(cfg, fs, FakeSubprocessRunner(), git)
+    assert svc.reconcile_env("myenv", init_reporter) is True
+
+    assert git.env_calls
+    for method, path, env in git.env_calls:
+        in_env = path in (alpha_worktree, beta_worktree)
+        assert env == ("myenv" if in_env else None), f"{method} on {path} was given env={env!r}"
+    # The calls that acted on the new worktree were made: creating it, inferring and wiring tracking, identity.
+    for method in ("add_worktree", "set_upstream_to", "set_push_default_upstream", "set_user_identity"):
+        assert "myenv" in git.envs_for(method), method
+    assert git.envs_for("get_local_branches") == [None]
+    owner = {alpha_main: "alpha-repo", alpha_worktree: "alpha-repo", beta_main: "beta-repo", beta_worktree: "beta-repo"}
+    assert git.repo_name_calls
+    for method, path, repo_name in git.repo_name_calls:
+        assert repo_name == owner[path], f"{method} on {path} was given repo_name={repo_name!r}"
+
+
+def test_reconcile_projects_and_standalones_name_no_env(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """A source checkout and a standalone are not feature worktrees: init's git calls on them name no env."""
+    ext_path = WORKSPACE_ROOT / "my-ext"
+    demo_path = WORKSPACE_ROOT / "projects" / "demo"
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", demo_path, ext_path])
+    fs.directories.add(WORKSPACE_ROOT / ".git" / "info")
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    cfg = _standalone_config(ref="v1.0.0")
+    lock_repo = FakeConfigLockRepository(
+        entries={"my-ext": LockEntry(name="my-ext", ref="v1.0.0", kind=RefKind.tag, commit=STANDALONE_SHA)}
+    )
+    git = FakeGitRepository()
+
+    svc = _service(cfg, fs, FakeSubprocessRunner(), git, config_lock_repo=lock_repo)
+    svc.reconcile_projects(init_reporter)
+    svc.reconcile_standalones(init_reporter)
+
+    assert git.env_calls
+    assert {env for _method, _path, env in git.env_calls} == {None}
+    # Only the pinned standalone runs git here (no identity is configured); its calls name it.
+    assert {(path, repo_name) for _method, path, repo_name in git.repo_name_calls} == {(ext_path, "my-ext")}

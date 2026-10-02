@@ -4,12 +4,14 @@ from pathlib import Path
 
 import git
 
+from winter_cli.core.tracing import IOperationTracer
 from winter_cli.modules.workspace.env_index import GREEK_LETTERS, resolve_env_index
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
 from winter_cli.modules.workspace.internal.branch_tracking import (
     feature_branch_from_upstream,
     read_origin_merge_branch,
 )
+from winter_cli.modules.workspace.internal.git_operation import GitOperationDeclaration
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.models import (
     FeatureEnvironment,
@@ -35,11 +37,13 @@ class ReadWorkspaceRepository:
     def __init__(
         self,
         error_factory: RepoErrorFactory,
+        tracer: IOperationTracer,
         env_aliases: list[str] | None = None,
         envs_per_workspace: int | None = None,
         registry: IEnvIndexRegistry | None = None,
     ) -> None:
         self._error_factory = error_factory
+        self._tracer = tracer
         self._env_aliases = env_aliases
         self._envs_per_workspace = envs_per_workspace
         self._registry = registry
@@ -171,17 +175,19 @@ class ReadWorkspaceRepository:
             if worktree_tracking is not None:
                 branches.append(feature_branch_from_upstream(worktree_tracking.get(repo.name)))
             else:
-                branches.append(self._read_worktree_feature_branch(env.path / repo.name, repo.name))
+                branches.append(self._read_worktree_feature_branch(env.path / repo.name, repo.name, env=env.name))
         return branches
 
-    def _read_worktree_feature_branch(self, worktree_path: Path, repo_name: str) -> str | None:
+    @GitOperationDeclaration("config")
+    def _read_worktree_feature_branch(self, worktree_path: Path, repo_name: str, *, env: str | None) -> str | None:
         """One worktree's connected feature branch, or `None` when not connected.
 
         Delegates to `read_origin_merge_branch`, which reads
         `branch.<head>.{remote,merge}` config directly so a freshly-connected,
         never-fetched worktree reads back as connected immediately. Only used
         when the caller has no already-gathered status piece to derive the
-        branch from (see `_read_feature_branches`).
+        branch from (see `_read_feature_branches`). `env` names the feature
+        environment the worktree belongs to, for the `git config` span.
         """
         if not (worktree_path / ".git").exists():
             return None

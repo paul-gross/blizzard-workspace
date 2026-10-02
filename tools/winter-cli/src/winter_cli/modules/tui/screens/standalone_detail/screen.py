@@ -8,6 +8,7 @@ from textual.containers import Horizontal
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static
 
+from winter_cli.core.tracing import ISessionTracer
 from winter_cli.modules.tui.error_log import ErrorLogService
 from winter_cli.modules.tui.keybindings import KeybindingMixin, KeybindingResolver, plugin_action_bindings
 from winter_cli.modules.tui.keybindings.actions import STANDALONE_DETAIL_ACTIONS
@@ -53,6 +54,7 @@ class StandaloneDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
         plugin_registry: PluginRegistry,
         error_log: ErrorLogService,
         keybinding_resolver: KeybindingResolver,
+        session_tracer: ISessionTracer,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -63,6 +65,7 @@ class StandaloneDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
         self._plugin_registry = plugin_registry
         self._error_log = error_log
         self._keybinding_resolver = keybinding_resolver
+        self._session_tracer = session_tracer
         self._detail_panels = list(plugin_registry.detail_panels)
         # Retained for parity with WorktreeDetailScreen and as a test/observability
         # hook on the last-rendered status; not read by the screen itself.
@@ -95,21 +98,22 @@ class StandaloneDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
 
     @work(thread=True)
     def _refresh_data(self) -> None:
-        self._call_from_thread_safe(self._on_refresh_start)
-        if self._worker_cancelled():
-            return
-        repo = self._resolve_repo()
-        if repo is None:
-            self._call_from_thread_safe(self._on_refresh_finished)
-            return
-        try:
-            detail = self._repo_repo.get_standalone_detail(repo)
-        except RepoError as exc:
-            self._capture_error(f"StandaloneDetailScreen({self.repo_name}).refresh", exc)
-            self._call_from_thread_safe(self._on_refresh_finished)
-            return
-        outcomes = render_detail_panels(self._detail_panels, DetailPanelContext(repo=repo))
-        self._call_from_thread_safe(self._update_widgets, detail, outcomes)
+        with self._session_tracer.session_root("dashboard refresh standalone"):
+            self._call_from_thread_safe(self._on_refresh_start)
+            if self._worker_cancelled():
+                return
+            repo = self._resolve_repo()
+            if repo is None:
+                self._call_from_thread_safe(self._on_refresh_finished)
+                return
+            try:
+                detail = self._repo_repo.get_standalone_detail(repo)
+            except RepoError as exc:
+                self._capture_error(f"StandaloneDetailScreen({self.repo_name}).refresh", exc)
+                self._call_from_thread_safe(self._on_refresh_finished)
+                return
+            outcomes = render_detail_panels(self._detail_panels, DetailPanelContext(repo=repo))
+            self._call_from_thread_safe(self._update_widgets, detail, outcomes)
 
     def _update_widgets(self, detail: RepoStatusAndHistory, outcomes: list[PanelOutcome]) -> None:
         self._repo_detail = detail
@@ -169,21 +173,23 @@ class StandaloneDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
 
     @work(thread=True)
     def _execute_workspace_action(self, action_name: str, originating_scope: ActionScope) -> None:
-        ctx = WorkspaceContext(workspace=self._workspace, suspend=self.app.suspend)
-        inv = ActionInvocation(scope=originating_scope, context=ctx)
-        for action in self._plugin_registry.actions_for_scope(originating_scope):
-            if action.name == action_name:
-                action.handler(inv)
-                return
+        with self._session_tracer.session_root("dashboard plugin action"):
+            ctx = WorkspaceContext(workspace=self._workspace, suspend=self.app.suspend)
+            inv = ActionInvocation(scope=originating_scope, context=ctx)
+            for action in self._plugin_registry.actions_for_scope(originating_scope):
+                if action.name == action_name:
+                    action.handler(inv)
+                    return
 
     @work(thread=True)
     def _execute_standalone_action(self, action_name: str, originating_scope: ActionScope) -> None:
-        repo = self._resolve_repo()
-        if repo is None:
-            return
-        ctx = StandaloneRepoContext(repo=repo, suspend=self.app.suspend)
-        inv = ActionInvocation(scope=originating_scope, context=ctx)
-        for action in self._plugin_registry.actions_for_scope(originating_scope):
-            if action.name == action_name:
-                action.handler(inv)
+        with self._session_tracer.session_root("dashboard plugin action"):
+            repo = self._resolve_repo()
+            if repo is None:
                 return
+            ctx = StandaloneRepoContext(repo=repo, suspend=self.app.suspend)
+            inv = ActionInvocation(scope=originating_scope, context=ctx)
+            for action in self._plugin_registry.actions_for_scope(originating_scope):
+                if action.name == action_name:
+                    action.handler(inv)
+                    return

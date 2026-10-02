@@ -212,6 +212,10 @@ def test_update_tag_pin_moves_to_new_sha(tmp_path: Path) -> None:
     assert report.standalone[0].pin_ref == SHA_NEW[:8]
     assert ("standalone", "my-lib", SyncResult.re_pinned, SHA_NEW[:8]) in reporter.synced
     assert reporter.completed_success is True
+    # A standalone is not a feature worktree: every git call it makes names no env.
+    assert git_repo.env_calls
+    assert {env for _method, _path, env in git_repo.env_calls} == {None}
+    assert {repo_name for _method, _path, repo_name in git_repo.repo_name_calls} == {"my-lib"}
 
 
 def test_update_branch_pin_resets_to_resolved_commit(tmp_path: Path) -> None:

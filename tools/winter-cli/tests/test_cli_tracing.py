@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Mapping
+from contextlib import AbstractContextManager
 
 import click
 import pytest
@@ -19,7 +21,8 @@ from winter_cli import cli as cli_module
 from winter_cli.cli import _cli_group, _exit_error_type, _tracing_settings_from_environment
 from winter_cli.cli_context import CliContext, cli_ctx
 from winter_cli.container import Container
-from winter_cli.core.tracing import TracingSettings
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
+from winter_cli.core.tracing import AttributeValue, ICommandTracer, IOperationHandle, TracingSettings
 from winter_cli.modules.workspace.models import RepoError
 
 
@@ -41,11 +44,28 @@ class FakeCommandTracer:
     def end_command(self, error_type: str | None) -> None:
         self.events.append(("end", error_type))
 
+    def start_background_export(self) -> None:
+        self.events.append(("start_background_export", None))
+
+    def session_root(self, name: str) -> AbstractContextManager[IOperationHandle]:
+        self.events.append(("session_root", name))
+        return NoopCommandTracer().operation(name)
+
+    def operation(
+        self, name: str, attributes: Mapping[str, AttributeValue] | None = None
+    ) -> AbstractContextManager[IOperationHandle]:
+        self.events.append(("operation", name))
+        return NoopCommandTracer().operation(name)
+
     def export(self) -> None:
         self.events.append(("export", None))
 
     def named(self, kind: str) -> list[object]:
         return [value for event, value in self.events if event == kind]
+
+
+def _conforms_fake_command_tracer(x: FakeCommandTracer) -> ICommandTracer:
+    return x
 
 
 def _container_with(tracer: FakeCommandTracer) -> Container:
@@ -264,6 +284,46 @@ def test_export_runs_once_when_no_command_runs(tracer: FakeCommandTracer, monkey
     assert _run_cli(monkeypatch, "no-such-command") == 2
 
     assert tracer.events == [("export", None)]
+
+
+# ── Background export belongs to the dashboard alone ─────────────────────────
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [["ok"], ["sys-exit", "1"], ["repo-error"], ["boom"], ["nested", "leaf"], ["no-such-command"]],
+)
+def test_a_one_shot_command_never_starts_background_export(
+    argv: list[str], tracer: FakeCommandTracer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _run_cli(monkeypatch, *argv)
+
+    assert tracer.named("start_background_export") == []
+
+
+def test_the_dashboard_starts_background_export_before_the_app_runs_and_exports_after_it(
+    tracer: FakeCommandTracer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _App:
+        def __init__(self, container: Container, source_override: str | None = None) -> None:
+            pass
+
+        def run(self) -> None:
+            tracer.events.append(("app_run", None))
+
+    monkeypatch.setattr("winter_cli.modules.tui.app.WinterDashboardApp", _App)
+    monkeypatch.setitem(_TEST_COMMANDS, "dashboard", "winter_cli.modules.tui.command:dashboard")
+
+    assert _run_cli(monkeypatch, "dashboard") == 0
+
+    assert [event for event, _ in tracer.events] == [
+        "start",
+        "start_background_export",
+        "app_run",
+        "end",
+        "export",
+    ]
+    assert tracer.named("start") == ["winter dashboard"]
 
 
 # ── Exit semantics (a zero exit is success; anything else is an error type) ──

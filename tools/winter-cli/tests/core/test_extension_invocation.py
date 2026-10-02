@@ -16,6 +16,7 @@ from pathlib import Path
 
 from tests.conftest import FakeSubprocessRunner
 from winter_cli.core.extension_invocation import build_extension_env
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.modules.capability.models import CapabilitySlot, ResolvedCapability
 from winter_cli.modules.service.service_fan_out_service import FanOutCell, ServiceFanOutService
 
@@ -158,7 +159,9 @@ def test_fan_out_up_emits_winter_ext_config_dir() -> None:
         config_dir=CONFIG_DIR,
     )
     runner = FakeSubprocessRunner()
-    svc = ServiceFanOutService(subprocess_runner=runner, workspace_root=WS, service_prefix=SERVICE_PREFIX)
+    svc = ServiceFanOutService(
+        subprocess_runner=runner, workspace_root=WS, service_prefix=SERVICE_PREFIX, tracer=NoopCommandTracer()
+    )
 
     svc.up([FanOutCell(provider=provider, scope="alpha", positional="alpha")])
 

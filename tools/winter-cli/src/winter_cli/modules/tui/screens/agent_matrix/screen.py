@@ -32,6 +32,7 @@ from textual.widgets import DataTable, Footer, Header, Static
 
 from winter_cli.config.models import CodeAgentVendor
 from winter_cli.core.config_file import ConfigError
+from winter_cli.core.tracing import ISessionTracer
 from winter_cli.modules.agents.agent_matrix_service import AgentMatrixService
 from winter_cli.modules.agents.cell_text import Segments, code_default_segments, effective_segments, tier_segments
 from winter_cli.modules.agents.models import (
@@ -142,6 +143,7 @@ class AgentMatrixScreen(KeybindingMixin, PluginActionMixin, Screen):
         error_log: ErrorLogService,
         keybinding_resolver: KeybindingResolver,
         ws_init_runner: WorkspaceInitRunner,
+        session_tracer: ISessionTracer,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
@@ -149,6 +151,7 @@ class AgentMatrixScreen(KeybindingMixin, PluginActionMixin, Screen):
         self._error_log = error_log
         self._keybinding_resolver = keybinding_resolver
         self._ws_init_runner = ws_init_runner
+        self._session_tracer = session_tracer
         # True from `i` until that run's real outcome is reported — a run that
         # outlasts the timeout still blocks another `i` until it finishes.
         self._ws_init_running = False
@@ -199,18 +202,19 @@ class AgentMatrixScreen(KeybindingMixin, PluginActionMixin, Screen):
         threading.Thread(target=self._run_ws_init, args=(app, slow_timer), name="ws-init", daemon=True).start()
 
     def _run_ws_init(self, app: App, slow_timer: Timer) -> None:
-        try:
-            result = self._ws_init_runner.run()
-            error = None if result.success else "; ".join(result.errors) or "winter ws init failed"
-        except Exception as exc:
-            # Init walks every repo and extension hook; an unexpected failure
-            # there is reported like a failed run rather than escaping the thread.
-            error = f"{type(exc).__name__}: {exc}"
-        if not app.is_running:
-            return
-        # The app may begin tearing down between the is_running check and the call.
-        with contextlib.suppress(RuntimeError, concurrent.futures.CancelledError):
-            app.call_from_thread(self._finish_ws_init, app, slow_timer, error)
+        with self._session_tracer.session_root("dashboard ws init"):
+            try:
+                result = self._ws_init_runner.run()
+                error = None if result.success else "; ".join(result.errors) or "winter ws init failed"
+            except Exception as exc:
+                # Init walks every repo and extension hook; an unexpected failure
+                # there is reported like a failed run rather than escaping the thread.
+                error = f"{type(exc).__name__}: {exc}"
+            if not app.is_running:
+                return
+            # The app may begin tearing down between the is_running check and the call.
+            with contextlib.suppress(RuntimeError, concurrent.futures.CancelledError):
+                app.call_from_thread(self._finish_ws_init, app, slow_timer, error)
 
     def _warn_ws_init_slow(self, app: App) -> None:
         app.notify(
@@ -242,24 +246,25 @@ class AgentMatrixScreen(KeybindingMixin, PluginActionMixin, Screen):
     # post-init reload; cancelling the older one keeps its stale result off screen.
     @work(thread=True, exclusive=True, group="agent-matrix-load")
     def _load(self) -> None:
-        if self._worker_cancelled():
-            return
-        try:
-            matrix = self._matrix_svc.build()
-        except ConfigError as exc:
-            self._capture_error("AgentMatrixScreen.open", RepoError(str(exc)), title="config error")
-            self._call_from_thread_safe(self._show_error, str(exc), "config error")
-            return
-        except Exception as exc:
-            # build() delegates to collaborators this screen doesn't control
-            # (the copy inspector, the resolver chain) — an unexpected failure
-            # there must not take the whole dashboard down. Surface it the
-            # same way a ConfigError is surfaced rather than letting it escape
-            # this worker thread.
-            self._capture_error("AgentMatrixScreen.open", RepoError(str(exc)), title="agent matrix error")
-            self._call_from_thread_safe(self._show_error, str(exc), "agent matrix error")
-            return
-        self._call_from_thread_safe(self._show_matrix, matrix)
+        with self._session_tracer.session_root("dashboard load agent matrix"):
+            if self._worker_cancelled():
+                return
+            try:
+                matrix = self._matrix_svc.build()
+            except ConfigError as exc:
+                self._capture_error("AgentMatrixScreen.open", RepoError(str(exc)), title="config error")
+                self._call_from_thread_safe(self._show_error, str(exc), "config error")
+                return
+            except Exception as exc:
+                # build() delegates to collaborators this screen doesn't control
+                # (the copy inspector, the resolver chain) — an unexpected failure
+                # there must not take the whole dashboard down. Surface it the
+                # same way a ConfigError is surfaced rather than letting it escape
+                # this worker thread.
+                self._capture_error("AgentMatrixScreen.open", RepoError(str(exc)), title="agent matrix error")
+                self._call_from_thread_safe(self._show_error, str(exc), "agent matrix error")
+                return
+            self._call_from_thread_safe(self._show_matrix, matrix)
 
     def _show_error(self, message: str, label: str = "config error") -> None:
         error = self.query_one("#agent-matrix-error", Static)

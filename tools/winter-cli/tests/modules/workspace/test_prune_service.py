@@ -83,6 +83,42 @@ def test_find_orphans_flags_undeclared_clean_clone_as_safe(workspace_config: Wor
     assert project_orphans[0].safe_to_remove is True
 
 
+def test_find_orphans_probes_a_source_checkout_without_an_env(workspace_config: WorkspaceConfig) -> None:
+    orphan_path = PROJECTS_DIR / "ghost"
+    fs = FakeFilesystem(
+        directories=[PROJECTS_DIR, orphan_path],
+        files={orphan_path / ".git" / "HEAD": "ref: refs/heads/main\n"},
+    )
+    git = FakeGitRepository()
+    git.clean_worktrees.add(orphan_path)
+    svc = _service(workspace_config, fs, git)
+
+    svc.find_orphans()
+
+    assert git.env_calls == [("is_worktree_clean", orphan_path, None)]
+    # An orphan clone has no declared repo: its directory name stands in for the repo name.
+    assert git.repo_name_calls == [("is_worktree_clean", orphan_path, "ghost")]
+
+
+def test_find_orphans_names_a_standalone_orphan_by_its_exclude_block(workspace_config: WorkspaceConfig) -> None:
+    """The managed block a standalone's paths sit in is named for the repo, so the probe names that repo."""
+    orphan_path = WORKSPACE_ROOT / "vendor" / "old-ext-checkout"
+    fs = FakeFilesystem(
+        directories=[PROJECTS_DIR, orphan_path],
+        files={orphan_path / ".git" / "HEAD": "ref: refs/heads/main\n"},
+    )
+    _write_exclude(fs, WORKSPACE_ROOT, "# >>> old-ext (managed by winter)\n/vendor/old-ext-checkout/\n# <<< old-ext\n")
+    git = FakeGitRepository()
+    git.clean_worktrees.add(orphan_path)
+    svc = _service(workspace_config, fs, git)
+
+    orphans = svc.find_orphans()
+
+    assert [(o.kind, o.path) for o in orphans if o.kind == "standalone_clone"] == [("standalone_clone", orphan_path)]
+    assert git.repo_name_calls == [("is_worktree_clean", orphan_path, "old-ext")]
+    assert git.envs_for("is_worktree_clean") == [None]
+
+
 def test_find_orphans_flags_dirty_clone_as_unsafe(workspace_config: WorkspaceConfig) -> None:
     orphan_path = PROJECTS_DIR / "dirty"
     fs = FakeFilesystem(

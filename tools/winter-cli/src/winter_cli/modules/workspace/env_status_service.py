@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 
+from winter_cli.core.context_thread_pool import ContextThreadPoolExecutor
 from winter_cli.modules.workspace.models import (
     DiffMode,
     EnvDiffResult,
@@ -104,7 +104,7 @@ class EnvStatusService:
         # semantics enforced below.
         wt_repo_statuses: list[WorktreeRepoStatus] = []
         if worktrees:
-            with ThreadPoolExecutor(max_workers=min(len(worktrees), STATUS_PARALLELISM)) as pool:
+            with ContextThreadPoolExecutor(max_workers=min(len(worktrees), STATUS_PARALLELISM)) as pool:
                 futures = [pool.submit(self._repo_repo.get_worktree_status, wt) for wt in worktrees]
             for wt, future in zip(worktrees, futures, strict=True):
                 try:

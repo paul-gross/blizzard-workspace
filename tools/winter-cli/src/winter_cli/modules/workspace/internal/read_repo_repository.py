@@ -7,6 +7,8 @@ from pathlib import Path
 
 import git
 
+from winter_cli.core.tracing import IOperationTracer
+from winter_cli.modules.workspace.internal.git_operation import GitOperationDeclaration
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.models import (
     DiffMode,
@@ -216,12 +218,17 @@ class _Visit:
 class ReadRepoRepository:
     """Read-only GitPython implementation. All GitPython usage is confined here."""
 
-    def __init__(self, error_factory: RepoErrorFactory) -> None:
+    def __init__(self, error_factory: RepoErrorFactory, tracer: IOperationTracer) -> None:
         self._error_factory = error_factory
+        self._tracer = tracer
 
     def get_worktree_status(self, worktree: FeatureWorktree) -> RepoStatus:
         return self._build_status(
-            worktree.path, worktree.repository.name, worktree.repository.main_branch, pieces=_Piece.STATUS
+            worktree.path,
+            worktree.repository.name,
+            worktree.repository.main_branch,
+            pieces=_Piece.STATUS,
+            env=worktree.environment.name,
         )
 
     def get_worktree_status_for_snapshot(self, worktree: FeatureWorktree) -> RepoStatus:
@@ -234,10 +241,16 @@ class ReadRepoRepository:
             worktree.repository.name,
             worktree.repository.main_branch,
             pieces=_Piece.STATUS | _Piece.TIP_SUBJECT,
+            env=worktree.environment.name,
         )
 
     def get_worktree_status_and_history(self, worktree: FeatureWorktree) -> RepoStatusAndHistory:
-        return self._build_status_and_history(worktree.path, worktree.repository.name, worktree.repository.main_branch)
+        return self._build_status_and_history(
+            worktree.path,
+            worktree.repository.name,
+            worktree.repository.main_branch,
+            env=worktree.environment.name,
+        )
 
     def get_standalone_detail(self, repo: StandaloneRepository) -> RepoStatusAndHistory:
         # The standalone detail screen reuses the worktree detail's composite
@@ -246,8 +259,9 @@ class ReadRepoRepository:
         # `recent_from_head` lists the tip commits on HEAD itself — otherwise a
         # standalone with no configured `main_branch` would show an empty
         # history.
-        return self._build_status_and_history(repo.path, repo.name, repo.main_branch, recent_from_head=True)
+        return self._build_status_and_history(repo.path, repo.name, repo.main_branch, env=None, recent_from_head=True)
 
+    @GitOperationDeclaration("status")
     def get_standalone_status(self, repo: StandaloneRepository) -> StandaloneRepoStatus:
         # Missing-on-disk / not-a-repo aren't errors — the dashboard renders
         # the row as "not present" and the user knows to run init.
@@ -326,8 +340,9 @@ class ReadRepoRepository:
             return StandaloneRepoStatus(repository=repo)
 
     def get_project_status(self, repo: ProjectRepository) -> RepoStatus:
-        return self._build_status(repo.main_path, repo.name, repo.main_branch, pieces=_Piece.STATUS)
+        return self._build_status(repo.main_path, repo.name, repo.main_branch, pieces=_Piece.STATUS, env=None)
 
+    @GitOperationDeclaration("diff")
     def get_diff(self, worktree: FeatureWorktree, mode: DiffMode) -> RepoDiffResult:
         name = worktree.repository.name
         with git.Repo(str(worktree.path)) as r:
@@ -418,6 +433,7 @@ class ReadRepoRepository:
         main_branch: str | None,
         *,
         pieces: _Piece,
+        env: str | None,
     ) -> RepoStatus:
         """Build the lean `RepoStatus` piece from one open-repo visit.
 
@@ -425,7 +441,7 @@ class ReadRepoRepository:
         through `_build_status_and_history` instead, so the grid / `ws status`
         / project-status paths that call this never pay for `git log --graph`.
         """
-        visit = self._visit(repo_path, name, main_branch, pieces=pieces)
+        visit = self._visit(repo_path, name, main_branch, pieces=pieces, env=env)
         return self._status_from_visit(name, repo_path, main_branch, visit)
 
     def _build_status_and_history(
@@ -433,6 +449,8 @@ class ReadRepoRepository:
         repo_path: Path,
         name: str,
         main_branch: str | None,
+        *,
+        env: str | None,
         recent_from_head: bool = False,
     ) -> RepoStatusAndHistory:
         visit = self._visit(
@@ -440,6 +458,7 @@ class ReadRepoRepository:
             name,
             main_branch,
             pieces=_Piece.STATUS | _Piece.HISTORY,
+            env=env,
             recent_from_head=recent_from_head,
         )
         status = self._status_from_visit(name, repo_path, main_branch, visit)
@@ -469,16 +488,21 @@ class ReadRepoRepository:
             last_commit_subject=visit.tip_subject,
         )
 
+    @GitOperationDeclaration("status")
     def _visit(
         self,
         repo_path: Path,
-        name: str,
+        repo_name: str,
         main_branch: str | None,
         *,
         pieces: _Piece,
+        env: str | None,
         recent_from_head: bool = False,
     ) -> _Visit:
         """Open the repo once and gather exactly the requested `pieces`.
+
+        `env` names the feature environment the path is a worktree of, or `None` for a source
+        checkout or a standalone; it, with `repo_name`, labels the `git status` span.
 
         The single `git.Repo` open per repo per gathering exercise: every
         piece-probe below (`_read_status`, `_read_main_ahead_behind`,
@@ -503,10 +527,12 @@ class ReadRepoRepository:
                 tip_subject: str | None = None
 
                 if _Piece.STATUS in pieces:
-                    status = self._read_status(r, name, repo_path)
-                    ahead, behind = self._read_main_ahead_behind(r, name, repo_path, main_branch)
+                    status = self._read_status(r, repo_name, repo_path)
+                    ahead, behind = self._read_main_ahead_behind(r, repo_name, repo_path, main_branch)
                 if _Piece.HISTORY in pieces:
-                    commit_graph, recent_commits = self._read_history(r, name, repo_path, main_branch, recent_from_head)
+                    commit_graph, recent_commits = self._read_history(
+                        r, repo_name, repo_path, main_branch, recent_from_head
+                    )
                 if _Piece.TIP_SUBJECT in pieces:
                     tip_subject = self._read_tip_subject(r, ahead)
 
@@ -610,6 +636,7 @@ class ReadRepoRepository:
         except git.GitCommandError:
             return False
 
+    @GitOperationDeclaration("rev-parse")
     def get_ref_tip(self, worktree: FeatureWorktree, ref: str) -> str | None:
         """Full sha `ref` resolves to in the worktree's local object store, or
         None when it doesn't resolve there. No network, never raises — a
@@ -628,6 +655,7 @@ class ReadRepoRepository:
         except (git.InvalidGitRepositoryError, git.NoSuchPathError):
             return None
 
+    @GitOperationDeclaration("merge-base")
     def is_ancestor(self, worktree: FeatureWorktree, ancestor_ref: str, ref: str) -> bool:
         """Whether `ancestor_ref` is reachable from `ref` — true also when the
         two resolve to the same commit, false for a sibling tip. `git
@@ -647,6 +675,7 @@ class ReadRepoRepository:
         except (git.InvalidGitRepositoryError, git.NoSuchPathError):
             return False
 
+    @GitOperationDeclaration("merge-base")
     def fork_point(self, worktree: FeatureWorktree, lower_ref: str, upper_ref: str) -> str | None:
         """Where `upper_ref` forked from `lower_ref`, read from `lower_ref`'s
         reflog — `git merge-base --fork-point <lower_ref> <upper_ref>`.
@@ -670,6 +699,7 @@ class ReadRepoRepository:
         except (git.InvalidGitRepositoryError, git.NoSuchPathError):
             return None
 
+    @GitOperationDeclaration("rev-parse")
     def is_rebase_in_progress(self, worktree: FeatureWorktree) -> bool:
         """Whether the worktree is currently stopped mid-rebase.
 

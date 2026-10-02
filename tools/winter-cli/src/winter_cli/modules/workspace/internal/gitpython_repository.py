@@ -5,7 +5,9 @@ from pathlib import Path
 
 import git
 
+from winter_cli.core.tracing import IOperationTracer
 from winter_cli.modules.workspace.git_repository import IGitRepository
+from winter_cli.modules.workspace.internal.git_operation import GitOperationDeclaration, GitOperationExemption
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.models import RepoError
 from winter_cli.modules.workspace.models.domain_model import RefKind
@@ -23,13 +25,20 @@ class GitPythonRepository:
     caller can pass `GIT_TERMINAL_PROMPT=0` to make a prompt fail fast.
     """
 
-    def __init__(self, error_factory: RepoErrorFactory, clone_env: Mapping[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        error_factory: RepoErrorFactory,
+        tracer: IOperationTracer,
+        clone_env: Mapping[str, str] | None = None,
+    ) -> None:
         self._error_factory = error_factory
+        self._tracer = tracer
         self._clone_env = dict(clone_env) if clone_env is not None else None
 
     # ── Cloning + worktrees ───────────────────────────────────────────────
 
-    def clone(self, url: str, dest: Path) -> None:
+    @GitOperationDeclaration("clone")
+    def clone(self, url: str, dest: Path, *, repo_name: str) -> None:
         try:
             git.Repo.clone_from(url, str(dest), env=self._clone_env)
         except git.GitCommandError as exc:
@@ -39,12 +48,16 @@ class GitPythonRepository:
                 cwd=dest.parent,
             ) from exc
 
+    @GitOperationDeclaration("worktree add")
     def add_worktree(
         self,
         source: Path,
         worktree_path: Path,
         branch: str,
         base_branch: str | None = None,
+        *,
+        repo_name: str,
+        env: str | None,
     ) -> None:
         try:
             with git.Repo(str(source)) as r:
@@ -65,7 +78,10 @@ class GitPythonRepository:
                 cwd=source,
             ) from exc
 
-    def remove_worktree(self, source: Path, worktree_path: Path, force: bool) -> None:
+    @GitOperationDeclaration("worktree remove")
+    def remove_worktree(
+        self, source: Path, worktree_path: Path, force: bool, *, repo_name: str, env: str | None
+    ) -> None:
         try:
             with git.Repo(str(source)) as r:
                 args = ["remove"]
@@ -80,6 +96,7 @@ class GitPythonRepository:
                 cwd=source,
             ) from exc
 
+    @GitOperationExemption("env discovery is workspace discovery, not an operation on a repository")
     def list_worktrees(self, source: Path) -> list[Path]:
         try:
             with git.Repo(str(source)) as r:
@@ -98,11 +115,13 @@ class GitPythonRepository:
 
     # ── Branches + tracking ──────────────────────────────────────────────
 
-    def get_local_branches(self, path: Path) -> list[str]:
+    @GitOperationDeclaration("branch")
+    def get_local_branches(self, path: Path, *, repo_name: str, env: str | None) -> list[str]:
         with git.Repo(str(path)) as r:
             return [h.name for h in r.heads]
 
-    def get_tracking_branch(self, path: Path) -> str | None:
+    @GitOperationDeclaration("config")
+    def get_tracking_branch(self, path: Path, *, repo_name: str, env: str | None) -> str | None:
         with git.Repo(str(path)) as r:
             try:
                 tb = r.active_branch.tracking_branch()
@@ -110,7 +129,8 @@ class GitPythonRepository:
                 return None
             return tb.name if tb is not None else None
 
-    def set_upstream_to(self, path: Path, ref: str) -> None:
+    @GitOperationDeclaration("config")
+    def set_upstream_to(self, path: Path, ref: str, *, repo_name: str, env: str | None) -> None:
         # Write branch.<head>.{remote,merge} config directly instead of
         # `git branch --set-upstream-to <ref>`, which exits 128 when <ref> is a
         # remote-tracking branch git cannot resolve locally — the state left by
@@ -159,25 +179,29 @@ class GitPythonRepository:
                 cwd=path,
             ) from exc
 
-    def set_push_default_upstream(self, path: Path) -> None:
+    @GitOperationDeclaration("config")
+    def set_push_default_upstream(self, path: Path, *, repo_name: str, env: str | None) -> None:
         with git.Repo(str(path)) as r, r.config_writer() as cw:
             cw.set_value("push", "default", "upstream")
 
     # ── Repository-scope config ──────────────────────────────────────────
 
-    def set_user_identity(self, path: Path, name: str, email: str) -> None:
+    @GitOperationDeclaration("config")
+    def set_user_identity(self, path: Path, name: str, email: str, *, repo_name: str, env: str | None) -> None:
         with git.Repo(str(path)) as r, r.config_writer(config_level="repository") as cw:
             cw.set_value("user", "name", name)
             cw.set_value("user", "email", email)
 
-    def get_push_default(self, path: Path) -> str | None:
+    @GitOperationDeclaration("config")
+    def get_push_default(self, path: Path, *, repo_name: str, env: str | None) -> str | None:
         with git.Repo(str(path)) as r, r.config_reader() as cr:
             value = cr.get_value("push", "default", "")
         return str(value) if value != "" else None
 
     # ── Status probes ────────────────────────────────────────────────────
 
-    def is_worktree_clean(self, path: Path) -> bool:
+    @GitOperationDeclaration("status")
+    def is_worktree_clean(self, path: Path, *, repo_name: str, env: str | None) -> bool:
         """True iff `git status --porcelain` reports no changes.
 
         Any failure (missing repo, git error) returns False so safety-check
@@ -192,7 +216,8 @@ class GitPythonRepository:
 
     # ── Ref resolution + checkout ─────────────────────────────────────────
 
-    def resolve_ref(self, path: Path, ref: str) -> tuple[RefKind, str]:
+    @GitOperationDeclaration("rev-parse")
+    def resolve_ref(self, path: Path, ref: str, *, repo_name: str, env: str | None) -> tuple[RefKind, str]:
         """Classify `ref` against on-disk refs and return its kind + full 40-char SHA.
 
         Tries candidates in order via ``git rev-parse --verify``; first match wins.
@@ -215,7 +240,8 @@ class GitPythonRepository:
             cwd=str(path),
         )
 
-    def checkout_detached(self, path: Path, commit: str) -> None:
+    @GitOperationDeclaration("checkout")
+    def checkout_detached(self, path: Path, commit: str, *, repo_name: str, env: str | None) -> None:
         """Check out `commit` in detached-HEAD mode."""
         try:
             with git.Repo(str(path)) as r:
@@ -227,7 +253,8 @@ class GitPythonRepository:
                 cwd=path,
             ) from exc
 
-    def checkout_branch(self, path: Path, branch: str) -> None:
+    @GitOperationDeclaration("checkout")
+    def checkout_branch(self, path: Path, branch: str, *, repo_name: str, env: str | None) -> None:
         """Land the working tree on the local branch tracking ``origin/<branch>``.
 
         Creates the local branch with upstream set if it does not yet exist.
@@ -242,7 +269,8 @@ class GitPythonRepository:
                 cwd=path,
             ) from exc
 
-    def get_head_commit(self, path: Path) -> str:
+    @GitOperationDeclaration("rev-parse")
+    def get_head_commit(self, path: Path, *, repo_name: str, env: str | None) -> str:
         """Return the full 40-character SHA of HEAD."""
         try:
             with git.Repo(str(path)) as r:
@@ -254,7 +282,8 @@ class GitPythonRepository:
                 cwd=path,
             ) from exc
 
-    def stash_push(self, path: Path) -> None:
+    @GitOperationDeclaration("stash push")
+    def stash_push(self, path: Path, *, repo_name: str, env: str | None) -> None:
         """Stash the working tree at `path`."""
         try:
             with git.Repo(str(path)) as r:
@@ -266,7 +295,8 @@ class GitPythonRepository:
                 cwd=path,
             ) from exc
 
-    def stash_pop(self, path: Path) -> None:
+    @GitOperationDeclaration("stash pop")
+    def stash_pop(self, path: Path, *, repo_name: str, env: str | None) -> None:
         """Pop the most recent stash at `path`."""
         try:
             with git.Repo(str(path)) as r:

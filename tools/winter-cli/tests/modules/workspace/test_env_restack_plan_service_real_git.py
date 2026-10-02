@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 
 from tests.modules.workspace.conftest import add_env_worktree, commit, git_cmd, init_project, init_repo
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.modules.workspace.env_restack_plan_service import EnvRestackPlanService
 from winter_cli.modules.workspace.internal.read_repo_repository import ReadRepoRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
@@ -24,7 +25,7 @@ from winter_cli.modules.workspace.models import BoundarySource, ProjectRepositor
 
 @pytest.fixture
 def service() -> EnvRestackPlanService:
-    return EnvRestackPlanService(repo_repo=ReadRepoRepository(RepoErrorFactory()))
+    return EnvRestackPlanService(repo_repo=ReadRepoRepository(RepoErrorFactory(), NoopCommandTracer()))
 
 
 def test_plan_freezes_the_boundary_from_the_predecessors_reflog_across_an_amend(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 import os
 import shutil
 import subprocess
@@ -342,6 +343,14 @@ def test_executor_uses_parallelism_constant() -> None:
     svc = GitOpsService(RepoErrorFactory())
     with svc.executor() as pool:
         assert pool._max_workers == GitOpsService.PARALLELISM
+
+
+def test_executor_carries_the_submitters_context_into_tasks() -> None:
+    marker: contextvars.ContextVar[str] = contextvars.ContextVar("git_ops_executor_marker", default="unset")
+    marker.set("from-submitter")
+    svc = GitOpsService(RepoErrorFactory())
+    with svc.executor() as pool:
+        assert pool.submit(marker.get).result() == "from-submitter"
 
 
 # ── hung-remote integration (#30) ──────────────────────────────────────────

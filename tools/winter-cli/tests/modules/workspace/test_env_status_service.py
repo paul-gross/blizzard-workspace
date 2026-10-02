@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextvars
 from pathlib import Path
 from typing import Any
 
@@ -291,6 +292,26 @@ def test_get_worktree_repo_statuses_runs_concurrently(workspace: Workspace) -> N
     ).get_worktree_repo_statuses(env_wts)
 
     assert [r.worktree.repository.name for r in rows] == names
+
+
+def test_get_worktree_repo_statuses_reads_run_in_the_callers_context(workspace: Workspace) -> None:
+    """Each pooled read sees the context value the caller set before the fan-out."""
+    marker: contextvars.ContextVar[str] = contextvars.ContextVar("env_status_marker", default="unset")
+    marker.set("from-caller")
+    seen: list[str] = []
+    names = ["r1", "r2", "r3"]
+
+    repo = StatusByRepoRepository(
+        statuses={n: _status(n) for n in names},
+        on_call=lambda _name: seen.append(marker.get()),
+    )
+
+    EnvStatusService(
+        worktree_repo=FakeReadWorkspaceRepository(),  # type: ignore[arg-type]
+        repo_repo=repo,  # type: ignore[arg-type]
+    ).get_worktree_repo_statuses(_env_worktrees(workspace, names))
+
+    assert seen == ["from-caller"] * len(names)
 
 
 # ── worktree-repo decorator isolation ────────────────────────────────────────

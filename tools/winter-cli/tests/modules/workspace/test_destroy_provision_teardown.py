@@ -20,6 +20,7 @@ from tests.conftest import (
     FakeFilesystem,
     FakeGitRepository,
     FakeInitReporter,
+    FakeOperationTracer,
     FakeSubprocessRunner,
 )
 from winter_cli.config.models import (
@@ -699,3 +700,56 @@ def test_teardown_started_event_emitted_once(
 
     started_events = [a for a in init_reporter.actions if a[2] == "provision_teardown_started"]
     assert len(started_events) == 1
+
+
+# ---------------------------------------------------------------------------
+# Provision spans reached through destroy
+# ---------------------------------------------------------------------------
+
+
+def test_destroy_teardown_reaches_run_handler_and_opens_a_provision_handler_destroy_span(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """`ws destroy` runs its teardown through the real execution service, so each destroy handler is spanned."""
+    from winter_cli.modules.provision.execution_service import ProvisionExecutionService
+    from winter_cli.modules.provision.provision_service import NoOpServiceCheck, ProvisionService
+
+    config = _workspace_config(
+        provision_raw={"resource": [{"scope": "feature-environment", "apply": "echo up", "destroy": "echo drop"}]}
+    )
+    fs = _minimal_fs()
+    git = FakeGitRepository()
+    git.clean_worktrees.add(WORKSPACE_ROOT / "alpha" / "demo")
+    tracer = FakeOperationTracer()
+    subprocess = FakeSubprocessRunner(popen_responses={"sh -c echo drop": ([], 0)})
+    exec_svc = ProvisionExecutionService(
+        config=config,
+        fs=fs,
+        subprocess_runner=subprocess,
+        manifest_loader=ExtensionManifestLoader(config_file_reader=FakeConfigFileReader({})),
+        repo_factory=RepositoryFactory(config),
+        tracer=tracer,
+    )
+    prov_svc = ProvisionService(
+        config=config,
+        execution_svc=exec_svc,
+        manifest_loader=_FakeManifestLoader(),  # type: ignore[arg-type]
+        repo_factory=_FakeRepoFactory(),  # type: ignore[arg-type]
+        service_check=NoOpServiceCheck(),
+        fs=fs,
+    )
+
+    ok = _service(config, fs, git, provision_svc=prov_svc).destroy_env(
+        "alpha",
+        force=False,
+        strict=False,
+        dry_run=False,
+        reporter=init_reporter,
+        provision_teardown=True,
+    )
+
+    assert ok is True
+    [span] = tracer.spans
+    assert span.name == "provision handler destroy"
+    assert span.attributes["winter.env"] == "alpha"
+    assert span.attributes["winter.exit_code"] == 0

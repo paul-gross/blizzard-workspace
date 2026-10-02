@@ -93,6 +93,11 @@ class HangingEndpoint:
     def endpoint(self) -> str:
         return f"http://127.0.0.1:{self._listener.getsockname()[1]}"
 
+    @property
+    def accepted(self) -> int:
+        """How many connections the endpoint has taken, so a test can tell a request is in flight."""
+        return len(self._held)
+
     def _accept_forever(self) -> None:
         while True:
             try:

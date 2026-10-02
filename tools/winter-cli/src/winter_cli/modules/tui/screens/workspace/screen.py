@@ -10,6 +10,7 @@ from textual.widgets import DataTable, Footer, Header, LoadingIndicator, Static
 
 from winter_cli.config.models import DashboardLayout
 from winter_cli.core.config_file import ConfigError
+from winter_cli.core.tracing import ISessionTracer
 from winter_cli.modules.tui.error_log import ErrorLogService
 from winter_cli.modules.tui.keybindings import (
     KeybindingMixin,
@@ -61,6 +62,7 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
         plugin_registry: PluginRegistry,
         error_log: ErrorLogService,
         keybinding_resolver: KeybindingResolver,
+        session_tracer: ISessionTracer,
         dashboard_layout: DashboardLayout = DashboardLayout.auto,
         **kwargs,
     ) -> None:
@@ -71,6 +73,7 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
         self._plugin_registry = plugin_registry
         self._error_log = error_log
         self._keybinding_resolver = keybinding_resolver
+        self._session_tracer = session_tracer
         self._dashboard_layout = dashboard_layout
         self._env_worktrees: dict[str, FeatureEnvironmentWorktrees] = {}
 
@@ -143,56 +146,57 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
         All git-probing is delegated to `WorkspaceSnapshotService.collect_for_dashboard()`
         so the dashboard and `ws status` cannot diverge on what they read.
         """
-        self._call_from_thread_safe(self._on_refresh_start)
-        if self._worker_cancelled():
-            return
-        worktree_repo_decorators = list(self._plugin_registry.worktree_repo_decorators)
-        environment_decorators = list(self._plugin_registry.environment_decorators)
+        with self._session_tracer.session_root("dashboard refresh workspace"):
+            self._call_from_thread_safe(self._on_refresh_start)
+            if self._worker_cancelled():
+                return
+            worktree_repo_decorators = list(self._plugin_registry.worktree_repo_decorators)
+            environment_decorators = list(self._plugin_registry.environment_decorators)
 
-        def _on_repo_error(wt, exc):
-            self._capture_error(f"WorkspaceScreen.refresh({wt.repository.name})", exc)
+            def _on_repo_error(wt, exc):
+                self._capture_error(f"WorkspaceScreen.refresh({wt.repository.name})", exc)
 
-        def _on_config_error(exc: ConfigError) -> None:
-            # Tolerated: a last-good config exists and DashboardSnapshotService
-            # already fell back to it, so the panels stay populated — this only
-            # surfaces the failure in the error log, it does not blank anything.
-            self._capture_error("WorkspaceScreen.refresh(config)", RepoError(str(exc)), title="config error")
+            def _on_config_error(exc: ConfigError) -> None:
+                # Tolerated: a last-good config exists and DashboardSnapshotService
+                # already fell back to it, so the panels stay populated — this only
+                # surfaces the failure in the error log, it does not blank anything.
+                self._capture_error("WorkspaceScreen.refresh(config)", RepoError(str(exc)), title="config error")
 
-        try:
-            data = self._snapshot_svc.collect_for_dashboard(
-                on_repo_error=_on_repo_error,
-                on_config_error=_on_config_error,
-                env_decorators=environment_decorators or None,
-                worktree_repo_decorators=worktree_repo_decorators or None,
+            try:
+                data = self._snapshot_svc.collect_for_dashboard(
+                    on_repo_error=_on_repo_error,
+                    on_config_error=_on_config_error,
+                    env_decorators=environment_decorators or None,
+                    worktree_repo_decorators=worktree_repo_decorators or None,
+                )
+            except RepoError as exc:
+                self._capture_error("WorkspaceScreen.refresh", exc)
+                self._call_from_thread_safe(self._update_widgets, {}, [], [])
+                return
+            except ConfigError as exc:
+                # No last-good config was ever loaded (first-ever refresh hit a
+                # malformed config.toml) — nothing valid to fall back to yet.
+                self._capture_error("WorkspaceScreen.refresh", RepoError(str(exc)), title="config error")
+                self._call_from_thread_safe(self._update_widgets, {}, [], [])
+                return
+
+            # Reconstruct FeatureEnvironmentWorktrees from the overviews for the
+            # plugin action execution methods — no extra git probing needed.
+            env_worktrees_map: dict[str, FeatureEnvironmentWorktrees] = {
+                overview.status.environment.name: FeatureEnvironmentWorktrees(
+                    environment=overview.status.environment,
+                    worktrees=[rs.worktree for rs in overview.repo_statuses],
+                )
+                for overview in data.overviews
+            }
+
+            self._call_from_thread_safe(
+                self._update_widgets,
+                env_worktrees_map,
+                data.overviews,
+                data.standalone_statuses,
+                data.main_statuses,
             )
-        except RepoError as exc:
-            self._capture_error("WorkspaceScreen.refresh", exc)
-            self._call_from_thread_safe(self._update_widgets, {}, [], [])
-            return
-        except ConfigError as exc:
-            # No last-good config was ever loaded (first-ever refresh hit a
-            # malformed config.toml) — nothing valid to fall back to yet.
-            self._capture_error("WorkspaceScreen.refresh", RepoError(str(exc)), title="config error")
-            self._call_from_thread_safe(self._update_widgets, {}, [], [])
-            return
-
-        # Reconstruct FeatureEnvironmentWorktrees from the overviews for the
-        # plugin action execution methods — no extra git probing needed.
-        env_worktrees_map: dict[str, FeatureEnvironmentWorktrees] = {
-            overview.status.environment.name: FeatureEnvironmentWorktrees(
-                environment=overview.status.environment,
-                worktrees=[rs.worktree for rs in overview.repo_statuses],
-            )
-            for overview in data.overviews
-        }
-
-        self._call_from_thread_safe(
-            self._update_widgets,
-            env_worktrees_map,
-            data.overviews,
-            data.standalone_statuses,
-            data.main_statuses,
-        )
 
     def action_open_log(self) -> None:
         app = cast("WinterDashboardApp", self.app)
@@ -364,59 +368,63 @@ class WorkspaceScreen(KeybindingMixin, PluginActionMixin, Screen):
 
     @work(thread=True)
     def _execute_workspace_action(self, action_name: str, originating_scope: ActionScope) -> None:
-        ctx = WorkspaceContext(workspace=self._workspace, suspend=self.app.suspend)
-        inv = ActionInvocation(scope=originating_scope, context=ctx)
-        for action in self._plugin_registry.actions_for_scope(originating_scope):
-            if action.name == action_name:
-                action.handler(inv)
-                return
+        with self._session_tracer.session_root("dashboard plugin action"):
+            ctx = WorkspaceContext(workspace=self._workspace, suspend=self.app.suspend)
+            inv = ActionInvocation(scope=originating_scope, context=ctx)
+            for action in self._plugin_registry.actions_for_scope(originating_scope):
+                if action.name == action_name:
+                    action.handler(inv)
+                    return
 
     @work(thread=True)
     def _execute_environment_action(self, action_name: str, wt_name: str, originating_scope: ActionScope) -> None:
-        env_worktrees = self._env_worktrees.get(wt_name)
-        if env_worktrees is None:
-            return
-        ctx = FeatureEnvironmentContext(
-            environment=env_worktrees.environment,
-            worktrees=env_worktrees.worktrees,
-            suspend=self.app.suspend,
-        )
-        inv = ActionInvocation(scope=originating_scope, context=ctx)
-        for action in self._plugin_registry.actions_for_scope(originating_scope):
-            if action.name == action_name:
-                action.handler(inv)
+        with self._session_tracer.session_root("dashboard plugin action"):
+            env_worktrees = self._env_worktrees.get(wt_name)
+            if env_worktrees is None:
                 return
+            ctx = FeatureEnvironmentContext(
+                environment=env_worktrees.environment,
+                worktrees=env_worktrees.worktrees,
+                suspend=self.app.suspend,
+            )
+            inv = ActionInvocation(scope=originating_scope, context=ctx)
+            for action in self._plugin_registry.actions_for_scope(originating_scope):
+                if action.name == action_name:
+                    action.handler(inv)
+                    return
 
     @work(thread=True)
     def _execute_worktree_action(
         self, action_name: str, wt_name: str, repo_name: str, originating_scope: ActionScope
     ) -> None:
-        env_worktrees = self._env_worktrees.get(wt_name)
-        if env_worktrees is None:
-            return
-        wt = next((wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name), None)
-        if wt is None:
-            return
-        ctx = FeatureWorktreeContext(
-            worktree=wt,
-            environment_worktrees=env_worktrees,
-            workspace=self._workspace,
-            suspend=self.app.suspend,
-        )
-        inv = ActionInvocation(scope=originating_scope, context=ctx)
-        for action in self._plugin_registry.actions_for_scope(originating_scope):
-            if action.name == action_name:
-                action.handler(inv)
+        with self._session_tracer.session_root("dashboard plugin action"):
+            env_worktrees = self._env_worktrees.get(wt_name)
+            if env_worktrees is None:
                 return
+            wt = next((wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name), None)
+            if wt is None:
+                return
+            ctx = FeatureWorktreeContext(
+                worktree=wt,
+                environment_worktrees=env_worktrees,
+                workspace=self._workspace,
+                suspend=self.app.suspend,
+            )
+            inv = ActionInvocation(scope=originating_scope, context=ctx)
+            for action in self._plugin_registry.actions_for_scope(originating_scope):
+                if action.name == action_name:
+                    action.handler(inv)
+                    return
 
     @work(thread=True)
     def _execute_standalone_action(self, action_name: str, repo_name: str, originating_scope: ActionScope) -> None:
-        repo = self._repo_factory.find_standalone(repo_name)
-        if repo is None:
-            return
-        ctx = StandaloneRepoContext(repo=repo, suspend=self.app.suspend)
-        inv = ActionInvocation(scope=originating_scope, context=ctx)
-        for action in self._plugin_registry.actions_for_scope(originating_scope):
-            if action.name == action_name:
-                action.handler(inv)
+        with self._session_tracer.session_root("dashboard plugin action"):
+            repo = self._repo_factory.find_standalone(repo_name)
+            if repo is None:
                 return
+            ctx = StandaloneRepoContext(repo=repo, suspend=self.app.suspend)
+            inv = ActionInvocation(scope=originating_scope, context=ctx)
+            for action in self._plugin_registry.actions_for_scope(originating_scope):
+                if action.name == action_name:
+                    action.handler(inv)
+                    return

@@ -9,6 +9,7 @@ from textual.containers import Horizontal
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
 
+from winter_cli.core.tracing import ISessionTracer
 from winter_cli.modules.tui.error_log import ErrorLogService
 from winter_cli.modules.tui.keybindings import KeybindingMixin, KeybindingResolver, plugin_action_bindings
 from winter_cli.modules.tui.keybindings.actions import WORKTREE_DETAIL_ACTIONS
@@ -53,6 +54,7 @@ class WorktreeDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
         plugin_registry: PluginRegistry,
         error_log: ErrorLogService,
         keybinding_resolver: KeybindingResolver,
+        session_tracer: ISessionTracer,
         focused_repo: str | None = None,
         **kwargs,
     ) -> None:
@@ -66,6 +68,7 @@ class WorktreeDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
         self._plugin_registry = plugin_registry
         self._error_log = error_log
         self._keybinding_resolver = keybinding_resolver
+        self._session_tracer = session_tracer
         self._detail_panels = list(plugin_registry.detail_panels)
         self._env_status: FeatureEnvironmentStatus | None = None
         self._repo_statuses: list[WorktreeRepoStatus] = []
@@ -96,47 +99,48 @@ class WorktreeDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
 
     @work(thread=True)
     def _refresh_data(self) -> None:
-        self._call_from_thread_safe(self._on_refresh_start)
-        if self._worker_cancelled():
-            return
-        worktree_repo_decorators = list(self._plugin_registry.worktree_repo_decorators)
-        environment_decorators = list(self._plugin_registry.environment_decorators)
-        try:
-            project_repos = self._repo_factory.get_project_repos()
-            env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
-            env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-        except RepoError as exc:
-            self._capture_error(f"WorktreeDetailScreen({self.worktree_name}).refresh", exc)
-            self._call_from_thread_safe(self._on_refresh_finished)
-            return
+        with self._session_tracer.session_root("dashboard refresh worktree"):
+            self._call_from_thread_safe(self._on_refresh_start)
+            if self._worker_cancelled():
+                return
+            worktree_repo_decorators = list(self._plugin_registry.worktree_repo_decorators)
+            environment_decorators = list(self._plugin_registry.environment_decorators)
+            try:
+                project_repos = self._repo_factory.get_project_repos()
+                env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
+                env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
+            except RepoError as exc:
+                self._capture_error(f"WorktreeDetailScreen({self.worktree_name}).refresh", exc)
+                self._call_from_thread_safe(self._on_refresh_finished)
+                return
 
-        def _on_repo_error(wt, exc):
-            self._capture_error(
-                f"WorktreeDetailScreen({self.worktree_name}).refresh({wt.repository.name})",
-                exc,
-            )
+            def _on_repo_error(wt, exc):
+                self._capture_error(
+                    f"WorktreeDetailScreen({self.worktree_name}).refresh({wt.repository.name})",
+                    exc,
+                )
 
-        repo_statuses = self._env_status_svc.get_worktree_repo_statuses(
-            env_worktrees,
-            worktree_repo_decorators or None,
-            on_repo_error=_on_repo_error,
-        )
-        # The env-level feature-branch read derives from the per-repo status
-        # pieces just gathered above, instead of opening every worktree's repo
-        # a second time (see `_read_feature_branches`).
-        worktree_tracking = {rs.worktree.repository.name: rs.tracking_branch for rs in repo_statuses}
-        try:
-            env_status = self._env_status_svc.get_environment_status(
-                env,
-                project_repos,
-                environment_decorators or None,
-                worktree_tracking=worktree_tracking,
+            repo_statuses = self._env_status_svc.get_worktree_repo_statuses(
+                env_worktrees,
+                worktree_repo_decorators or None,
+                on_repo_error=_on_repo_error,
             )
-        except RepoError as exc:
-            self._capture_error(f"WorktreeDetailScreen({self.worktree_name}).refresh", exc)
-            self._call_from_thread_safe(self._on_refresh_finished)
-            return
-        self._call_from_thread_safe(self._update_widgets, env_status, repo_statuses)
+            # The env-level feature-branch read derives from the per-repo status
+            # pieces just gathered above, instead of opening every worktree's repo
+            # a second time (see `_read_feature_branches`).
+            worktree_tracking = {rs.worktree.repository.name: rs.tracking_branch for rs in repo_statuses}
+            try:
+                env_status = self._env_status_svc.get_environment_status(
+                    env,
+                    project_repos,
+                    environment_decorators or None,
+                    worktree_tracking=worktree_tracking,
+                )
+            except RepoError as exc:
+                self._capture_error(f"WorktreeDetailScreen({self.worktree_name}).refresh", exc)
+                self._call_from_thread_safe(self._on_refresh_finished)
+                return
+            self._call_from_thread_safe(self._update_widgets, env_status, repo_statuses)
 
     def _on_refresh_finished(self) -> None:
         with contextlib.suppress(Exception):
@@ -236,24 +240,25 @@ class WorktreeDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
 
     @work(thread=True)
     def _load_repo_detail(self, repo_name: str) -> None:
-        try:
-            project_repos = self._repo_factory.get_project_repos()
-            env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
-            env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-            wt = next((wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name), None)
-            if wt is None:
+        with self._session_tracer.session_root("dashboard load repo detail"):
+            try:
+                project_repos = self._repo_factory.get_project_repos()
+                env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
+                env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
+                wt = next((wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name), None)
+                if wt is None:
+                    return
+                detail = self._repo_repo.get_worktree_status_and_history(wt)
+            except RepoError as exc:
+                self._capture_error(
+                    f"WorktreeDetailScreen({self.worktree_name}).load_repo_detail({repo_name})",
+                    exc,
+                )
                 return
-            detail = self._repo_repo.get_worktree_status_and_history(wt)
-        except RepoError as exc:
-            self._capture_error(
-                f"WorktreeDetailScreen({self.worktree_name}).load_repo_detail({repo_name})",
-                exc,
-            )
-            return
-        # Panel rendering is pure and isolated, so it runs here in the worker
-        # thread alongside the git read; the UI thread only applies the results.
-        outcomes = render_detail_panels(self._detail_panels, DetailPanelContext(worktree=wt))
-        self._call_from_thread_safe(self._update_repo_info, detail, outcomes)
+            # Panel rendering is pure and isolated, so it runs here in the worker
+            # thread alongside the git read; the UI thread only applies the results.
+            outcomes = render_detail_panels(self._detail_panels, DetailPanelContext(worktree=wt))
+            self._call_from_thread_safe(self._update_repo_info, detail, outcomes)
 
     def _update_repo_info(self, detail: RepoStatusAndHistory, outcomes: list[PanelOutcome]) -> None:
         self._repo_detail = detail
@@ -310,48 +315,51 @@ class WorktreeDetailScreen(KeybindingMixin, PluginActionMixin, Screen):
 
     @work(thread=True)
     def _execute_workspace_action(self, action_name: str, originating_scope: ActionScope) -> None:
-        ctx = WorkspaceContext(workspace=self._workspace, suspend=self.app.suspend)
-        inv = ActionInvocation(scope=originating_scope, context=ctx)
-        for action in self._plugin_registry.actions_for_scope(originating_scope):
-            if action.name == action_name:
-                action.handler(inv)
-                return
+        with self._session_tracer.session_root("dashboard plugin action"):
+            ctx = WorkspaceContext(workspace=self._workspace, suspend=self.app.suspend)
+            inv = ActionInvocation(scope=originating_scope, context=ctx)
+            for action in self._plugin_registry.actions_for_scope(originating_scope):
+                if action.name == action_name:
+                    action.handler(inv)
+                    return
 
     @work(thread=True)
     def _execute_environment_action(self, action_name: str, originating_scope: ActionScope) -> None:
-        project_repos = self._repo_factory.get_project_repos()
-        env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
-        env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-        ctx = FeatureEnvironmentContext(
-            environment=env,
-            worktrees=env_worktrees.worktrees,
-            suspend=self.app.suspend,
-        )
-        inv = ActionInvocation(scope=originating_scope, context=ctx)
-        for action in self._plugin_registry.actions_for_scope(originating_scope):
-            if action.name == action_name:
-                action.handler(inv)
-                return
+        with self._session_tracer.session_root("dashboard plugin action"):
+            project_repos = self._repo_factory.get_project_repos()
+            env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
+            env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
+            ctx = FeatureEnvironmentContext(
+                environment=env,
+                worktrees=env_worktrees.worktrees,
+                suspend=self.app.suspend,
+            )
+            inv = ActionInvocation(scope=originating_scope, context=ctx)
+            for action in self._plugin_registry.actions_for_scope(originating_scope):
+                if action.name == action_name:
+                    action.handler(inv)
+                    return
 
     @work(thread=True)
     def _execute_worktree_action(self, action_name: str, repo_name: str, originating_scope: ActionScope) -> None:
-        project_repos = self._repo_factory.get_project_repos()
-        env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
-        env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
-        wt = next((wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name), None)
-        if wt is None:
-            return
-        ctx = FeatureWorktreeContext(
-            worktree=wt,
-            environment_worktrees=env_worktrees,
-            workspace=self._workspace,
-            suspend=self.app.suspend,
-        )
-        inv = ActionInvocation(scope=originating_scope, context=ctx)
-        for action in self._plugin_registry.actions_for_scope(originating_scope):
-            if action.name == action_name:
-                action.handler(inv)
+        with self._session_tracer.session_root("dashboard plugin action"):
+            project_repos = self._repo_factory.get_project_repos()
+            env = self._workspace_repo.get_environment(self._workspace, self.worktree_name)
+            env_worktrees = self._env_status_svc.get_feature_environment_worktrees(env, project_repos)
+            wt = next((wt for wt in env_worktrees.worktrees if wt.repository.name == repo_name), None)
+            if wt is None:
                 return
+            ctx = FeatureWorktreeContext(
+                worktree=wt,
+                environment_worktrees=env_worktrees,
+                workspace=self._workspace,
+                suspend=self.app.suspend,
+            )
+            inv = ActionInvocation(scope=originating_scope, context=ctx)
+            for action in self._plugin_registry.actions_for_scope(originating_scope):
+                if action.name == action_name:
+                    action.handler(inv)
+                    return
 
     def action_back(self) -> None:
         self.app.pop_screen()

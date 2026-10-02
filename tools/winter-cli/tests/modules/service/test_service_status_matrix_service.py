@@ -17,9 +17,11 @@ Covers:
 
 import json
 import stat
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
+from opentelemetry import trace
 
 from tests.conftest import (
     FakeCommandEntryRunner,
@@ -32,7 +34,9 @@ from tests.conftest import (
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.internal.local_subprocess_runner import LocalSubprocessRunner
 from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
+from winter_cli.core.internal.otel_command_tracer import OtelCommandTracer
 from winter_cli.core.subprocess_runner import SubprocessResult
+from winter_cli.core.tracing import ITracePropagator, TracingSettings
 from winter_cli.modules.capability.capability_registry_service import CapabilityRegistryService
 from winter_cli.modules.capability.models import CapabilitySlot, ResolvedCapability
 from winter_cli.modules.service.describe_parser import DescribeResultParser
@@ -1277,12 +1281,13 @@ def _real_matrix_svc(
     ws: Path,
     assignments: dict[str, int],
     provider_names: list[str],
+    tracer: ITracePropagator | None = None,
 ) -> tuple[ServiceStatusMatrixService, list[ResolvedCapability]]:
     """Build a ServiceStatusMatrixService driven by real subprocesses."""
     from winter_cli.modules.workspace.env_band_resolver_service import EnvBandResolverService
     from winter_cli.modules.workspace.env_provisioner import EnvProvisionerService
 
-    runner = LocalSubprocessRunner(NoopCommandTracer())
+    runner = LocalSubprocessRunner(tracer if tracer is not None else NoopCommandTracer())
     reg = _FakeEnvIndexRegistry(assignments)
     ws_config = _fake_ws_config(base_port=4000, ports_per_env=20)
     provisioner = EnvProvisionerService(
@@ -1498,6 +1503,7 @@ def test_readiness_wait_never_runs_a_command_entry_across_its_own_poll_loop() ->
     sleeps: list[float] = []
     readiness = ServiceReadinessService(
         status_service=status_svc,
+        tracer=NoopCommandTracer(),
         sleep=sleeps.append,
         monotonic=_ticking_monotonic(),
         poll_interval_s=0.25,
@@ -1512,3 +1518,47 @@ def test_readiness_wait_never_runs_a_command_entry_across_its_own_poll_loop() ->
     # Yet no command entry ran even once across all those polls.
     assert command_runner.calls == []
     assert runner.popen_envs[0]["SECRET"] == COMMAND_PLACEHOLDER
+
+
+# ── Trace context across the matrix pool ──────────────────────────────────────
+
+
+@pytest.fixture()
+def command_span_tracer(monkeypatch: pytest.MonkeyPatch) -> Iterator[OtelCommandTracer]:
+    """A real OpenTelemetry tracer with its command span open (never exported)."""
+    monkeypatch.setattr(trace, "_TRACER_PROVIDER", None)
+    monkeypatch.setattr(trace._TRACER_PROVIDER_SET_ONCE, "_done", False)
+    monkeypatch.delenv("TRACEPARENT", raising=False)
+    tracer = OtelCommandTracer(TracingSettings(otlp_endpoint="http://127.0.0.1:9"))
+    tracer.start_command("winter test")
+    yield tracer
+    tracer.end_command(None)
+
+
+def test_subprocess_provider_child_carries_the_span_active_around_the_matrix_call(
+    tmp_path: Path, command_span_tracer: OtelCommandTracer
+) -> None:
+    """A cell runs on a pool thread, yet its provider child's TRACEPARENT names the caller's span.
+
+    The span is opened with the OpenTelemetry SDK directly around the matrix call, so it differs
+    from the command span a pool thread with no context would fall back to.
+    """
+    ep_dir = tmp_path / "sole-provider" / "workflow"
+    ep_dir.mkdir(parents=True)
+    _make_executable(ep_dir / "service", _build_status_echo_script("TRACEPARENT"))
+    matrix_svc, providers = _real_matrix_svc(
+        tmp_path, assignments={"alpha": 1}, provider_names=["sole-provider"], tracer=command_span_tracer
+    )
+    cells = matrix_svc.build_matrix(providers, patterns=())
+    command_span_id = trace.format_span_id(trace.get_current_span().get_span_context().span_id)
+
+    with trace.get_tracer("test").start_as_current_span("around-the-matrix") as span:
+        docs, worst_exit = matrix_svc.run_matrix(cells, reporter=None)
+        context = span.get_span_context()
+        expected = (trace.format_trace_id(context.trace_id), trace.format_span_id(context.span_id))
+
+    assert worst_exit == 0
+    handles = [svc.handle for doc in docs for env in doc.envs for svc in env.services if svc.name == "probe"]
+    assert len(handles) == len(cells) > 1
+    assert [tuple((handle or "").split("-")[1:3]) for handle in handles] == [expected] * len(cells)
+    assert trace.format_span_id(context.span_id) != command_span_id

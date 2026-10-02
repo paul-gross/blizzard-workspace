@@ -147,7 +147,10 @@ class FreshInitServiceFactory:
         )
         container.git_repo.override(
             providers.Singleton(
-                GitPythonRepository, error_factory=container.repo_error_factory, clone_env=NON_INTERACTIVE_ENV
+                GitPythonRepository,
+                error_factory=container.repo_error_factory,
+                tracer=self._command_tracer,
+                clone_env=NON_INTERACTIVE_ENV,
             )
         )
         return container
@@ -223,7 +226,7 @@ class Container(containers.DeclarativeContainer):
     # Service-level git seam used by InitService / DestroyService / PruneService
     # (not by IRead/IWriteRepoRepository, which already own domain-level git).
     # The adapter wraps `git.GitCommandError` into `RepoError` via repo_error_factory.
-    git_repo = providers.Singleton(GitPythonRepository, error_factory=repo_error_factory)
+    git_repo = providers.Singleton(GitPythonRepository, error_factory=repo_error_factory, tracer=command_tracer)
 
     # Importlib-based plugin module loader. Confines `importlib.util` and
     # `sys.modules` mutation so the registry depends on a Protocol.
@@ -237,6 +240,7 @@ class Container(containers.DeclarativeContainer):
         WriteRepoRepository,
         error_factory=repo_error_factory,
         git_ops=git_ops_svc,
+        tracer=command_tracer,
     )
     # `DashboardSnapshotService._build` rebuilds an equivalent Workspace per
     # poll from its own reloaded config — a constructor change here must be
@@ -280,6 +284,7 @@ class Container(containers.DeclarativeContainer):
     worktree_repo = providers.Factory(
         ReadWorkspaceRepository,
         error_factory=repo_error_factory,
+        tracer=command_tracer,
         env_aliases=workspace_config.provided.env_aliases,
         envs_per_workspace=workspace_config.provided.envs_per_workspace,
         registry=env_index_registry,
@@ -487,6 +492,7 @@ class Container(containers.DeclarativeContainer):
         prune_svc=prune_svc,
         config_lock_repo=config_lock_repo,
         git_repo=git_repo,
+        tracer=command_tracer,
     )
 
     init_svc = providers.Factory(
@@ -890,6 +896,7 @@ class Container(containers.DeclarativeContainer):
         subprocess_runner=subprocess_runner,
         workspace_root=workspace_config.provided.workspace_root,
         service_prefix=workspace_config.provided.service_prefix,
+        tracer=command_tracer,
         manifest_collector=service_manifest_collector_svc,
         env_provisioner=env_provisioner,
         reporter=stream_service_reporter,
@@ -937,6 +944,7 @@ class Container(containers.DeclarativeContainer):
     service_readiness_svc = providers.Factory(
         _lazy("winter_cli.modules.service.service_readiness_service:ServiceReadinessService"),
         status_service=service_status_svc,
+        tracer=command_tracer,
     )
 
     service_handler = providers.Factory(
@@ -958,6 +966,7 @@ class Container(containers.DeclarativeContainer):
         subprocess_runner=subprocess_runner,
         manifest_loader=extension_manifest_loader,
         repo_factory=repo_factory,
+        tracer=command_tracer,
         registry=env_index_registry,
     )
 
@@ -1172,6 +1181,7 @@ class Container(containers.DeclarativeContainer):
         plugin_registry=plugin_registry,
         error_log=error_log_svc,
         keybinding_resolver=keybinding_resolver,
+        session_tracer=command_tracer,
         dashboard_layout=workspace_config.provided.dashboard.layout,
     )
 
@@ -1185,6 +1195,7 @@ class Container(containers.DeclarativeContainer):
         plugin_registry=plugin_registry,
         error_log=error_log_svc,
         keybinding_resolver=keybinding_resolver,
+        session_tracer=command_tracer,
     )
 
     standalone_detail_screen = providers.Factory(
@@ -1195,6 +1206,7 @@ class Container(containers.DeclarativeContainer):
         plugin_registry=plugin_registry,
         error_log=error_log_svc,
         keybinding_resolver=keybinding_resolver,
+        session_tracer=command_tracer,
     )
 
     error_log_screen = providers.Factory(
@@ -1220,4 +1232,5 @@ class Container(containers.DeclarativeContainer):
         error_log=error_log_svc,
         keybinding_resolver=keybinding_resolver,
         ws_init_runner=ws_init_runner,
+        session_tracer=command_tracer,
     )

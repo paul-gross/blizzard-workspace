@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator
+import threading
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path
 from textwrap import dedent
 from typing import Any
@@ -17,7 +19,9 @@ from winter_cli.config.models import (
     WorkspaceConfig,
 )
 from winter_cli.container import Container
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.core.subprocess_runner import SubprocessResult
+from winter_cli.core.tracing import AttributeValue, IOperationHandle, IOperationTracer, ISessionTracer
 from winter_cli.modules.workspace.models import RepoError
 from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
 
@@ -607,24 +611,47 @@ class FakeGitRepository:
         self.stash_pushes: list[Path] = []
         self.stash_pops: list[Path] = []
 
+        # The `env` each path-taking call was given: (method, path, env).
+        self.env_calls: list[tuple[str, Path, str | None]] = []
+        # The `repo_name` each call was given: (method, path, repo_name).
+        self.repo_name_calls: list[tuple[str, Path, str]] = []
+
+    def envs_for(self, method: str) -> list[str | None]:
+        """The `env` of every `method` call, in call order."""
+        return [env for name, _path, env in self.env_calls if name == method]
+
+    def repo_names_for(self, method: str) -> list[str]:
+        """The `repo_name` of every `method` call, in call order."""
+        return [repo_name for name, _path, repo_name in self.repo_name_calls if name == method]
+
     # ── Reads ────────────────────────────────────────────────────────────
-    def get_local_branches(self, path: Path) -> list[str]:
+    def get_local_branches(self, path: Path, *, repo_name: str, env: str | None) -> list[str]:
+        self.env_calls.append(("get_local_branches", path, env))
+        self.repo_name_calls.append(("get_local_branches", path, repo_name))
         return list(self.local_branches.get(path, []))
 
-    def get_tracking_branch(self, path: Path) -> str | None:
+    def get_tracking_branch(self, path: Path, *, repo_name: str, env: str | None) -> str | None:
+        self.env_calls.append(("get_tracking_branch", path, env))
+        self.repo_name_calls.append(("get_tracking_branch", path, repo_name))
         return self.tracking_branches.get(path)
 
     def list_worktrees(self, source: Path) -> list[Path]:
         return list(self.worktree_paths.get(source, []))
 
-    def get_push_default(self, path: Path) -> str | None:
+    def get_push_default(self, path: Path, *, repo_name: str, env: str | None) -> str | None:
+        self.env_calls.append(("get_push_default", path, env))
+        self.repo_name_calls.append(("get_push_default", path, repo_name))
         return self.push_defaults.get(path)
 
-    def is_worktree_clean(self, path: Path) -> bool:
+    def is_worktree_clean(self, path: Path, *, repo_name: str, env: str | None) -> bool:
+        self.env_calls.append(("is_worktree_clean", path, env))
+        self.repo_name_calls.append(("is_worktree_clean", path, repo_name))
         return path in self.clean_worktrees
 
     # Phase-3 reads.
-    def resolve_ref(self, path: Path, ref: str) -> tuple[RefKind, str]:
+    def resolve_ref(self, path: Path, ref: str, *, repo_name: str, env: str | None) -> tuple[RefKind, str]:
+        self.env_calls.append(("resolve_ref", path, env))
+        self.repo_name_calls.append(("resolve_ref", path, repo_name))
         key = (path, ref)
         if key not in self.resolved_refs:
             raise RepoError(
@@ -633,42 +660,74 @@ class FakeGitRepository:
             )
         return self.resolved_refs[key]
 
-    def get_head_commit(self, path: Path) -> str:
+    def get_head_commit(self, path: Path, *, repo_name: str, env: str | None) -> str:
+        self.env_calls.append(("get_head_commit", path, env))
+        self.repo_name_calls.append(("get_head_commit", path, repo_name))
         if path not in self.head_commits:
             raise RepoError(f"rev-parse HEAD failed at {path}", cwd=str(path))
         return self.head_commits[path]
 
     # ── Writes ───────────────────────────────────────────────────────────
-    def clone(self, url: str, dest: Path) -> None:
+    def clone(self, url: str, dest: Path, *, repo_name: str) -> None:
+        self.repo_name_calls.append(("clone", dest, repo_name))
         self.clones.append((url, dest))
 
-    def add_worktree(self, source: Path, worktree_path: Path, branch: str, base_branch: str | None = None) -> None:
+    def add_worktree(
+        self,
+        source: Path,
+        worktree_path: Path,
+        branch: str,
+        base_branch: str | None = None,
+        *,
+        repo_name: str,
+        env: str | None,
+    ) -> None:
+        self.env_calls.append(("add_worktree", worktree_path, env))
+        self.repo_name_calls.append(("add_worktree", worktree_path, repo_name))
         self.added_worktrees.append((source, worktree_path, branch, base_branch))
 
-    def remove_worktree(self, source: Path, worktree_path: Path, force: bool) -> None:
+    def remove_worktree(
+        self, source: Path, worktree_path: Path, force: bool, *, repo_name: str, env: str | None
+    ) -> None:
+        self.env_calls.append(("remove_worktree", worktree_path, env))
+        self.repo_name_calls.append(("remove_worktree", worktree_path, repo_name))
         self.removed_worktrees.append((source, worktree_path, force))
 
-    def set_user_identity(self, path: Path, name: str, email: str) -> None:
+    def set_user_identity(self, path: Path, name: str, email: str, *, repo_name: str, env: str | None) -> None:
+        self.env_calls.append(("set_user_identity", path, env))
+        self.repo_name_calls.append(("set_user_identity", path, repo_name))
         self.identities.append((path, name, email))
 
-    def set_upstream_to(self, path: Path, ref: str) -> None:
+    def set_upstream_to(self, path: Path, ref: str, *, repo_name: str, env: str | None) -> None:
+        self.env_calls.append(("set_upstream_to", path, env))
+        self.repo_name_calls.append(("set_upstream_to", path, repo_name))
         self.upstreams_set.append((path, ref))
 
-    def set_push_default_upstream(self, path: Path) -> None:
+    def set_push_default_upstream(self, path: Path, *, repo_name: str, env: str | None) -> None:
+        self.env_calls.append(("set_push_default_upstream", path, env))
+        self.repo_name_calls.append(("set_push_default_upstream", path, repo_name))
         self.push_default_set.append(path)
 
     # Phase-3 writes.
-    def checkout_detached(self, path: Path, commit: str) -> None:
+    def checkout_detached(self, path: Path, commit: str, *, repo_name: str, env: str | None) -> None:
+        self.env_calls.append(("checkout_detached", path, env))
+        self.repo_name_calls.append(("checkout_detached", path, repo_name))
         self.detached_checkouts.append((path, commit))
 
-    def checkout_branch(self, path: Path, branch: str) -> None:
+    def checkout_branch(self, path: Path, branch: str, *, repo_name: str, env: str | None) -> None:
+        self.env_calls.append(("checkout_branch", path, env))
+        self.repo_name_calls.append(("checkout_branch", path, repo_name))
         self.branch_checkouts.append((path, branch))
 
     # Phase-6 stash writes.
-    def stash_push(self, path: Path) -> None:
+    def stash_push(self, path: Path, *, repo_name: str, env: str | None) -> None:
+        self.env_calls.append(("stash_push", path, env))
+        self.repo_name_calls.append(("stash_push", path, repo_name))
         self.stash_pushes.append(path)
 
-    def stash_pop(self, path: Path) -> None:
+    def stash_pop(self, path: Path, *, repo_name: str, env: str | None) -> None:
+        self.env_calls.append(("stash_pop", path, env))
+        self.repo_name_calls.append(("stash_pop", path, repo_name))
         self.stash_pops.append(path)
 
 
@@ -726,7 +785,116 @@ class FakeConfigLockRepository:
         self.write(merged.values())
 
 
+# ── Fake operation tracer ────────────────────────────────────────────────────
+
+
+@dataclass
+class RecordedOperation:
+    """One span a `FakeOperationTracer` was asked to open."""
+
+    name: str
+    attributes: dict[str, AttributeValue]
+    failed: bool = False
+    error_type: str | None = None
+
+
+class _RecordingOperation:
+    def __init__(self, record: RecordedOperation) -> None:
+        self._record = record
+
+    def __enter__(self) -> IOperationHandle:
+        return self
+
+    def __exit__(self, exc_type: type[BaseException] | None, exc: BaseException | None, traceback: object) -> None:
+        if exc_type is not None:
+            self.mark_failed(exc_type.__name__)
+
+    def set_attribute(self, key: str, value: AttributeValue) -> None:
+        self._record.attributes[key] = value
+
+    def mark_failed(self, error_type: str | None = None) -> None:
+        self._record.failed = True
+        self._record.error_type = error_type
+
+
+@dataclass
+class FakeOperationTracer:
+    """`IOperationTracer` fake that records every operation opened, in the order they opened.
+
+    Safe to share across pool threads. Assert on `spans` (or `by_name`) after the code under
+    test ran; a span's `attributes` include anything the body added through its handle.
+    """
+
+    spans: list[RecordedOperation] = field(default_factory=list)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    def operation(self, name: str, attributes: Mapping[str, AttributeValue] | None = None) -> _RecordingOperation:
+        record = RecordedOperation(name=name, attributes=dict(attributes or {}))
+        with self._lock:
+            self.spans.append(record)
+        return _RecordingOperation(record)
+
+    def by_name(self, name: str) -> list[RecordedOperation]:
+        return [span for span in self.spans if span.name == name]
+
+
+def _conforms_fake_operation_tracer(x: FakeOperationTracer) -> IOperationTracer:
+    return x
+
+
+@dataclass
+class FakeSessionTracer(NoopCommandTracer):
+    """`ISessionTracer` fake that records the name of every session root opened and whether export started.
+
+    Every other tracer call does nothing, so it can stand in for the container's whole command
+    tracer. Safe to share across worker threads. A root counts as open from its `with` entry to its exit,
+    so a test can assert that work ran inside one through `open_roots`.
+    """
+
+    roots: list[str] = field(default_factory=list)
+    background_export_started: int = 0
+    _open: list[str] = field(default_factory=list)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+
+    @property
+    def open_roots(self) -> list[str]:
+        with self._lock:
+            return list(self._open)
+
+    @contextmanager
+    def session_root(self, name: str) -> Iterator[IOperationHandle]:
+        with self._lock:
+            self.roots.append(name)
+            self._open.append(name)
+        try:
+            yield _RecordingOperation(RecordedOperation(name=name, attributes={}))
+        finally:
+            with self._lock:
+                self._open.remove(name)
+
+    def start_background_export(self) -> None:
+        self.background_export_started += 1
+
+
+def _conforms_fake_session_tracer(x: FakeSessionTracer) -> ISessionTracer:
+    return x
+
+
 # ── Tracing endpoints ────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def no_span_context_left_attached() -> Iterator[None]:
+    """Fail the test that leaves an OpenTelemetry span current, so no later test inherits it as a stale parent.
+
+    A command span or operation span is current only between its start and its end; a test
+    that starts one must end it.
+    """
+    yield
+    from opentelemetry import trace
+
+    leaked = trace.get_current_span()
+    assert not leaked.get_span_context().is_valid, f"a span context was left attached: {leaked}"
 
 
 @pytest.fixture

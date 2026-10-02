@@ -22,6 +22,7 @@ import git
 import pytest
 
 from tests.modules.workspace.conftest import add_env_worktree, commit, git_cmd, init_project, init_repo
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.modules.workspace.env_restack_plan_service import EnvRestackPlanService
 from winter_cli.modules.workspace.env_restack_service import EnvRestackService
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
@@ -75,14 +76,14 @@ def _rebase_in_progress(path: Path) -> bool:
 def plan_service() -> EnvRestackPlanService:
     error_factory = RepoErrorFactory()
     git_ops = GitOpsService(error_factory, sleep=lambda _: None, jitter=lambda: 0.0)
-    return EnvRestackPlanService(repo_repo=WriteRepoRepository(error_factory, git_ops))
+    return EnvRestackPlanService(repo_repo=WriteRepoRepository(error_factory, git_ops, NoopCommandTracer()))
 
 
 @pytest.fixture
 def exec_service() -> EnvRestackService:
     error_factory = RepoErrorFactory()
     git_ops = GitOpsService(error_factory, sleep=lambda _: None, jitter=lambda: 0.0)
-    return EnvRestackService(repo_repo=WriteRepoRepository(error_factory, git_ops))
+    return EnvRestackService(repo_repo=WriteRepoRepository(error_factory, git_ops, NoopCommandTracer()))
 
 
 def test_conflicting_rebase_leaves_the_worktree_mid_rebase_and_reports_the_detail(

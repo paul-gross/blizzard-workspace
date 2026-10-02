@@ -170,6 +170,7 @@ def _fan_out_svc(runner: ISubprocessRunner) -> ServiceFanOutService:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix=SERVICE_PREFIX,
+        tracer=NoopCommandTracer(),
     )
 
 
@@ -742,6 +743,7 @@ def test_fan_out_up_launches_with_no_traceparent(tracing: str, tmp_path: Path, m
         subprocess_runner=LocalSubprocessRunner(_propagators()[tracing]),
         workspace_root=tmp_path,
         service_prefix=SERVICE_PREFIX,
+        tracer=NoopCommandTracer(),
     )
 
     assert fan_out.up([FanOutCell(provider=provider, scope="alpha", positional="alpha")]) == 0
@@ -788,6 +790,7 @@ def test_fan_out_down_keeps_the_trace_context(
         subprocess_runner=LocalSubprocessRunner(_propagators()[tracing]),
         workspace_root=tmp_path,
         service_prefix=SERVICE_PREFIX,
+        tracer=NoopCommandTracer(),
     )
 
     assert fan_out.down([FanOutCell(provider=provider, scope="alpha", positional="alpha")]) == 0

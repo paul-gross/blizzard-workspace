@@ -25,6 +25,9 @@ the same way. The worktree-detail and standalone-detail screens' own `r` only re
 not trigger a config reload. A malformed `config.toml` at refresh time is tolerated: the parse error lands in the Log
 tab and the dashboard keeps showing the last-good state.
 
+**Tracing:** with tracing on, the dashboard is traced as a series of short traces, one per refresh or user action, and
+exports them while it runs rather than only on exit; see [../tracing.md](../tracing.md#the-dashboard).
+
 **Limitation:** `[keybindings]` and plugin-contributed screens/actions are resolved once at launch and stay fixed for
 the session — editing `[keybindings]` or a plugin's registered actions requires a restart to take effect, even though
 the plugin's own repo shows up live in the standalone panel like any other standalone.

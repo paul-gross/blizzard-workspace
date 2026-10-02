@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import git
 import pytest
 
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.modules.workspace.internal import read_repo_repository
 from winter_cli.modules.workspace.internal.read_repo_repository import (
     ReadRepoRepository,
@@ -56,7 +57,7 @@ def _fake_git_repo(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 @pytest.fixture
 def repo() -> ReadRepoRepository:
-    return ReadRepoRepository(RepoErrorFactory())
+    return ReadRepoRepository(RepoErrorFactory(), NoopCommandTracer())
 
 
 def _worktree(name: str = "demo", branch: str = "alpha") -> FeatureWorktree:

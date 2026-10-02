@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, PropertyMock
 import git
 import pytest
 
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.modules.workspace.internal import read_repo_repository, write_repo_repository
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
@@ -51,7 +52,7 @@ def git_ops(error_factory: RepoErrorFactory) -> GitOpsService:
 
 @pytest.fixture
 def repo(error_factory: RepoErrorFactory, git_ops: GitOpsService) -> WriteRepoRepository:
-    return WriteRepoRepository(error_factory=error_factory, git_ops=git_ops)
+    return WriteRepoRepository(error_factory=error_factory, git_ops=git_ops, tracer=NoopCommandTracer())
 
 
 def _wt(path: Path, name: str = "demo", main_branch: str = "main") -> FeatureWorktree:

@@ -175,9 +175,17 @@ inherited from its caller. A provider starts its services in a trace-free enviro
 traces and never attach spans to the step that launched them.
 
 On `down`, `status`, `logs`, `describe`, and `catalog`, the provider's environment follows winter's own: `TRACEPARENT`
-is the winter command's span when tracing is on, with its own `TRACESTATE` or none, and the caller's values pass through
-unchanged when tracing is off. See [../tracing.md](../tracing.md#propagation-to-child-processes) for the tracing
-behavior.
+is the active winter span when tracing is on, with its own `TRACESTATE` or none, and the caller's values pass through
+unchanged when tracing is off. The active span is not always the command span:
+
+| Action                                               | `TRACEPARENT` names                                                                           |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `down`                                               | The `service provider down` span for that provider call.                                      |
+| `status` and `describe` during a readiness wait      | The `service readiness wait` span of `winter service up --wait`, which every poll runs under. |
+| `status`, `describe`, `logs` and `catalog` otherwise | The winter command's span.                                                                    |
+
+See [../tracing.md](../tracing.md#propagation-to-child-processes) for the tracing behavior and
+[../tracing.md](../tracing.md#service-spans) for the spans.
 
 ## Per-action parameters
 

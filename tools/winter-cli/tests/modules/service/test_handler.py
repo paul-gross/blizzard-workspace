@@ -15,6 +15,7 @@ from tests.conftest import (
 )
 from winter_cli.config.models import ProjectRepositoryConfig, SingletonRepository, SingletonType, WorkspaceConfig
 from winter_cli.core.internal.click_cli_output_service import ClickCliOutputService
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.modules.capability.capability_registry_service import CapabilityRegistryService
 from winter_cli.modules.service.describe_parser import DescribeResultParser
 from winter_cli.modules.service.handler import ServiceHandler, ServiceParams
@@ -146,6 +147,7 @@ def _handler(runner: FakeSubprocessRunner, click: Any = None) -> ServiceHandler:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
     )
     matrix = ServiceStatusMatrixService(
         subprocess_runner=runner,
@@ -179,6 +181,7 @@ def _handler(runner: FakeSubprocessRunner, click: Any = None) -> ServiceHandler:
     )
     readiness = ServiceReadinessService(
         status_service=status,
+        tracer=NoopCommandTracer(),
         sleep=lambda _s: None,
         monotonic=_counting_clock(),
     )

@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.modules.workspace.internal.read_repo_repository import ReadRepoRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.models import (
@@ -27,7 +28,7 @@ from winter_cli.modules.workspace.models import (
 
 @pytest.fixture
 def repo() -> ReadRepoRepository:
-    return ReadRepoRepository(RepoErrorFactory())
+    return ReadRepoRepository(RepoErrorFactory(), NoopCommandTracer())
 
 
 def _git(cwd: Path, *args: str) -> str:

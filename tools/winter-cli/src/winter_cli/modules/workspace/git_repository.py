@@ -17,11 +17,20 @@ class IGitRepository(Protocol):
 
     Every method raises `RepoError` on git failure — GitPython types are
     confined to the adapter under `internal/`.
+
+    Every method except `list_worktrees` takes a required keyword `repo_name`: the
+    name of the repo the path belongs to, from the repo object the caller holds.
+    Every path-taking method except `clone` and `list_worktrees` also takes a
+    required keyword `env`: the name of the feature environment the call acts in,
+    or `None` when the path is not a feature worktree (a source checkout, a
+    standalone). Both label the call's trace span and change nothing else; the env
+    is never derived from the path. `list_worktrees` is env discovery and opens no
+    span.
     """
 
     # ── Cloning + worktrees ───────────────────────────────────────────────
 
-    def clone(self, url: str, dest: Path) -> None: ...
+    def clone(self, url: str, dest: Path, *, repo_name: str) -> None: ...
 
     def add_worktree(
         self,
@@ -29,6 +38,9 @@ class IGitRepository(Protocol):
         worktree_path: Path,
         branch: str,
         base_branch: str | None = None,
+        *,
+        repo_name: str,
+        env: str | None,
     ) -> None:
         """Create a new git worktree at `worktree_path`.
 
@@ -39,33 +51,35 @@ class IGitRepository(Protocol):
         """
         ...
 
-    def remove_worktree(self, source: Path, worktree_path: Path, force: bool) -> None: ...
+    def remove_worktree(
+        self, source: Path, worktree_path: Path, force: bool, *, repo_name: str, env: str | None
+    ) -> None: ...
 
     def list_worktrees(self, source: Path) -> list[Path]: ...
 
     # ── Branches + tracking ──────────────────────────────────────────────
 
-    def get_local_branches(self, path: Path) -> list[str]: ...
+    def get_local_branches(self, path: Path, *, repo_name: str, env: str | None) -> list[str]: ...
 
-    def get_tracking_branch(self, path: Path) -> str | None:
+    def get_tracking_branch(self, path: Path, *, repo_name: str, env: str | None) -> str | None:
         """Return the current branch's tracking ref (e.g. `origin/main`), or None if unset / detached."""
         ...
 
-    def set_upstream_to(self, path: Path, ref: str) -> None: ...
+    def set_upstream_to(self, path: Path, ref: str, *, repo_name: str, env: str | None) -> None: ...
 
-    def set_push_default_upstream(self, path: Path) -> None:
+    def set_push_default_upstream(self, path: Path, *, repo_name: str, env: str | None) -> None:
         """Set `push.default=upstream` so `git push` from the worktree branch targets its tracking branch."""
         ...
 
     # ── Repository-scope config ──────────────────────────────────────────
 
-    def set_user_identity(self, path: Path, name: str, email: str) -> None: ...
+    def set_user_identity(self, path: Path, name: str, email: str, *, repo_name: str, env: str | None) -> None: ...
 
-    def get_push_default(self, path: Path) -> str | None: ...
+    def get_push_default(self, path: Path, *, repo_name: str, env: str | None) -> str | None: ...
 
     # ── Status probes ────────────────────────────────────────────────────
 
-    def is_worktree_clean(self, path: Path) -> bool:
+    def is_worktree_clean(self, path: Path, *, repo_name: str, env: str | None) -> bool:
         """True if the worktree has no uncommitted/untracked changes.
 
         Returns False on any git failure — callers use this for safety
@@ -76,7 +90,7 @@ class IGitRepository(Protocol):
 
     # ── Ref resolution + checkout ─────────────────────────────────────────
 
-    def resolve_ref(self, path: Path, ref: str) -> tuple[RefKind, str]:
+    def resolve_ref(self, path: Path, ref: str, *, repo_name: str, env: str | None) -> tuple[RefKind, str]:
         """Classify `ref` against on-disk refs and return its kind + full 40-char SHA.
 
         Resolution order (first match wins):
@@ -89,11 +103,11 @@ class IGitRepository(Protocol):
         """
         ...
 
-    def checkout_detached(self, path: Path, commit: str) -> None:
+    def checkout_detached(self, path: Path, commit: str, *, repo_name: str, env: str | None) -> None:
         """Check out `commit` in detached-HEAD mode (equivalent to ``git checkout --detach <commit>``)."""
         ...
 
-    def checkout_branch(self, path: Path, branch: str) -> None:
+    def checkout_branch(self, path: Path, branch: str, *, repo_name: str, env: str | None) -> None:
         """Land the working tree on the local branch tracking ``origin/<branch>``.
 
         Creates the local branch and sets its upstream if it does not yet exist.
@@ -110,15 +124,15 @@ class IGitRepository(Protocol):
         """
         ...
 
-    def get_head_commit(self, path: Path) -> str:
+    def get_head_commit(self, path: Path, *, repo_name: str, env: str | None) -> str:
         """Return the full 40-character SHA of HEAD."""
         ...
 
-    def stash_push(self, path: Path) -> None:
+    def stash_push(self, path: Path, *, repo_name: str, env: str | None) -> None:
         """Stash the working tree at `path` (equivalent to ``git stash push``)."""
         ...
 
-    def stash_pop(self, path: Path) -> None:
+    def stash_pop(self, path: Path, *, repo_name: str, env: str | None) -> None:
         """Pop the most recent stash at `path` (equivalent to ``git stash pop``).
 
         Best-effort: called after checkout to restore a dirty tree stashed by

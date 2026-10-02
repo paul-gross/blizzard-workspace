@@ -13,6 +13,7 @@ from typing import Any, cast
 import pytest
 from textual.app import App, ComposeResult
 
+from tests.conftest import FakeSessionTracer
 from winter_cli.config.models import KeybindingsConfig
 from winter_cli.modules.tui.keybindings import KeybindingResolver
 from winter_cli.modules.tui.screens.workspace.feature_worktrees import FeatureWorktreesGrid
@@ -144,6 +145,7 @@ def _make_screen(actions: list[TuiAction]) -> WorkspaceScreen:
         plugin_registry=cast(Any, _FakePluginRegistry(actions)),
         error_log=cast(Any, None),
         keybinding_resolver=KeybindingResolver(KeybindingsConfig()),
+        session_tracer=FakeSessionTracer(),
     )
 
 
@@ -262,6 +264,7 @@ def _make_screen_with_env(actions: list[TuiAction], overview: FeatureEnvironment
         plugin_registry=cast(Any, _FakePluginRegistry(actions)),
         error_log=cast(Any, None),
         keybinding_resolver=KeybindingResolver(KeybindingsConfig()),
+        session_tracer=FakeSessionTracer(),
     )
 
 

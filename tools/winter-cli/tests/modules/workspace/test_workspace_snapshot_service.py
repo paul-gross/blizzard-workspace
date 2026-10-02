@@ -185,8 +185,12 @@ class FakeGitRepositoryForSnapshot:
 
     def __init__(self, head_commits: dict[str, str] | None = None) -> None:
         self._head_commits: dict[str, str] = head_commits or {}
+        self.envs: list[str | None] = []
+        self.repo_names: list[str] = []
 
-    def get_head_commit(self, path: Path) -> str:
+    def get_head_commit(self, path: Path, *, repo_name: str, env: str | None) -> str:
+        self.envs.append(env)
+        self.repo_names.append(repo_name)
         name = path.name
         if name in self._head_commits:
             return self._head_commits[name]
@@ -277,6 +281,7 @@ def _service(
     orphans: list[PruneOrphan] | None = None,
     lock_entries: dict[str, LockEntry] | None = None,
     head_commits: dict[str, str] | None = None,
+    git_repo: FakeGitRepositoryForSnapshot | None = None,
     dashboard_layout: DashboardLayout = DashboardLayout.auto,
 ) -> WorkspaceSnapshotService:
     """Construct a `WorkspaceSnapshotService` with all fakes wired."""
@@ -307,7 +312,7 @@ def _service(
     )
     prune_svc = FakePruneService(orphans=orphans)  # type: ignore[arg-type]
     config_lock_repo = FakeConfigLockRepository(entries=lock_entries)
-    git_repo = FakeGitRepositoryForSnapshot(head_commits=head_commits)
+    git_repo = git_repo or FakeGitRepositoryForSnapshot(head_commits=head_commits)
 
     env_status_svc = EnvStatusService(
         worktree_repo=worktree_repo,  # type: ignore[arg-type]
@@ -1109,6 +1114,19 @@ def test_collect_standalone_pins_present_when_ref_configured(workspace: Workspac
     assert pin.config_ref_drift is False
     assert pin.head_drift is False
     assert pin.head_commit is None
+
+
+def test_standalone_pin_head_probe_names_the_repo_and_no_env(workspace: Workspace) -> None:
+    sha = "a" * 40
+    config = _config_with_standalones({"ext-a": "main"})
+    lock_entries = {"ext-a": LockEntry(name="ext-a", ref="main", kind=RefKind.branch, commit=sha)}
+    git_repo = FakeGitRepositoryForSnapshot(head_commits={"ext-a": sha})
+    svc = _service(workspace, config, lock_entries=lock_entries, git_repo=git_repo)
+
+    svc.collect()
+
+    assert git_repo.envs == [None]
+    assert git_repo.repo_names == ["ext-a"]
 
 
 def test_collect_standalone_pins_no_drift_when_locked_and_head_matches(workspace: Workspace) -> None:

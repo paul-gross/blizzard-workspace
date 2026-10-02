@@ -20,6 +20,7 @@ import pytest
 from textual.app import App, ComposeResult
 from textual.widgets import DataTable
 
+from tests.conftest import FakeSessionTracer
 from winter_cli.config.models import KeybindingsConfig
 from winter_cli.modules.tui.keybindings import KeybindingResolver
 from winter_cli.modules.tui.screens.workspace.feature_worktrees import FeatureWorktreesGrid
@@ -211,6 +212,7 @@ def _make_detail_screen(focused_repo: str | None, detail_panels: tuple = ()) -> 
         plugin_registry=cast(Any, _FakePluginRegistry(detail_panels)),
         error_log=cast(Any, None),
         keybinding_resolver=KeybindingResolver(KeybindingsConfig()),
+        session_tracer=FakeSessionTracer(),
         focused_repo=focused_repo,
     )
 

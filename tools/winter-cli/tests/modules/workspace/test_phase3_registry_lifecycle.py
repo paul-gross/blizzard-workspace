@@ -31,6 +31,7 @@ from winter_cli.config.models import (
     WorkspaceConfig,
 )
 from winter_cli.core.internal.local_filesystem import LocalFilesystem
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.modules.workspace.destroy_service import DestroyService
 from winter_cli.modules.workspace.env_index import resolve_env_index
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
@@ -331,6 +332,7 @@ class TestReadPathRegistryLookup:
 
         repo = ReadWorkspaceRepository(
             error_factory=RepoErrorFactory(),
+            tracer=NoopCommandTracer(),
             env_aliases=["alpha", "beta"],
             envs_per_workspace=20,
             registry=registry,
@@ -350,6 +352,7 @@ class TestReadPathRegistryLookup:
 
         repo = ReadWorkspaceRepository(
             error_factory=RepoErrorFactory(),
+            tracer=NoopCommandTracer(),
             env_aliases=["alpha", "beta"],
             envs_per_workspace=20,
             registry=registry,
@@ -366,6 +369,7 @@ class TestReadPathRegistryLookup:
         """When no registry is injected (registry=None), resolve_env_index is always used."""
         repo = ReadWorkspaceRepository(
             error_factory=RepoErrorFactory(),
+            tracer=NoopCommandTracer(),
             env_aliases=["alpha", "beta"],
             envs_per_workspace=20,
             registry=None,
@@ -385,6 +389,7 @@ class TestReadPathRegistryLookup:
 
         repo = ReadWorkspaceRepository(
             error_factory=RepoErrorFactory(),
+            tracer=NoopCommandTracer(),
             env_aliases=["alpha"],
             envs_per_workspace=20,
             registry=registry,

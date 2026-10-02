@@ -71,7 +71,7 @@ Each cell is invoked as:
 (or ``<scope>/<svc>`` when the user supplied a service filter).  The explicit scope
 pattern lets the provider report configured-but-stopped services via its existing
 pattern expansion logic — no provider code change is needed.  Cells run in a bounded
-worker pool (``concurrent.futures.ThreadPoolExecutor``).  Results are merged in
+worker pool (``ContextThreadPoolExecutor``).  Results are merged in
 **enumeration order** (not completion order) to preserve deterministic output.
 
 WINTER_SERVICE_MANIFEST
@@ -89,9 +89,10 @@ from __future__ import annotations
 import dataclasses
 import fnmatch
 from collections.abc import Callable
-from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_EXCEPTION, wait
 from pathlib import Path
 
+from winter_cli.core.context_thread_pool import ContextThreadPoolExecutor
 from winter_cli.core.subprocess_runner import ISubprocessRunner
 from winter_cli.modules.capability.models import ResolvedCapability
 from winter_cli.modules.service.provider_invocation import (
@@ -356,7 +357,7 @@ class ServiceStatusMatrixService:
             results[idx] = (doc, code)
 
         try:
-            with ThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
+            with ContextThreadPoolExecutor(max_workers=_MAX_WORKERS) as pool:
                 futures = [pool.submit(_run_cell, i, cell) for i, cell in enumerate(active_cells)]
                 done, _ = wait(futures, return_when=FIRST_EXCEPTION)
                 # Propagate KeyboardInterrupt if any future raised it.

@@ -11,6 +11,14 @@ from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.extension_invocation import build_extension_env
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.core.subprocess_runner import ISubprocessRunner
+from winter_cli.core.tracing import (
+    ATTR_ENV,
+    ATTR_EXIT_CODE,
+    ATTR_HANDLER,
+    ATTR_REPO,
+    AttributeValue,
+    IOperationTracer,
+)
 from winter_cli.modules.provision.manifest import ProvisionAction, ProvisionHandler, ProvisionScope
 from winter_cli.modules.workspace.env_index import build_env_trio
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
@@ -56,6 +64,14 @@ class SingleRunResult:
 
     cwd: Path
     exit_code: int
+
+
+@dataclass(frozen=True)
+class _HandlerCwd:
+    """One directory a handler runs in, with the project repo it is a worktree of, if any."""
+
+    path: Path
+    repo: str | None = None
 
 
 @dataclass(frozen=True)
@@ -112,6 +128,7 @@ class ProvisionExecutionService:
         subprocess_runner: ISubprocessRunner,
         manifest_loader: ExtensionManifestLoader,
         repo_factory: RepositoryFactory,
+        tracer: IOperationTracer,
         registry: IEnvIndexRegistry | None = None,
     ) -> None:
         self._config = config
@@ -119,6 +136,7 @@ class ProvisionExecutionService:
         self._subprocess = subprocess_runner
         self._manifest_loader = manifest_loader
         self._repo_factory = repo_factory
+        self._tracer = tracer
         self._registry = registry
 
     def run_handler(
@@ -177,7 +195,8 @@ class ProvisionExecutionService:
             return HandlerExecutionResult(handler=handler, action=action, error=error)
         runs: list[SingleRunResult] = []
 
-        for cwd in cwds:
+        for handler_cwd in cwds:
+            cwd = handler_cwd.path
             env = dict(base_env)
             if handler.scope in (
                 ProvisionScope.feature_environment,
@@ -192,19 +211,28 @@ class ProvisionExecutionService:
             # commands the tuple contains.
             sink.execution_started(label, action_str, cwd)
             cwd_exit_code = 0
-            try:
-                for command in commands:
-                    with self._subprocess.popen(["sh", "-c", command], cwd=cwd, env=env) as proc:
-                        for line in proc.stdout_lines:
-                            sink.execution_output_line(label, line)
-                        cwd_exit_code = proc.wait()
-                    if cwd_exit_code != 0:
-                        # Stop at first failing command within this cwd.
-                        break
-            except OSError as exc:
-                error = f"provision command — {exc}"
-                sink.execution_error(label, error)
-                return HandlerExecutionResult(handler=handler, action=action, runs=tuple(runs), error=error)
+            # One span per cwd run, open before the first command starts so the handler
+            # process's TRACEPARENT names it.
+            with self._tracer.operation(
+                f"provision handler {action_str}", _span_attributes(handler, env_name, handler_cwd.repo, label)
+            ) as operation:
+                try:
+                    for command in commands:
+                        with self._subprocess.popen(["sh", "-c", command], cwd=cwd, env=env) as proc:
+                            for line in proc.stdout_lines:
+                                sink.execution_output_line(label, line)
+                            cwd_exit_code = proc.wait()
+                        if cwd_exit_code != 0:
+                            # Stop at first failing command within this cwd.
+                            break
+                except OSError as exc:
+                    operation.mark_failed(type(exc).__name__)
+                    error = f"provision command — {exc}"
+                    sink.execution_error(label, error)
+                    return HandlerExecutionResult(handler=handler, action=action, runs=tuple(runs), error=error)
+                operation.set_attribute(ATTR_EXIT_CODE, cwd_exit_code)
+                if cwd_exit_code != 0:
+                    operation.mark_failed()
             sink.execution_completed(label, action_str, cwd_exit_code)
             runs.append(SingleRunResult(cwd=cwd, exit_code=cwd_exit_code))
 
@@ -305,8 +333,10 @@ class ProvisionExecutionService:
                 continue
         return None
 
-    def _resolve_cwds(self, handler: ProvisionHandler, env_name: str) -> list[Path]:
+    def _resolve_cwds(self, handler: ProvisionHandler, env_name: str) -> list[_HandlerCwd]:
         """Return the list of cwds to run the script in for the given handler.
+
+        Each cwd that is a project worktree carries that project repo's name.
 
         For ``feature-environment`` handlers with a ``project`` field, returns
         a single-element list containing ``<workspace>/<env>/<project>/``.
@@ -322,7 +352,7 @@ class ProvisionExecutionService:
         workspace_root = self._config.workspace_root
         scope = handler.scope
         if scope is ProvisionScope.workspace:
-            return [workspace_root]
+            return [_HandlerCwd(workspace_root)]
         if scope is ProvisionScope.feature_environment:
             if handler.project is not None:
                 project_cwd = workspace_root / env_name / handler.project
@@ -333,10 +363,25 @@ class ProvisionExecutionService:
                         f"(expected: {project_cwd}). "
                         f"Run 'winter ws init {env_name}' to create worktrees."
                     )
-                return [project_cwd]
-            return [workspace_root / env_name]
+                return [_HandlerCwd(project_cwd, handler.project)]
+            return [_HandlerCwd(workspace_root / env_name)]
         # feature-worktree: one cwd per project repo in the env
-        return [workspace_root / env_name / repo.name for repo in self._repo_factory.get_project_repos()]
+        return [
+            _HandlerCwd(workspace_root / env_name / repo.name, repo.name)
+            for repo in self._repo_factory.get_project_repos()
+        ]
+
+
+def _span_attributes(
+    handler: ProvisionHandler, env_name: str, repo: str | None, label: str
+) -> dict[str, AttributeValue]:
+    """The names a cwd run's span carries: the handler label, the env at env scopes, and the project repo."""
+    attributes: dict[str, AttributeValue] = {ATTR_HANDLER: label}
+    if handler.scope in (ProvisionScope.feature_environment, ProvisionScope.feature_worktree):
+        attributes[ATTR_ENV] = env_name
+    if repo is not None:
+        attributes[ATTR_REPO] = repo
+    return attributes
 
 
 def _handler_label(handler: ProvisionHandler) -> str:

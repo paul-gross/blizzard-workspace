@@ -510,5 +510,7 @@ def test_inject_and_annotate_env_failures_are_swallowed(
 
     tracer.annotate_env("alpha")
     tracer.inject(env)
+    tracer.end_command(None)
 
     assert env == {"PATH": "/bin"}
+    assert not trace.get_current_span().get_span_context().is_valid

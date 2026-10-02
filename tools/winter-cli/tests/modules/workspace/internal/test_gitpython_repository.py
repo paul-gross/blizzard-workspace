@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, PropertyMock, call
 import git
 import pytest
 
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.modules.workspace.internal import gitpython_repository
 from winter_cli.modules.workspace.internal.gitpython_repository import GitPythonRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
@@ -33,7 +34,7 @@ def _fake_git_repo(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 @pytest.fixture
 def adapter() -> GitPythonRepository:
-    return GitPythonRepository(RepoErrorFactory())
+    return GitPythonRepository(RepoErrorFactory(), NoopCommandTracer())
 
 
 # ── clone ──────────────────────────────────────────────────────────────────
@@ -44,16 +45,16 @@ def test_clone_calls_clone_from_with_url_and_dest(
 ) -> None:
     git_mock = _fake_git_repo(monkeypatch)
 
-    adapter.clone("git@example.com:org/repo.git", _DEST_PATH)
+    adapter.clone("git@example.com:org/repo.git", _DEST_PATH, repo_name="repo")
 
     git_mock.Repo.clone_from.assert_called_once_with("git@example.com:org/repo.git", str(_DEST_PATH), env=None)
 
 
 def test_clone_passes_the_clone_env(monkeypatch: pytest.MonkeyPatch) -> None:
     git_mock = _fake_git_repo(monkeypatch)
-    adapter = GitPythonRepository(RepoErrorFactory(), clone_env={"GIT_TERMINAL_PROMPT": "0"})
+    adapter = GitPythonRepository(RepoErrorFactory(), NoopCommandTracer(), clone_env={"GIT_TERMINAL_PROMPT": "0"})
 
-    adapter.clone("git@example.com:org/repo.git", _DEST_PATH)
+    adapter.clone("git@example.com:org/repo.git", _DEST_PATH, repo_name="repo")
 
     git_mock.Repo.clone_from.assert_called_once_with(
         "git@example.com:org/repo.git", str(_DEST_PATH), env={"GIT_TERMINAL_PROMPT": "0"}
@@ -67,7 +68,7 @@ def test_clone_raises_repo_error_on_git_command_error(
     git_mock.Repo.clone_from.side_effect = git.GitCommandError(("git", "clone", "origin"), 128, stderr=b"not found")
 
     with pytest.raises(RepoError) as ei:
-        adapter.clone("git@example.com:org/repo.git", _DEST_PATH)
+        adapter.clone("git@example.com:org/repo.git", _DEST_PATH, repo_name="repo")
 
     assert "clone failed" in ei.value.message
     assert ei.value.subcommand == "clone"
@@ -81,7 +82,7 @@ def test_add_worktree_without_base_branch_calls_worktree_add(
 ) -> None:
     git_mock = _fake_git_repo(monkeypatch)
 
-    adapter.add_worktree(_SOURCE_PATH, _WT_PATH, branch="alpha")
+    adapter.add_worktree(_SOURCE_PATH, _WT_PATH, branch="alpha", repo_name="repo", env=None)
 
     git_mock.Repo.assert_called_once_with(str(_SOURCE_PATH))
     git_mock.Repo.return_value.git.worktree.assert_called_once_with("add", str(_WT_PATH), "alpha")
@@ -92,7 +93,7 @@ def test_add_worktree_with_base_branch_passes_b_flag(
 ) -> None:
     git_mock = _fake_git_repo(monkeypatch)
 
-    adapter.add_worktree(_SOURCE_PATH, _WT_PATH, branch="alpha", base_branch="main")
+    adapter.add_worktree(_SOURCE_PATH, _WT_PATH, branch="alpha", base_branch="main", repo_name="repo", env=None)
 
     git_mock.Repo.return_value.git.worktree.assert_called_once_with(
         "add", str(_WT_PATH), "-b", "alpha", "--no-track", "main"
@@ -108,7 +109,7 @@ def test_add_worktree_raises_repo_error_on_git_command_error(
     )
 
     with pytest.raises(RepoError) as ei:
-        adapter.add_worktree(_SOURCE_PATH, _WT_PATH, branch="alpha")
+        adapter.add_worktree(_SOURCE_PATH, _WT_PATH, branch="alpha", repo_name="repo", env=None)
 
     assert "worktree add failed" in ei.value.message
     assert ei.value.subcommand == "worktree"
@@ -122,7 +123,7 @@ def test_remove_worktree_without_force_calls_remove(
 ) -> None:
     git_mock = _fake_git_repo(monkeypatch)
 
-    adapter.remove_worktree(_SOURCE_PATH, _WT_PATH, force=False)
+    adapter.remove_worktree(_SOURCE_PATH, _WT_PATH, force=False, repo_name="repo", env=None)
 
     git_mock.Repo.return_value.git.worktree.assert_called_once_with("remove", str(_WT_PATH))
 
@@ -132,7 +133,7 @@ def test_remove_worktree_with_force_passes_force_flag(
 ) -> None:
     git_mock = _fake_git_repo(monkeypatch)
 
-    adapter.remove_worktree(_SOURCE_PATH, _WT_PATH, force=True)
+    adapter.remove_worktree(_SOURCE_PATH, _WT_PATH, force=True, repo_name="repo", env=None)
 
     git_mock.Repo.return_value.git.worktree.assert_called_once_with("remove", "--force", str(_WT_PATH))
 
@@ -146,7 +147,7 @@ def test_remove_worktree_raises_repo_error_on_git_command_error(
     )
 
     with pytest.raises(RepoError) as ei:
-        adapter.remove_worktree(_SOURCE_PATH, _WT_PATH, force=False)
+        adapter.remove_worktree(_SOURCE_PATH, _WT_PATH, force=False, repo_name="repo", env=None)
 
     assert "worktree remove failed" in ei.value.message
 
@@ -192,7 +193,7 @@ def test_get_local_branches_returns_head_names(monkeypatch: pytest.MonkeyPatch, 
     head_b.name = "alpha"
     git_mock.Repo.return_value.heads = [head_a, head_b]
 
-    result = adapter.get_local_branches(_REPO_PATH)
+    result = adapter.get_local_branches(_REPO_PATH, repo_name="repo", env=None)
 
     assert result == ["main", "alpha"]
 
@@ -203,7 +204,7 @@ def test_get_local_branches_returns_empty_for_no_heads(
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.heads = []
 
-    result = adapter.get_local_branches(_REPO_PATH)
+    result = adapter.get_local_branches(_REPO_PATH, repo_name="repo", env=None)
 
     assert result == []
 
@@ -219,7 +220,7 @@ def test_get_tracking_branch_returns_name_when_set(
     tb.name = "origin/main"
     git_mock.Repo.return_value.active_branch.tracking_branch.return_value = tb
 
-    result = adapter.get_tracking_branch(_REPO_PATH)
+    result = adapter.get_tracking_branch(_REPO_PATH, repo_name="repo", env=None)
 
     assert result == "origin/main"
 
@@ -230,7 +231,7 @@ def test_get_tracking_branch_returns_none_when_not_set(
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.active_branch.tracking_branch.return_value = None
 
-    result = adapter.get_tracking_branch(_REPO_PATH)
+    result = adapter.get_tracking_branch(_REPO_PATH, repo_name="repo", env=None)
 
     assert result is None
 
@@ -241,7 +242,7 @@ def test_get_tracking_branch_returns_none_on_type_error(
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.active_branch.tracking_branch.side_effect = TypeError("detached HEAD")
 
-    result = adapter.get_tracking_branch(_REPO_PATH)
+    result = adapter.get_tracking_branch(_REPO_PATH, repo_name="repo", env=None)
 
     assert result is None
 
@@ -255,7 +256,7 @@ def test_set_upstream_to_writes_tracking_config_directly(
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.active_branch.name = "alpha"
 
-    adapter.set_upstream_to(_REPO_PATH, "origin/main")
+    adapter.set_upstream_to(_REPO_PATH, "origin/main", repo_name="repo", env=None)
 
     # Written directly (not via `git branch --set-upstream-to`) so tracking can
     # be set to a remote branch git cannot yet resolve locally (unpushed feature).
@@ -272,7 +273,7 @@ def test_set_upstream_to_tolerates_unpushed_remote_branch(
 
     # A nested, never-pushed feature branch: `--set-upstream-to` would exit 128,
     # but writing config directly must succeed and split remote/branch correctly.
-    adapter.set_upstream_to(_REPO_PATH, "origin/feature/foo")
+    adapter.set_upstream_to(_REPO_PATH, "origin/feature/foo", repo_name="repo", env=None)
 
     git_mock.Repo.return_value.git.config.assert_any_call("branch.alpha.remote", "origin")
     git_mock.Repo.return_value.git.config.assert_any_call("branch.alpha.merge", "refs/heads/feature/foo")
@@ -284,7 +285,7 @@ def test_set_upstream_to_rejects_ref_without_remote_prefix(
     _fake_git_repo(monkeypatch)
 
     with pytest.raises(RepoError):
-        adapter.set_upstream_to(_REPO_PATH, "bare-ref")
+        adapter.set_upstream_to(_REPO_PATH, "bare-ref", repo_name="repo", env=None)
 
 
 def test_set_upstream_to_raises_repo_error_on_git_command_error(
@@ -295,7 +296,7 @@ def test_set_upstream_to_raises_repo_error_on_git_command_error(
     git_mock.Repo.return_value.git.config.side_effect = git.GitCommandError(("git", "config"), 128, stderr=b"boom")
 
     with pytest.raises(RepoError) as ei:
-        adapter.set_upstream_to(_REPO_PATH, "origin/main")
+        adapter.set_upstream_to(_REPO_PATH, "origin/main", repo_name="repo", env=None)
 
     assert "set-upstream-to" in ei.value.message
 
@@ -318,7 +319,7 @@ def test_set_upstream_to_raises_repo_error_on_detached_head(
     )
 
     with pytest.raises(RepoError) as ei:
-        adapter.set_upstream_to(_REPO_PATH, "origin/main")
+        adapter.set_upstream_to(_REPO_PATH, "origin/main", repo_name="repo", env=None)
 
     assert str(_REPO_PATH) in str(ei.value)
     git_mock.Repo.return_value.git.config.assert_not_called()
@@ -340,7 +341,7 @@ def test_set_upstream_to_derives_message_from_value_error_instead_of_asserting_d
     )
 
     with pytest.raises(RepoError) as ei:
-        adapter.set_upstream_to(_REPO_PATH, "origin/main")
+        adapter.set_upstream_to(_REPO_PATH, "origin/main", repo_name="repo", env=None)
 
     assert "Reference at 'HEAD' does not exist" in str(ei.value)
     assert "detached" not in str(ei.value)
@@ -356,7 +357,7 @@ def test_set_push_default_upstream_writes_config(monkeypatch: pytest.MonkeyPatch
     git_mock.Repo.return_value.config_writer.return_value.__enter__ = MagicMock(return_value=cw)
     git_mock.Repo.return_value.config_writer.return_value.__exit__ = MagicMock(return_value=False)
 
-    adapter.set_push_default_upstream(_REPO_PATH)
+    adapter.set_push_default_upstream(_REPO_PATH, repo_name="repo", env=None)
 
     cw.set_value.assert_called_once_with("push", "default", "upstream")
 
@@ -370,7 +371,7 @@ def test_set_user_identity_writes_name_and_email(monkeypatch: pytest.MonkeyPatch
     git_mock.Repo.return_value.config_writer.return_value.__enter__ = MagicMock(return_value=cw)
     git_mock.Repo.return_value.config_writer.return_value.__exit__ = MagicMock(return_value=False)
 
-    adapter.set_user_identity(_REPO_PATH, name="Alice", email="alice@example.com")
+    adapter.set_user_identity(_REPO_PATH, name="Alice", email="alice@example.com", repo_name="repo", env=None)
 
     git_mock.Repo.assert_called_once_with(str(_REPO_PATH))
     assert call("user", "name", "Alice") in cw.set_value.call_args_list
@@ -387,7 +388,7 @@ def test_get_push_default_returns_value_when_set(monkeypatch: pytest.MonkeyPatch
     git_mock.Repo.return_value.config_reader.return_value.__enter__ = MagicMock(return_value=cr)
     git_mock.Repo.return_value.config_reader.return_value.__exit__ = MagicMock(return_value=False)
 
-    result = adapter.get_push_default(_REPO_PATH)
+    result = adapter.get_push_default(_REPO_PATH, repo_name="repo", env=None)
 
     assert result == "upstream"
     # Must use config_reader (no lock), not config_writer.
@@ -404,7 +405,7 @@ def test_get_push_default_returns_none_when_empty(
     git_mock.Repo.return_value.config_reader.return_value.__enter__ = MagicMock(return_value=cr)
     git_mock.Repo.return_value.config_reader.return_value.__exit__ = MagicMock(return_value=False)
 
-    result = adapter.get_push_default(_REPO_PATH)
+    result = adapter.get_push_default(_REPO_PATH, repo_name="repo", env=None)
 
     assert result is None
 
@@ -418,7 +419,7 @@ def test_is_worktree_clean_returns_true_when_status_empty(
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.git.status.return_value = ""
 
-    result = adapter.is_worktree_clean(_REPO_PATH)
+    result = adapter.is_worktree_clean(_REPO_PATH, repo_name="repo", env=None)
 
     assert result is True
     git_mock.Repo.return_value.git.status.assert_called_once_with("--porcelain")
@@ -430,7 +431,7 @@ def test_is_worktree_clean_returns_false_when_status_nonempty(
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.git.status.return_value = " M README.md\n"
 
-    result = adapter.is_worktree_clean(_REPO_PATH)
+    result = adapter.is_worktree_clean(_REPO_PATH, repo_name="repo", env=None)
 
     assert result is False
 
@@ -441,7 +442,7 @@ def test_is_worktree_clean_returns_false_on_invalid_git_repository(
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.side_effect = git.InvalidGitRepositoryError("not a git repo")
 
-    result = adapter.is_worktree_clean(_REPO_PATH)
+    result = adapter.is_worktree_clean(_REPO_PATH, repo_name="repo", env=None)
 
     assert result is False
 
@@ -454,7 +455,7 @@ def test_is_worktree_clean_returns_false_on_git_command_error(
         ("git", "status"), 128, stderr=b"not a git repo"
     )
 
-    result = adapter.is_worktree_clean(_REPO_PATH)
+    result = adapter.is_worktree_clean(_REPO_PATH, repo_name="repo", env=None)
 
     assert result is False
 
@@ -472,7 +473,7 @@ def test_resolve_ref_branch_matches_remote_tracking_ref(
     # First candidate (refs/remotes/origin/<ref>) succeeds → branch.
     git_mock.Repo.return_value.git.rev_parse.return_value = _FULL_SHA
 
-    kind, sha = adapter.resolve_ref(_REPO_PATH, "main")
+    kind, sha = adapter.resolve_ref(_REPO_PATH, "main", repo_name="repo", env=None)
 
     assert kind is RefKind.branch
     assert sha == _FULL_SHA
@@ -489,7 +490,7 @@ def test_resolve_ref_tag_matches_on_second_candidate(
         _FULL_SHA,
     ]
 
-    kind, sha = adapter.resolve_ref(_REPO_PATH, "v1.4.2")
+    kind, sha = adapter.resolve_ref(_REPO_PATH, "v1.4.2", repo_name="repo", env=None)
 
     assert kind is RefKind.tag
     assert sha == _FULL_SHA
@@ -508,7 +509,7 @@ def test_resolve_ref_commit_matches_on_third_candidate(
         _FULL_SHA,
     ]
 
-    kind, sha = adapter.resolve_ref(_REPO_PATH, _FULL_SHA[:8])
+    kind, sha = adapter.resolve_ref(_REPO_PATH, _FULL_SHA[:8], repo_name="repo", env=None)
 
     assert kind is RefKind.commit
     assert sha == _FULL_SHA
@@ -523,7 +524,7 @@ def test_resolve_ref_raises_repo_error_when_all_candidates_fail(
     git_mock.Repo.return_value.git.rev_parse.side_effect = git.GitCommandError(("git", "rev-parse", "--verify"), 128)
 
     with pytest.raises(RepoError) as ei:
-        adapter.resolve_ref(_REPO_PATH, "nonexistent-ref")
+        adapter.resolve_ref(_REPO_PATH, "nonexistent-ref", repo_name="repo", env=None)
 
     assert "unresolvable ref" in ei.value.message
     assert "nonexistent-ref" in ei.value.message
@@ -538,7 +539,7 @@ def test_checkout_detached_calls_checkout_with_detach_flag(
 ) -> None:
     git_mock = _fake_git_repo(monkeypatch)
 
-    adapter.checkout_detached(_REPO_PATH, _FULL_SHA)
+    adapter.checkout_detached(_REPO_PATH, _FULL_SHA, repo_name="repo", env=None)
 
     git_mock.Repo.return_value.git.checkout.assert_called_once_with("--detach", _FULL_SHA)
 
@@ -552,7 +553,7 @@ def test_checkout_detached_raises_repo_error_on_git_command_error(
     )
 
     with pytest.raises(RepoError) as ei:
-        adapter.checkout_detached(_REPO_PATH, "deadbeef")
+        adapter.checkout_detached(_REPO_PATH, "deadbeef", repo_name="repo", env=None)
 
     assert "checkout --detach" in ei.value.message
     assert ei.value.subcommand == "checkout"
@@ -566,7 +567,7 @@ def test_checkout_branch_calls_checkout_with_track_flag(
 ) -> None:
     git_mock = _fake_git_repo(monkeypatch)
 
-    adapter.checkout_branch(_REPO_PATH, "feature")
+    adapter.checkout_branch(_REPO_PATH, "feature", repo_name="repo", env=None)
 
     git_mock.Repo.return_value.git.checkout.assert_called_once_with("-B", "feature", "--track", "origin/feature")
 
@@ -580,7 +581,7 @@ def test_checkout_branch_raises_repo_error_on_git_command_error(
     )
 
     with pytest.raises(RepoError) as ei:
-        adapter.checkout_branch(_REPO_PATH, "no-such-branch")
+        adapter.checkout_branch(_REPO_PATH, "no-such-branch", repo_name="repo", env=None)
 
     assert "checkout -B" in ei.value.message
     assert ei.value.subcommand == "checkout"
@@ -593,7 +594,7 @@ def test_get_head_commit_returns_full_sha(monkeypatch: pytest.MonkeyPatch, adapt
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.git.rev_parse.return_value = _FULL_SHA
 
-    result = adapter.get_head_commit(_REPO_PATH)
+    result = adapter.get_head_commit(_REPO_PATH, repo_name="repo", env=None)
 
     assert result == _FULL_SHA
     git_mock.Repo.return_value.git.rev_parse.assert_called_once_with("HEAD")
@@ -605,7 +606,7 @@ def test_get_head_commit_strips_trailing_whitespace(
     git_mock = _fake_git_repo(monkeypatch)
     git_mock.Repo.return_value.git.rev_parse.return_value = _FULL_SHA + "\n"
 
-    result = adapter.get_head_commit(_REPO_PATH)
+    result = adapter.get_head_commit(_REPO_PATH, repo_name="repo", env=None)
 
     assert result == _FULL_SHA
 
@@ -619,7 +620,7 @@ def test_get_head_commit_raises_repo_error_on_git_command_error(
     )
 
     with pytest.raises(RepoError) as ei:
-        adapter.get_head_commit(_REPO_PATH)
+        adapter.get_head_commit(_REPO_PATH, repo_name="repo", env=None)
 
     assert "rev-parse HEAD" in ei.value.message
     assert ei.value.subcommand == "rev-parse"
@@ -644,7 +645,7 @@ def _configure(r: git.Repo) -> git.Repo:
 
 def test_add_worktree_no_track_survives_auto_setup_merge_always(tmp_path: Path) -> None:
     """Branch created from a local base is not born tracking that base under `autoSetupMerge = always`."""
-    adapter = GitPythonRepository(RepoErrorFactory())
+    adapter = GitPythonRepository(RepoErrorFactory(), NoopCommandTracer())
     source = tmp_path / "source"
     r = _configure(git.Repo.init(str(source), initial_branch="master"))
     (source / "README").write_text("init\n")
@@ -654,7 +655,7 @@ def test_add_worktree_no_track_survives_auto_setup_merge_always(tmp_path: Path) 
         cw.set_value("branch", "autoSetupMerge", "always")
 
     worktree_path = tmp_path / "env" / "source"
-    adapter.add_worktree(source, worktree_path, branch="beta", base_branch="master")
+    adapter.add_worktree(source, worktree_path, branch="beta", base_branch="master", repo_name="repo", env=None)
 
     with git.Repo(str(worktree_path)) as wt:
         tb = wt.active_branch.tracking_branch()
@@ -663,7 +664,7 @@ def test_add_worktree_no_track_survives_auto_setup_merge_always(tmp_path: Path) 
 
 def test_add_worktree_no_track_survives_remote_tracking_base(tmp_path: Path) -> None:
     """Branch created from a remote-tracking base ref does not inherit that ref as its upstream."""
-    adapter = GitPythonRepository(RepoErrorFactory())
+    adapter = GitPythonRepository(RepoErrorFactory(), NoopCommandTracer())
     origin_bare = tmp_path / "origin.git"
     seed = _configure(git.Repo.init(str(tmp_path / "seed"), initial_branch="master"))
     (tmp_path / "seed" / "README").write_text("init\n")
@@ -675,7 +676,7 @@ def test_add_worktree_no_track_survives_remote_tracking_base(tmp_path: Path) -> 
     _configure(git.Repo.clone_from(str(origin_bare), str(source)))
 
     worktree_path = tmp_path / "env" / "source"
-    adapter.add_worktree(source, worktree_path, branch="gamma", base_branch="origin/master")
+    adapter.add_worktree(source, worktree_path, branch="gamma", base_branch="origin/master", repo_name="repo", env=None)
 
     with git.Repo(str(worktree_path)) as wt:
         tb = wt.active_branch.tracking_branch()
@@ -690,7 +691,7 @@ def test_add_worktree_no_track_survives_remote_tracking_base(tmp_path: Path) -> 
 
 
 def test_set_upstream_to_raises_repo_error_on_genuinely_detached_head(tmp_path: Path) -> None:
-    adapter = GitPythonRepository(RepoErrorFactory())
+    adapter = GitPythonRepository(RepoErrorFactory(), NoopCommandTracer())
     repo_path = tmp_path / "demo"
     r = _configure(git.Repo.init(str(repo_path), initial_branch="main"))
     (repo_path / "README").write_text("init\n")
@@ -699,7 +700,7 @@ def test_set_upstream_to_raises_repo_error_on_genuinely_detached_head(tmp_path: 
     r.git.checkout("--detach", commit_sha)
 
     with pytest.raises(RepoError) as ei:
-        adapter.set_upstream_to(repo_path, "origin/main")
+        adapter.set_upstream_to(repo_path, "origin/main", repo_name="repo", env=None)
 
     assert str(repo_path) in str(ei.value)
     # No tracking config was written — the write never happens once HEAD can't

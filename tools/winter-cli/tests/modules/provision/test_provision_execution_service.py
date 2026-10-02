@@ -4,8 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import FakeFilesystem, FakeSubprocessRunner
+from tests.conftest import FakeFilesystem, FakeOperationTracer, FakeSubprocessRunner
 from winter_cli.config.models import AdoptExtensions, ProjectRepositoryConfig, WorkspaceConfig
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
+from winter_cli.core.tracing import ATTR_ENV, ATTR_EXIT_CODE, ATTR_HANDLER, ATTR_REPO, IOperationTracer
 from winter_cli.modules.provision.execution_service import (
     ProvisionExecutionService,
 )
@@ -95,6 +97,7 @@ def _make_service(
     config_files: dict[Path, dict],
     subprocess: FakeSubprocessRunner,
     registry: _InMemoryRegistry | None = None,
+    tracer: IOperationTracer | None = None,
 ) -> ProvisionExecutionService:
     loader = ExtensionManifestLoader(config_file_reader=_FakeConfigFileReader(config_files))
     repo_factory = RepositoryFactory(config=config)
@@ -104,6 +107,7 @@ def _make_service(
         subprocess_runner=subprocess,
         manifest_loader=loader,
         repo_factory=repo_factory,
+        tracer=tracer or NoopCommandTracer(),
         registry=registry,
     )
 
@@ -884,3 +888,201 @@ def test_feature_environment_without_project_still_uses_env_root() -> None:
 
     assert result.ok
     assert result.runs[0].cwd == ENV_ROOT
+
+
+# ── spans ─────────────────────────────────────────────────────────────────────
+
+
+class _LaunchFailingRunner(FakeSubprocessRunner):
+    """A runner whose process launch raises, as `sh` failing to spawn would."""
+
+    def __init__(self, message: str, error: type[OSError] = OSError) -> None:
+        super().__init__()
+        self._message = message
+        self._error = error
+
+    def popen(self, cmd, **kwargs):  # type: ignore[no-untyped-def]
+        raise self._error(self._message)
+
+
+def test_workspace_handler_opens_one_span_with_label_and_exit_code_and_no_env() -> None:
+    tracer = FakeOperationTracer()
+    subprocess = FakeSubprocessRunner(popen_responses={_sh_c_key("echo apply"): ([], 0)})
+    svc = _make_service(_make_config(), FakeFilesystem(), {}, subprocess, tracer=tracer)
+
+    svc.run_handler(
+        _project_handler(scope=ProvisionScope.workspace), ProvisionAction.apply, ENV_NAME, FakeProvisionOutputSink()
+    )
+
+    [span] = tracer.spans
+    assert span.name == "provision handler apply"
+    assert span.attributes == {ATTR_HANDLER: "project/dependency[workspace]", ATTR_EXIT_CODE: 0}
+    assert span.failed is False
+
+
+def test_feature_environment_handler_span_carries_the_env() -> None:
+    tracer = FakeOperationTracer()
+    subprocess = FakeSubprocessRunner(popen_responses={_sh_c_key("echo apply"): ([], 0)})
+    svc = _make_service(_make_config(), FakeFilesystem(), {}, subprocess, tracer=tracer)
+
+    svc.run_handler(
+        _project_handler(scope=ProvisionScope.feature_environment),
+        ProvisionAction.apply,
+        ENV_NAME,
+        FakeProvisionOutputSink(),
+    )
+
+    [span] = tracer.spans
+    assert span.attributes == {
+        ATTR_HANDLER: "project/dependency[feature-environment]",
+        ATTR_ENV: ENV_NAME,
+        ATTR_EXIT_CODE: 0,
+    }
+
+
+def test_feature_worktree_handler_opens_one_span_per_cwd_each_naming_its_repo() -> None:
+    tracer = FakeOperationTracer()
+    config = _make_config(
+        project_repos=[
+            ProjectRepositoryConfig(name="app", url="git@example.com:org/app.git"),
+            ProjectRepositoryConfig(name="api", url="git@example.com:org/api.git"),
+        ]
+    )
+    subprocess = FakeSubprocessRunner(popen_responses={_sh_c_key("echo apply"): ([], 0)})
+    svc = _make_service(config, FakeFilesystem(), {}, subprocess, tracer=tracer)
+
+    svc.run_handler(
+        _project_handler(scope=ProvisionScope.feature_worktree),
+        ProvisionAction.apply,
+        ENV_NAME,
+        FakeProvisionOutputSink(),
+    )
+
+    assert [(span.name, span.attributes) for span in tracer.spans] == [
+        (
+            "provision handler apply",
+            {
+                ATTR_HANDLER: "project/dependency[feature-worktree]",
+                ATTR_ENV: ENV_NAME,
+                ATTR_REPO: repo,
+                ATTR_EXIT_CODE: 0,
+            },
+        )
+        for repo in ("app", "api")
+    ]
+
+
+def test_feature_environment_handler_pinned_to_a_project_names_that_repo() -> None:
+    tracer = FakeOperationTracer()
+    fs = FakeFilesystem(directories=[ENV_ROOT / "app"])
+    subprocess = FakeSubprocessRunner(popen_responses={_sh_c_key("echo apply"): ([], 0)})
+    svc = _make_service(_make_config(), fs, {}, subprocess, tracer=tracer)
+    handler = ProvisionHandler(
+        subtarget="dependency",
+        scope=ProvisionScope.feature_environment,
+        apply=("echo apply",),
+        source="project",
+        project="app",
+    )
+
+    svc.run_handler(handler, ProvisionAction.apply, ENV_NAME, FakeProvisionOutputSink())
+
+    [span] = tracer.spans
+    assert span.attributes[ATTR_REPO] == "app"
+    assert span.attributes[ATTR_ENV] == ENV_NAME
+
+
+def test_a_destroy_run_opens_a_destroy_span() -> None:
+    tracer = FakeOperationTracer()
+    subprocess = FakeSubprocessRunner(popen_responses={_sh_c_key("echo destroy"): ([], 0)})
+    svc = _make_service(_make_config(), FakeFilesystem(), {}, subprocess, tracer=tracer)
+
+    svc.run_handler(
+        _project_handler(destroy=("echo destroy",)), ProvisionAction.destroy, ENV_NAME, FakeProvisionOutputSink()
+    )
+
+    assert [span.name for span in tracer.spans] == ["provision handler destroy"]
+
+
+def test_a_clean_run_opens_a_clean_span() -> None:
+    tracer = FakeOperationTracer()
+    subprocess = FakeSubprocessRunner(popen_responses={_sh_c_key("echo clean"): ([], 0)})
+    svc = _make_service(_make_config(), FakeFilesystem(), {}, subprocess, tracer=tracer)
+
+    svc.run_handler(_project_handler(clean=("echo clean",)), ProvisionAction.clean, ENV_NAME, FakeProvisionOutputSink())
+
+    assert [span.name for span in tracer.spans] == ["provision handler clean"]
+
+
+def test_a_non_zero_exit_marks_the_span_failed_and_records_the_exit_code() -> None:
+    tracer = FakeOperationTracer()
+    subprocess = FakeSubprocessRunner(popen_responses={_sh_c_key("echo apply"): (["secret output"], 7)})
+    svc = _make_service(_make_config(), FakeFilesystem(), {}, subprocess, tracer=tracer)
+
+    svc.run_handler(_project_handler(), ProvisionAction.apply, ENV_NAME, FakeProvisionOutputSink())
+
+    [span] = tracer.spans
+    assert span.failed is True
+    assert span.error_type is None
+    assert span.attributes[ATTR_EXIT_CODE] == 7
+    assert "secret output" not in repr(span)
+
+
+def test_one_failing_worktree_marks_only_its_own_span_failed() -> None:
+    tracer = FakeOperationTracer()
+    config = _make_config(
+        project_repos=[
+            ProjectRepositoryConfig(name="app", url="git@example.com:org/app.git"),
+            ProjectRepositoryConfig(name="api", url="git@example.com:org/api.git"),
+        ]
+    )
+
+    class _Runner(FakeSubprocessRunner):
+        def popen(self, cmd, *, cwd=None, **kwargs):  # type: ignore[no-untyped-def]
+            self._popen_responses = {_sh_c_key("echo apply"): ([], 1 if cwd is not None and cwd.name == "api" else 0)}
+            return super().popen(cmd, cwd=cwd, **kwargs)
+
+    svc = _make_service(config, FakeFilesystem(), {}, _Runner(), tracer=tracer)
+
+    svc.run_handler(
+        _project_handler(scope=ProvisionScope.feature_worktree),
+        ProvisionAction.apply,
+        ENV_NAME,
+        FakeProvisionOutputSink(),
+    )
+
+    assert [(span.attributes[ATTR_REPO], span.failed) for span in tracer.spans] == [("app", False), ("api", True)]
+
+
+@pytest.mark.parametrize("error", [OSError, FileNotFoundError, PermissionError])
+def test_a_launch_oserror_marks_the_span_failed_with_its_class_name_and_no_message(error: type[OSError]) -> None:
+    tracer = FakeOperationTracer()
+    runner = _LaunchFailingRunner("cannot spawn sh", error)
+    svc = _make_service(_make_config(), FakeFilesystem(), {}, runner, tracer=tracer)
+    sink = FakeProvisionOutputSink()
+
+    result = svc.run_handler(_project_handler(), ProvisionAction.apply, ENV_NAME, sink)
+
+    [span] = tracer.spans
+    assert span.failed is True
+    assert span.error_type == error.__name__
+    assert ATTR_EXIT_CODE not in span.attributes
+    assert "cannot spawn sh" not in repr(span)
+    # The message still reaches the user through the sink and the result.
+    assert result.error is not None and "cannot spawn sh" in result.error
+    assert sink.errors
+
+
+def test_a_failure_before_any_cwd_runs_opens_no_span() -> None:
+    tracer = FakeOperationTracer()
+    svc = _make_service(_make_config(), FakeFilesystem(), {}, FakeSubprocessRunner(), tracer=tracer)
+    handler = ProvisionHandler(
+        subtarget="dependency", scope=ProvisionScope.workspace, apply=("x",), source="no-such-ext"
+    )
+
+    result = svc.run_handler(handler, ProvisionAction.apply, ENV_NAME, FakeProvisionOutputSink())
+    no_script = svc.run_handler(_project_handler(), ProvisionAction.destroy, ENV_NAME, FakeProvisionOutputSink())
+
+    assert result.error is not None
+    assert no_script.error is not None
+    assert tracer.spans == []

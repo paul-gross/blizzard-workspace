@@ -198,7 +198,7 @@ class DestroyService:
         if not force:
             dirty: list[str] = []
             for repo, wt_path in existing_worktrees:
-                if not self._git_repo.is_worktree_clean(wt_path):
+                if not self._git_repo.is_worktree_clean(wt_path, repo_name=repo.name, env=name):
                     dirty.append(repo.name)
             if dirty:
                 logger.warning("destroy_env: refusing — dirty worktrees in %s: %s", name, ", ".join(dirty))
@@ -297,7 +297,7 @@ class DestroyService:
         # Phase 3: remove every project repo's worktree from its source checkout.
         success = True
         for repo, wt_path in existing_worktrees:
-            if not self._remove_git_worktree(repo, wt_path, force, reporter):
+            if not self._remove_git_worktree(repo, wt_path, name, force, reporter):
                 success = False
 
         # Phase 4: drop the env directory itself (covers any stray files
@@ -420,6 +420,7 @@ class DestroyService:
         self,
         repo: ProjectRepository,
         worktree_path: Path,
+        env_name: str,
         force: bool,
         reporter: IInitReporter,
     ) -> bool:
@@ -431,7 +432,7 @@ class DestroyService:
                 reporter.repo_action(repo.name, str(worktree_path), "worktree_removed", "no source checkout")
                 return True
 
-            self._git_repo.remove_worktree(repo.main_path, worktree_path, force)
+            self._git_repo.remove_worktree(repo.main_path, worktree_path, force, repo_name=repo.name, env=env_name)
         except (RepoError, OSError) as exc:
             reporter.repo_error(repo.name, str(exc))
             return False

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.config.workspace import WorkspaceConfigService
 from winter_cli.core.config_file import ConfigError
+from winter_cli.core.tracing import IOperationTracer
 from winter_cli.modules.workspace.config_lock_repository import IConfigLockRepository
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_index_registry import IEnvIndexRegistry
@@ -42,7 +43,7 @@ class DashboardSnapshotService:
     `EnvStatusService` on every call, wiring them into a fresh
     `WorkspaceSnapshotService`. The remaining collaborators
     (`repo_repo`, `drift_warning_svc`, `prune_svc`, `config_lock_repo`,
-    `git_repo`) are not config-derived (or are unused by
+    `git_repo`, `tracer`) are not config-derived (or are unused by
     `collect_for_dashboard`) and are reused as-is.
 
     A malformed `config.toml` at refresh time is tolerated: the parse error is
@@ -72,6 +73,7 @@ class DashboardSnapshotService:
         prune_svc: PruneService,
         config_lock_repo: IConfigLockRepository,
         git_repo: IGitRepository,
+        tracer: IOperationTracer,
     ) -> None:
         self._workspace_config_svc = workspace_config_svc
         self._repo_error_factory = repo_error_factory
@@ -81,6 +83,7 @@ class DashboardSnapshotService:
         self._prune_svc = prune_svc
         self._config_lock_repo = config_lock_repo
         self._git_repo = git_repo
+        self._tracer = tracer
         self._snapshot_svc: WorkspaceSnapshotService | None = None
 
     def collect_for_dashboard(
@@ -124,6 +127,7 @@ class DashboardSnapshotService:
         repo_factory = RepositoryFactory(config=config)
         worktree_repo = ReadWorkspaceRepository(
             error_factory=self._repo_error_factory,
+            tracer=self._tracer,
             env_aliases=config.env_aliases,
             envs_per_workspace=config.envs_per_workspace,
             registry=self._env_index_registry,

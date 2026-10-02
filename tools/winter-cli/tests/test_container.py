@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 import pytest
 from dependency_injector import providers
 
-from winter_cli.container import Container
+from tests.conftest import FakeOperationTracer, FakeSessionTracer
+from tests.modules.workspace.conftest import add_env_worktree, init_project
+from winter_cli.container import Container, FreshInitServiceFactory
+from winter_cli.modules.workspace import dashboard_snapshot_service
 from winter_cli.modules.workspace.agent_install import ExtensionAgentService
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
@@ -15,7 +21,9 @@ from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcl
 from winter_cli.modules.workspace.extension_hook_service import ExtensionHookService
 from winter_cli.modules.workspace.extension_symlink_service import ExtensionSymlinkService
 from winter_cli.modules.workspace.init_service import InitService
+from winter_cli.modules.workspace.internal.read_workspace_repository import ReadWorkspaceRepository
 from winter_cli.modules.workspace.internal.subprocess_command_entry_runner import SubprocessCommandEntryRunner
+from winter_cli.modules.workspace.models import FeatureEnvironment
 from winter_cli.modules.workspace.prune_service import PruneService
 from winter_cli.modules.workspace.workspace_push_service import WorkspacePushService
 from winter_cli.modules.workspace.workspace_snapshot_service import WorkspaceSnapshotService
@@ -149,3 +157,83 @@ def test_container_falls_back_to_the_noop_tracer_when_the_adapter_constructor_ra
     assert [record.levelname for record in caplog.records] == ["DEBUG"]
     assert caplog.records[0].exc_info is not None
     assert "adapter construction failed" in str(caplog.records[0].exc_info[1])
+
+
+# ── The git adapters open their spans on the process's one tracer ────────────
+
+
+def _bind_fake_tracer(container: Container) -> FakeOperationTracer:
+    tracer = FakeOperationTracer()
+    container.command_tracer.override(providers.Object(tracer))
+    return tracer
+
+
+def test_container_binds_the_command_tracer_into_every_git_adapter(container: Container, tmp_path: Path) -> None:
+    tracer = _bind_fake_tracer(container)
+    workspace, project = init_project(tmp_path)
+    add_env_worktree(project.main_path, tmp_path, "alpha", "main")
+    env = FeatureEnvironment(workspace=workspace, name="alpha", index=1, path=tmp_path / "alpha")
+
+    container.git_repo().get_local_branches(project.main_path, repo_name=project.name, env=None)
+    container.repo_repo().get_project_status(project)
+    container.worktree_repo().get_environment_status(env, [project])
+
+    assert [span.name for span in tracer.spans] == ["git branch", "git status", "git config"]
+
+
+def test_dashboard_snapshot_service_hands_its_tracer_to_the_workspace_repository_it_builds(
+    container: Container, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    tracer = _bind_fake_tracer(container)
+    built: list[dict[str, object]] = []
+
+    class _RecordingWorkspaceRepository(ReadWorkspaceRepository):
+        def __init__(self, **kwargs: Any) -> None:
+            built.append(kwargs)
+            super().__init__(**kwargs)
+
+    monkeypatch.setattr(dashboard_snapshot_service, "ReadWorkspaceRepository", _RecordingWorkspaceRepository)
+
+    container.dashboard_snapshot_svc().collect_for_dashboard()
+
+    assert [kwargs["tracer"] for kwargs in built] == [tracer]
+
+
+def test_fresh_init_container_git_adapter_opens_spans_on_the_launching_tracer(tmp_path: Path) -> None:
+    launching_tracer = FakeOperationTracer()
+    _workspace, project = init_project(tmp_path)
+
+    fresh = FreshInitServiceFactory(launching_tracer).build_container()  # type: ignore[arg-type]
+    fresh.git_repo().get_local_branches(project.main_path, repo_name=project.name, env=None)
+
+    assert [(span.name, span.attributes) for span in launching_tracer.spans] == [
+        ("git branch", {"winter.repo": project.name})
+    ]
+
+
+# ── The service and provision span sites open their spans on the process's one tracer ──
+
+
+def test_container_binds_the_command_tracer_into_the_service_and_provision_span_sites(container: Container) -> None:
+    tracer = _bind_fake_tracer(container)
+
+    assert container.service_fan_out_svc()._tracer is tracer
+    assert container.service_readiness_svc()._tracer is tracer
+    assert container.provision_execution_svc()._tracer is tracer
+
+
+# ── The dashboard's screens open their session roots on the process's one tracer ─
+
+
+def test_container_binds_the_command_tracer_into_every_screen_that_runs_thread_workers(container: Container) -> None:
+    tracer = FakeSessionTracer()
+    container.command_tracer.override(providers.Object(tracer))
+
+    screens = [
+        container.workspace_screen(),
+        container.worktree_detail_screen(worktree_name="alpha"),
+        container.standalone_detail_screen(repo_name="notes"),
+        container.agent_matrix_screen(),
+    ]
+
+    assert [screen._session_tracer for screen in screens] == [tracer] * 4  # type: ignore[attr-defined]

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from tests.conftest import FakeOperationTracer
+from winter_cli.core.tracing import ATTR_READY, ATTR_SERVICE_PATTERNS, IOperationTracer
 from winter_cli.modules.service.service_readiness_service import ServiceReadinessService
 from winter_cli.modules.service.status_models import EnvStatus, ServiceStatus, StatusDocument
 
@@ -48,9 +50,12 @@ def _ticking_clock(step: float = 1.0):
     return _clock
 
 
-def _readiness(status: _StubStatusService, sleeps: list[float]) -> ServiceReadinessService:
+def _readiness(
+    status: _StubStatusService, sleeps: list[float], tracer: IOperationTracer | None = None
+) -> ServiceReadinessService:
     return ServiceReadinessService(
         status_service=status,  # type: ignore[arg-type]
+        tracer=tracer or FakeOperationTracer(),
         sleep=sleeps.append,
         monotonic=_ticking_clock(),
         poll_interval_s=0.25,
@@ -129,3 +134,40 @@ def test_wait_gates_readiness_across_multiple_patterns_in_one_poll() -> None:
     result = _readiness(status, []).wait(("alpha", "beta"), timeout_s=30.0)
     assert result.ready is True
     assert status.collect_patterns == [("alpha", "beta")]
+
+
+def test_ready_wait_opens_a_span_with_the_pattern_count_and_ready_true() -> None:
+    status = _StubStatusService([_doc("alpha", [_svc("api", "healthy")])])
+    tracer = FakeOperationTracer()
+    _readiness(status, [], tracer).wait(("alpha", "beta"), timeout_s=30.0)
+    [span] = tracer.spans
+    assert span.name == "service readiness wait"
+    assert span.attributes == {ATTR_SERVICE_PATTERNS: 2, ATTR_READY: True}
+    assert span.failed is False
+
+
+def test_timed_out_wait_marks_its_span_failed_with_ready_false() -> None:
+    status = _StubStatusService([_doc("alpha", [_svc("api", "unhealthy")])])
+    tracer = FakeOperationTracer()
+    _readiness(status, [], tracer).wait(("alpha",), timeout_s=0.5)
+    [span] = tracer.spans
+    assert span.attributes == {ATTR_SERVICE_PATTERNS: 1, ATTR_READY: False}
+    assert span.failed is True
+    assert span.error_type is None
+    # The span's attributes name counts and booleans only, never the unhealthy service names.
+    assert "alpha/api" not in repr(span.attributes)
+
+
+def test_every_poll_runs_inside_the_one_span() -> None:
+    tracer = FakeOperationTracer()
+    open_during_poll: list[int] = []
+
+    class _Status(_StubStatusService):
+        def collect(self, patterns: tuple[str, ...]) -> StatusDocument | None:
+            open_during_poll.append(len(tracer.spans))
+            return super().collect(patterns)
+
+    status = _Status([_doc("alpha", [_svc("api", "unhealthy")]), _doc("alpha", [_svc("api", "healthy")])])
+    _readiness(status, [], tracer).wait(("alpha",), timeout_s=30.0)
+    assert open_during_poll == [1, 1]
+    assert len(tracer.spans) == 1

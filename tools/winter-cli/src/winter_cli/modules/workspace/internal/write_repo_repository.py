@@ -5,7 +5,9 @@ from pathlib import Path
 
 import git
 
+from winter_cli.core.tracing import IOperationTracer
 from winter_cli.modules.workspace.internal.branch_tracking import read_origin_merge_branch
+from winter_cli.modules.workspace.internal.git_operation import GitOperationDeclaration
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.read_repo_repository import ReadRepoRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory, unwrap_gitpython_stream
@@ -79,10 +81,11 @@ def _autostash_args(autostash: bool) -> list[str]:
 class WriteRepoRepository(ReadRepoRepository):
     """Read-write GitPython implementation. Extends ReadRepoRepository with mutating operations."""
 
-    def __init__(self, error_factory: RepoErrorFactory, git_ops: GitOpsService) -> None:
-        super().__init__(error_factory)
+    def __init__(self, error_factory: RepoErrorFactory, git_ops: GitOpsService, tracer: IOperationTracer) -> None:
+        super().__init__(error_factory, tracer)
         self._git_ops = git_ops
 
+    @GitOperationDeclaration("fetch")
     def fetch(self, worktree: FeatureWorktree) -> None:
         # Shell out via r.git rather than r.remotes.origin.fetch() — gitpython's
         # high-level remotes API reads from the worktree's git-dir, which doesn't
@@ -96,6 +99,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 message=f"fetch failed for {worktree.repository.name}",
             )
 
+    @GitOperationDeclaration("pull")
     def integrate(
         self,
         worktree: FeatureWorktree,
@@ -112,6 +116,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 autostash,
             )
 
+    @GitOperationDeclaration("merge")
     def merge_ref(
         self,
         worktree: FeatureWorktree,
@@ -137,6 +142,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 autostash,
             )
 
+    @GitOperationDeclaration("merge")
     def merge_ref_standalone(
         self,
         repo: StandaloneRepository,
@@ -154,6 +160,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 autostash,
             )
 
+    @GitOperationDeclaration("pull")
     def sync_ff_only(self, repo: ProjectRepository) -> int:
         """Fetch origin and fast-forward the source checkout's local main.
 
@@ -183,6 +190,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 return 0
             return self._count_range(r, repo.name, f"{head_before}..{head_after}")
 
+    @GitOperationDeclaration("config")
     def set_upstream(self, worktree: FeatureWorktree, remote_branch: str) -> None:
         # Write branch.<head>.{remote,merge} directly instead of using
         # `git branch --set-upstream-to`, which refuses to set tracking to a
@@ -228,6 +236,7 @@ class WriteRepoRepository(ReadRepoRepository):
             r.git.config(f"branch.{head}.remote", remote)
             r.git.config(f"branch.{head}.merge", f"refs/heads/{branch}")
 
+    @GitOperationDeclaration("rev-parse")
     def has_local_ref(self, worktree: FeatureWorktree, ref: str) -> bool:
         """Whether `ref` resolves in the worktree's local object store. No network.
 
@@ -242,12 +251,14 @@ class WriteRepoRepository(ReadRepoRepository):
             except git.GitCommandError:
                 return False
 
+    @GitOperationDeclaration("status")
     def is_worktree_dirty(self, worktree: FeatureWorktree) -> bool:
         """Staged or unstaged changes present? Untracked files don't count —
         `git reset --hard` leaves untracked files in place."""
         with git.Repo(str(worktree.path)) as r:
             return r.is_dirty(working_tree=True, index=True, untracked_files=False)
 
+    @GitOperationDeclaration("rev-list")
     def count_commits_not_in(self, worktree: FeatureWorktree, ref: str, from_ref: str = "HEAD") -> int:
         """Commits reachable from `from_ref` (HEAD by default) but not from `ref`. No network.
 
@@ -267,6 +278,7 @@ class WriteRepoRepository(ReadRepoRepository):
                     cwd=worktree.path,
                 ) from exc
 
+    @GitOperationDeclaration("symbolic-ref")
     def get_active_branch_name(self, worktree: FeatureWorktree) -> str | None:
         """The currently checked-out branch name, or None when HEAD is detached. No network."""
         with git.Repo(str(worktree.path)) as r:
@@ -275,6 +287,7 @@ class WriteRepoRepository(ReadRepoRepository):
             except TypeError:
                 return None
 
+    @GitOperationDeclaration("config")
     def get_branch_upstream(self, worktree: FeatureWorktree, branch_name: str) -> str | None:
         """`branch_name`'s configured upstream (e.g. `origin/feature-123`), or None. No network.
 
@@ -292,6 +305,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 return None
             return tb.name if self._has_ref(r, tb.name) else None
 
+    @GitOperationDeclaration("checkout")
     def force_checkout_env_branch(self, worktree: FeatureWorktree, target_ref: str) -> None:
         # Force the worktree onto `worktree.environment.name` — the branch
         # every non-pinned feature worktree is created under
@@ -321,6 +335,7 @@ class WriteRepoRepository(ReadRepoRepository):
                     cwd=worktree.path,
                 ) from exc
 
+    @GitOperationDeclaration("reset")
     def reset_to(self, worktree: FeatureWorktree, mode: ResetMode, target_ref: str) -> None:
         """`git reset --soft|--mixed|--hard <target_ref>` — the literal, unmodified
         git primitive `winter ws reset` needs.
@@ -348,6 +363,7 @@ class WriteRepoRepository(ReadRepoRepository):
                     cwd=worktree.path,
                 ) from exc
 
+    @GitOperationDeclaration("rebase")
     def rebase_onto(self, worktree: FeatureWorktree, newbase: str, oldbase: str, branch: str) -> RebaseOntoResult:
         """`git rebase --onto <newbase> <oldbase> <branch>` — replay `branch`'s
         own commits past `oldbase` onto `newbase`, checking `branch` out as a
@@ -444,6 +460,7 @@ class WriteRepoRepository(ReadRepoRepository):
         """
         return self._run_clean(worktree, "-fd", _CLEAN_REMOVED_PREFIX)
 
+    @GitOperationDeclaration("clean")
     def _run_clean(self, worktree: FeatureWorktree, flags: str, prefix: str) -> list[str]:
         """`git clean <flags>`, parsed into the paths git named.
 
@@ -490,6 +507,7 @@ class WriteRepoRepository(ReadRepoRepository):
             ) from exc
         return _parse_clean_output(output, prefix, worktree.repository.name)
 
+    @GitOperationDeclaration("branch")
     def unset_upstream(self, worktree: FeatureWorktree) -> None:
         """Remove upstream tracking; no-op when already unset.
 
@@ -527,6 +545,7 @@ class WriteRepoRepository(ReadRepoRepository):
                     cwd=worktree.path,
                 ) from exc
 
+    @GitOperationDeclaration("config")
     def get_worktree_upstream(self, worktree: FeatureWorktree) -> str | None:
         """The worktree branch's current upstream (e.g. `origin/feature-123`), or None. No network.
 
@@ -548,6 +567,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 return None
             return name if self._has_ref(r, name) else None
 
+    @GitOperationDeclaration("config")
     def get_worktree_push_branch(self, worktree: FeatureWorktree) -> str | None:
         """The bare branch this worktree pushes to, read from its own tracking config.
 
@@ -561,10 +581,12 @@ class WriteRepoRepository(ReadRepoRepository):
         with git.Repo(str(worktree.path)) as r:
             return read_origin_merge_branch(r, self._error_factory, cwd=worktree.path, label=worktree.repository.name)
 
+    @GitOperationDeclaration("config")
     def set_push_default(self, worktree: FeatureWorktree) -> None:
         with git.Repo(str(worktree.path)) as r, r.config_writer() as cw:
             cw.set_value("push", "default", "upstream")
 
+    @GitOperationDeclaration("push")
     def push(self, worktree: FeatureWorktree, feature_branch: str | None = None) -> int:
         message = f"push failed for {worktree.repository.name}"
         with git.Repo(str(worktree.path)) as r:
@@ -614,6 +636,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 )
         return commit_count
 
+    @GitOperationDeclaration("rev-parse")
     def get_remote_branch_tip(self, worktree: FeatureWorktree, branch: str) -> str | None:
         """OID of `origin/<branch>` in the worktree's object store, or None when the
         remote ref doesn't resolve yet (first push of a new branch). No network.
@@ -628,6 +651,7 @@ class WriteRepoRepository(ReadRepoRepository):
             except git.GitCommandError:
                 return None
 
+    @GitOperationDeclaration("merge")
     def fast_forward_local_branch(
         self, repo: ProjectRepository, branch: str, pre_remote_tip: str
     ) -> LocalFastForward | None:
@@ -702,10 +726,12 @@ class WriteRepoRepository(ReadRepoRepository):
                 return current_path
         return None
 
+    @GitOperationDeclaration("rev-list")
     def _count_between(self, repo: ProjectRepository, old_tip: str, new_tip: str) -> int:
         with git.Repo(str(repo.main_path)) as r:
             return self._count_range(r, repo.name, f"{old_tip}..{new_tip}")
 
+    @GitOperationDeclaration("fetch")
     def fetch_standalone(self, repo: StandaloneRepository) -> None:
         with git.Repo(str(repo.path)) as r:
             self._git_ops.run_remote_git(
@@ -716,6 +742,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 message=f"fetch failed for {repo.name}",
             )
 
+    @GitOperationDeclaration("pull")
     def integrate_standalone(
         self,
         repo: StandaloneRepository,
@@ -728,6 +755,7 @@ class WriteRepoRepository(ReadRepoRepository):
                 return RepoSyncOutcome(repo_name=repo.name, sync_result=SyncResult.no_upstream)
             return self._integrate(r, repo.name, tb, mode, autostash)
 
+    @GitOperationDeclaration("pull")
     def integrate_standalone_to_ref(
         self,
         repo: StandaloneRepository,
@@ -745,6 +773,7 @@ class WriteRepoRepository(ReadRepoRepository):
         with git.Repo(str(repo.path)) as r:
             return self._integrate(r, repo.name, target_ref, mode, autostash)
 
+    @GitOperationDeclaration("push")
     def push_standalone(self, repo: StandaloneRepository) -> int:
         with git.Repo(str(repo.path)) as r:
             if self._tracking_branch_name(r) is None:
@@ -762,10 +791,12 @@ class WriteRepoRepository(ReadRepoRepository):
             )
             return commit_count
 
+    @GitOperationDeclaration("rev-list")
     def get_standalone_tracking_ahead(self, repo: StandaloneRepository) -> int:
         with git.Repo(str(repo.path)) as r:
             return self._tracking_ahead(repo, r)
 
+    @GitOperationDeclaration("config")
     def get_standalone_upstream(self, repo: StandaloneRepository) -> str | None:
         with git.Repo(str(repo.path)) as r:
             return self._tracking_branch_name(r)

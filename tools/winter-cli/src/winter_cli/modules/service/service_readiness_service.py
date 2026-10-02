@@ -17,6 +17,7 @@ import dataclasses
 import time
 from collections.abc import Callable
 
+from winter_cli.core.tracing import ATTR_READY, ATTR_SERVICE_PATTERNS, IOperationTracer
 from winter_cli.modules.service.service_status_service import ServiceStatusService
 from winter_cli.modules.service.status_models import StatusDocument
 
@@ -46,6 +47,7 @@ class ServiceReadinessService:
     """Polls service health until readiness or timeout.
 
     ``status_service`` supplies the merged, filtered status document each poll.
+    ``tracer`` opens the ``service readiness wait`` span the polls run under.
     ``sleep`` and ``monotonic`` are injected (defaulting to the stdlib) so tests
     can drive the clock without real delays.
     """
@@ -53,12 +55,14 @@ class ServiceReadinessService:
     def __init__(
         self,
         status_service: ServiceStatusService,
+        tracer: IOperationTracer,
         *,
         sleep: Callable[[float], None] = time.sleep,
         monotonic: Callable[[], float] = time.monotonic,
         poll_interval_s: float = DEFAULT_POLL_INTERVAL_S,
     ) -> None:
         self._status_service = status_service
+        self._tracer = tracer
         self._sleep = sleep
         self._monotonic = monotonic
         self._poll_interval_s = poll_interval_s
@@ -73,6 +77,14 @@ class ServiceReadinessService:
         service (the common case completes on the first poll). On timeout, returns
         the still-unhealthy identifiers so the caller can name them.
         """
+        with self._tracer.operation("service readiness wait", {ATTR_SERVICE_PATTERNS: len(patterns)}) as operation:
+            result = self._poll(patterns, timeout_s)
+            operation.set_attribute(ATTR_READY, result.ready)
+            if not result.ready:
+                operation.mark_failed()
+            return result
+
+    def _poll(self, patterns: tuple[str, ...], timeout_s: float) -> ReadinessResult:
         deadline = self._monotonic() + timeout_s
 
         while True:

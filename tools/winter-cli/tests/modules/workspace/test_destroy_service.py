@@ -89,6 +89,32 @@ def test_destroy_env_removes_worktree_dir_and_env_dir(
     assert any(a[2] == "env_removed" for a in init_reporter.actions)
 
 
+def test_destroy_env_names_the_env_and_repo_on_every_worktree_git_call(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    env_root = WORKSPACE_ROOT / "alpha"
+    worktree_path = env_root / "demo"
+    fs = FakeFilesystem(
+        directories=[WORKSPACE_ROOT / "projects", DEMO_MAIN, env_root, worktree_path],
+        files={WORKSPACE_ROOT / ".git" / "info" / "exclude": ""},
+    )
+    git = FakeGitRepository()
+    git.clean_worktrees.add(worktree_path)
+
+    svc = _service(workspace_config, fs, git)
+    ok = svc.destroy_env("alpha", force=False, strict=False, dry_run=False, reporter=init_reporter)
+
+    assert ok is True
+    assert git.env_calls == [
+        ("is_worktree_clean", worktree_path, "alpha"),
+        ("remove_worktree", worktree_path, "alpha"),
+    ]
+    assert git.repo_name_calls == [
+        ("is_worktree_clean", worktree_path, "demo"),
+        ("remove_worktree", worktree_path, "demo"),
+    ]
+
+
 def test_destroy_env_refuses_dirty_worktree_without_force(
     workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
 ) -> None:
@@ -213,7 +239,9 @@ def test_destroy_env_removes_registry_entry(workspace_config: WorkspaceConfig, i
 class _ExplodingRemoveGit(FakeGitRepository):
     """FakeGitRepository whose remove_worktree raises — exercises the per-repo wrap site."""
 
-    def remove_worktree(self, source: Path, worktree_path: Path, force: bool) -> None:  # type: ignore[override]
+    def remove_worktree(
+        self, source: Path, worktree_path: Path, force: bool, *, repo_name: str, env: str | None
+    ) -> None:
         raise RepoError("worktree busy")
 
 

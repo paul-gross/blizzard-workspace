@@ -22,6 +22,7 @@ from pathlib import Path
 import git
 import pytest
 
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
@@ -41,7 +42,7 @@ from winter_cli.modules.workspace.worktree_safety import WorktreeSafetyService
 def service() -> EnvCheckoutService:
     error_factory = RepoErrorFactory()
     git_ops = GitOpsService(error_factory, sleep=lambda _: None, jitter=lambda: 0.0)
-    repo_repo = WriteRepoRepository(error_factory=error_factory, git_ops=git_ops)
+    repo_repo = WriteRepoRepository(error_factory=error_factory, git_ops=git_ops, tracer=NoopCommandTracer())
     return EnvCheckoutService(repo_repo=repo_repo, worktree_safety_svc=WorktreeSafetyService(repo_repo=repo_repo))
 
 

@@ -18,6 +18,10 @@
 
 No readiness gate, no status polling, no inter-cell ordering semantics.
 
+Each cell's provider call runs inside a ``service provider up`` / ``service provider down``
+span carrying the provider's extension name and the cell's scope; a non-zero exit marks it
+failed.
+
 Per-scope env injection
 ------------------------
 Each cell's provider subprocess environment is provisioned once per unique scope
@@ -57,6 +61,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from winter_cli.core.subprocess_runner import ISubprocessRunner
+from winter_cli.core.tracing import ATTR_PROVIDER, ATTR_SCOPE, IOperationTracer
 from winter_cli.modules.capability.models import ResolvedCapability
 from winter_cli.modules.service.provider_invocation import (
     IEnvProvisioner,
@@ -123,6 +128,7 @@ class ServiceFanOutService:
         subprocess_runner: ISubprocessRunner,
         workspace_root: Path,
         service_prefix: str,
+        tracer: IOperationTracer,
         manifest_collector: ServiceManifestCollectorService | None = None,
         env_provisioner: IEnvProvisioner | None = None,
         reporter: IServiceReporter | None = None,
@@ -130,6 +136,7 @@ class ServiceFanOutService:
         self._subprocess_runner = subprocess_runner
         self._workspace_root = workspace_root
         self._service_prefix = service_prefix
+        self._tracer = tracer
         self._manifest_collector = manifest_collector
         self._env_provisioner = env_provisioner
         self._reporter = reporter
@@ -220,6 +227,13 @@ class ServiceFanOutService:
         merged = apply_provisioned_env(merged, provisioned_env)
         if extra_env:
             merged = {**merged, **extra_env}
-        # `up` launches long-running services: they never inherit the caller's trace, so a
-        # service never attaches spans to a step that has ended.
-        return self._subprocess_runner.call(cmd, cwd=self._workspace_root, env=merged, detach_trace=action == "up")
+        attributes = {ATTR_PROVIDER: cell.provider.extension_name, ATTR_SCOPE: cell.scope}
+        with self._tracer.operation(f"service provider {action}", attributes) as operation:
+            # `up` launches long-running services: they never inherit the caller's trace, so a
+            # service never attaches spans to a step that has ended.
+            exit_code = self._subprocess_runner.call(
+                cmd, cwd=self._workspace_root, env=merged, detach_trace=action == "up"
+            )
+            if exit_code != 0:
+                operation.mark_failed()
+            return exit_code

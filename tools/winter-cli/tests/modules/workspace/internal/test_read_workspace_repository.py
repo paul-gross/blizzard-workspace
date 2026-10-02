@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import git
 import pytest
 
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.modules.workspace.env_index import GREEK_LETTERS, resolve_env_index
 from winter_cli.modules.workspace.internal import read_workspace_repository
 from winter_cli.modules.workspace.internal.branch_tracking import feature_branch_from_upstream
@@ -34,7 +35,7 @@ def _fake_git_repo(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 
 @pytest.fixture
 def repo() -> ReadWorkspaceRepository:
-    return ReadWorkspaceRepository(RepoErrorFactory())
+    return ReadWorkspaceRepository(RepoErrorFactory(), NoopCommandTracer())
 
 
 def _project(name: str) -> ProjectRepository:
@@ -105,7 +106,7 @@ def test_get_environments_discovers_non_greek_env_from_registry(
     registry = MagicMock()
     registry.all_assignments.return_value = {"alpha": 1, "feature-xyz": 30}
     registry.get_index.side_effect = lambda name: {"alpha": 1, "feature-xyz": 30}.get(name)
-    repo = ReadWorkspaceRepository(RepoErrorFactory(), registry=registry)
+    repo = ReadWorkspaceRepository(RepoErrorFactory(), NoopCommandTracer(), registry=registry)
     workspace = Workspace(root_path=_ROOT, service_prefix="t", main_branch="main")
 
     def _is_dir(self: Path) -> bool:
@@ -412,7 +413,7 @@ def _compare_old_and_new(repo_path: Path, repo_name: str) -> None:
     workspace = Workspace(root_path=repo_path.parent, service_prefix="t", main_branch="main")
     env = FeatureEnvironment(workspace=workspace, name="alpha", index=1, path=repo_path.parent)
     project = ProjectRepository(name=repo_name, main_path=repo_path, main_branch="main")
-    real_repo = ReadWorkspaceRepository(RepoErrorFactory())
+    real_repo = ReadWorkspaceRepository(RepoErrorFactory(), NoopCommandTracer())
 
     old_status = real_repo.get_environment_status(env, [project])
 

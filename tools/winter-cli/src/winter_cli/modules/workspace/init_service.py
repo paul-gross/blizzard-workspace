@@ -246,7 +246,7 @@ class InitService:
                 continue
             ready_repos.append(repo)
 
-        inferred_upstream = self._infer_env_upstream(ready_repos, env_root)
+        inferred_upstream = self._infer_env_upstream(ready_repos, env_root, name)
 
         if not self._run_per_repo(
             ready_repos,
@@ -378,12 +378,12 @@ class InitService:
             if not self._fs.exists(repo_path):
                 if not repo.url:
                     raise RepoError("no `url` declared in config; cannot clone")
-                self._git_repo.clone(repo.url, repo_path)
+                self._git_repo.clone(repo.url, repo_path, repo_name=repo.name)
                 reporter.repo_action(label, str(repo_path), "cloned")
             else:
                 reporter.repo_action(label, str(repo_path), "exists")
 
-            self._apply_identity(repo_path)
+            self._apply_identity(repo_path, repo_name=repo.name, env=None)
             self._write_excludes(repo_path, repo, reporter, str(repo_path))
             self._run_cmds(repo_path, repo, reporter)
         except (RepoError, OSError) as exc:
@@ -406,12 +406,12 @@ class InitService:
                 if not repo.url:
                     raise RepoError("no `url` declared in config; cannot clone")
                 self._fs.mkdir(repo_path.parent, parents=True, exist_ok=True)
-                self._git_repo.clone(repo.url, repo_path)
+                self._git_repo.clone(repo.url, repo_path, repo_name=repo.name)
                 reporter.repo_action(label, str(repo_path), "cloned")
             else:
                 reporter.repo_action(label, str(repo_path), "exists")
 
-            self._apply_identity(repo_path)
+            self._apply_identity(repo_path, repo_name=repo.name, env=None)
             self._write_excludes(repo_path, repo, reporter, str(repo_path))
             self._run_cmds(repo_path, repo, reporter)
             self._apply_standalone_pin(repo, repo_path, reporter)
@@ -484,9 +484,9 @@ class InitService:
             # Fresh lock — check out at the locked commit, no network/resolve needed.
             entry = existing_entry
             if entry.kind is RefKind.branch:
-                self._git_repo.checkout_branch(repo_path, entry.ref)
+                self._git_repo.checkout_branch(repo_path, entry.ref, repo_name=repo.name, env=None)
             else:
-                self._git_repo.checkout_detached(repo_path, entry.commit)
+                self._git_repo.checkout_detached(repo_path, entry.commit, repo_name=repo.name, env=None)
             reporter.repo_action(
                 label,
                 str(repo_path),
@@ -496,18 +496,18 @@ class InitService:
         else:
             # Lock absent or stale — need to re-resolve.
             # Guard: refuse if the working tree has uncommitted changes.
-            if not self._git_repo.is_worktree_clean(repo_path):
+            if not self._git_repo.is_worktree_clean(repo_path, repo_name=repo.name, env=None):
                 raise RepoError(
                     f"refusing to re-pin {repo.name!r}: working tree has uncommitted changes; "
                     f"commit or stash first (or run `winter ws fetch {repo.name}` to sync refs)"
                 )
 
-            kind, commit = self._git_repo.resolve_ref(repo_path, repo.ref)
+            kind, commit = self._git_repo.resolve_ref(repo_path, repo.ref, repo_name=repo.name, env=None)
 
             if kind is RefKind.branch:
-                self._git_repo.checkout_branch(repo_path, repo.ref)
+                self._git_repo.checkout_branch(repo_path, repo.ref, repo_name=repo.name, env=None)
             else:
-                self._git_repo.checkout_detached(repo_path, commit)
+                self._git_repo.checkout_detached(repo_path, commit, repo_name=repo.name, env=None)
 
             new_entry = LockEntry(name=repo.name, ref=repo.ref, kind=kind, commit=commit)
             # Atomic upsert: preserves other repos' entries even under the
@@ -527,11 +527,16 @@ class InitService:
     def _reconcile_worktree_repo(
         self,
         repo: ProjectRepository,
-        branch_name: str,
+        env_name: str,
         env_root: Path,
         reporter: IInitReporter,
         inferred_upstream: str | None = None,
     ) -> bool:
+        """Reconcile one project repo's worktree in the env `env_name`.
+
+        Every feature worktree is created under a branch named for its env, so `env_name` is
+        also the branch the worktree is created on.
+        """
         worktree_path = env_root / repo.name
         location = str(worktree_path)
         label = repo.name
@@ -539,14 +544,16 @@ class InitService:
         try:
             newly_created = not self._fs.exists(worktree_path)
             if newly_created:
-                self._create_git_worktree(repo, branch_name, worktree_path)
+                self._create_git_worktree(repo, env_name, worktree_path)
                 reporter.repo_action(label, location, "worktree_created")
             else:
                 reporter.repo_action(label, location, "exists")
 
-            self._apply_identity(worktree_path)
+            self._apply_identity(worktree_path, repo_name=repo.name, env=env_name)
             self._write_excludes(worktree_path, repo, reporter, location)
-            wiring_ok = self._wire_upstream_tracking(repo, worktree_path, inferred_upstream, reporter, newly_created)
+            wiring_ok = self._wire_upstream_tracking(
+                repo, worktree_path, env_name, inferred_upstream, reporter, newly_created
+            )
             self._run_cmds(worktree_path, repo, reporter)
         except (RepoError, OSError) as exc:
             reporter.repo_error(label, str(exc))
@@ -557,6 +564,7 @@ class InitService:
         self,
         repo: ProjectRepository,
         worktree_path: Path,
+        env_name: str,
         inferred_upstream: str | None,
         reporter: IInitReporter,
         newly_created: bool,
@@ -574,8 +582,8 @@ class InitService:
         `_run_cmds` run regardless.
         """
         try:
-            self._configure_pinned_tracking(repo, worktree_path, reporter)
-            self._connect_inferred_upstream(repo, worktree_path, inferred_upstream, reporter, newly_created)
+            self._configure_pinned_tracking(repo, worktree_path, env_name, reporter)
+            self._connect_inferred_upstream(repo, worktree_path, env_name, inferred_upstream, reporter, newly_created)
         except RepoError as exc:
             reporter.repo_error(repo.name, str(exc))
             return False
@@ -585,6 +593,7 @@ class InitService:
         self,
         repos: list[ProjectRepository],
         env_root: Path,
+        env_name: str,
     ) -> str | None:
         """Infer a single consistent upstream from the non-pinned worktrees that already have one.
 
@@ -601,7 +610,7 @@ class InitService:
             worktree_path = env_root / repo.name
             if not self._fs.exists(worktree_path):
                 continue
-            upstream = self._git_repo.get_tracking_branch(worktree_path)
+            upstream = self._git_repo.get_tracking_branch(worktree_path, repo_name=repo.name, env=env_name)
             if upstream is not None:
                 upstreams.add(upstream)
         if len(upstreams) == 1:
@@ -612,6 +621,7 @@ class InitService:
         self,
         repo: ProjectRepository,
         worktree_path: Path,
+        env_name: str,
         inferred_upstream: str | None,
         reporter: IInitReporter,
         newly_created: bool = False,
@@ -637,19 +647,20 @@ class InitService:
             return
         if inferred_upstream is None:
             return
-        current = self._git_repo.get_tracking_branch(worktree_path)
+        current = self._git_repo.get_tracking_branch(worktree_path, repo_name=repo.name, env=env_name)
         if current == inferred_upstream:
             return
         if current is not None and not newly_created:
             return
-        self._git_repo.set_upstream_to(worktree_path, inferred_upstream)
-        self._git_repo.set_push_default_upstream(worktree_path)
+        self._git_repo.set_upstream_to(worktree_path, inferred_upstream, repo_name=repo.name, env=env_name)
+        self._git_repo.set_push_default_upstream(worktree_path, repo_name=repo.name, env=env_name)
         reporter.repo_action(repo.name, str(worktree_path), "upstream_inferred", inferred_upstream)
 
     def _configure_pinned_tracking(
         self,
         repo: ProjectRepository,
         worktree_path: Path,
+        env_name: str,
         reporter: IInitReporter,
     ) -> None:
         """Wire a pinned worktree to push and pull against `origin/<main-branch>`.
@@ -665,13 +676,13 @@ class InitService:
             return
         desired = f"origin/{repo.main_branch}"
         changes: list[str] = []
-        current = self._git_repo.get_tracking_branch(worktree_path)
+        current = self._git_repo.get_tracking_branch(worktree_path, repo_name=repo.name, env=env_name)
         if current != desired:
-            self._git_repo.set_upstream_to(worktree_path, desired)
+            self._git_repo.set_upstream_to(worktree_path, desired, repo_name=repo.name, env=env_name)
             changes.append(desired)
 
-        if self._git_repo.get_push_default(worktree_path) != "upstream":
-            self._git_repo.set_push_default_upstream(worktree_path)
+        if self._git_repo.get_push_default(worktree_path, repo_name=repo.name, env=env_name) != "upstream":
+            self._git_repo.set_push_default_upstream(worktree_path, repo_name=repo.name, env=env_name)
             changes.append("push.default=upstream")
 
         if changes:
@@ -688,11 +699,21 @@ class InitService:
         branch_name: str,
         worktree_path: Path,
     ) -> None:
-        existing_heads = set(self._git_repo.get_local_branches(repo.main_path))
+        """Create the env's worktree for `repo`, on the branch named for the env (`branch_name`)."""
+        existing_heads = set(self._git_repo.get_local_branches(repo.main_path, repo_name=repo.name, env=None))
         if branch_name in existing_heads:
-            self._git_repo.add_worktree(repo.main_path, worktree_path, branch_name)
+            self._git_repo.add_worktree(
+                repo.main_path, worktree_path, branch_name, repo_name=repo.name, env=branch_name
+            )
         else:
-            self._git_repo.add_worktree(repo.main_path, worktree_path, branch_name, base_branch=repo.main_branch)
+            self._git_repo.add_worktree(
+                repo.main_path,
+                worktree_path,
+                branch_name,
+                base_branch=repo.main_branch,
+                repo_name=repo.name,
+                env=branch_name,
+            )
 
     def _write_workspace_self_exclude(
         self,
@@ -774,11 +795,11 @@ class InitService:
 
     # ── Shared reconcile steps ────────────────────────────────────────────
 
-    def _apply_identity(self, repo_path: Path) -> None:
+    def _apply_identity(self, repo_path: Path, *, repo_name: str, env: str | None) -> None:
         identity = self._config.git_identity
         if identity is None:
             return
-        self._git_repo.set_user_identity(repo_path, identity.name, identity.email)
+        self._git_repo.set_user_identity(repo_path, identity.name, identity.email, repo_name=repo_name, env=env)
 
     def _write_excludes(
         self,

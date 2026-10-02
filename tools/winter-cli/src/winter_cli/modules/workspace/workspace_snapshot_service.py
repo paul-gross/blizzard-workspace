@@ -527,7 +527,7 @@ class WorkspaceSnapshotService:
 
             head_commit: str | None = None
             try:
-                head_commit = self._git_repo.get_head_commit(repo.path)
+                head_commit = self._git_repo.get_head_commit(repo.path, repo_name=repo.name, env=None)
             except Exception as exc:
                 logger.debug("HEAD probe failed for %s: %s", repo.name, exc)
 

@@ -99,7 +99,8 @@ class PruneService:
         for entry in sorted(self._fs.iterdir(projects_dir)):
             if not self._fs.is_dir(entry) or entry.name in declared:
                 continue
-            safe, notes = self._project_clone_safety(entry)
+            # An orphan clone has no declared repo, so its directory name stands in for the repo name.
+            safe, notes = self._project_clone_safety(entry, repo_name=entry.name)
             orphans.append(
                 PruneOrphan(
                     kind="project_clone",
@@ -144,7 +145,11 @@ class PruneService:
                 if path in seen_paths or not self._fs.exists(path):
                     continue
                 seen_paths.add(path)
-                safe, notes = self._project_clone_safety(path) if self._fs.exists(path / ".git") else (True, "")
+                safe, notes = (
+                    self._project_clone_safety(path, repo_name=block_name)
+                    if self._fs.exists(path / ".git")
+                    else (True, "")
+                )
                 orphans.append(
                     PruneOrphan(
                         kind="standalone_clone",
@@ -263,12 +268,12 @@ class PruneService:
             yield name, block_lines
             i = j + 1
 
-    def _project_clone_safety(self, path: Path) -> tuple[bool, str]:
+    def _project_clone_safety(self, path: Path, *, repo_name: str) -> tuple[bool, str]:
         if not self._fs.exists(path / ".git"):
             return False, "not a git clone (delete by hand if intentional)"
         worktrees_dir = path / ".git" / "worktrees"
         if self._fs.is_dir(worktrees_dir) and self._fs.iterdir(worktrees_dir):
             return False, "has linked worktrees"
-        if not self._git_repo.is_worktree_clean(path):
+        if not self._git_repo.is_worktree_clean(path, repo_name=repo_name, env=None):
             return False, "uncommitted or untracked changes"
         return True, ""

@@ -20,6 +20,7 @@ from rich.text import Text
 from textual.widgets import DataTable, Static
 from textual.widgets.data_table import ColumnKey
 
+from tests.conftest import FakeSessionTracer
 from winter_cli.container import Container
 from winter_cli.core.config_file import ConfigError
 from winter_cli.modules.agents.agent_matrix_service import AgentMatrixService
@@ -657,6 +658,40 @@ async def test_agent_matrix_i_runs_ws_init_once_then_reloads(container: Containe
     finally:
         container.agent_matrix_svc.reset_override()
         container.ws_init_runner.reset_override()
+
+
+@pytest.mark.asyncio
+async def test_agent_matrix_load_and_ws_init_each_run_inside_their_own_session_root(container: Container) -> None:
+    tracer = FakeSessionTracer()
+    roots_open_during_build: list[list[str]] = []
+    roots_open_during_init: list[list[str]] = []
+
+    class _RootWatchingMatrixService(FakeAgentMatrixService):
+        def build(self) -> AgentMatrix:
+            roots_open_during_build.append(tracer.open_roots)
+            return super().build()
+
+    class _RootWatchingRunner(FakeWsInitRunner):
+        def run(self) -> WsInitResult:
+            roots_open_during_init.append(tracer.open_roots)
+            return super().run()
+
+    container.command_tracer.override(providers.Object(tracer))
+    container.agent_matrix_svc.override(providers.Object(_RootWatchingMatrixService(_fixture_matrix())))
+    container.ws_init_runner.override(providers.Object(_RootWatchingRunner()))
+    try:
+        app = WinterDashboardApp(container)
+        async with app.run_test(size=(200, 60)) as pilot:
+            await _open_with(pilot, app, [])
+            await pilot.press("i")
+            await pilot.pause(0.3)
+    finally:
+        container.command_tracer.reset_override()
+        container.agent_matrix_svc.reset_override()
+        container.ws_init_runner.reset_override()
+
+    assert roots_open_during_build[0] == ["dashboard load agent matrix"]
+    assert roots_open_during_init == [["dashboard ws init"]]
 
 
 @pytest.mark.parametrize(

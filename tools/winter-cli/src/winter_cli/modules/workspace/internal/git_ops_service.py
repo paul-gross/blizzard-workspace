@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import concurrent.futures
 import contextlib
 import logging
 import os
@@ -13,6 +12,7 @@ from typing import TypeVar
 
 import git
 
+from winter_cli.core.context_thread_pool import ContextThreadPoolExecutor
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory, unwrap_gitpython_stream
 
 logger = logging.getLogger(__name__)
@@ -182,9 +182,9 @@ class GitOpsService:
         return OPERATION_TIMEOUT_S
 
     @contextlib.contextmanager
-    def executor(self) -> Iterator[concurrent.futures.ThreadPoolExecutor]:
+    def executor(self) -> Iterator[ContextThreadPoolExecutor]:
         """Thread pool capped at PARALLELISM for fan-out of git operations."""
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.PARALLELISM) as pool:
+        with ContextThreadPoolExecutor(max_workers=self.PARALLELISM) as pool:
             yield pool
 
     def run_remote_git(

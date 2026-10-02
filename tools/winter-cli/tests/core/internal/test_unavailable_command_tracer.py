@@ -28,3 +28,34 @@ def test_unavailable_tracer_logs_the_failure_at_debug_on_export(caplog: pytest.L
     assert [record.levelname for record in caplog.records] == ["DEBUG"]
     assert caplog.records[0].exc_info is not None
     assert caplog.records[0].exc_info[1] is failure
+
+
+def test_unavailable_operation_runs_its_body_and_propagates_its_exception() -> None:
+    tracer = UnavailableCommandTracer(RuntimeError("sdk import failed"))
+    ran: list[str] = []
+
+    with tracer.operation("git status") as operation:
+        operation.set_attribute("winter.repo", "winter")
+        operation.mark_failed()
+        ran.append("body")
+    with pytest.raises(ValueError), tracer.operation("git fetch"):
+        raise ValueError("boom")
+
+    assert ran == ["body"]
+
+
+def test_unavailable_session_root_runs_its_body_and_background_export_does_nothing() -> None:
+    import threading
+
+    tracer = UnavailableCommandTracer(RuntimeError("sdk import failed"))
+    before = threading.active_count()
+    ran: list[str] = []
+
+    tracer.start_background_export()
+    with tracer.session_root("dashboard refresh workspace"):
+        ran.append("body")
+    with pytest.raises(ValueError), tracer.session_root("dashboard refresh workspace"):
+        raise ValueError("boom")
+
+    assert ran == ["body"]
+    assert threading.active_count() == before

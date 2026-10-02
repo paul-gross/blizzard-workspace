@@ -683,6 +683,10 @@ def test_standalone_branch_ref_advances_working_tree_and_rewrites_lock(tmp_path:
     assert report.standalone[0].sync_result == SyncResult.re_pinned
     assert report.standalone[0].pin_ref == SHA_NEW[:8]
     assert ("standalone", "my-lib", SyncResult.re_pinned) in reporter.synced
+    # A standalone is not a feature worktree: every git call it makes names no env.
+    assert git_repo.env_calls
+    assert {env for _method, _path, env in git_repo.env_calls} == {None}
+    assert {repo_name for _method, _path, repo_name in git_repo.repo_name_calls} == {"my-lib"}
 
 
 def test_standalone_branch_ref_up_to_date_does_not_rewrite_lock(tmp_path: Path) -> None:

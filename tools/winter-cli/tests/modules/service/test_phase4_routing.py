@@ -25,6 +25,7 @@ from tests.conftest import (
 )
 from winter_cli.config.models import ProjectRepositoryConfig, SingletonRepository, SingletonType, WorkspaceConfig
 from winter_cli.core.internal.click_cli_output_service import ClickCliOutputService
+from winter_cli.core.internal.noop_command_tracer import NoopCommandTracer
 from winter_cli.core.subprocess_runner import SubprocessResult
 from winter_cli.modules.capability.capability_registry_service import CapabilityRegistryService
 from winter_cli.modules.service.describe_parser import DescribeResultParser
@@ -216,6 +217,7 @@ def _make_dispatch(
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
     )
     matrix_svc = ServiceStatusMatrixService(
         subprocess_runner=runner,
@@ -1004,6 +1006,7 @@ def test_override_wins_over_configured_list_for_up() -> None:
         subprocess_runner=runner,
         workspace_root=WS,
         service_prefix="winter",
+        tracer=NoopCommandTracer(),
     )
     describe_svc = ServiceDescribeService(
         subprocess_runner=runner,
