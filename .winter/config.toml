@@ -12,13 +12,13 @@ base_port = 4500
 ports_per_env = 20
 
 # Fixed-index env aliases (slots 1..N in list order). The Greek quartet
-# alpha..delta (1-4) is the human's pool; r1..r4 (5-8) is the Claude Code runner's
-# (`r-claude`) static pool and oce1..oce4 (9-12) the OpenCode runner's
+# alpha..delta (1-4) is the human's pool; r1..r6 (5-10) is the Claude Code runner's
+# (`r-claude`) static pool and oce1..oce4 (11-14) the OpenCode runner's
 # (`r-chatgpt`) — see each runner's `workspace_envs` in ../runner/ and
 # ../runner-opencode/.
 # Declaring them as aliases pins each pool to stable, sequential port bands instead
 # of the scattered hash-band slots ad-hoc names would otherwise draw.
-env_aliases = ["alpha", "beta", "gamma", "delta", "r1", "r2", "r3", "r4", "oce1", "oce2", "oce3", "oce4"]
+env_aliases = ["alpha", "beta", "gamma", "delta", "r1", "r2", "r3", "r4", "r5", "r6", "oce1", "oce2", "oce3", "oce4"]
 
 [model_tiers.fable]
 opencode = "openai/gpt-6-astra"
