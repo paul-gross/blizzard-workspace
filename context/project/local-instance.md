@@ -1,7 +1,7 @@
 # The instance
 
 This workspace **dogfoods blizzard**: a real blizzard hub and two runners drive blizzard's own development (the
-`r1`–`r4` and `oce1`–`oce4` envs) against the **real** GitHub forge. **The instance** is what this file calls that
+`r1`–`r6` and `oce1`–`oce4` envs) against the **real** GitHub forge. **The instance** is what this file calls that
 deployment, and what "redeploy and restart the instance" means — **not** a feature env, and not the per-feature-env
 verification stacks.
 
@@ -39,8 +39,8 @@ its plan's quota runs out while the other keeps working. Both share `workspace_r
 | `runner_id`             | `r-claude`                                                              | `r-chatgpt`                                        |
 | Runtime dir             | `../runner`                                                             | `../runner-opencode`                               |
 | Harness                 | `[opencode] enabled = false`                                            | `[claude_code] enabled = false`                    |
-| Envs (`workspace_envs`) | `r1`–`r4`                                                               | `oce1`–`oce4`                                      |
-| `max_agents`            | 2                                                                       | 1                                                  |
+| Envs (`workspace_envs`) | `r1`–`r6`                                                               | `oce1`–`oce4`                                      |
+| `max_agents`            | 4                                                                       | 1                                                  |
 | Port / `public_url`     | `127.0.0.1:8431`, plus the tailnet origin                               | `127.0.0.1:8432`, loopback only                    |
 | Subscription sampled    | `anthropic`                                                             | `openai`                                           |
 | Systemd unit            | `blizzard-blizzard-runner.service`                                      | `blizzard-blizzard-runner-opencode.service`        |
