@@ -328,24 +328,8 @@ Ingest takes a source-native token — prefer `blizzard:26`, `blizzard#26`, or t
 
 ### Marshalling the backlog
 
-**Marshal** names turning the resting backlog into ordered, claimable work: when the user says to marshal, carry every
-`not_ready` chunk through the steps below, promotion included. Anything that mints a chunk — `hub chunk ingest`,
-`hub garden-proposal accept`, `hub item create` — owes steps 1–3 at once, unasked; only promotion waits for the word.
-
-1. **Map the ground.** For each `not_ready` chunk, read its work item and locate the code and docs it will change on
-   `origin/master`. Map every unfinished chunk too — `ready`, `running`, `delivering` — since a resting chunk can
-   collide with work already in flight.
-2. **Group** chunks that are one change — the same defect from two angles, or small changes to the same files for the
-   same reason: `hub chunk group <survivor> <merged-id>…`. A group is one lane and one PR, so keep it a size one lane
-   carries. Every id must be unacquired.
-3. **Link** chunks that are separable but would collide — they edit the same files, or one builds on what the other
-   introduces: `hub chunk depend <dependent> <prerequisite>`. The foundation, or else the smaller, goes first. A resting
-   chunk that would collide with in-flight work depends on that in-flight chunk.
-4. **Promote in priority order** — `hub chunk promote <chunk-id>`, most urgent first: defects operators or the fleet hit
-   ahead of latent ones, both ahead of prose. Promotion lands each at the tail of the `ready` queue, so promoting in
-   order is the ordering; a dependent rests there blocked until its prerequisites finish.
-5. **Reorder** only where the new work must jump chunks already `ready`: `hub queue move <chunk-id> <position>`.
-6. **Report** each group, edge, and reorder with its reason — the file or seam the chunks share.
+Marshalling, and the steps every chunk-minting verb above owes at once, is owned by blizzard-context
+([workflows/marshalling.md](../../.winter/ext/context/workflows/marshalling.md), `bzh:marshal`).
 
 ## Developing a feature env against this instance's data
 
