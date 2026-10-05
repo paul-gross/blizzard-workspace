@@ -30,7 +30,7 @@ Per matched env, in order:
    exit aborts the teardown; without it, hook failures are logged and teardown proceeds.
 4. **Worktree removal** — `git worktree remove` for every per-repo worktree.
 5. **Env cleanup** — removes the env directory, strips the matching `# >>> winter-dir/<env>` block from the workspace's
-   `.git/info/exclude`, and removes the env's index entry from `.winter/state.toml`.
+   [exclude file](./init.md#workspace-exclude-file), and removes the env's index entry from `.winter/state.toml`.
 
 A failure in any one matched env is reported and does not stop teardown of the remaining matched envs; the command exits
 non-zero if any env failed.
@@ -62,7 +62,7 @@ same stream:
 | `would_provision_teardown`       | dry-run | Handler that would run; `detail` is `destroy: <script>`                  |
 | `worktree_removed`               | 4       | A per-repo worktree was removed                                          |
 | `env_removed`                    | 5       | The env directory was removed                                            |
-| `workspace_excludes_updated`     | 5       | The `# >>> winter-dir/<env>` block was stripped from `.git/info/exclude` |
+| `workspace_excludes_updated`     | 5       | The `winter-dir/<env>` block was stripped from the exclude file          |
 | `would_remove_worktree`          | dry-run | Worktree that would be removed                                           |
 | `would_remove_env`               | dry-run | Env directory that would be removed                                      |
 | `would_remove_workspace_exclude` | dry-run | Exclude block that would be stripped                                     |

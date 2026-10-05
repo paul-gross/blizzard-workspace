@@ -21,6 +21,7 @@ from winter_cli.modules.workspace.internal.managed_block import (
 )
 from winter_cli.modules.workspace.models import ProjectRepository, RepoError
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
+from winter_cli.modules.workspace.workspace_exclude import IWorkspaceExcludeLocator
 
 if TYPE_CHECKING:
     from winter_cli.modules.provision.provision_service import ProvisionService
@@ -160,9 +161,11 @@ class DestroyService:
         fs: IFilesystemWriter,
         git_repo: IGitRepository,
         registry: IEnvIndexRegistry,
+        exclude_locator: IWorkspaceExcludeLocator,
         provision_svc: ProvisionService | None = None,
     ) -> None:
         self._config = config
+        self._exclude_locator = exclude_locator
         self._repo_factory = repo_factory
         self._extension_hook_svc = extension_hook_svc
         self._fs = fs
@@ -244,16 +247,22 @@ class DestroyService:
                 str(env_root),
                 "would_remove_env",
             )
-            exclude_path = self._config.workspace_root / ".git" / "info" / "exclude"
-            if self._self_exclude_present(env_name=name, exclude_path=exclude_path):
+            preview_ok = True
+            try:
+                exclude_path = self._exclude_locator.locate()
+            except RepoError as exc:
+                reporter.repo_error(name, f"workspace exclude — {exc}")
+                exclude_path = None
+                preview_ok = False
+            if exclude_path is not None and self._self_exclude_present(env_name=name, exclude_path=exclude_path):
                 reporter.repo_action(
                     name,
                     str(exclude_path),
                     "would_remove_workspace_exclude",
                     f"/{name}/",
                 )
-            reporter.target_completed(name, True)
-            return True
+            reporter.target_completed(name, preview_ok)
+            return preview_ok
 
         # Phase 2a: provision teardown — run data --destroy then resource --destroy
         # before extension hooks and worktree removal, so provisioned resources are
@@ -305,8 +314,8 @@ class DestroyService:
         if not self._remove_env_directory(name, env_root, reporter):
             success = False
 
-        # Phase 5: strip the matching `winter-dir/<env>` block from the workspace
-        # `.git/info/exclude`. Init writes this block in `_write_workspace_self_exclude`;
+        # Phase 5: strip the matching `winter-dir/<env>` block from the workspace's
+        # exclude file. Init writes this block in `_write_workspace_self_exclude`;
         # leaving it behind would orphan a stale ignore rule.
         if not self._strip_self_exclude(name, reporter):
             success = False
@@ -390,8 +399,12 @@ class DestroyService:
         return True
 
     def _strip_self_exclude(self, env_name: str, reporter: IInitReporter) -> bool:
-        exclude_path = self._config.workspace_root / ".git" / "info" / "exclude"
-        if not self._fs.exists(exclude_path):
+        try:
+            exclude_path = self._exclude_locator.locate()
+        except RepoError as exc:
+            reporter.repo_error(env_name, f"workspace exclude — {exc}")
+            return False
+        if exclude_path is None or not self._fs.exists(exclude_path):
             return True
 
         block_name = f"winter-dir/{env_name}"
@@ -405,7 +418,7 @@ class DestroyService:
                 return True
             self._fs.write_text(exclude_path, new_content)
         except OSError as exc:
-            reporter.repo_error(env_name, f".git/info/exclude — {exc}")
+            reporter.repo_error(env_name, f"{exclude_path} — {exc}")
             return False
 
         reporter.repo_action(

@@ -57,6 +57,7 @@ from winter_cli.modules.workspace.init_service import InitService
 from winter_cli.modules.workspace.internal.config_lock_repository import WriteConfigLockRepository
 from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.gitpython_repository import GitPythonRepository
+from winter_cli.modules.workspace.internal.gitpython_workspace_exclude_locator import GitPythonWorkspaceExcludeLocator
 from winter_cli.modules.workspace.internal.read_workspace_repository import ReadWorkspaceRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.internal.subprocess_command_entry_runner import SubprocessCommandEntryRunner
@@ -227,6 +228,16 @@ class Container(containers.DeclarativeContainer):
     # (not by IRead/IWriteRepoRepository, which already own domain-level git).
     # The adapter wraps `git.GitCommandError` into `RepoError` via repo_error_factory.
     git_repo = providers.Singleton(GitPythonRepository, error_factory=repo_error_factory, tracer=command_tracer)
+
+    # The one resolver for the git exclude file holding the workspace root's managed
+    # blocks (`.git/info/exclude`, or the worktree's own git-dir file for a linked
+    # worktree root). Every workspace-exclude reader and writer takes it.
+    workspace_exclude_locator = providers.Singleton(
+        GitPythonWorkspaceExcludeLocator,
+        workspace_root=workspace_config.provided.workspace_root,
+        error_factory=repo_error_factory,
+        tracer=command_tracer,
+    )
 
     # Importlib-based plugin module loader. Confines `importlib.util` and
     # `sys.modules` mutation so the registry depends on a Protocol.
@@ -435,6 +446,7 @@ class Container(containers.DeclarativeContainer):
         config=workspace_config,
         fs=fs,
         manifest_loader=extension_manifest_loader,
+        exclude_locator=workspace_exclude_locator,
     )
 
     extension_agentsmd_svc = providers.Singleton(
@@ -448,6 +460,7 @@ class Container(containers.DeclarativeContainer):
         WorkspaceSkillService,
         config=workspace_config,
         fs=fs,
+        exclude_locator=workspace_exclude_locator,
     )
 
     prune_svc = providers.Factory(
@@ -457,6 +470,7 @@ class Container(containers.DeclarativeContainer):
         extension_exclude_svc=extension_exclude_svc,
         fs=fs,
         git_repo=git_repo,
+        exclude_locator=workspace_exclude_locator,
     )
 
     # `DashboardSnapshotService._build` rebuilds this same graph (workspace,
@@ -511,6 +525,7 @@ class Container(containers.DeclarativeContainer):
         config_lock_repo=config_lock_repo,
         workspace_skill_svc=workspace_skill_svc,
         registry=env_index_registry,
+        exclude_locator=workspace_exclude_locator,
     )
 
     # Command-band execution seam — the only new `subprocess` import site for
@@ -1014,6 +1029,7 @@ class Container(containers.DeclarativeContainer):
         fs=fs,
         git_repo=git_repo,
         registry=env_index_registry,
+        exclude_locator=workspace_exclude_locator,
         provision_svc=provision_svc,
     )
 

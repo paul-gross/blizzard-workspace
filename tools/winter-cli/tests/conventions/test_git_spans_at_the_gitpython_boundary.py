@@ -177,13 +177,14 @@ def test_every_repository_open_is_in_a_declared_adapter_function() -> None:
         pytest.fail("\n".join(["GitPython repository boundary violations:", *violations]))
 
 
-def test_the_four_adapters_open_repositories_and_declare_them() -> None:
+def test_the_adapters_open_repositories_and_declare_them() -> None:
     """The rule is not vacuous: each adapter has opens, and they sit under declarations."""
     adapters = {
         "read_repo_repository.py",
         "write_repo_repository.py",
         "gitpython_repository.py",
         "read_workspace_repository.py",
+        "gitpython_workspace_exclude_locator.py",
     }
     seen: set[str] = set()
     for path, tree in walk_src():

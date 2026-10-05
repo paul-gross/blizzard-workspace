@@ -23,6 +23,7 @@ from tests.conftest import (
     FakeGitRepository,
     FakeInitReporter,
     FakeSubprocessRunner,
+    FakeWorkspaceExcludeLocator,
 )
 from winter_cli.config.models import (
     AdoptExtensions,
@@ -119,6 +120,7 @@ def _init_service(
             config=workspace_config,
             fs=fs,
             manifest_loader=manifest_loader,
+            exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
         ),
         extension_agentsmd_svc=ExtensionAgentsMdService(
             config=workspace_config,
@@ -130,6 +132,7 @@ def _init_service(
         git_repo=git,
         git_ops=GitOpsService(RepoErrorFactory()),
         registry=registry,
+        exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
     )
 
 
@@ -152,6 +155,7 @@ def _destroy_service(
         fs=fs,
         git_repo=git,
         registry=registry,
+        exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
     )
 
 

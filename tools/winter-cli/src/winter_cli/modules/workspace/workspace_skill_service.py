@@ -18,6 +18,7 @@ from winter_cli.modules.workspace.internal.managed_block import (
     replace_or_append_block,
 )
 from winter_cli.modules.workspace.models import RepoError
+from winter_cli.modules.workspace.workspace_exclude import IWorkspaceExcludeWriteLocator
 
 logger = logging.getLogger(__name__)
 
@@ -43,16 +44,22 @@ class WorkspaceSkillService:
     directory is deleted — the strategies receive `source_root=None` and prune
     any remaining `<prefix>-*` links or copies.
 
-    A managed git-exclude block is written to `.git/info/exclude` so the
+    A managed git-exclude block is written to the workspace's exclude file so the
     generated vendor entries are never accidentally committed.
 
     Projection is always-on: `prefix` defaults to `"ws"` and `skills_dir`
     defaults to `"skills"`.
     """
 
-    def __init__(self, config: WorkspaceConfig, fs: IFilesystemWriter) -> None:
+    def __init__(
+        self,
+        config: WorkspaceConfig,
+        fs: IFilesystemWriter,
+        exclude_locator: IWorkspaceExcludeWriteLocator,
+    ) -> None:
         self._config = config
         self._fs = fs
+        self._exclude_locator = exclude_locator
 
     def reconcile(self, reporter: IInitReporter) -> bool:
         """Project workspace skills into all vendor skill dirs.
@@ -112,10 +119,6 @@ class WorkspaceSkillService:
 
     def _write_excludes(self, prefix: str, reporter: IInitReporter) -> bool:
         """Write a managed exclude block for all three vendor skill dirs."""
-        exclude_path = self._config.workspace_root / ".git" / "info" / "exclude"
-        if not self._fs.exists(self._config.workspace_root / ".git"):
-            return True
-
         begin = GITIGNORE_BEGIN.format(name=_EXCLUDE_BLOCK_NAME)
         end = GITIGNORE_END.format(name=_EXCLUDE_BLOCK_NAME)
         lines = [
@@ -130,15 +133,18 @@ class WorkspaceSkillService:
         ]
 
         try:
+            exclude_path = self._exclude_locator.locate_for_write()
+            if exclude_path is None:
+                return True
             existing = self._fs.read_text(exclude_path) if self._fs.exists(exclude_path) else ""
             new_content = replace_or_append_block(existing, begin, end, lines)
             if new_content == existing:
                 return True
             self._fs.mkdir(exclude_path.parent, parents=True, exist_ok=True)
             self._fs.write_text(exclude_path, new_content)
-        except OSError as exc:
+        except (OSError, RepoError) as exc:
             logger.warning("workspace skills: exclude write failed — %s", exc)
-            reporter.repo_error("workspace", f"workspace skills .git/info/exclude — {exc}")
+            reporter.repo_error("workspace", f"workspace skills exclude — {exc}")
             return False
 
         return True

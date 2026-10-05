@@ -10,7 +10,9 @@ from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
 from winter_cli.modules.workspace.git_repository import IGitRepository
 from winter_cli.modules.workspace.init_reporter import IInitReporter
+from winter_cli.modules.workspace.models import RepoError
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
+from winter_cli.modules.workspace.workspace_exclude import IWorkspaceExcludeLocator
 
 logger = logging.getLogger(__name__)
 
@@ -50,8 +52,10 @@ class PruneService:
         extension_exclude_svc: ExtensionExcludeService,
         fs: IFilesystemWriter,
         git_repo: IGitRepository,
+        exclude_locator: IWorkspaceExcludeLocator,
     ) -> None:
         self._config = config
+        self._exclude_locator = exclude_locator
         self._repo_factory = repo_factory
         self._extension_exclude_svc = extension_exclude_svc
         self._fs = fs
@@ -111,9 +115,22 @@ class PruneService:
             )
         return orphans
 
+    def _locate_exclude(self) -> Path | None:
+        """The workspace exclude file, or `None` when it cannot be resolved.
+
+        Detection has no reporter and also feeds `ws status`, so a git failure
+        (for example a dubious-ownership refusal) is logged and the exclude-driven
+        scans come back empty rather than aborting the whole command.
+        """
+        try:
+            return self._exclude_locator.locate()
+        except RepoError as exc:
+            logger.warning("prune: could not resolve the workspace exclude file — %s", exc)
+            return None
+
     def _find_orphan_standalone_clones(self) -> list[PruneOrphan]:
-        exclude_path = self._config.workspace_root / ".git" / "info" / "exclude"
-        if not self._fs.exists(exclude_path):
+        exclude_path = self._locate_exclude()
+        if exclude_path is None or not self._fs.exists(exclude_path):
             return []
         try:
             content = self._fs.read_text(exclude_path)
@@ -185,7 +202,7 @@ class PruneService:
     def _find_orphan_agent_copies(self) -> list[PruneOrphan]:
         """Find rendered agent copies whose source extension is no longer in the config.
 
-        Reads the ``.git/info/exclude`` file's managed blocks.  For each block
+        Reads the workspace exclude file's managed blocks.  For each block
         whose extension name is NOT in the current set of standalone repos, the
         agent glob lines (e.g. ``.claude/agents/{prefix}-*``) are parsed to
         find the prefix, and any matching files in the vendor agents dirs are
@@ -196,8 +213,8 @@ class PruneService:
         ``ExtensionAgentService._prune`` on the next ``winter ws init`` run,
         and is separately flagged as "orphaned copy" by ``AgentProbeService``.
         """
-        exclude_path = self._config.workspace_root / ".git" / "info" / "exclude"
-        if not self._fs.exists(exclude_path):
+        exclude_path = self._locate_exclude()
+        if exclude_path is None or not self._fs.exists(exclude_path):
             return []
         try:
             content = self._fs.read_text(exclude_path)

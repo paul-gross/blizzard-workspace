@@ -41,7 +41,8 @@ With the defaults (`prefix = "ws"`, `skills_dir = "skills"`) and a `skills/my-sk
 - `.opencode/skill/ws-my-skill/` (copy, for OpenCode)
 
 These projected entries are generated artifacts that `winter ws init` writes; they are git-excluded automatically via a
-managed block in `.git/info/exclude`.
+managed block in the workspace's git exclude file — see
+[Workspace exclude file](./usage/ws/init.md#workspace-exclude-file) for where that file lives.
 
 **`SKILL.md` constraint:** Workspace skill files must not set a `name:` frontmatter key — the projected directory name
 is the authoritative identity. `winter ws init` rejects any skill directory whose `SKILL.md` declares `name:`.

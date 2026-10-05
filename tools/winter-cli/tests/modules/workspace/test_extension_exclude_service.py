@@ -8,6 +8,7 @@ from tests.conftest import (
     FakeConfigFileReader,
     FakeFilesystem,
     FakeInitReporter,
+    FakeWorkspaceExcludeLocator,
 )
 from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
@@ -46,6 +47,7 @@ def _service(
         config=workspace_config,
         fs=fs,
         manifest_loader=ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files)),
+        exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
     )
 
 

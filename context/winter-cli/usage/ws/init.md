@@ -46,6 +46,35 @@ assigned (persisted) or what slot a new name would be suggested (hash, before pr
 with an error. `workspace` is a reserved service scope used by `winter service`; see
 [../service.md#workspace-scope](../service.md#workspace-scope).
 
+## Workspace exclude file
+
+`winter ws init` keeps its generated workspace paths (`/projects/`, feature-env directories, projected skills and agents,
+extension checkouts, `.winter/config/**/*.local.*`) out of `git status` with managed blocks in the workspace repo's
+exclude file. `winter ws destroy` and `winter ws prune` read and rewrite the same blocks. Where the file lives depends
+on the workspace root:
+
+- **Normal clone** — `<root>/.git/info/exclude`.
+- **Linked git worktree** (the root was made with `git worktree add`) — the worktree's own
+  `<git-dir>/info/exclude`, where `<git-dir>` is `git rev-parse --absolute-git-dir`. `winter ws init` also enables
+  `extensions.worktreeConfig` and sets `core.excludesFile` to that file with `git config --worktree`, so the blocks
+  apply to that worktree alone. Sibling worktrees of one repository, and the main checkout, never see or rewrite each
+  other's blocks, and the shared `info/exclude` of the common git directory is never written. The per-worktree
+  `core.excludesFile` replaces the user-level `$XDG_CONFIG_HOME/git/ignore` for that worktree.
+
+Both settings are read first and written only when they differ, so re-running `ws init`, or running it in several
+sibling worktrees at once, leaves the shared `.git/config` alone once it is set up.
+
+When the common git directory is a **bare repository**, enabling `extensions.worktreeConfig` first moves `core.bare`
+(and `core.worktree`, if set) from the shared `config` to the common directory's `config.worktree`, as
+[git-worktree](https://git-scm.com/docs/git-worktree#_configuration_file) requires. Otherwise `core.bare = true` would
+apply to every linked worktree and each sibling would fail with `this operation must be run in a work tree`.
+
+`winter ws destroy` and `winter ws prune` only read the exclude file's location and never change git configuration. If
+git refuses to resolve it (for example a dubious-ownership error), destroy reports the error, still finishes the env's
+teardown, and exits non-zero; prune logs a warning and skips the scans that read the exclude file.
+
+A workspace root whose git directory is relocated with `GIT_DIR` is not supported.
+
 ## Errors
 
 - **`set-upstream-to <ref> failed at <path>: HEAD is detached`** — a worktree's tracking wiring (pinned or inferred)

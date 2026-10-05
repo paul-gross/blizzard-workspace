@@ -8,6 +8,7 @@ from tests.conftest import (
     FakeConfigFileReader,
     FakeFilesystem,
     FakeGitRepository,
+    FakeWorkspaceExcludeLocator,
 )
 from winter_cli.config.models import (
     AdoptExtensions,
@@ -16,6 +17,7 @@ from winter_cli.config.models import (
 )
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
 from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
+from winter_cli.modules.workspace.models import RepoError
 from winter_cli.modules.workspace.prune_service import PruneOrphan, PruneService
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
@@ -40,6 +42,8 @@ def _service(
     workspace_config: WorkspaceConfig,
     fs: FakeFilesystem,
     git: FakeGitRepository | None = None,
+    exclude_path: Path | None = None,
+    exclude_error: RepoError | None = None,
 ) -> PruneService:
     git = git or FakeGitRepository()
     # ExtensionExcludeService is only used here for finalize_excludes
@@ -49,6 +53,7 @@ def _service(
         config=workspace_config,
         fs=fs,
         manifest_loader=ExtensionManifestLoader(config_file_reader=FakeConfigFileReader({})),
+        exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
     )
     return PruneService(
         config=workspace_config,
@@ -56,6 +61,9 @@ def _service(
         extension_exclude_svc=exclude_svc,
         fs=fs,
         git_repo=git,
+        exclude_locator=FakeWorkspaceExcludeLocator(
+            fs, workspace_config.workspace_root, override=exclude_path, error=exclude_error
+        ),
     )
 
 
@@ -236,6 +244,26 @@ def _write_exclude(fs: FakeFilesystem, workspace_root: Path, content: str) -> No
     fs.files[exclude_path] = content
     for parent in exclude_path.parents:
         fs.directories.add(parent)
+
+
+def test_find_orphan_agent_copies_reads_the_located_exclude_file(workspace_config: WorkspaceConfig) -> None:
+    """A linked-worktree root's blocks live in its own git dir; the shared `.git/info/exclude` is not consulted."""
+    claude_agents = WORKSPACE_ROOT / ".claude" / "agents"
+    own_exclude = Path("/common/.git/worktrees/ws/info/exclude")
+    fs = FakeFilesystem(
+        directories=[PROJECTS_DIR, claude_agents],
+        files={
+            claude_agents / "old-reviewer.md": "# old agent",
+            claude_agents / "kept-reviewer.md": "# kept agent",
+            own_exclude: _EXCLUDE_WITH_OLD_EXT,
+        },
+    )
+    _write_exclude(fs, WORKSPACE_ROOT, _EXCLUDE_WITH_KEPT_EXT)
+    svc = _service(workspace_config, fs, exclude_path=own_exclude)
+
+    orphans = [o for o in svc.find_orphans() if o.kind == "orphan_agent_copy"]
+
+    assert [o.path for o in orphans] == [claude_agents / "old-reviewer.md"]
 
 
 def test_find_orphan_agent_copies_claude(workspace_config: WorkspaceConfig) -> None:
@@ -437,3 +465,23 @@ def test_remove_orphan_agent_copy(workspace_config: WorkspaceConfig) -> None:
     target = next(o for o in agent_orphans if o.path == orphan_file)
     svc.remove_orphan(target)
     assert not fs.is_file(orphan_file)
+
+
+def test_find_orphans_skips_the_exclude_driven_scans_when_the_exclude_file_cannot_be_located(
+    workspace_config: WorkspaceConfig, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A git refusal while resolving the exclude file must not crash detection (it also feeds `ws status`):
+    the orphan standalone-clone and agent-copy scans come back empty and the failure is logged."""
+    claude_agents = WORKSPACE_ROOT / ".claude" / "agents"
+    fs = FakeFilesystem(
+        directories=[PROJECTS_DIR, claude_agents],
+        files={claude_agents / "old-reviewer.md": "# old agent"},
+    )
+    _write_exclude(fs, WORKSPACE_ROOT, _EXCLUDE_WITH_OLD_EXT)
+    svc = _service(workspace_config, fs, exclude_error=RepoError("detected dubious ownership"))
+
+    with caplog.at_level("WARNING"):
+        orphans = svc.find_orphans()
+
+    assert orphans == []
+    assert "dubious ownership" in caplog.text

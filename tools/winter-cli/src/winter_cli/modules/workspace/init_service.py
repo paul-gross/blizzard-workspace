@@ -32,6 +32,7 @@ from winter_cli.modules.workspace.models import (
 )
 from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
+from winter_cli.modules.workspace.workspace_exclude import IWorkspaceExcludeWriteLocator
 from winter_cli.modules.workspace.workspace_skill_service import WorkspaceSkillService
 
 logger = logging.getLogger(__name__)
@@ -86,11 +87,13 @@ class InitService:
         git_repo: IGitRepository,
         git_ops: GitOpsService,
         registry: IEnvIndexRegistry,
+        exclude_locator: IWorkspaceExcludeWriteLocator,
         config_lock_repo: IConfigLockRepository | None = None,
         workspace_skill_svc: WorkspaceSkillService | None = None,
         extension_agent_svc: ExtensionAgentService | None = None,
     ) -> None:
         self._config = config
+        self._exclude_locator = exclude_locator
         self._repo_factory = repo_factory
         self._extension_symlink_svc = extension_symlink_svc
         self._extension_hook_svc = extension_hook_svc
@@ -166,7 +169,7 @@ class InitService:
         ):
             success = False
 
-        # Aggregate-update workspace CLAUDE.md and `.git/info/exclude` from all
+        # Aggregate-update workspace CLAUDE.md and the workspace exclude file from all
         # standalones that were successfully reconciled (i.e. exist on disk now),
         # plus the project-repo-only extensions just projected above so their
         # projected skill/agent entries and repo path are excluded from the
@@ -720,7 +723,7 @@ class InitService:
         dir_name: str,
         reporter: IInitReporter,
     ) -> bool:
-        """Add `/{dir_name}/` to a managed block in the workspace's `.git/info/exclude`.
+        """Add `/{dir_name}/` to a managed block in the workspace's exclude file.
 
         The block is namespaced as `winter-dir/{dir_name}` so the orphan-stripping
         pass in ExtensionExcludeService.finalize_excludes leaves it alone (its regex
@@ -761,28 +764,29 @@ class InitService:
         summary: str,
         reporter: IInitReporter,
     ) -> bool:
-        """Write one namespaced managed block to the workspace `.git/info/exclude`.
+        """Write one namespaced managed block to the workspace's exclude file.
 
-        Silent no-op when the workspace isn't a git repo (`.git/info/` missing
-        and not creatable). Returns False only on a real I/O error.
+        The file is whatever `IWorkspaceExcludeWriteLocator` resolves: `.git/info/exclude`
+        for a normal clone, the worktree's own git-dir file for a linked worktree.
+        Silent no-op when the workspace isn't a git repo. Returns False only on a
+        real I/O or git error.
         """
         begin = GITIGNORE_BEGIN.format(name=block_name)
         end = GITIGNORE_END.format(name=block_name)
         desired_lines = [begin, *exclude_lines, end]
 
-        exclude_path = self._config.workspace_root / ".git" / "info" / "exclude"
-        if not self._fs.exists(self._config.workspace_root / ".git"):
-            return True
-
         try:
+            exclude_path = self._exclude_locator.locate_for_write()
+            if exclude_path is None:
+                return True
             existing = self._fs.read_text(exclude_path) if self._fs.exists(exclude_path) else ""
             new_content = replace_or_append_block(existing, begin, end, desired_lines)
             if new_content == existing:
                 return True
             self._fs.mkdir(exclude_path.parent, parents=True, exist_ok=True)
             self._fs.write_text(exclude_path, new_content)
-        except OSError as exc:
-            reporter.repo_error("winter", f".git/info/exclude — {exc}")
+        except (OSError, RepoError) as exc:
+            reporter.repo_error("winter", f"workspace exclude — {exc}")
             return False
 
         reporter.repo_action(

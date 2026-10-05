@@ -731,6 +731,43 @@ class FakeGitRepository:
         self.stash_pops.append(path)
 
 
+class FakeWorkspaceExcludeLocator:
+    """IWorkspaceExcludeWriteLocator fake — a normal-clone workspace on a `FakeFilesystem`.
+
+    The exclude file is `<root>/.git/info/exclude`, and the workspace counts as a git
+    repository only while `<root>/.git` exists on the fake filesystem. `override` pins
+    the path instead (the linked-worktree shape); `error` makes every resolution raise
+    it (git refusing the repository); `write_resolutions` counts the calls that asked
+    for a write-ready path.
+    """
+
+    def __init__(
+        self,
+        fs: FakeFilesystem,
+        workspace_root: Path,
+        override: Path | None = None,
+        error: RepoError | None = None,
+    ) -> None:
+        self._fs = fs
+        self._workspace_root = workspace_root
+        self._override = override
+        self._error = error
+        self.write_resolutions = 0
+
+    def locate(self) -> Path | None:
+        if self._error is not None:
+            raise self._error
+        if self._override is not None:
+            return self._override
+        if not self._fs.exists(self._workspace_root / ".git"):
+            return None
+        return self._workspace_root / ".git" / "info" / "exclude"
+
+    def locate_for_write(self) -> Path | None:
+        self.write_resolutions += 1
+        return self.locate()
+
+
 class FakeEnvIndexRegistry:
     """IEnvIndexRegistry fake — in-memory index store for unit tests.
 

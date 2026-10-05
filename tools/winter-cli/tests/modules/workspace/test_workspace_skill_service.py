@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.conftest import FakeConfigFileReader, FakeFilesystem, FakeInitReporter
+from tests.conftest import FakeConfigFileReader, FakeFilesystem, FakeInitReporter, FakeWorkspaceExcludeLocator
 from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
 from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoader
@@ -44,7 +44,9 @@ def _config(prefix: str = "ws", skills_dir: str = "skills") -> WorkspaceConfig:
 
 
 def _service(config: WorkspaceConfig, fs: FakeFilesystem) -> WorkspaceSkillService:
-    return WorkspaceSkillService(config=config, fs=fs)
+    return WorkspaceSkillService(
+        config=config, fs=fs, exclude_locator=FakeWorkspaceExcludeLocator(fs, config.workspace_root)
+    )
 
 
 def _seed_skill(fs: FakeFilesystem, name: str, body: str = "---\ndescription: x\n---\n") -> Path:
@@ -555,6 +557,7 @@ def test_exclude_block_survives_finalize_excludes(init_reporter: FakeInitReporte
         config=cfg,
         fs=fs,
         manifest_loader=ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files)),
+        exclude_locator=FakeWorkspaceExcludeLocator(fs, cfg.workspace_root),
     )
     repos = [StandaloneRepository(name="winter-workflow", path=ext_path)]
 

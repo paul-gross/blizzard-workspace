@@ -1125,7 +1125,7 @@ def ws_prune(ctx: click.Context, dry_run: bool, force: bool, output_json: bool):
     """Remove disk state for repos no longer in the workspace config.
 
     Detects orphan project clones under projects/, orphan standalone clones
-    referenced by stale entries in .git/info/exclude, and broken symlinks
+    referenced by stale entries in the workspace exclude file, and broken symlinks
     under .claude/skills/ and .claude/agents/. Refuses to delete repos with
     uncommitted changes or attached worktrees.
     """

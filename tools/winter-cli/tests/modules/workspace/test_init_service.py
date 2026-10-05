@@ -13,6 +13,7 @@ from tests.conftest import (
     FakeGitRepository,
     FakeInitReporter,
     FakeSubprocessRunner,
+    FakeWorkspaceExcludeLocator,
 )
 from winter_cli.config.models import (
     AdoptExtensions,
@@ -79,6 +80,7 @@ def _service(
             config=workspace_config,
             fs=fs,
             manifest_loader=manifest_loader,
+            exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
         ),
         extension_agentsmd_svc=ExtensionAgentsMdService(
             config=workspace_config,
@@ -91,6 +93,7 @@ def _service(
         git_ops=git_ops or GitOpsService(RepoErrorFactory()),
         registry=registry or FakeEnvIndexRegistry(),
         config_lock_repo=config_lock_repo,
+        exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
     )
 
 
@@ -432,6 +435,7 @@ def _service_with_ext(
             config=workspace_config,
             fs=fs,
             manifest_loader=manifest_loader,
+            exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
         ),
         extension_agentsmd_svc=ExtensionAgentsMdService(
             config=workspace_config,
@@ -443,6 +447,7 @@ def _service_with_ext(
         git_repo=git,
         git_ops=GitOpsService(RepoErrorFactory()),
         registry=FakeEnvIndexRegistry(),
+        exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
     )
 
 
@@ -950,6 +955,7 @@ def _service_with_ext_and_agents(
             config=workspace_config,
             fs=fs,
             manifest_loader=manifest_loader,
+            exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
         ),
         extension_agentsmd_svc=ExtensionAgentsMdService(
             config=workspace_config,
@@ -961,6 +967,7 @@ def _service_with_ext_and_agents(
         git_repo=git,
         git_ops=GitOpsService(RepoErrorFactory()),
         registry=FakeEnvIndexRegistry(),
+        exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
     )
 
 

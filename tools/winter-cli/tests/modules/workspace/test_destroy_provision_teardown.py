@@ -22,6 +22,7 @@ from tests.conftest import (
     FakeInitReporter,
     FakeOperationTracer,
     FakeSubprocessRunner,
+    FakeWorkspaceExcludeLocator,
 )
 from winter_cli.config.models import (
     AdoptExtensions,
@@ -304,6 +305,7 @@ def _service(
         fs=fs,
         git_repo=git,
         registry=registry or FakeEnvIndexRegistry(),
+        exclude_locator=FakeWorkspaceExcludeLocator(fs, config.workspace_root),
         provision_svc=provision_svc,
     )
 

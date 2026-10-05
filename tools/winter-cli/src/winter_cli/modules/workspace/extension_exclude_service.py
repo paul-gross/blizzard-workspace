@@ -18,12 +18,13 @@ from winter_cli.modules.workspace.internal.managed_block import (
     strip_block,
 )
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
+from winter_cli.modules.workspace.workspace_exclude import IWorkspaceExcludeWriteLocator
 
 logger = logging.getLogger(__name__)
 
 
 class ExtensionExcludeService:
-    """Aggregate-updates the workspace `.git/info/exclude` with one block per extension repo.
+    """Aggregate-updates the workspace's exclude file with one block per extension repo.
 
     Each block is bracketed with `# >>> <name> (managed by winter)` markers
     and lists the extension repo path plus the install globs under
@@ -38,9 +39,11 @@ class ExtensionExcludeService:
         config: WorkspaceConfig,
         fs: IFilesystemWriter,
         manifest_loader: ExtensionManifestLoader,
+        exclude_locator: IWorkspaceExcludeWriteLocator,
     ) -> None:
         self._config = config
         self._fs = fs
+        self._exclude_locator = exclude_locator
         self._manifest_loader = manifest_loader
 
     # Fixed block name for the workspace-wide .winter/config local-overlay excludes.
@@ -51,7 +54,7 @@ class ExtensionExcludeService:
         repos: list[StandaloneRepository],
         reporter: IInitReporter,
     ) -> bool:
-        """Aggregate-update the workspace `.git/info/exclude` with one block per extension.
+        """Aggregate-update the workspace's exclude file with one block per extension.
 
         Called once after all standalones are reconciled. Each block is bracketed
         with `# >>> <name> (managed by winter)` markers and lists the extension
@@ -66,7 +69,15 @@ class ExtensionExcludeService:
         """
         logger.info("finalize_excludes start: %d repo(s)", len(repos))
 
-        exclude_path = self._config.workspace_root / ".git" / "info" / "exclude"
+        try:
+            exclude_path = self._exclude_locator.locate_for_write()
+        except RepoError as exc:
+            logger.warning("finalize_excludes: could not resolve the exclude file — %s", exc)
+            reporter.repo_error(EXTENSION_BLOCK_NAME, f"workspace exclude — {exc}")
+            return False
+        if exclude_path is None:
+            logger.info("finalize_excludes: workspace is not a git repository, nothing to write")
+            return True
 
         # Always write the workspace-wide config local-overlay exclude block,
         # regardless of adopt_extensions mode.
@@ -83,7 +94,7 @@ class ExtensionExcludeService:
                 self._fs.write_text(exclude_path, new_content_for_config)
         except OSError as exc:
             logger.warning("finalize_excludes: write failed at %s — %s", exclude_path, exc)
-            reporter.repo_error(EXTENSION_BLOCK_NAME, f".git/info/exclude — {exc}")
+            reporter.repo_error(EXTENSION_BLOCK_NAME, f"{exclude_path} — {exc}")
             return False
 
         if self._config.adopt_extensions == AdoptExtensions.none:
@@ -131,7 +142,7 @@ class ExtensionExcludeService:
             self._fs.write_text(exclude_path, new_content)
         except OSError as exc:
             logger.warning("finalize_excludes: write failed at %s — %s", exclude_path, exc)
-            reporter.repo_error(EXTENSION_BLOCK_NAME, f".git/info/exclude — {exc}")
+            reporter.repo_error(EXTENSION_BLOCK_NAME, f"{exclude_path} — {exc}")
             return False
 
         detail = ", ".join(sorted(eligible_names)) if eligible_names else "cleared"
@@ -151,7 +162,7 @@ class ExtensionExcludeService:
         """Resolve (relative_path, prefix) for an extension's exclude block, or None if not eligible.
 
         Every standalone repo cloned at a path under the workspace root gets its
-        directory added to `.git/info/exclude` so it doesn't appear as untracked
+        directory added to the workspace's exclude file so it doesn't appear as untracked
         in the workspace repo — this applies regardless of manifest presence or
         adopt_extensions mode.
 
