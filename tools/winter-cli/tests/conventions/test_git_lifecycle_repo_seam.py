@@ -63,6 +63,9 @@ GIT_LIFECYCLE_ALLOWED_FILES = frozenset(
         "modules/workspace/handlers/repo_handler.py",
         # winter ws worktrees
         "modules/workspace/handlers/workspace_handler.py",
+        # winter ws fingerprint — a workspace definition is its own tracked content
+        # plus its declared standalones; project-repo extensions are out of scope.
+        "modules/workspace/workspace_fingerprint_service.py",
     }
 )
 

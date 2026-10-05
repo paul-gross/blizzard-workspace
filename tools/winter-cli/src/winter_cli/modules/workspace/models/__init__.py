@@ -42,6 +42,7 @@ from winter_cli.modules.workspace.models.service_model import (
     RepoCommit,
     RepoDiffResult,
     RepoFetchOutcome,
+    RepoFingerprint,
     RepoHistory,
     RepoMergeOutcome,
     RepoPushOutcome,
@@ -64,6 +65,7 @@ from winter_cli.modules.workspace.models.service_model import (
     RestackResult,
     StandaloneRepoStatus,
     SyncResult,
+    WorkspaceFingerprint,
     WorktreeRepoStatus,
 )
 from winter_cli.modules.workspace.models.snapshot_model import (
@@ -120,6 +122,7 @@ __all__ = [
     "RepoDiffResult",
     "RepoError",
     "RepoFetchOutcome",
+    "RepoFingerprint",
     "RepoHistory",
     "RepoMergeOutcome",
     "RepoPushOutcome",
@@ -148,6 +151,7 @@ __all__ = [
     "StandaloneRepository",
     "SyncResult",
     "Workspace",
+    "WorkspaceFingerprint",
     "WorkspaceLevelSnapshot",
     "WorkspaceSnapshot",
     "WorktreeRepoStatus",

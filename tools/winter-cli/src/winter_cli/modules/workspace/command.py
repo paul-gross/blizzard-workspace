@@ -21,6 +21,7 @@ from winter_cli.modules.workspace.handlers import (
     EnvStatusParams,
     EnvUpdateParams,
     EnvWorktreesParams,
+    FingerprintParams,
     InitParams,
     RepoAddParams,
     RepoListParams,
@@ -271,6 +272,30 @@ def ws_worktrees(ctx: click.Context, output_json: bool, with_status: bool):
     container = cli_ctx(ctx).container
     handler = container.workspace_handler()
     handler.worktrees(EnvWorktreesParams(output_json=output_json, with_status=with_status))
+
+
+@ws_group.command("fingerprint")
+@click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
+@click.pass_context
+def ws_fingerprint(ctx: click.Context, output_json: bool):
+    """Print one digest identifying this workspace's definition.
+
+    The digest covers the workspace repo's tracked content and each standalone
+    repo's name and tracked content. A clean repo contributes its HEAD tree (so
+    copies that differ only in history match); a repo with staged or modified
+    tracked files contributes the tree of its tracked content (the index brought
+    up to the working tree). Untracked files, generated projections,
+    feature environments, and project repos are excluded. Never touches refs,
+    the index or the working tree; may write unreferenced objects to the object
+    store. Makes no network calls.
+
+    \b
+      winter ws fingerprint           # the digest alone
+      winter ws fingerprint --json    # digest + commit/tree/dirty per repo
+    """
+    container = cli_ctx(ctx).container
+    handler = container.fingerprint_handler()
+    handler.run(FingerprintParams(output_json=output_json))
 
 
 @ws_group.command("status")

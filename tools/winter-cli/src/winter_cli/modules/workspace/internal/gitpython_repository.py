@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import shutil
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -285,6 +287,63 @@ class GitPythonRepository:
             raise self._error_factory.from_exception(
                 exc,
                 message=f"rev-parse HEAD failed at {path}: not a git repository",
+                cwd=path,
+            ) from exc
+
+    @GitOperationDeclaration("write-tree")
+    def get_tracked_content_tree(self, path: Path, *, repo_name: str, env: str | None) -> str:
+        """Return the tree of the tracked content: the index, brought up to the working tree.
+
+        The throwaway ``GIT_INDEX_FILE`` is a byte copy of the repo's real index
+        (``shutil.copy2``, so the file's mtime survives and git's racy-timestamp
+        rule keeps rehashing entries written in the same tick as the index), so
+        staged adds, renames and removals are part of the starting state and
+        ``git add -u`` then folds in every working-tree edit and deletion of a
+        tracked file. The real index is never written. A repo with no index
+        file seeds the copy from ``HEAD`` instead.
+
+        The only repository writes are the unreferenced blob and tree objects
+        that ``add -u`` and ``write-tree`` leave in the object store.
+        """
+        try:
+            with (
+                tempfile.TemporaryDirectory(prefix="winter-fingerprint-") as tmp,
+                git.Repo(str(path)) as r,
+            ):
+                temp_index = Path(tmp) / "index"
+                real_index = Path(path) / r.git.rev_parse("--git-path", "index").strip()
+                with r.git.custom_environment(GIT_INDEX_FILE=str(temp_index)):
+                    if real_index.is_file():
+                        shutil.copy2(real_index, temp_index)
+                    else:
+                        r.git.read_tree("HEAD")
+                    r.git.add("-u")
+                    return r.git.write_tree().strip()
+        except git.GitCommandError as exc:
+            raise self._error_factory.from_git(
+                exc,
+                message=f"tracked-content tree failed at {path}",
+                cwd=path,
+            ) from exc
+
+    @GitOperationDeclaration("status")
+    def has_tracked_changes(self, path: Path, *, repo_name: str, env: str | None) -> bool:
+        """True iff a tracked file is staged, modified, deleted or conflicted.
+
+        ``git status --porcelain --untracked-files=no`` is the same judgement
+        ``ws status`` makes of tracked files; ``GIT_OPTIONAL_LOCKS=0`` keeps
+        status from refreshing (rewriting) the real index.
+        """
+        try:
+            with (
+                git.Repo(str(path)) as r,
+                r.git.custom_environment(GIT_OPTIONAL_LOCKS="0"),
+            ):
+                return bool(r.git.status("--porcelain", "--untracked-files=no").strip())
+        except git.GitCommandError as exc:
+            raise self._error_factory.from_git(
+                exc,
+                message=f"status failed at {path}",
                 cwd=path,
             ) from exc
 

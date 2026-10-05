@@ -594,6 +594,11 @@ class FakeGitRepository:
         # Phase-3 read state.
         self.resolved_refs: dict[tuple[Path, str], tuple[RefKind, str]] = {}
         self.head_commits: dict[Path, str] = {}
+        # Fingerprint read state: canned HEAD^{tree} and tracked-content tree per path.
+        self.head_trees: dict[Path, str] = {}
+        self.content_trees: dict[Path, str] = {}
+        # Paths `has_tracked_changes` reports True for even when their content tree equals HEAD's (e.g. staged then reverted).
+        self.tracked_changes: set[Path] = set()
 
         # Mutation log — assertion targets.
         self.clones: list[tuple[str, Path]] = []
@@ -666,6 +671,18 @@ class FakeGitRepository:
         if path not in self.head_commits:
             raise RepoError(f"rev-parse HEAD failed at {path}", cwd=str(path))
         return self.head_commits[path]
+
+    def get_tracked_content_tree(self, path: Path, *, repo_name: str, env: str | None) -> str:
+        self.env_calls.append(("get_tracked_content_tree", path, env))
+        self.repo_name_calls.append(("get_tracked_content_tree", path, repo_name))
+        # A path with no canned content tree is a clean repo: its content tree is its HEAD tree.
+        return self.content_trees.get(path, self.head_trees[path])
+
+    def has_tracked_changes(self, path: Path, *, repo_name: str, env: str | None) -> bool:
+        self.env_calls.append(("has_tracked_changes", path, env))
+        self.repo_name_calls.append(("has_tracked_changes", path, repo_name))
+        content_tree = self.content_trees.get(path, self.head_trees[path])
+        return path in self.tracked_changes or content_tree != self.head_trees[path]
 
     # ── Writes ───────────────────────────────────────────────────────────
     def clone(self, url: str, dest: Path, *, repo_name: str) -> None:

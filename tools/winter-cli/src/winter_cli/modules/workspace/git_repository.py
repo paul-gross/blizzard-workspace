@@ -128,6 +128,25 @@ class IGitRepository(Protocol):
         """Return the full 40-character SHA of HEAD."""
         ...
 
+    def get_tracked_content_tree(self, path: Path, *, repo_name: str, env: str | None) -> str:
+        """Return the SHA of the tree of the repo's tracked content: the index, brought up to the working tree.
+
+        Built in a throwaway index (a byte copy of the real ``GIT_INDEX_FILE``,
+        then ``git add -u``, then ``git write-tree``), so staged adds, renames
+        and removals count, and every edit or deletion of a tracked file shows
+        up; untracked files never do. The real index, refs and working tree are
+        never written; the only side effect is unreferenced objects in the
+        object store. For a clean repo this equals ``HEAD^{tree}``.
+        """
+        ...
+
+    def has_tracked_changes(self, path: Path, *, repo_name: str, env: str | None) -> bool:
+        """True iff a tracked file is staged, modified, deleted or conflicted (untracked files are ignored).
+
+        The judgement ``ws status`` makes of tracked files; never refreshes the real index.
+        """
+        ...
+
     def stash_push(self, path: Path, *, repo_name: str, env: str | None) -> None:
         """Stash the working tree at `path` (equivalent to ``git stash push``)."""
         ...

@@ -48,6 +48,7 @@ from winter_cli.modules.workspace.extension_manifest import ExtensionManifestLoa
 from winter_cli.modules.workspace.extension_symlink_service import ExtensionSymlinkService
 from winter_cli.modules.workspace.fetch_reporter import JsonFetchReporter, StreamFetchReporter
 from winter_cli.modules.workspace.handlers.destroy_handler import DestroyHandler
+from winter_cli.modules.workspace.handlers.fingerprint_handler import FingerprintHandler
 from winter_cli.modules.workspace.handlers.init_handler import InitHandler
 from winter_cli.modules.workspace.handlers.repo_handler import RepoHandler
 from winter_cli.modules.workspace.handlers.restack_handler import RestackHandler
@@ -68,6 +69,7 @@ from winter_cli.modules.workspace.prune_service import PruneService
 from winter_cli.modules.workspace.pull_reporter import JsonPullReporter, StreamPullReporter
 from winter_cli.modules.workspace.reporter_factory import ReporterFactory
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
+from winter_cli.modules.workspace.workspace_fingerprint_service import WorkspaceFingerprintService
 from winter_cli.modules.workspace.workspace_merge_service import WorkspaceMergeService
 from winter_cli.modules.workspace.workspace_push_service import WorkspacePushService
 from winter_cli.modules.workspace.workspace_skill_service import WorkspaceSkillService
@@ -640,6 +642,17 @@ class Container(containers.DeclarativeContainer):
         InitHandler,
         init_service=init_svc,
         reporter_factory=reporter_factory,
+    )
+
+    workspace_fingerprint_svc = providers.Factory(
+        WorkspaceFingerprintService,
+        repo_factory=repo_factory,
+        git_repo=git_repo,
+    )
+
+    fingerprint_handler = providers.Factory(
+        FingerprintHandler,
+        fingerprint_svc=workspace_fingerprint_svc,
     )
 
     restack_handler = providers.Factory(

@@ -964,3 +964,34 @@ class RestackReport:
     @property
     def success(self) -> bool:
         return self.conflict is None and self.failure is None
+
+
+@dataclasses.dataclass(frozen=True)
+class RepoFingerprint:
+    """One repo's contribution to a workspace fingerprint.
+
+    `tree` is the tree of the repo's tracked content — `HEAD^{tree}` when the
+    repo is clean, the tree of its tracked content (the index brought up to the
+    working tree) when a tracked file is staged, modified or deleted. `commit`
+    is informational (history differences between otherwise-identical copies do
+    not move the digest). `dirty` is true exactly when a tracked file has a
+    staged or unstaged change, the judgement `ws status` makes; it can be true
+    while `tree` equals `HEAD^{tree}` (a change staged and then reverted).
+    """
+
+    name: str
+    commit: str
+    tree: str
+    dirty: bool
+
+
+@dataclasses.dataclass(frozen=True)
+class WorkspaceFingerprint:
+    """The digest identifying a workspace definition, with every component beside it.
+
+    `workspace` is the workspace repo; `standalones` are sorted by name.
+    """
+
+    digest: str
+    workspace: RepoFingerprint
+    standalones: list[RepoFingerprint]
