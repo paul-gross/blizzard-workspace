@@ -77,6 +77,14 @@ class StreamReporter:
             self._echo(f"[{repo}] would remove worktree at {location}")
         elif action == "would_remove_env":
             self._echo(f"[{repo}] would remove env directory at {location}")
+        elif action == "would_destroy_nested_env":
+            self._echo(f"[{repo}] would destroy nested env {detail} at {location}")
+        elif action == "nested_env_destroyed":
+            self._echo(f"[{repo}] nested env {detail} destroyed at {location}")
+        elif action == "would_stop_nested_workspace_services":
+            self._echo(f"[{repo}] would stop nested workspace services at {location}")
+        elif action == "nested_workspace_services_stopped":
+            self._echo(f"[{repo}] nested workspace services stopped at {location}")
         elif action == "would_remove_workspace_exclude":
             self._echo(f"[{repo}] would strip workspace exclude block: {detail}")
         elif action == "pinned":

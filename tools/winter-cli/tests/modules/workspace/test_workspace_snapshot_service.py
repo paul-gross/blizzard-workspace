@@ -5,6 +5,13 @@ from typing import Any
 
 import pytest
 
+from tests.modules.workspace.conftest import (
+    FakeNestedWorkspaceRunner,
+    make_nested_service,
+    nested_env,
+    nested_status,
+    nested_wt,
+)
 from winter_cli.config.models import (
     AdoptExtensions,
     DashboardLayout,
@@ -16,10 +23,12 @@ from winter_cli.config.models import (
 )
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
+from winter_cli.modules.workspace.handlers.workspace_handler import compute_status_exit_code
 from winter_cli.modules.workspace.models import (
     FeatureEnvironment,
     FeatureEnvironmentStatus,
     FeatureWorktree,
+    NestedSnapshot,
     ProjectRepository,
     RepoError,
     RepoStatus,
@@ -97,7 +106,9 @@ class FakeRepoRepository:
 
     Maps repo name → `RepoStatus` to return, or `RepoError` to raise.
     `get_project_status` maps repo name → `RepoStatus` for source-checkout reads.
-    Unknown attribute access fails loudly so accidental fan-out surfaces.
+    `local_work_requests` records `(repo name, local_work)` for every source-checkout
+    and standalone read. Unknown attribute access fails loudly so accidental fan-out
+    surfaces.
     """
 
     def __init__(
@@ -111,6 +122,7 @@ class FakeRepoRepository:
         self._project_statuses: dict[str, RepoStatus] = project_statuses or {}
         self._errors: dict[str, RepoError] = errors or {}
         self._standalone_statuses: dict[str, StandaloneRepoStatus] = standalone_statuses or {}
+        self.local_work_requests: list[tuple[str, bool]] = []
 
     def get_worktree_status(self, worktree: FeatureWorktree) -> RepoStatus:
         name = worktree.repository.name
@@ -123,8 +135,9 @@ class FakeRepoRepository:
         # last_commit_subject where a test needs it (see _dirty_repo_status).
         return self.get_worktree_status(worktree)
 
-    def get_project_status(self, repo: ProjectRepository) -> RepoStatus:
+    def get_project_status(self, repo: ProjectRepository, *, local_work: bool = False) -> RepoStatus:
         name = repo.name
+        self.local_work_requests.append((name, local_work))
         if name in self._errors:
             raise self._errors[name]
         if name in self._project_statuses:
@@ -140,8 +153,9 @@ class FakeRepoRepository:
             dirty_files=[],
         )
 
-    def get_standalone_status(self, repo: StandaloneRepository) -> StandaloneRepoStatus:
+    def get_standalone_status(self, repo: StandaloneRepository, *, local_work: bool = False) -> StandaloneRepoStatus:
         name = repo.name
+        self.local_work_requests.append((name, local_work))
         if name in self._errors:
             raise self._errors[name]
         if name in self._standalone_statuses:
@@ -283,12 +297,14 @@ def _service(
     head_commits: dict[str, str] | None = None,
     git_repo: FakeGitRepositoryForSnapshot | None = None,
     dashboard_layout: DashboardLayout = DashboardLayout.auto,
+    nested_runner: Any | None = None,
+    repo_repo: FakeRepoRepository | None = None,
 ) -> WorkspaceSnapshotService:
-    """Construct a `WorkspaceSnapshotService` with all fakes wired."""
+    """Construct a `WorkspaceSnapshotService` with all fakes wired; a given *repo_repo* replaces the status maps."""
     from tests.conftest import ClickRecorder, FakeFilesystem
 
     worktree_repo = FakeReadWorkspaceRepository(envs=envs, feature_branch=feature_branch, env_errors=env_errors)
-    repo_repo = FakeRepoRepository(
+    repo_repo = repo_repo or FakeRepoRepository(
         worktree_statuses=worktree_statuses,
         project_statuses=project_statuses,
         errors=repo_errors,
@@ -330,6 +346,7 @@ def _service(
         config_lock_repo=config_lock_repo,  # type: ignore[arg-type]
         git_repo=git_repo,  # type: ignore[arg-type]
         dashboard_layout=dashboard_layout,
+        nested_svc=make_nested_service(nested_runner) if nested_runner is not None else None,
     )
 
 
@@ -828,6 +845,60 @@ def test_collect_standalone_dirty_ahead_behind_surfaces(workspace: Workspace) ->
     assert ext_a.ahead_origin == 2
     assert ext_a.behind_origin == 4
     assert ext_a.dirty == 3
+
+
+def test_collect_surfaces_local_only_commits_and_stashes_of_an_otherwise_clean_checkout(workspace: Workspace) -> None:
+    """Local work no remote holds keeps a clean, level source checkout in `projects`; `collect` asks for it."""
+    config = _config_with_two_standalones()
+    alpha = _make_env(workspace, "alpha", 1)
+    repo_repo = FakeRepoRepository(
+        worktree_statuses={"repo-a": _clean_repo_status("repo-a")},
+        project_statuses={
+            "repo-a": RepoStatus(
+                name="repo-a",
+                path=str(WORKSPACE_ROOT / "projects" / "repo-a"),
+                main_branch="main",
+                branch="main",
+                local_only_commits=2,
+                stashes=1,
+            ),
+        },
+        standalone_statuses={
+            "ext-a": StandaloneRepoStatus(
+                repository=StandaloneRepository(name="ext-a", path=WORKSPACE_ROOT / "ext-a"),
+                branch="master",
+                local_only_commits=3,
+                stashes=4,
+            ),
+        },
+    )
+    svc = _service(workspace, config, envs=[alpha], feature_branch="feature/x", repo_repo=repo_repo)
+
+    snapshot = svc.collect()
+
+    [repo_a] = [sc for sc in snapshot.projects if sc.repo == "repo-a"]
+    assert (repo_a.ahead_origin, repo_a.behind_origin, repo_a.dirty) == (0, 0, 0)
+    assert (repo_a.local_only_commits, repo_a.stashes) == (2, 1)
+    ext_a = next(st for st in snapshot.standalones if st.repo == "ext-a")
+    assert (ext_a.local_only_commits, ext_a.stashes) == (3, 4)
+    assert repo_repo.local_work_requests
+    assert all(local_work for _, local_work in repo_repo.local_work_requests)
+
+
+def test_collect_for_dashboard_does_not_read_local_work(workspace: Workspace) -> None:
+    repo_repo = FakeRepoRepository(worktree_statuses={"repo-a": _clean_repo_status("repo-a")})
+    svc = _service(
+        workspace,
+        _config_with_two_standalones(),
+        envs=[_make_env(workspace, "alpha", 1)],
+        feature_branch="feature/x",
+        repo_repo=repo_repo,
+    )
+
+    svc.collect_for_dashboard()
+
+    assert repo_repo.local_work_requests
+    assert not any(local_work for _, local_work in repo_repo.local_work_requests)
 
 
 def test_collect_standalone_failing_probe_is_skipped_not_fatal(workspace: Workspace) -> None:
@@ -1441,3 +1512,125 @@ def test_collect_raising_env_decorator_is_isolated(workspace: Workspace, workspa
     assert bad_called == [True]
     assert good_called == [True]
     assert snapshot.environments[0].extensions == {"ok": "running"}
+
+
+# ── nested workspaces ─────────────────────────────────────────────────────────
+
+
+def _nested_config() -> WorkspaceConfig:
+    return WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        project_repos=[
+            ProjectRepositoryConfig(name="lab", url="git@example.com:org/lab.git", nested=True, extension=False),
+            ProjectRepositoryConfig(name="repo-a", url="git@example.com:org/repo-a.git"),
+        ],
+        standalone_repos=[],
+    )
+
+
+def test_collect_carries_the_nested_workspace_state_on_a_nested_worktree_only(workspace: Workspace) -> None:
+    alpha = _make_env(workspace, "alpha", 1)
+    lab = WORKSPACE_ROOT / "alpha" / "lab"
+    status = nested_status(lab, nested_env("n1"), nested_env("n2", nested_wt(dirty=1)))
+    runner = FakeNestedWorkspaceRunner(statuses={lab: status})
+    svc = _service(
+        workspace,
+        _nested_config(),
+        envs=[alpha],
+        worktree_statuses={"lab": _clean_repo_status("lab"), "repo-a": _clean_repo_status("repo-a")},
+        nested_runner=runner,
+    )
+
+    snapshot = svc.collect()
+
+    by_repo = {wt.repo: wt for wt in snapshot.environments[0].worktrees}
+    assert by_repo["lab"].nested == NestedSnapshot(env_count=2, dirty=True)
+    assert by_repo["repo-a"].nested is None
+    assert runner.status_calls == [lab]
+
+
+def test_collect_reads_every_nested_worktree_and_carries_unpushed_and_deep_dirt(workspace: Workspace) -> None:
+    roots = {env: WORKSPACE_ROOT / env / "lab" for env in ("alpha", "beta", "gamma")}
+    deep_dirty = {"env_count": 1, "dirty": True, "unpushed": False, "error": None}
+    runner = FakeNestedWorkspaceRunner(
+        statuses={
+            roots["alpha"]: nested_status(roots["alpha"], nested_env("n1", nested_wt("deep", nested=deep_dirty))),
+            roots["beta"]: nested_status(roots["beta"], nested_env("n1", nested_wt("app", ahead=1))),
+        }
+    )
+    svc = _service(
+        workspace,
+        _nested_config(),
+        envs=[_make_env(workspace, env, i + 1) for i, env in enumerate(roots)],
+        worktree_statuses={"lab": _clean_repo_status("lab"), "repo-a": _clean_repo_status("repo-a")},
+        nested_runner=runner,
+    )
+
+    snapshot = svc.collect()
+
+    nested = {env.name: next(wt.nested for wt in env.worktrees if wt.repo == "lab") for env in snapshot.environments}
+    assert nested == {
+        "alpha": NestedSnapshot(env_count=1, dirty=True),
+        "beta": NestedSnapshot(env_count=1, dirty=False, unpushed=True),
+        "gamma": NestedSnapshot(env_count=0, dirty=False),
+    }
+    assert sorted(runner.status_calls) == sorted(roots.values())
+    assert compute_status_exit_code(snapshot, scoped=True) == 1
+
+
+def test_collect_records_a_malformed_nested_status_without_aborting(workspace: Workspace) -> None:
+    lab = WORKSPACE_ROOT / "alpha" / "lab"
+    malformed = {**nested_status(lab), "environments": [{"name": "n1", "worktrees": [{"repo": "app", "dirty": None}]}]}
+    runner = FakeNestedWorkspaceRunner(statuses={lab: malformed})
+    svc = _service(
+        workspace,
+        _nested_config(),
+        envs=[_make_env(workspace, "alpha", 1)],
+        worktree_statuses={"lab": _clean_repo_status("lab"), "repo-a": _clean_repo_status("repo-a")},
+        nested_runner=runner,
+    )
+
+    snapshot = svc.collect()
+
+    lab_wt = next(wt for wt in snapshot.environments[0].worktrees if wt.repo == "lab")
+    assert lab_wt.nested is not None
+    assert lab_wt.nested.error is not None and "malformed" in lab_wt.nested.error
+    assert compute_status_exit_code(snapshot, scoped=True) == 1
+
+
+def test_collect_records_an_unreadable_nested_workspace_without_aborting(workspace: Workspace) -> None:
+    alpha = _make_env(workspace, "alpha", 1)
+    runner = FakeNestedWorkspaceRunner(
+        statuses={WORKSPACE_ROOT / "alpha" / "lab": RepoError("resolved another workspace")}
+    )
+    svc = _service(
+        workspace,
+        _nested_config(),
+        envs=[alpha],
+        worktree_statuses={"lab": _clean_repo_status("lab"), "repo-a": _clean_repo_status("repo-a")},
+        nested_runner=runner,
+    )
+
+    snapshot = svc.collect()
+
+    lab = next(wt for wt in snapshot.environments[0].worktrees if wt.repo == "lab")
+    assert lab.nested is not None
+    assert (lab.nested.env_count, lab.nested.dirty) == (None, False)
+    assert lab.nested.error is not None and "another workspace" in lab.nested.error
+
+
+def test_collect_without_a_nested_service_reads_no_nested_state(workspace: Workspace) -> None:
+    alpha = _make_env(workspace, "alpha", 1)
+    svc = _service(
+        workspace,
+        _nested_config(),
+        envs=[alpha],
+        worktree_statuses={"lab": _clean_repo_status("lab"), "repo-a": _clean_repo_status("repo-a")},
+    )
+
+    snapshot = svc.collect()
+
+    assert all(wt.nested is None for wt in snapshot.environments[0].worktrees)

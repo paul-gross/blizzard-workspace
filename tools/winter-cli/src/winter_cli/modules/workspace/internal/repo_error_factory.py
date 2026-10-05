@@ -12,6 +12,9 @@ from winter_cli.modules.workspace.models import RepoError
 
 if TYPE_CHECKING:
     import subprocess
+    from collections.abc import Sequence
+
+    from winter_cli.core.subprocess_runner import SubprocessResult
 
 _GITPYTHON_STREAM_RE = re.compile(r"^\s*std(?:out|err):\s*'(.*)'\s*$", re.DOTALL)
 
@@ -133,6 +136,48 @@ class RepoErrorFactory:
         self._logger.error(
             "%s — git %s %s (cwd=%s exit=%s) %s",
             message,
+            subcommand or "",
+            " ".join(cmd_args),
+            cwd_str,
+            err.exit_code,
+            stderr,
+        )
+        return err
+
+    def from_result(
+        self,
+        result: SubprocessResult,
+        message: str,
+        *,
+        cmd: Sequence[str],
+        cwd: Path | str,
+    ) -> RepoError:
+        """Wrap an `ISubprocessRunner.run` outcome into a structured `RepoError` and log it.
+
+        The `ISubprocessRunner` counterpart of `from_subprocess`: a
+        `SubprocessResult` carries no `args`, so the caller passes the *cmd* it
+        ran. `program` / `subcommand` / `cmd_args` decompose from *cmd* the same
+        way `from_subprocess` decomposes `completed.args`.
+        """
+        tokens = [str(a) for a in cmd]
+        program = tokens[0] if tokens else ""
+        subcommand = tokens[1] if len(tokens) > 1 else None
+        cmd_args = tuple(tokens[2:]) if len(tokens) > 2 else ()
+        stderr = result.stderr.strip()
+        cwd_str = str(cwd)
+        err = RepoError(
+            message,
+            program=program,
+            subcommand=subcommand,
+            cmd_args=cmd_args,
+            cwd=cwd_str,
+            exit_code=result.returncode,
+            stderr=stderr,
+        )
+        self._logger.error(
+            "%s — %s %s %s (cwd=%s exit=%s) %s",
+            message,
+            program,
             subcommand or "",
             " ".join(cmd_args),
             cwd_str,

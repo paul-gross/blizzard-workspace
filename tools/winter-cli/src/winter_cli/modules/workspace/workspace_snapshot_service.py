@@ -7,9 +7,10 @@ from collections.abc import Callable
 import click
 
 from winter_cli.config.models import DashboardLayout
+from winter_cli.core.context_thread_pool import ContextThreadPoolExecutor
 from winter_cli.modules.workspace.config_lock_repository import IConfigLockRepository
 from winter_cli.modules.workspace.drift import DriftWarningService
-from winter_cli.modules.workspace.env_status_service import EnvStatusService
+from winter_cli.modules.workspace.env_status_service import STATUS_PARALLELISM, EnvStatusService
 from winter_cli.modules.workspace.git_repository import IGitRepository
 from winter_cli.modules.workspace.models import (
     DashboardSnapshot,
@@ -17,6 +18,7 @@ from winter_cli.modules.workspace.models import (
     FeatureEnvironment,
     FeatureEnvironmentOverview,
     FeatureWorktree,
+    NestedSnapshot,
     OrphanSnapshot,
     ProjectCheckoutSnapshot,
     ProjectRepository,
@@ -31,6 +33,7 @@ from winter_cli.modules.workspace.models import (
     WorktreeRepoStatus,
     WorktreeSnapshot,
 )
+from winter_cli.modules.workspace.nested_workspace_service import NestedWorkspaceService
 from winter_cli.modules.workspace.pattern_match import matches_any_pattern
 from winter_cli.modules.workspace.prune_service import PruneService
 from winter_cli.modules.workspace.repo_repository import IWriteRepoRepository
@@ -49,6 +52,11 @@ class WorkspaceSnapshotService:
     repositories, and the factory). Both the dashboard TUI (Phase 5) and the
     `ws status` command (Phase 3) consume this service so the two surfaces cannot
     disagree on what they read.
+
+    With a `nested_svc`, each on-disk worktree of a `nested = true` repo also
+    carries its nested workspace's env count, dirtiness, and unpushed work,
+    read through that workspace's own CLI, every worktree's read running
+    concurrently. The dashboard builds this service without one.
     """
 
     def __init__(
@@ -63,6 +71,7 @@ class WorkspaceSnapshotService:
         config_lock_repo: IConfigLockRepository,
         git_repo: IGitRepository,
         dashboard_layout: DashboardLayout = DashboardLayout.auto,
+        nested_svc: NestedWorkspaceService | None = None,
     ) -> None:
         self._workspace = workspace
         self._env_status_svc = env_status_svc
@@ -74,6 +83,7 @@ class WorkspaceSnapshotService:
         self._config_lock_repo = config_lock_repo
         self._git_repo = git_repo
         self._dashboard_layout = dashboard_layout
+        self._nested_svc = nested_svc
 
     def collect(
         self,
@@ -120,6 +130,10 @@ class WorkspaceSnapshotService:
         # is resolved from these so the CLI and the grid feed `resolve` inputs
         # derived identically (per-env worktree count, env count).
         overviews: list[FeatureEnvironmentOverview] = []
+        # Worktree snapshots still owed their nested workspace's state: each
+        # read is a whole child `winter ws status`, so they all run together
+        # once every env is collected.
+        pending_nested: list[tuple[list[WorktreeSnapshot], int, FeatureWorktree]] = []
         total_matched_worktrees = 0
         for env in environments:
             overview = self._collect_env_overview(
@@ -177,6 +191,8 @@ class WorkspaceSnapshotService:
                         main_branch=wt_status.worktree.repository.main_branch,
                     )
                 )
+                if self._nested_svc is not None and wt_status.worktree.repository.nested:
+                    pending_nested.append((worktree_snapshots, len(worktree_snapshots) - 1, wt_status.worktree))
 
             # When patterns are active, drop envs that ended up with no matching worktrees.
             if effective_patterns and not worktree_snapshots:
@@ -198,13 +214,17 @@ class WorkspaceSnapshotService:
         if effective_patterns and total_matched_worktrees == 0:
             raise click.ClickException(f"No worktrees match: {', '.join(effective_patterns)}")
 
+        self._attach_nested_snapshots(pending_nested)
+
         # ── projects (project main clones) ────────────────────────────────
         drift_report = self._drift_warning_svc.detect()
         missing_names = {r.name for r in drift_report.missing}
 
         project_snapshots: list[ProjectCheckoutSnapshot] = []
 
-        main_statuses = self._collect_main_branch_statuses(project_repos, tolerate=on_repo_error is not None)
+        main_statuses = self._collect_main_branch_statuses(
+            project_repos, tolerate=on_repo_error is not None, local_work=True
+        )
 
         for repo in project_repos:
             drift_notes: list[str] = []
@@ -221,6 +241,8 @@ class WorkspaceSnapshotService:
                         ahead_origin=wt_status.ahead,
                         dirty=wt_status.dirty_count,
                         drift=drift_notes,
+                        local_only_commits=wt_status.local_only_commits,
+                        stashes=wt_status.stashes,
                     )
                 )
             elif drift_notes:
@@ -262,6 +284,7 @@ class WorkspaceSnapshotService:
         standalone_statuses = self._collect_standalone_statuses(
             self._repo_factory.get_standalone_repos(),
             tolerate=True,
+            local_work=True,
         )
         standalone_snapshots = [
             StandaloneCheckoutSnapshot(
@@ -270,6 +293,8 @@ class WorkspaceSnapshotService:
                 behind_origin=st.behind,
                 ahead_origin=st.ahead,
                 dirty=st.dirty_count,
+                local_only_commits=st.local_only_commits,
+                stashes=st.stashes,
             )
             for st in standalone_statuses
         ]
@@ -454,18 +479,42 @@ class WorkspaceSnapshotService:
             return None
         return FeatureEnvironmentOverview(status=env_status, repo_statuses=repo_statuses)
 
+    def _attach_nested_snapshots(self, pending: list[tuple[list[WorktreeSnapshot], int, FeatureWorktree]]) -> None:
+        """Read each pending worktree's nested workspace on a bounded thread pool and attach it to its snapshot."""
+        nested_svc = self._nested_svc
+        if nested_svc is None or not pending:
+            return
+        with ContextThreadPoolExecutor(max_workers=min(len(pending), STATUS_PARALLELISM)) as pool:
+            futures = [pool.submit(self._nested_snapshot, nested_svc, worktree) for _, _, worktree in pending]
+        for (snapshots, index, _), future in zip(pending, futures, strict=True):
+            snapshots[index] = dataclasses.replace(snapshots[index], nested=future.result())
+
+    @staticmethod
+    def _nested_snapshot(nested_svc: NestedWorkspaceService, worktree: FeatureWorktree) -> NestedSnapshot:
+        """The state of the nested workspace in a `nested = true` worktree.
+
+        Never raises `RepoError`: an unreadable nested workspace is recorded in `error`.
+        """
+        try:
+            state = nested_svc.state(worktree.path)
+        except RepoError as exc:
+            return NestedSnapshot(env_count=None, dirty=False, error=str(exc))
+        return NestedSnapshot(env_count=state.env_count, dirty=state.dirty, unpushed=bool(state.unpushed))
+
     def _collect_main_branch_statuses(
         self,
         project_repos: list[ProjectRepository],
         *,
         tolerate: bool,
+        local_work: bool = False,
     ) -> dict[str, WorktreeRepoStatus]:
         """Probe each project repo's main-branch checkout under the shared error policy.
 
         Feeds `collect()`'s `projects` snapshots and the dashboard's
         repo-label column. When `tolerate` is true (dashboard) a failed probe is
         logged and skipped; when false (CLI / JSON) the first `RepoError`
-        propagates.
+        propagates. `local_work` (`collect()` only) adds the local-only commit
+        and stash counts, which the dashboard never renders.
         """
 
         def _on_main_error(repo: ProjectRepository, exc: RepoError) -> None:
@@ -475,6 +524,7 @@ class WorkspaceSnapshotService:
             self._workspace,
             project_repos,
             on_repo_error=_on_main_error if tolerate else None,
+            local_work=local_work,
         )
 
     def _collect_standalone_statuses(
@@ -482,6 +532,7 @@ class WorkspaceSnapshotService:
         repos: list[StandaloneRepository],
         *,
         tolerate: bool,
+        local_work: bool = False,
     ) -> list[StandaloneRepoStatus]:
         """Probe each standalone/singleton repo's status under the shared error policy.
 
@@ -491,11 +542,12 @@ class WorkspaceSnapshotService:
         for its standalone panel. When `tolerate` is true a failed probe is
         logged and skipped; when false the first `RepoError` propagates — the
         same propagate-vs-skip contract used for worktree and main-branch probes.
+        `local_work` (`collect()` only) adds the local-only commit and stash counts.
         """
         statuses: list[StandaloneRepoStatus] = []
         for repo in repos:
             try:
-                statuses.append(self._repo_repo.get_standalone_status(repo))
+                statuses.append(self._repo_repo.get_standalone_status(repo, local_work=local_work))
             except RepoError as exc:
                 if not tolerate:
                     raise

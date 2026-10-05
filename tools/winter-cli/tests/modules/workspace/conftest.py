@@ -18,10 +18,20 @@ updated in lockstep) than CI, silently, for every test in this subtree.
 
 from __future__ import annotations
 
+import json
 import subprocess
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import Any
 
-from winter_cli.modules.workspace.models import ProjectRepository, Workspace
+from tests.conftest import FakeFilesystem, make_workspace_config
+from winter_cli.config.models import WorkspaceConfig
+from winter_cli.config.workspace import CONFIG_FILE, WINTER_DIR
+from winter_cli.core.config_file import ConfigFileReadError, IConfigFileReader
+from winter_cli.core.filesystem import IFilesystemReader
+from winter_cli.modules.workspace.models import ProjectRepository, RepoError, Workspace
+from winter_cli.modules.workspace.nested_workspace_runner import INestedWorkspaceRunner
+from winter_cli.modules.workspace.nested_workspace_service import NestedWorkspaceService
 
 
 def git_cmd(cwd: Path, *args: str) -> str:
@@ -65,3 +75,184 @@ def add_env_worktree(main_path: Path, tmp_path: Path, env_name: str, base_ref: s
     worktree_path = env_dir / repo_name
     git_cmd(main_path, "worktree", "add", "-b", env_name, str(worktree_path), base_ref)
     return worktree_path
+
+
+def nested_wt(
+    repo: str = "app",
+    *,
+    dirty: int = 0,
+    ahead: int = 0,
+    tracking_ahead: int = 0,
+    upstream: str | None = None,
+    nested: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """One `environments[].worktrees[]` entry of a schema-v1 `ws status --json` document.
+
+    An *upstream* reads as a present tracking ref; none means no upstream configured.
+    """
+    wt: dict[str, Any] = {
+        "repo": repo,
+        "dirty": dirty,
+        "ahead": ahead,
+        "tracking_ahead": tracking_ahead,
+        "upstream": upstream,
+        "tracking_ref_present": upstream is not None,
+    }
+    if nested is not None:
+        wt["nested"] = nested
+    return wt
+
+
+def nested_env(name: str, *worktrees: dict[str, Any]) -> dict[str, Any]:
+    """One `environments[]` entry of a schema-v1 `ws status --json` document; one clean `app` worktree by default."""
+    return {"name": name, "worktrees": list(worktrees) if worktrees else [nested_wt()]}
+
+
+def nested_status(
+    root: Path,
+    *envs: dict[str, Any],
+    projects: list[dict[str, Any]] | None = None,
+    standalones: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """A schema-v1 `ws status --json` document, trimmed to the fields the nested reader uses, reporting *root*."""
+    return {
+        "schema_version": 1,
+        "workspace": {"root_path": str(root)},
+        "environments": list(envs),
+        "projects": projects or [],
+        "standalones": standalones or [],
+    }
+
+
+class FakeNestedWorkspaceRunner:
+    """INestedWorkspaceRunner fake — canned status documents and exit codes per nested root; records every call.
+
+    `statuses` maps a nested root to the `ws status --json` document
+    `status_json` returns (serialized), or to a `RepoError` it raises; a
+    document given as a string is returned verbatim, and an unmapped root
+    reports itself holding no envs. Every `status_json` call is recorded in
+    `status_calls`; every `run` is recorded in `calls` — `ws init` as
+    `("init", root)` and `ws destroy` as
+    `("destroy_env", root, env, force, strict, provision_teardown)` and
+    `service down workspace` as `("service_down", root)` — and, when given, in
+    the shared `events` log so a test can assert ordering against other fakes.
+    `envs` records the environment of every call, in order. `init_returncode` /
+    `init_lines` shape every init; `destroy_returncodes` maps an env name to its
+    destroy exit code (default 0) and `destroy_errors` maps one to a `RepoError`
+    to raise; `service_down_returncode` is every `service down` exit code.
+    """
+
+    def __init__(
+        self,
+        *,
+        statuses: dict[Path, dict[str, Any] | str | RepoError] | None = None,
+        init_returncode: int = 0,
+        init_lines: list[str] | None = None,
+        destroy_returncodes: dict[str, int] | None = None,
+        destroy_errors: dict[str, RepoError] | None = None,
+        service_down_returncode: int = 0,
+        events: list[str] | None = None,
+    ) -> None:
+        self.statuses = dict(statuses or {})
+        self.init_returncode = init_returncode
+        self.init_lines = list(init_lines or [])
+        self.destroy_returncodes = dict(destroy_returncodes or {})
+        self.destroy_errors = dict(destroy_errors or {})
+        self.service_down_returncode = service_down_returncode
+        self.events = events if events is not None else []
+        self.calls: list[tuple] = []
+        self.status_calls: list[Path] = []
+        self.envs: list[dict[str, str]] = []
+
+    def status_json(self, root: Path, env: Mapping[str, str]) -> str:
+        self.status_calls.append(root)
+        self.envs.append(dict(env))
+        status = self.statuses.get(root, nested_status(root))
+        if isinstance(status, RepoError):
+            raise status
+        return status if isinstance(status, str) else json.dumps(status)
+
+    def run(self, root: Path, args: Sequence[str], env: Mapping[str, str], on_line: Callable[[str], None]) -> int:
+        self.envs.append(dict(env))
+        if list(args) == ["ws", "init"]:
+            self.calls.append(("init", root))
+            self.events.append(f"nested_init:{root}")
+            for line in self.init_lines:
+                on_line(line)
+            return self.init_returncode
+        if list(args) == ["service", "down", "workspace"]:
+            self.calls.append(("service_down", root))
+            self.events.append(f"nested_service_down:{root}")
+            on_line("stopping workspace")
+            return self.service_down_returncode
+        assert list(args[:2]) == ["ws", "destroy"], args
+        name = args[2]
+        flags = set(args[3:])
+        self.calls.append(
+            ("destroy_env", root, name, "--force" in flags, "--strict" in flags, "--no-provision-teardown" not in flags)
+        )
+        self.events.append(f"nested_destroy:{name}")
+        if name in self.destroy_errors:
+            raise self.destroy_errors[name]
+        on_line(f"destroying {name}")
+        return self.destroy_returncodes.get(name, 0)
+
+
+def _conforms_fake_nested_workspace_runner(x: FakeNestedWorkspaceRunner) -> INestedWorkspaceRunner:
+    return x
+
+
+class EveryRootHasConfigFilesystem(FakeFilesystem):
+    """A `FakeFilesystem` on which every `.winter/config.toml` exists — the nested service's preflight always passes."""
+
+    def is_file(self, path: Path) -> bool:
+        return (path.name == CONFIG_FILE and path.parent.name == WINTER_DIR) or super().is_file(path)
+
+
+class FakeNestedConfigFiles:
+    """IConfigFileReader fake for nested config files — a path absent from `files` parses as `{}`.
+
+    A path in `broken` raises `ConfigFileReadError`.
+    """
+
+    def __init__(self, files: Mapping[Path, dict] | None = None, broken: Iterable[Path] = ()) -> None:
+        self.files = dict(files or {})
+        self.broken = set(broken)
+
+    def load(self, path: Path) -> dict:
+        if path in self.broken:
+            raise ConfigFileReadError(f"reading {path} — Invalid value (at line 1)")
+        return self.files.get(path, {})
+
+
+def _conforms_fake_nested_config_files(x: FakeNestedConfigFiles) -> IConfigFileReader:
+    return x
+
+
+def make_nested_service(
+    runner: INestedWorkspaceRunner,
+    *,
+    config: WorkspaceConfig | None = None,
+    fs: IFilesystemReader | None = None,
+    environ: Mapping[str, str] | None = None,
+    config_files: Mapping[Path, dict] | None = None,
+    broken_config_files: Iterable[Path] = (),
+) -> NestedWorkspaceService:
+    """A `NestedWorkspaceService` over fakes.
+
+    The outer workspace root defaults to `/ws`; every nested root holds a
+    `.winter/config.toml` unless *fs* says otherwise, and the process
+    environment is empty unless *environ* is given. *config_files* maps a
+    nested config file to its parsed content, and each one exists on the
+    default filesystem; any other config file parses as `{}`, and one in
+    *broken_config_files* is not valid TOML.
+    """
+    outer = config or make_workspace_config()
+    files = dict(config_files or {})
+    return NestedWorkspaceService(
+        runner,
+        fs=fs or EveryRootHasConfigFilesystem(files=dict.fromkeys(files, "")),
+        workspace_root=outer.workspace_root,
+        environ=environ if environ is not None else {},
+        config_file_reader=FakeNestedConfigFiles(files, broken_config_files),
+    )

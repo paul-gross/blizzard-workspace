@@ -36,6 +36,8 @@ logger = logging.getLogger(__name__)
 # clean subject for recent_commits.
 _GRAPH_FORMAT = "--format=%x00%h%d %s%x1f%H%x1f%s"
 
+_STASH_REF = "refs/stash"
+
 
 @dataclasses.dataclass(frozen=True)
 class _PorcelainStatus:
@@ -193,6 +195,8 @@ class _Piece(enum.Flag):
     `HISTORY` runs the expensive `git log --graph` walk; `TIP_SUBJECT` reads
     `ahead` from the already-gathered `STATUS` piece and, only when HEAD is
     ahead of `origin/<main>`, runs a single minimal `git log -1 --format=%s`.
+    `LOCAL_WORK` counts the commits no remote holds (one `rev-list`) and the
+    stash entries (a `stash list` only when `refs/stash` exists).
     A caller composes exactly the pieces its surface renders, so e.g. the
     dashboard grid never pays for `HISTORY` and `ws status` never pays for a
     full history walk just to read the tip subject.
@@ -201,6 +205,7 @@ class _Piece(enum.Flag):
     STATUS = enum.auto()
     HISTORY = enum.auto()
     TIP_SUBJECT = enum.auto()
+    LOCAL_WORK = enum.auto()
 
 
 @dataclasses.dataclass
@@ -213,6 +218,8 @@ class _Visit:
     commit_graph: list[str] = dataclasses.field(default_factory=list)
     recent_commits: list[RepoCommit] = dataclasses.field(default_factory=list)
     tip_subject: str | None = None
+    local_only_commits: int = 0
+    stashes: int = 0
 
 
 class ReadRepoRepository:
@@ -262,7 +269,7 @@ class ReadRepoRepository:
         return self._build_status_and_history(repo.path, repo.name, repo.main_branch, env=None, recent_from_head=True)
 
     @GitOperationDeclaration("status")
-    def get_standalone_status(self, repo: StandaloneRepository) -> StandaloneRepoStatus:
+    def get_standalone_status(self, repo: StandaloneRepository, *, local_work: bool = False) -> StandaloneRepoStatus:
         # Missing-on-disk / not-a-repo aren't errors — the dashboard renders
         # the row as "not present" and the user knows to run init.
         if not repo.path.exists():
@@ -327,6 +334,8 @@ class ReadRepoRepository:
                 except (ValueError, IndexError):
                     pass
 
+                local_only_commits, stashes = self._read_local_work(r, repo.name, repo.path) if local_work else (0, 0)
+
                 return StandaloneRepoStatus(
                     repository=repo,
                     branch=branch,
@@ -335,12 +344,15 @@ class ReadRepoRepository:
                     dirty_count=dirty_count,
                     tracking_ahead=0,
                     latest_commit=latest_commit,
+                    local_only_commits=local_only_commits,
+                    stashes=stashes,
                 )
         except (git.InvalidGitRepositoryError, git.NoSuchPathError):
             return StandaloneRepoStatus(repository=repo)
 
-    def get_project_status(self, repo: ProjectRepository) -> RepoStatus:
-        return self._build_status(repo.main_path, repo.name, repo.main_branch, pieces=_Piece.STATUS, env=None)
+    def get_project_status(self, repo: ProjectRepository, *, local_work: bool = False) -> RepoStatus:
+        pieces = _Piece.STATUS | _Piece.LOCAL_WORK if local_work else _Piece.STATUS
+        return self._build_status(repo.main_path, repo.name, repo.main_branch, pieces=pieces, env=None)
 
     @GitOperationDeclaration("diff")
     def get_diff(self, worktree: FeatureWorktree, mode: DiffMode) -> RepoDiffResult:
@@ -486,6 +498,8 @@ class ReadRepoRepository:
             tracking_behind=s.tracking_behind,
             tracking_ref_present=s.tracking_ref_present,
             last_commit_subject=visit.tip_subject,
+            local_only_commits=visit.local_only_commits,
+            stashes=visit.stashes,
         )
 
     @GitOperationDeclaration("status")
@@ -525,6 +539,7 @@ class ReadRepoRepository:
                 commit_graph: list[str] = []
                 recent_commits: list[RepoCommit] = []
                 tip_subject: str | None = None
+                local_only_commits = stashes = 0
 
                 if _Piece.STATUS in pieces:
                     status = self._read_status(r, repo_name, repo_path)
@@ -535,6 +550,8 @@ class ReadRepoRepository:
                     )
                 if _Piece.TIP_SUBJECT in pieces:
                     tip_subject = self._read_tip_subject(r, ahead)
+                if _Piece.LOCAL_WORK in pieces:
+                    local_only_commits, stashes = self._read_local_work(r, repo_name, repo_path)
 
                 return _Visit(
                     status=status,
@@ -543,6 +560,8 @@ class ReadRepoRepository:
                     commit_graph=commit_graph,
                     recent_commits=recent_commits,
                     tip_subject=tip_subject,
+                    local_only_commits=local_only_commits,
+                    stashes=stashes,
                 )
         except (git.InvalidGitRepositoryError, git.NoSuchPathError):
             return _Visit()
@@ -560,6 +579,23 @@ class ReadRepoRepository:
                 cwd=repo_path,
             ) from exc
         return _parse_status_porcelain_v2(out)
+
+    def _read_local_work(self, r: git.Repo, name: str, repo_path: Path) -> tuple[int, int]:
+        """`(local_only_commits, stashes)`: commits on a local branch no remote-tracking ref reaches, and stash entries.
+
+        The stash count runs `git stash list` only when `refs/stash` resolves,
+        so a checkout without a stash pays one `rev-list` and a ref read.
+        """
+        try:
+            local_only = int(r.git.rev_list("--count", "--branches", "--not", "--remotes"))
+            stashes = len(r.git.stash("list").splitlines()) if git.Reference(r, _STASH_REF).is_valid() else 0
+        except git.GitCommandError as exc:
+            raise self._error_factory.from_git(
+                exc,
+                message=f"local-work probe failed for {name}",
+                cwd=repo_path,
+            ) from exc
+        return local_only, stashes
 
     def _read_main_ahead_behind(
         self, r: git.Repo, name: str, repo_path: Path, main_branch: str | None

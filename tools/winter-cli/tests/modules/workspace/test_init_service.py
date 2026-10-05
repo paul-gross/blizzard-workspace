@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -15,6 +16,7 @@ from tests.conftest import (
     FakeSubprocessRunner,
     FakeWorkspaceExcludeLocator,
 )
+from tests.modules.workspace.conftest import FakeNestedWorkspaceRunner, make_nested_service
 from winter_cli.config.models import (
     AdoptExtensions,
     ExtensionLoad,
@@ -34,6 +36,7 @@ from winter_cli.modules.workspace.internal.git_ops_service import GitOpsService
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.models import RepoError
 from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
+from winter_cli.modules.workspace.nested_workspace_service import NestedWorkspaceService
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 
 WORKSPACE_ROOT = Path("/ws")
@@ -61,6 +64,7 @@ def _service(
     git_ops: GitOpsService | None = None,
     config_lock_repo: FakeConfigLockRepository | None = None,
     registry: FakeEnvIndexRegistry | None = None,
+    nested_svc: NestedWorkspaceService | None = None,
 ) -> InitService:
     manifest_loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader({}))
     return InitService(
@@ -95,6 +99,7 @@ def _service(
         registry=registry or FakeEnvIndexRegistry(),
         config_lock_repo=config_lock_repo,
         exclude_locator=FakeWorkspaceExcludeLocator(fs, workspace_config.workspace_root),
+        nested_svc=nested_svc,
     )
 
 
@@ -2051,3 +2056,156 @@ def test_reconcile_standalones_renders_a_routing_row_for_a_manifest_less_project
     assert "- **app**: `<env>/app/AGENTS.md`" in fs.files[WORKSPACE_ROOT / "AGENTS.winter.md"]
     # Context delivery only: nothing is projected for it, even under `adopt_extensions = "all"`.
     assert not fs.is_symlink(WORKSPACE_ROOT / ".claude" / "skills" / "app-do-thing")
+
+
+# ── nested workspaces ─────────────────────────────────────────────────────────
+
+LAB_MAIN = WORKSPACE_ROOT / "projects" / "lab"
+LAB_ALPHA = WORKSPACE_ROOT / "alpha" / "lab"
+TRUST = "./bootstrap.sh trust"
+
+
+def _nested_config(*, cmd: list[str] | None = None) -> WorkspaceConfig:
+    # `nested = true` parses to `extension = false` too; mirror that here.
+    return WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        project_repos=[
+            ProjectRepositoryConfig(
+                name="lab", url="git@example.com:org/lab.git", cmd=cmd or [], nested=True, extension=False
+            ),
+        ],
+    )
+
+
+def _nested_fs() -> FakeFilesystem:
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", LAB_MAIN, WORKSPACE_ROOT / ".git" / "info"])
+    fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"] = ""
+    return fs
+
+
+class _LoggingSubprocessRunner(FakeSubprocessRunner):
+    """FakeSubprocessRunner that also appends each streamed command to a shared event log."""
+
+    def __init__(self, events: list[str], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._events = events
+
+    def popen(self, cmd: Any, **kwargs: Any) -> Any:
+        self._events.append(f"cmd:{cmd}")
+        return super().popen(cmd, **kwargs)
+
+
+def test_reconcile_env_runs_nested_init_in_the_worktree_after_cmd(init_reporter: FakeInitReporter) -> None:
+    events: list[str] = []
+    subprocess = _LoggingSubprocessRunner(events, popen_responses={TRUST: ([], 0)})
+    runner = FakeNestedWorkspaceRunner(events=events, init_lines=["✓ projects/ done"])
+    git = FakeGitRepository()
+    git.local_branches[LAB_MAIN] = ["main"]
+
+    svc = _service(_nested_config(cmd=[TRUST]), _nested_fs(), subprocess, git, nested_svc=make_nested_service(runner))
+    ok = svc.reconcile_env("alpha", init_reporter)
+
+    assert ok is True
+    assert events == [f"cmd:{TRUST}", f"nested_init:{LAB_ALPHA}"]
+    assert runner.calls == [("init", LAB_ALPHA)]
+    assert ("lab", "winter ws init", 0) in init_reporter.cmds_completed
+    assert ("lab", "✓ projects/ done") in init_reporter.cmd_output
+
+
+def test_reconcile_env_runs_a_nested_repos_cmd_without_the_outer_workspace_env(
+    init_reporter: FakeInitReporter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("VIRTUAL_ENV", "/outer/.venv")
+    monkeypatch.setenv("PATH", "/outer/.venv/bin:/usr/bin")
+    monkeypatch.setenv("WINTER_PORT_BASE", "4020")
+    monkeypatch.setenv("WINTER_NESTED_CHAIN", "/up")
+    monkeypatch.setenv("WINTER_LOG_LEVEL", "debug")
+    subprocess = FakeSubprocessRunner(popen_responses={TRUST: ([], 0)})
+    git = FakeGitRepository()
+    git.local_branches[LAB_MAIN] = ["main"]
+
+    svc = _service(
+        _nested_config(cmd=[TRUST]),
+        _nested_fs(),
+        subprocess,
+        git,
+        nested_svc=make_nested_service(FakeNestedWorkspaceRunner()),
+    )
+    assert svc.reconcile_env("alpha", init_reporter) is True
+
+    env = subprocess.popen_envs[0]
+    assert "VIRTUAL_ENV" not in env
+    assert "WINTER_PORT_BASE" not in env
+    assert "WINTER_NESTED_CHAIN" not in env
+    assert env["PATH"] == "/usr/bin"
+    assert env["WINTER_LOG_LEVEL"] == "debug"
+    assert env["CI"] == "1"
+
+
+def test_reconcile_env_fails_when_nested_init_fails(init_reporter: FakeInitReporter) -> None:
+    runner = FakeNestedWorkspaceRunner(init_returncode=2)
+    git = FakeGitRepository()
+    git.local_branches[LAB_MAIN] = ["main"]
+
+    svc = _service(_nested_config(), _nested_fs(), FakeSubprocessRunner(), git, nested_svc=make_nested_service(runner))
+    ok = svc.reconcile_env("alpha", init_reporter)
+
+    assert ok is False
+    assert ("alpha", False) in init_reporter.targets_completed
+    assert any(repo == "lab" and "winter ws init" in msg and "code 2" in msg for repo, msg in init_reporter.errors)
+
+
+def test_reconcile_env_skips_nested_init_when_cmd_fails(init_reporter: FakeInitReporter) -> None:
+    runner = FakeNestedWorkspaceRunner()
+    git = FakeGitRepository()
+    git.local_branches[LAB_MAIN] = ["main"]
+    subprocess = FakeSubprocessRunner(popen_responses={TRUST: ([], 1)})
+
+    svc = _service(_nested_config(cmd=[TRUST]), _nested_fs(), subprocess, git, nested_svc=make_nested_service(runner))
+    ok = svc.reconcile_env("alpha", init_reporter)
+
+    assert ok is False
+    assert runner.calls == []
+
+
+def test_reconcile_projects_never_initializes_the_nested_source_checkout(init_reporter: FakeInitReporter) -> None:
+    runner = FakeNestedWorkspaceRunner()
+    subprocess = FakeSubprocessRunner(popen_responses={TRUST: ([], 0)})
+
+    svc = _service(
+        _nested_config(cmd=[TRUST]),
+        _nested_fs(),
+        subprocess,
+        FakeGitRepository(),
+        nested_svc=make_nested_service(runner),
+    )
+    ok = svc.reconcile_projects(init_reporter)
+
+    assert ok is True
+    assert runner.calls == []
+    # The entry's `cmd` still runs in the source checkout, as for any project repo.
+    assert subprocess.popen_calls == [(TRUST, LAB_MAIN)]
+
+
+def test_reconcile_standalones_projects_nothing_for_a_nested_repo_with_agent_files(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """A nested workspace's root `AGENTS.md`, `winter-ext.toml`, and skills stay out of the outer workspace."""
+    fs = _nested_fs()
+    skill_dir = LAB_MAIN / "skills" / "do-thing"
+    fs.directories.add(skill_dir)
+    fs.files[LAB_MAIN / "AGENTS.md"] = "# Lab\n"
+    fs.files[LAB_MAIN / "winter-ext.toml"] = ""
+    fs.files[skill_dir / "SKILL.md"] = "---\ndescription: An example skill\n---\n\n# do-thing\n"
+    config_files: dict = {LAB_MAIN / "winter-ext.toml": {"name": "lab", "prefix": "lab"}}
+
+    svc = _service_with_ext_and_agents(_nested_config(), fs, config_files, FakeSubprocessRunner(), FakeGitRepository())
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    assert not fs.exists(WORKSPACE_ROOT / ".claude" / "skills" / "lab-do-thing")
+    agents_winter = WORKSPACE_ROOT / "AGENTS.winter.md"
+    assert agents_winter not in fs.files or "lab" not in fs.files[agents_winter]

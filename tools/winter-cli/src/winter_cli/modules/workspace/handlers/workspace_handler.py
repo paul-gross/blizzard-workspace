@@ -29,6 +29,7 @@ from winter_cli.modules.workspace.models import (
     FeatureEnvironmentWorktrees,
     FeatureWorktree,
     MergeMode,
+    NestedSnapshot,
     PinnedScope,
     ProjectCheckoutSnapshot,
     ProjectRepository,
@@ -1194,6 +1195,20 @@ class WorkspaceHandler:
             return Cell.of(f"{ff.branch} +{ff.commits}", "green")
         return Cell.of(f"{ff.branch} skipped ({ff.skipped_reason})", "dim")
 
+    def _nested_status_line(self, repo: str, nested: NestedSnapshot) -> str:
+        """One `ws status` line summarizing a nested workspace, e.g. `  lab (nested): 2 envs, dirty, unpushed`."""
+        out = self._cli_output_svc
+        if nested.error is not None:
+            first_line = nested.error.splitlines()[0] if nested.error else ""
+            return f"  {repo} (nested): {out.style(f'unreadable — {first_line}', 'yellow')}"
+        count = nested.env_count or 0
+        parts = [f"{count} env{'s' if count != 1 else ''}"]
+        if nested.dirty:
+            parts.append(out.style("dirty", "red"))
+        if nested.unpushed:
+            parts.append(out.style("unpushed", "yellow"))
+        return f"  {repo} (nested): {', '.join(parts)}"
+
     def _render_status_table(self, snapshot: WorkspaceSnapshot) -> None:
         """Render the human-readable `ws status` output from a WorkspaceSnapshot."""
         out = self._cli_output_svc
@@ -1243,6 +1258,9 @@ class WorkspaceHandler:
 
             for line in out.render_table(rows, headers=["REPO", "SYNC", "DIRTY"], row_styles=row_styles):
                 click.echo(line)
+            for wt in env_snap.worktrees:
+                if wt.nested is not None:
+                    click.echo(self._nested_status_line(wt.repo, wt.nested))
             click.echo()
 
         # ── projects (source checkouts) ───────────────────────────────────────
@@ -1256,6 +1274,7 @@ class WorkspaceHandler:
                     sc_sync_parts.append(f"+{sc.ahead_origin}")
                 if sc.behind_origin:
                     sc_sync_parts.append(f"-{sc.behind_origin}")
+                sc_sync_parts.extend(_local_work_parts(sc.local_only_commits, sc.stashes))
                 sc_sync_str = ", ".join(sc_sync_parts) if sc_sync_parts else ""
                 drift_str = "; ".join(sc.drift) if sc.drift else ""
 
@@ -1284,6 +1303,7 @@ class WorkspaceHandler:
                     st_sync_parts.append(f"+{st.ahead_origin}")
                 if st.behind_origin:
                     st_sync_parts.append(f"-{st.behind_origin}")
+                st_sync_parts.extend(_local_work_parts(st.local_only_commits, st.stashes))
                 st_sync_str = ", ".join(st_sync_parts) if st_sync_parts else ""
 
                 if st.dirty == 0:
@@ -1330,6 +1350,16 @@ class WorkspaceHandler:
         click.echo()
 
 
+def _local_work_parts(local_only_commits: int, stashes: int) -> list[str]:
+    """The SYNC-cell parts naming a checkout's local-only commits and stashes, e.g. `["2 local-only", "1 stash"]`."""
+    parts: list[str] = []
+    if local_only_commits:
+        parts.append(f"{local_only_commits} local-only")
+    if stashes:
+        parts.append(f"{stashes} stash" if stashes == 1 else f"{stashes} stashes")
+    return parts
+
+
 def compute_status_exit_code(snapshot: WorkspaceSnapshot, *, scoped: bool) -> int:
     """Compute the exit code for `ws status`.
 
@@ -1344,7 +1374,9 @@ def compute_status_exit_code(snapshot: WorkspaceSnapshot, *, scoped: bool) -> in
     context but do NOT flip the exit code.
 
     When ``scoped`` is False (no patterns, full workspace) the full workspace is
-    considered: any dirty worktree OR any project source-checkout divergence
+    considered: any dirty worktree (a nested workspace with a dirty env, or one
+    whose state could not be read, counts as a dirty worktree, scoped or not)
+    OR any project source-checkout divergence
     (behind_origin > 0 or ahead_origin > 0 or dirty > 0 or non-empty drift list)
     OR any standalone divergence (behind/ahead/dirty) OR any orphans OR any
     config drift counts as ``1``.
@@ -1353,14 +1385,14 @@ def compute_status_exit_code(snapshot: WorkspaceSnapshot, *, scoped: bool) -> in
         # Scoped: only the matched worktrees contribute to dirtiness.
         for env_snap in snapshot.environments:
             for wt in env_snap.worktrees:
-                if wt.dirty > 0:
+                if _worktree_is_dirty(wt):
                     return 1
         return 0
 
     # Unscoped: check everything.
     for env_snap in snapshot.environments:
         for wt in env_snap.worktrees:
-            if wt.dirty > 0:
+            if _worktree_is_dirty(wt):
                 return 1
 
     for sc in snapshot.projects:
@@ -1376,6 +1408,11 @@ def compute_status_exit_code(snapshot: WorkspaceSnapshot, *, scoped: bool) -> in
         return 1
 
     return 0
+
+
+def _worktree_is_dirty(wt: WorktreeSnapshot) -> bool:
+    """A worktree is dirty when it has changes, or holds a nested workspace that is dirty or could not be read."""
+    return wt.dirty > 0 or (wt.nested is not None and (wt.nested.dirty or wt.nested.error is not None))
 
 
 def _snapshot_to_dict(snapshot: WorkspaceSnapshot) -> dict[str, Any]:
@@ -1405,7 +1442,7 @@ def _env_snap_to_dict(env: EnvSnapshot) -> dict[str, Any]:
 
 
 def _worktree_snap_to_dict(wt: WorktreeSnapshot) -> dict[str, Any]:
-    return {
+    doc: dict[str, Any] = {
         "repo": wt.repo,
         "branch": wt.branch,
         "upstream": wt.upstream,
@@ -1422,6 +1459,14 @@ def _worktree_snap_to_dict(wt: WorktreeSnapshot) -> dict[str, Any]:
         "pinned": wt.pinned,
         "main_branch": wt.main_branch,
     }
+    if wt.nested is not None:
+        doc["nested"] = {
+            "env_count": wt.nested.env_count,
+            "dirty": wt.nested.dirty,
+            "unpushed": wt.nested.unpushed,
+            "error": wt.nested.error,
+        }
+    return doc
 
 
 def _project_snap_to_dict(sc: ProjectCheckoutSnapshot) -> dict[str, Any]:
@@ -1432,6 +1477,8 @@ def _project_snap_to_dict(sc: ProjectCheckoutSnapshot) -> dict[str, Any]:
         "ahead_origin": sc.ahead_origin,
         "dirty": sc.dirty,
         "drift": list(sc.drift),
+        "local_only_commits": sc.local_only_commits,
+        "stashes": sc.stashes,
     }
 
 
@@ -1442,6 +1489,8 @@ def _standalone_snap_to_dict(st: StandaloneCheckoutSnapshot) -> dict[str, Any]:
         "behind_origin": st.behind_origin,
         "ahead_origin": st.ahead_origin,
         "dirty": st.dirty,
+        "local_only_commits": st.local_only_commits,
+        "stashes": st.stashes,
     }
 
 

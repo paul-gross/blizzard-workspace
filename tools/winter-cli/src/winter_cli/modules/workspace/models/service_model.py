@@ -78,6 +78,14 @@ class RepoStatus:
     producer leaves this `None` so a surface that doesn't render it doesn't
     pay for the probe.
     """
+    local_only_commits: int = 0
+    """Commits reachable from a local branch but from no remote-tracking ref — work no remote holds.
+
+    Populated only by `get_project_status(..., local_work=True)` (the
+    `ws status` source-checkout consumer); every other producer leaves it 0.
+    """
+    stashes: int = 0
+    """Entries on the stash; populated alongside `local_only_commits`, and 0 everywhere else."""
 
 
 @dataclasses.dataclass
@@ -123,6 +131,10 @@ class StandaloneRepoStatus:
     tracking_ahead: int = 0
     tracking_ref_present: bool = False
     latest_commit: str | None = None
+    local_only_commits: int = 0
+    """Commits reachable from a local branch but from no remote-tracking ref; read only with `local_work=True`."""
+    stashes: int = 0
+    """Entries on the stash; read only with `local_work=True`."""
 
     @property
     def name(self) -> str:
@@ -248,6 +260,10 @@ class WorktreeRepoStatus:
     tracking_behind: int = 0
     tracking_ref_present: bool = False
     extensions: dict[str, Any] = dataclasses.field(default_factory=dict)
+    local_only_commits: int = 0
+    """Commits no remote holds, carried from a source checkout's `RepoStatus.local_only_commits`; 0 otherwise."""
+    stashes: int = 0
+    """Stash entries, carried from a source checkout's `RepoStatus.stashes`; 0 otherwise."""
 
 
 @dataclasses.dataclass

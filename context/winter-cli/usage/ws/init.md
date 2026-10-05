@@ -46,20 +46,38 @@ assigned (persisted) or what slot a new name would be suggested (hash, before pr
 with an error. `workspace` is a reserved service scope used by `winter service`; see
 [../service.md#workspace-scope](../service.md#workspace-scope).
 
+## Nested workspaces
+
+For a `[[project_repository]]` declaring `nested = true` (see
+[configuration/repositories.md — nested](../../configuration/repositories.md#nested--a-project-repo-that-is-itself-a-workspace)),
+`winter ws init <name>` reconciles that repo's worktree in these steps:
+
+1. Create or reuse `<name>/<repo>/`, apply identity and excludes, and run the entry's `cmd` there, without the outer
+   CLI's own runtime environment (see
+   [repositories.md — nested](../../configuration/repositories.md#nested--a-project-repo-that-is-itself-a-workspace)).
+2. Run `winter ws init` inside `<name>/<repo>/`, streaming its output under the repo's name as `[<repo>] ...` lines.
+
+A failing `cmd` skips step 2. A failing nested init (non-zero exit, or a `winter` that resolves some workspace other
+than `<name>/<repo>/`) is reported as that repo's error and fails the env; which workspace `winter` resolves is checked
+before the nested init runs. The nested init is bare, so it clones the nested workspace's projects but creates none of
+its feature envs; create those from inside the nested root with its own `winter ws init <nested-env>`. `winter ws init`
+with no target never initializes `projects/<repo>/` as a workspace, and `--all` initializes each existing env's copy
+again.
+
 ## Workspace exclude file
 
-`winter ws init` keeps its generated workspace paths (`/projects/`, feature-env directories, projected skills and agents,
-extension checkouts, `.winter/config/**/*.local.*`) out of `git status` with managed blocks in the workspace repo's
-exclude file. `winter ws destroy` and `winter ws prune` read and rewrite the same blocks. Where the file lives depends
-on the workspace root:
+`winter ws init` keeps its generated workspace paths (`/projects/`, feature-env directories, projected skills and
+agents, extension checkouts, `.winter/config/**/*.local.*`) out of `git status` with managed blocks in the workspace
+repo's exclude file. `winter ws destroy` and `winter ws prune` read and rewrite the same blocks. Where the file lives
+depends on the workspace root:
 
 - **Normal clone** — `<root>/.git/info/exclude`.
-- **Linked git worktree** (the root was made with `git worktree add`) — the worktree's own
-  `<git-dir>/info/exclude`, where `<git-dir>` is `git rev-parse --absolute-git-dir`. `winter ws init` also enables
-  `extensions.worktreeConfig` and sets `core.excludesFile` to that file with `git config --worktree`, so the blocks
-  apply to that worktree alone. Sibling worktrees of one repository, and the main checkout, never see or rewrite each
-  other's blocks, and the shared `info/exclude` of the common git directory is never written. The per-worktree
-  `core.excludesFile` replaces the user-level `$XDG_CONFIG_HOME/git/ignore` for that worktree.
+- **Linked git worktree** (the root was made with `git worktree add`) — the worktree's own `<git-dir>/info/exclude`,
+  where `<git-dir>` is `git rev-parse --absolute-git-dir`. `winter ws init` also enables `extensions.worktreeConfig` and
+  sets `core.excludesFile` to that file with `git config --worktree`, so the blocks apply to that worktree alone.
+  Sibling worktrees of one repository, and the main checkout, never see or rewrite each other's blocks, and the shared
+  `info/exclude` of the common git directory is never written. The per-worktree `core.excludesFile` replaces the
+  user-level `$XDG_CONFIG_HOME/git/ignore` for that worktree.
 
 Both settings are read first and written only when they differ, so re-running `ws init`, or running it in several
 sibling worktrees at once, leaves the shared `.git/config` alone once it is set up.

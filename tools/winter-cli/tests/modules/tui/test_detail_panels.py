@@ -249,7 +249,7 @@ class _FakeRepoRepo:
     def get_standalone_detail(self, repo: StandaloneRepository) -> RepoStatusAndHistory:
         return self._detail
 
-    def get_standalone_status(self, repo: StandaloneRepository) -> StandaloneRepoStatus:
+    def get_standalone_status(self, repo: StandaloneRepository, *, local_work: bool = False) -> StandaloneRepoStatus:
         return StandaloneRepoStatus(repository=repo)
 
 

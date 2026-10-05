@@ -1784,3 +1784,52 @@ def test_repo_entry_accepts_every_load_value(load: str) -> None:
 def test_repo_entry_rejects_invalid_extension_keys(table: str, entry: dict, message: str) -> None:
     with pytest.raises(ConfigError, match=message):
         _load_with_repo(table, entry)
+
+
+# ── repo entry nested key ─────────────────────────────────────────────────────
+
+
+def test_project_repo_nested_defaults_to_false() -> None:
+    repo = _load_with_repo("project_repository", {}).project_repos[0]
+
+    assert repo.nested is False
+    assert repo.extension is True
+
+
+def test_project_repo_nested_true_implies_extension_false() -> None:
+    repo = _load_with_repo("project_repository", {"nested": True}).project_repos[0]
+
+    assert repo.nested is True
+    assert repo.extension is False
+
+
+def test_project_repo_nested_accepts_an_explicit_extension_false() -> None:
+    repo = _load_with_repo("project_repository", {"nested": True, "extension": False}).project_repos[0]
+
+    assert (repo.nested, repo.extension) == (True, False)
+
+
+def test_project_repo_nested_false_keeps_the_extension_keys() -> None:
+    repo = _load_with_repo("project_repository", {"nested": False, "load": "lazy"}).project_repos[0]
+
+    assert repo.nested is False
+    assert repo.load is ExtensionLoad.lazy
+
+
+@pytest.mark.parametrize(
+    ("entry", "message"),
+    [
+        ({"nested": "yes"}, "nested"),
+        ({"nested": True, "load": "lazy"}, "load"),
+        ({"nested": True, "entry": ["AGENTS.md"]}, "entry"),
+        ({"nested": True, "extension": True}, "extension = true"),
+    ],
+)
+def test_project_repo_rejects_invalid_nested_combinations(entry: dict, message: str) -> None:
+    with pytest.raises(ConfigError, match=message):
+        _load_with_repo("project_repository", entry)
+
+
+def test_standalone_repo_rejects_nested_true() -> None:
+    with pytest.raises(ConfigError, match="only a \\[\\[project_repository\\]\\] can be a nested workspace"):
+        _load_with_repo("standalone_repository", {"nested": True})

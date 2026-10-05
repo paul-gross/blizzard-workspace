@@ -821,3 +821,55 @@ def test_real_get_worktree_status_for_snapshot_last_commit_subject_null_at_parit
     status = repo.get_worktree_status_for_snapshot(_real_worktree(tmp_path))
 
     assert status.last_commit_subject is None
+
+
+# --------------------------------------------------------------------------- #
+# local_work: commits no remote holds, and stashes
+# --------------------------------------------------------------------------- #
+
+
+def _repo_with_local_work(tmp_path: Path) -> Path:
+    """A clean checkout on `main` at `origin/main`, holding 2 commits on a branch no remote has and 1 stash."""
+    _init_repo(tmp_path)
+    _commit(tmp_path, "f.txt", "1\n", "base")
+    _git(tmp_path, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(tmp_path, "checkout", "-q", "-b", "kept")
+    _commit(tmp_path, "f.txt", "2\n", "kept-1")
+    _commit(tmp_path, "f.txt", "3\n", "kept-2")
+    _git(tmp_path, "checkout", "-q", "main")
+    (tmp_path / "f.txt").write_text("stashed\n")
+    _git(tmp_path, "stash", "-q")
+    return tmp_path
+
+
+def test_real_local_work_counts_commits_on_any_unpushed_branch_and_stashes(
+    tmp_path: Path, repo: ReadRepoRepository
+) -> None:
+    path = _repo_with_local_work(tmp_path)
+
+    status = repo.get_project_status(_project(path), local_work=True)
+    standalone = repo.get_standalone_status(StandaloneRepository(name="ext", path=path), local_work=True)
+
+    assert (status.ahead, status.dirty_files) == (0, [])
+    assert (status.local_only_commits, status.stashes) == (2, 1)
+    assert (standalone.local_only_commits, standalone.stashes) == (2, 1)
+
+
+def test_real_local_work_is_not_read_unless_asked(tmp_path: Path, repo: ReadRepoRepository) -> None:
+    path = _repo_with_local_work(tmp_path)
+
+    status = repo.get_project_status(_project(path))
+    standalone = repo.get_standalone_status(StandaloneRepository(name="ext", path=path))
+
+    assert (status.local_only_commits, status.stashes) == (0, 0)
+    assert (standalone.local_only_commits, standalone.stashes) == (0, 0)
+
+
+def test_real_local_work_ignores_commits_a_remote_branch_holds(tmp_path: Path, repo: ReadRepoRepository) -> None:
+    path = _repo_with_local_work(tmp_path)
+    _git(path, "update-ref", "refs/remotes/origin/kept", "kept")
+    _git(path, "stash", "drop", "-q")
+
+    status = repo.get_project_status(_project(path), local_work=True)
+
+    assert (status.local_only_commits, status.stashes) == (0, 0)

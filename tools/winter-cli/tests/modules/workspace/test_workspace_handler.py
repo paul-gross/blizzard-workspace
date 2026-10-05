@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any, cast
@@ -19,6 +21,7 @@ from winter_cli.modules.workspace.models import (
     DashboardSnapshot,
     EnvSnapshot,
     FetchReport,
+    NestedSnapshot,
     OrphanSnapshot,
     ProjectCheckoutSnapshot,
     RepoFetchOutcome,
@@ -2161,3 +2164,117 @@ def test_clean_preview_lists_every_path_before_the_prompt(
     assert "scratch.py" in out
     assert "notes/todo.md" in out
     assert "cannot be undone" in out
+
+
+# ---------------------------------------------------------------------------
+# status() — nested workspaces
+# ---------------------------------------------------------------------------
+
+
+def _nested_wt_snapshot(nested: NestedSnapshot) -> WorktreeSnapshot:
+    return dataclasses.replace(_clean_wt_snapshot("lab"), nested=nested)
+
+
+@pytest.mark.parametrize("scoped", [False, True])
+def test_compute_status_exit_code_treats_a_dirty_nested_workspace_as_dirty(scoped: bool) -> None:
+    env = _clean_env_snapshot(worktrees=[_nested_wt_snapshot(NestedSnapshot(env_count=1, dirty=True))])
+
+    assert compute_status_exit_code(_make_snapshot(envs=[env]), scoped=scoped) == 1
+
+
+def test_compute_status_exit_code_treats_an_unreadable_nested_workspace_as_not_clean() -> None:
+    nested = NestedSnapshot(env_count=None, dirty=False, error="resolved another workspace")
+    env = _clean_env_snapshot(worktrees=[_nested_wt_snapshot(nested)])
+
+    assert compute_status_exit_code(_make_snapshot(envs=[env]), scoped=False) == 1
+
+
+@pytest.mark.parametrize("unpushed", [False, True])
+def test_compute_status_exit_code_a_clean_nested_workspace_stays_clean(unpushed: bool) -> None:
+    nested = NestedSnapshot(env_count=2, dirty=False, unpushed=unpushed)
+    env = _clean_env_snapshot(worktrees=[_nested_wt_snapshot(nested)])
+
+    assert compute_status_exit_code(_make_snapshot(envs=[env]), scoped=False) == 0
+
+
+def test_status_json_serializes_nested_only_where_present_and_matches_the_schema(
+    capsys: pytest.CaptureFixture[Any],
+) -> None:
+    schema = json.loads((Path(__file__).parents[3] / "schemas" / "ws-status-v1.json").read_text())
+    nested_def = schema["$defs"]["NestedSnapshot"]
+    env = _clean_env_snapshot(
+        worktrees=[_nested_wt_snapshot(NestedSnapshot(env_count=1, dirty=True)), _clean_wt_snapshot("repo-a")]
+    )
+    handler = _make_status_handler(_make_snapshot(envs=[env]))
+
+    with pytest.raises(SystemExit) as excinfo:
+        handler.status(EnvStatusParams(patterns=[], output_json=True))
+
+    assert excinfo.value.code == 1
+    worktrees = {wt["repo"]: wt for wt in json.loads(capsys.readouterr().out)["environments"][0]["worktrees"]}
+    assert worktrees["lab"]["nested"] == {"env_count": 1, "dirty": True, "unpushed": False, "error": None}
+    assert set(worktrees["lab"]["nested"]) == set(nested_def["properties"]) == set(nested_def["required"])
+    assert "nested" not in worktrees["repo-a"]
+    assert "nested" in schema["$defs"]["WorktreeSnapshot"]["properties"]
+    assert "nested" not in schema["$defs"]["WorktreeSnapshot"]["required"]
+
+
+@pytest.mark.parametrize(
+    ("nested", "line"),
+    [
+        (NestedSnapshot(env_count=2, dirty=True), "  lab (nested): 2 envs, dirty"),
+        (NestedSnapshot(env_count=2, dirty=True, unpushed=True), "  lab (nested): 2 envs, dirty, unpushed"),
+        (NestedSnapshot(env_count=1, dirty=False, unpushed=True), "  lab (nested): 1 env, unpushed"),
+        (NestedSnapshot(env_count=1, dirty=False), "  lab (nested): 1 env"),
+        (NestedSnapshot(env_count=None, dirty=False, error="boom\n  cwd: /x"), "  lab (nested): unreadable — boom"),
+    ],
+)
+def test_status_table_prints_a_line_per_nested_workspace(
+    capsys: pytest.CaptureFixture[Any], nested: NestedSnapshot, line: str
+) -> None:
+    env = _clean_env_snapshot(worktrees=[_nested_wt_snapshot(nested)])
+    handler = _make_status_handler(_make_snapshot(envs=[env]))
+
+    with pytest.raises(SystemExit) if nested.dirty or nested.error else contextlib.nullcontext():
+        handler.status(EnvStatusParams(patterns=[], output_json=False))
+
+    assert line in capsys.readouterr().out.splitlines()
+
+
+def _project_with_local_work() -> ProjectCheckoutSnapshot:
+    return dataclasses.replace(_clean_project_snapshot("app"), local_only_commits=2, stashes=1)
+
+
+def _standalone_with_local_work() -> StandaloneCheckoutSnapshot:
+    return dataclasses.replace(_clean_standalone_snapshot("kit"), local_only_commits=1, stashes=3)
+
+
+def test_status_json_carries_local_only_commits_and_stashes_of_checkouts(capsys: pytest.CaptureFixture[Any]) -> None:
+    snapshot = _make_snapshot(projects=[_project_with_local_work()], standalones=[_standalone_with_local_work()])
+    handler = _make_status_handler(snapshot)
+
+    handler.status(EnvStatusParams(patterns=[], output_json=True))
+
+    doc = json.loads(capsys.readouterr().out)
+    assert {k: doc["projects"][0][k] for k in ("local_only_commits", "stashes")} == {
+        "local_only_commits": 2,
+        "stashes": 1,
+    }
+    assert {k: doc["standalones"][0][k] for k in ("local_only_commits", "stashes")} == {
+        "local_only_commits": 1,
+        "stashes": 3,
+    }
+
+
+def test_status_table_names_local_work_in_the_sync_column_without_changing_the_exit_code() -> None:
+    snapshot = _make_snapshot(projects=[_project_with_local_work()], standalones=[_standalone_with_local_work()])
+    handler = _make_status_handler(snapshot)
+    rows: list[list[Any]] = []
+    cli_output_svc = cast(MagicMock, handler._cli_output_svc)
+    cli_output_svc.render_table.side_effect = lambda table, **_: rows.extend(table) or []
+
+    handler.status(EnvStatusParams(patterns=[], output_json=False))
+
+    assert ["app", "main", "2 local-only, 1 stash", ""] in rows
+    assert ["kit", "master", "1 local-only, 3 stashes", ""] in rows
+    assert compute_status_exit_code(snapshot, scoped=False) == 0

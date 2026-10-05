@@ -83,6 +83,27 @@ def test_container_resolves_command_entry_runner_and_env_provisioner(container: 
     assert isinstance(container.env_provisioner(), EnvProvisionerService)
 
 
+def test_container_injects_the_nested_workspace_service_into_init_destroy_and_status(container: Container) -> None:
+    """The nested runner runs `winter` from PATH, and one service instance reaches every nested call site."""
+    from winter_cli.modules.workspace.destroy_service import DestroyService
+    from winter_cli.modules.workspace.internal.subprocess_nested_workspace_runner import (
+        SubprocessNestedWorkspaceRunner,
+    )
+    from winter_cli.modules.workspace.nested_workspace_service import NestedWorkspaceService
+
+    runner = container.nested_workspace_runner()
+    assert isinstance(runner, SubprocessNestedWorkspaceRunner)
+    assert runner._command == ("winter",)
+    nested_svc = container.nested_workspace_svc()
+    assert isinstance(nested_svc, NestedWorkspaceService)
+    assert nested_svc._workspace_root == container.workspace_config().workspace_root
+    destroy_svc = container.destroy_svc()
+    assert isinstance(destroy_svc, DestroyService)
+    for svc in (container.init_svc(), destroy_svc, container.workspace_snapshot_svc()):
+        assert svc._nested_svc is nested_svc
+    assert nested_svc._runner is runner
+
+
 def test_container_resolves_restack_providers(container: Container) -> None:
     """The `winter ws restack` dispatch chain wires end-to-end: both services
     and the handler that composes them resolve through the full DI graph."""

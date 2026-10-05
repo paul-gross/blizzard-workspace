@@ -448,3 +448,29 @@ def test_get_context_only_repos_skips_a_project_repo_also_declared_as_a_standalo
     factory = RepositoryFactory(config, fs=FakeFilesystem())
 
     assert factory.get_context_only_repos() == []
+
+
+def test_a_nested_repo_is_a_project_repo_but_never_an_extension_or_context_source(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """A nested workspace with a root `AGENTS.md` and `winter-ext.toml` still feeds no extension feature.
+
+    `nested = true` parses to `extension = false` as well; the entry mirrors that.
+    """
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [
+                ProjectRepositoryConfig(name="lab", url="git@example.com:org/lab.git", nested=True, extension=False),
+            ],
+            "standalone_repos": [],
+        },
+    )
+    main_path = config.workspace_root / "projects" / "lab"
+    fs = FakeFilesystem(files={main_path / EXT_MANIFEST: "", main_path / "AGENTS.md": "# Lab\n"})
+    factory = RepositoryFactory(config, fs=fs)
+
+    projects = factory.get_project_repos()
+    assert [(r.name, r.nested) for r in projects] == [("lab", True)]
+    assert factory.get_extension_repos() == []
+    assert factory.get_context_only_repos() == []
+    assert [r.name for r in factory.get_non_extension_repos()] == ["lab"]

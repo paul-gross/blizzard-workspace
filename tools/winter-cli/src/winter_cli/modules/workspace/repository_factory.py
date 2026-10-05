@@ -67,6 +67,7 @@ class RepositoryFactory:
                     url=r.url,
                     git_excludes=list(r.git_excludes),
                     cmd=list(r.cmd),
+                    nested=r.nested,
                 )
             )
         return result

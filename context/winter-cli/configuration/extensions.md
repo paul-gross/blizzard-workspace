@@ -291,3 +291,5 @@ The top-level `adopt_extensions` field controls when winter processes a standalo
 | `none`             | Skip all extension processing. Standalone repos are still cloned, but no symlinks are created.                                                                                                                                                                                                 |
 
 A repo entry's `extension = false` overrides all three modes: the repo is cloned and pinned but processed by nothing.
+`nested = true` on a `[[project_repository]]` implies `extension = false` — see
+[repositories.md — nested](./repositories.md#nested--a-project-repo-that-is-itself-a-workspace).

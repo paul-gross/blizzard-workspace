@@ -144,12 +144,16 @@ class EnvStatusService:
         workspace: Workspace,
         project_repos: list[ProjectRepository],
         on_repo_error: Callable[[ProjectRepository, RepoError], None] | None = None,
+        *,
+        local_work: bool = False,
     ) -> dict[str, WorktreeRepoStatus]:
         """Read the main-branch checkout status for each project repo.
 
         Returns a mapping of repo name → WorktreeRepoStatus for every repo whose
         main checkout is dirty or diverged from origin. Clean, up-to-date repos are
-        omitted so the caller treats a missing entry as "nothing to show".
+        omitted so the caller treats a missing entry as "nothing to show". With
+        `local_work`, each probe also counts the checkout's local-only commits and
+        stashes, and a repo holding either is kept too.
 
         When `on_repo_error` is `None`, the first `RepoError` propagates. When a
         callback is provided, the failed repo is reported and skipped — matching the
@@ -158,8 +162,8 @@ class EnvStatusService:
         result: dict[str, WorktreeRepoStatus] = {}
         for repo in project_repos:
             try:
-                rs = self._repo_repo.get_project_status(repo)
-                if not (rs.ahead > 0 or rs.behind > 0 or rs.dirty_files):
+                rs = self._repo_repo.get_project_status(repo, local_work=local_work)
+                if not (rs.ahead > 0 or rs.behind > 0 or rs.dirty_files or rs.local_only_commits or rs.stashes):
                     continue
                 # The dummy env and worktree carry only repo.main_branch, which is
                 # what render_repo_cell reads — the empty-env sentinel is safe here.
@@ -175,6 +179,8 @@ class EnvStatusService:
                     tracking_ahead=rs.tracking_ahead,
                     tracking_behind=rs.tracking_behind,
                     tracking_ref_present=rs.tracking_ref_present,
+                    local_only_commits=rs.local_only_commits,
+                    stashes=rs.stashes,
                 )
             except RepoError as exc:
                 if on_repo_error is None:

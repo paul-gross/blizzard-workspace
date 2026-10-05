@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 from collections.abc import Callable
 from typing import Any
 
@@ -62,9 +63,11 @@ from winter_cli.modules.workspace.internal.gitpython_workspace_exclude_locator i
 from winter_cli.modules.workspace.internal.read_workspace_repository import ReadWorkspaceRepository
 from winter_cli.modules.workspace.internal.repo_error_factory import RepoErrorFactory
 from winter_cli.modules.workspace.internal.subprocess_command_entry_runner import SubprocessCommandEntryRunner
+from winter_cli.modules.workspace.internal.subprocess_nested_workspace_runner import SubprocessNestedWorkspaceRunner
 from winter_cli.modules.workspace.internal.toml_env_index_registry import TomlEnvIndexRegistry
 from winter_cli.modules.workspace.internal.write_repo_repository import WriteRepoRepository
 from winter_cli.modules.workspace.merge_reporter import JsonMergeReporter, StreamMergeReporter
+from winter_cli.modules.workspace.nested_workspace_service import NestedWorkspaceService
 from winter_cli.modules.workspace.prune_service import PruneService
 from winter_cli.modules.workspace.pull_reporter import JsonPullReporter, StreamPullReporter
 from winter_cli.modules.workspace.reporter_factory import ReporterFactory
@@ -477,6 +480,24 @@ class Container(containers.DeclarativeContainer):
         exclude_locator=workspace_exclude_locator,
     )
 
+    # Runs a `nested = true` repo's own winter CLI inside each env's worktree of
+    # it — `winter` from PATH, so the shim resolves the nested root's CLI.
+    nested_workspace_runner = providers.Singleton(
+        SubprocessNestedWorkspaceRunner,
+        subprocess_runner=subprocess_runner,
+        error_factory=repo_error_factory,
+    )
+    # One per process: it verifies each nested root once and reuses that for
+    # every later call into it, across init, status, and destroy.
+    nested_workspace_svc = providers.Singleton(
+        NestedWorkspaceService,
+        runner=nested_workspace_runner,
+        fs=fs,
+        workspace_root=workspace_config.provided.workspace_root,
+        environ=providers.Object(os.environ),
+        config_file_reader=config_file_reader,
+    )
+
     # `DashboardSnapshotService._build` rebuilds this same graph (workspace,
     # env_status_svc, worktree_repo, repo_factory, plus the non-config-derived
     # collaborators below) per poll from its own reloaded config — a
@@ -493,6 +514,7 @@ class Container(containers.DeclarativeContainer):
         config_lock_repo=config_lock_repo,
         git_repo=git_repo,
         dashboard_layout=workspace_config.provided.dashboard.layout,
+        nested_svc=nested_workspace_svc,
     )
 
     # Dashboard-only: re-reads config.toml on every poll and rebuilds the
@@ -530,6 +552,7 @@ class Container(containers.DeclarativeContainer):
         workspace_skill_svc=workspace_skill_svc,
         registry=env_index_registry,
         exclude_locator=workspace_exclude_locator,
+        nested_svc=nested_workspace_svc,
     )
 
     # Command-band execution seam — the only new `subprocess` import site for
@@ -1046,6 +1069,7 @@ class Container(containers.DeclarativeContainer):
         registry=env_index_registry,
         exclude_locator=workspace_exclude_locator,
         provision_svc=provision_svc,
+        nested_svc=nested_workspace_svc,
     )
 
     destroy_handler = providers.Factory(

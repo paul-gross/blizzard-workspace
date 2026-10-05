@@ -61,6 +61,54 @@ class ProjectRepository:
     url: str | None = None
     git_excludes: list[str] = dataclasses.field(default_factory=list)
     cmd: list[str] = dataclasses.field(default_factory=list)
+    nested: bool = False
+    """The repo is itself a winter workspace, initialized and destroyed inside each env's worktree of it."""
+
+
+@dataclasses.dataclass(frozen=True)
+class NestedEnvState:
+    """One feature env of a nested workspace, as the nested workspace's own `ws status --json` reports it.
+
+    `dirty` names the env's worktrees with uncommitted changes, or holding a
+    workspace of their own that is dirty or unreadable at any depth.
+    `unpushed` names the env's worktrees holding commits no remote has — ahead
+    of their upstream, or ahead of their main branch with no upstream ref — or
+    holding a workspace of their own with work that exists nowhere else, each
+    with why, e.g. `app (unpushed commits)`.
+    """
+
+    name: str
+    dirty: tuple[str, ...] = ()
+    unpushed: tuple[str, ...] = ()
+
+
+@dataclasses.dataclass(frozen=True)
+class NestedWorkspaceState:
+    """The feature envs a nested workspace holds, and the work in it that exists nowhere else.
+
+    `checkouts` names its source checkouts (`projects/<repo>`) and standalones
+    (`standalone <repo>`) that are dirty, ahead of origin, or hold local-only
+    commits or stashes, each with why, e.g. `projects/app (local-only commits)`.
+    They live inside the outer worktree, so destroying that worktree deletes
+    them — local branches a nested `ws destroy` kept included.
+    """
+
+    envs: tuple[NestedEnvState, ...]
+    checkouts: tuple[str, ...] = ()
+
+    @property
+    def env_count(self) -> int:
+        return len(self.envs)
+
+    @property
+    def dirty(self) -> bool:
+        """True when any nested env has a dirty worktree."""
+        return any(env.dirty for env in self.envs)
+
+    @property
+    def unpushed(self) -> tuple[str, ...]:
+        """Every place in the nested workspace holding unpushed work, e.g. `n1/app (unpushed commits)`."""
+        return (*(f"{env.name}/{repo}" for env in self.envs for repo in env.unpushed), *self.checkouts)
 
 
 @dataclasses.dataclass

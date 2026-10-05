@@ -19,7 +19,8 @@ from winter_cli.modules.workspace.internal.managed_block import (
     GITIGNORE_END,
     strip_block,
 )
-from winter_cli.modules.workspace.models import ProjectRepository, RepoError
+from winter_cli.modules.workspace.models import NestedWorkspaceState, ProjectRepository, RepoError
+from winter_cli.modules.workspace.nested_workspace_service import NestedWorkspaceService
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_exclude import IWorkspaceExcludeLocator
 
@@ -148,6 +149,16 @@ class DestroyService:
     cleared by an `rmtree` pass at the end so stray files don't strand the
     env after a partial earlier teardown.
 
+    A `nested = true` repo's worktree holds a nested workspace: its feature
+    envs are read first, count toward the dirty-worktree refusal, any work in
+    it that exists nowhere else refuses the destroy too, and its envs are
+    destroyed through the nested workspace's own `winter ws destroy` before
+    anything else is torn down; then, when it binds a service provider, its
+    workspace-scope services are stopped with `winter service down workspace`.
+    A nested env that cannot be read or destroyed, or nested services that
+    cannot be stopped, stop the outer env's destroy, keeping its worktree,
+    unless `--force`.
+
     Error-handling shape: `destroy_env` is the aggregator and collects per-phase
     booleans. Each per-repo and per-step helper wraps `(RepoError, OSError)`
     once at its boundary; leaves raise.
@@ -163,6 +174,7 @@ class DestroyService:
         registry: IEnvIndexRegistry,
         exclude_locator: IWorkspaceExcludeLocator,
         provision_svc: ProvisionService | None = None,
+        nested_svc: NestedWorkspaceService | None = None,
     ) -> None:
         self._config = config
         self._exclude_locator = exclude_locator
@@ -172,6 +184,7 @@ class DestroyService:
         self._git_repo = git_repo
         self._registry = registry
         self._provision_svc = provision_svc
+        self._nested_svc = nested_svc
 
     def destroy_env(
         self,
@@ -197,18 +210,51 @@ class DestroyService:
             (repo, env_root / repo.name) for repo in project_repos if self._fs.is_dir(env_root / repo.name)
         ]
 
-        # Phase 1: safety check — refuse if any worktree is dirty unless --force.
+        # Phase 0: read the feature envs each nested workspace holds. An
+        # unreadable one refuses the destroy unless --force — its envs (and
+        # their services) would otherwise be orphaned.
+        nested_states, unreadable = self._read_nested_states(existing_worktrees, reporter)
+        if unreadable and not force:
+            reporter.repo_error(
+                name,
+                "refusing to destroy — cannot read nested workspace: "
+                + ", ".join(unreadable)
+                + ". Re-run with --force to bypass.",
+            )
+            reporter.target_completed(name, False)
+            return False
+
+        # Phase 1: safety check — refuse unless --force if any worktree or nested
+        # env is dirty, or a nested workspace holds unpushed work: its source
+        # checkouts and env branches live inside the worktree removed below.
         if not force:
             dirty: list[str] = []
+            unpushed: list[str] = []
             for repo, wt_path in existing_worktrees:
                 if not self._git_repo.is_worktree_clean(wt_path, repo_name=repo.name, env=name):
                     dirty.append(repo.name)
+            for repo, _wt_path, state in nested_states:
+                dirty_envs = [env.name for env in state.envs if env.dirty]
+                if dirty_envs:
+                    dirty.append(f"{repo.name} (nested: {', '.join(dirty_envs)})")
+                if state.unpushed:
+                    unpushed.append(f"{repo.name} (nested: {', '.join(state.unpushed)})")
             if dirty:
                 logger.warning("destroy_env: refusing — dirty worktrees in %s: %s", name, ", ".join(dirty))
                 reporter.repo_error(
                     name,
                     "refusing to destroy — dirty worktrees: " + ", ".join(dirty) + ". Re-run with --force to bypass.",
                 )
+            if unpushed:
+                logger.warning("destroy_env: refusing — unpushed nested work in %s: %s", name, ", ".join(unpushed))
+                reporter.repo_error(
+                    name,
+                    "refusing to destroy — unpushed work in a nested workspace would be deleted with its worktree: "
+                    + ", ".join(unpushed)
+                    + ". Push its commits and branches, and commit and push or drop its changes and stashes, "
+                    "or re-run with --force to discard it.",
+                )
+            if dirty or unpushed:
                 reporter.target_completed(name, False)
                 return False
 
@@ -221,8 +267,16 @@ class DestroyService:
         # elsewhere in this method stays on get_project_repos()/get_standalone_repos().
         extension_repos = self._repo_factory.get_extension_repos()
         if dry_run:
-            # Dry-run: emit provision teardown plan first (if applicable), then
-            # structural plan events — no side effects.
+            # Dry-run: list the nested envs and nested services stops, then emit
+            # the provision teardown plan (if applicable), then structural plan
+            # events — no side effects.
+            preview_ok = True
+            for repo, wt_path, state in nested_states:
+                for env in state.envs:
+                    reporter.repo_action(repo.name, str(wt_path / env.name), "would_destroy_nested_env", env.name)
+            for repo, wt_path, _state in nested_states:
+                if not self._preview_nested_services(repo, wt_path, reporter):
+                    preview_ok = False
             if provision_teardown and self._provision_svc is not None:
                 prov_reporter = _DestroyProvisionReporter(reporter, name)
                 for st in _TEARDOWN_SUBTARGETS:
@@ -247,7 +301,6 @@ class DestroyService:
                 str(env_root),
                 "would_remove_env",
             )
-            preview_ok = True
             try:
                 exclude_path = self._exclude_locator.locate()
             except RepoError as exc:
@@ -263,6 +316,49 @@ class DestroyService:
                 )
             reporter.target_completed(name, preview_ok)
             return preview_ok
+
+        # Phase 1b: destroy every nested env — its own provision teardown and
+        # services included — while the outer env is still whole.
+        nested_ok = not unreadable
+        if nested_states and self._nested_svc is not None:
+            for repo, wt_path, state in nested_states:
+                if not self._nested_svc.destroy_envs(
+                    repo,
+                    wt_path,
+                    state,
+                    force=force,
+                    strict=strict,
+                    provision_teardown=provision_teardown,
+                    reporter=reporter,
+                ):
+                    nested_ok = False
+            if not nested_ok and not force:
+                reporter.repo_error(
+                    name,
+                    "aborting destroy — a nested env could not be destroyed; keeping the env. "
+                    "Re-run with --force to bypass.",
+                )
+                reporter.target_completed(name, False)
+                return False
+
+        # Phase 1c: stop each nested workspace's workspace-scope services. Its
+        # env destroys stopped only per-env services; the workspace scope
+        # would otherwise keep running from the worktree removed below.
+        if nested_states and self._nested_svc is not None:
+            services_ok = True
+            for repo, wt_path, _state in nested_states:
+                if not self._nested_svc.stop_workspace_services(repo, wt_path, reporter=reporter):
+                    services_ok = False
+            if not services_ok:
+                nested_ok = False
+                if not force:
+                    reporter.repo_error(
+                        name,
+                        "aborting destroy — a nested workspace's services could not be stopped; keeping the env. "
+                        "Re-run with --force to bypass.",
+                    )
+                    reporter.target_completed(name, False)
+                    return False
 
         # Phase 2a: provision teardown — run data --destroy then resource --destroy
         # before extension hooks and worktree removal, so provisioned resources are
@@ -324,12 +420,49 @@ class DestroyService:
         # reused by a future env with the same name.
         self._registry.remove(name)
 
-        # Propagate a non-strict teardown failure into the overall success flag.
-        if not teardown_ok:
+        # Propagate a non-strict teardown failure, or a nested failure bypassed
+        # with --force, into the overall success flag.
+        if not teardown_ok or not nested_ok:
             success = False
 
         reporter.target_completed(name, success)
         return success
+
+    def _read_nested_states(
+        self,
+        existing_worktrees: list[tuple[ProjectRepository, Path]],
+        reporter: IInitReporter,
+    ) -> tuple[list[tuple[ProjectRepository, Path, NestedWorkspaceState]], list[str]]:
+        """Read each nested worktree's envs; return the states read and the names of repos that failed.
+
+        A failed read is reported as that repo's error.
+        """
+        states: list[tuple[ProjectRepository, Path, NestedWorkspaceState]] = []
+        unreadable: list[str] = []
+        if self._nested_svc is None:
+            return states, unreadable
+        for repo, wt_path in existing_worktrees:
+            if not repo.nested:
+                continue
+            try:
+                states.append((repo, wt_path, self._nested_svc.state(wt_path)))
+            except RepoError as exc:
+                reporter.repo_error(repo.name, f"nested workspace state — {exc}")
+                unreadable.append(repo.name)
+        return states, unreadable
+
+    def _preview_nested_services(self, repo: ProjectRepository, wt_path: Path, reporter: IInitReporter) -> bool:
+        """List the nested workspace's services stop when it binds a provider; return whether its config was read."""
+        if self._nested_svc is None:
+            return True
+        try:
+            binds = self._nested_svc.binds_service(wt_path)
+        except RepoError as exc:
+            reporter.repo_error(repo.name, f"nested workspace services — {exc}")
+            return False
+        if binds:
+            reporter.repo_action(repo.name, str(wt_path), "would_stop_nested_workspace_services")
+        return True
 
     def _run_provision_teardown(
         self,

@@ -80,6 +80,26 @@ class WorkspaceLevelSnapshot:
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
+class NestedSnapshot:
+    """State of the nested workspace held in one worktree of a `nested = true` repo.
+
+    `env_count` is the number of feature envs the nested workspace holds.
+    `dirty` is True when any of them has a dirty worktree, at any depth of
+    nesting. `unpushed` is True when the nested workspace holds work that
+    exists nowhere else — an env branch with commits its upstream lacks, or
+    with commits beyond its main branch and no upstream ref; a source checkout
+    or standalone that is dirty, ahead of origin, or holds local-only commits
+    or stashes — at any depth. When the nested workspace's state cannot be read, `error`
+    carries why, `env_count` is None, and both flags are False.
+    """
+
+    env_count: int | None
+    dirty: bool
+    unpushed: bool = False
+    error: str | None = None
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
 class WorktreeSnapshot:
     """Per-repo snapshot inside a feature environment worktree.
 
@@ -109,6 +129,8 @@ class WorktreeSnapshot:
     last_commit_subject: str | None
     pinned: bool = False
     main_branch: str | None = None
+    nested: NestedSnapshot | None = None
+    """The nested workspace's state for a `nested = true` repo; None for any other repo."""
     # NOTE: WorktreeRepoStatus.extensions (per-worktree plugin badges) is intentionally
     # NOT serialized into WorktreeSnapshot. The TUI renders per-cell badges directly from
     # WorktreeRepoStatus; the JSON contract omits them because no tested serialization
@@ -148,6 +170,9 @@ class ProjectCheckoutSnapshot:
     `dirty` is the count of changed files (staged + unstaged + untracked).
     `drift` lists any drift findings specific to this checkout (e.g. the clone is
     missing from ``projects/`` or a directory is undeclared in config).
+    `local_only_commits` counts the commits reachable from any local branch but
+    from no remote-tracking ref — including a branch no worktree has checked
+    out — and `stashes` the stash entries: local work no remote holds.
     """
 
     repo: str
@@ -156,6 +181,8 @@ class ProjectCheckoutSnapshot:
     ahead_origin: int
     dirty: int
     drift: list[str]
+    local_only_commits: int = 0
+    stashes: int = 0
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -169,7 +196,8 @@ class StandaloneCheckoutSnapshot:
 
     `behind_origin` and `ahead_origin` are relative to the standalone's configured
     upstream tracking ref (``origin/<ref>``). `dirty` is the count of changed
-    files (staged + unstaged + untracked).
+    files (staged + unstaged + untracked). `local_only_commits` and `stashes`
+    count the local work no remote holds, as on `ProjectCheckoutSnapshot`.
     """
 
     repo: str
@@ -177,6 +205,8 @@ class StandaloneCheckoutSnapshot:
     behind_origin: int
     ahead_origin: int
     dirty: int
+    local_only_commits: int = 0
+    stashes: int = 0
 
 
 @dataclasses.dataclass(frozen=True, slots=True)

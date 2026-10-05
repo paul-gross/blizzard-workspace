@@ -59,6 +59,36 @@ on any matched worktree → exit 1). Global project-checkout drift, standalone d
 drift are still printed as context but do **not** flip the exit code for a scoped run. An unscoped run (no patterns)
 considers all of them.
 
+**Local work does not flip it.** A source checkout's or standalone's `local_only_commits` and `stashes` never change the
+exit code, scoped or not. The table shows them in that row's SYNC cell, after any ahead/behind counts, as
+`N local-only, N stash` (`N stashes` for more than one).
+
+## Nested workspaces
+
+Each worktree of a `[[project_repository]]` declaring `nested = true` (see
+[configuration/repositories.md — nested](../../configuration/repositories.md#nested--a-project-repo-that-is-itself-a-workspace))
+holds a workspace with feature envs of its own. `ws status` reads it by running `winter ws status --json` inside the
+nested root, then:
+
+- the table prints a line under the env's repo table, e.g. `lab (nested): 2 envs, dirty, unpushed`, or
+  `lab (nested): unreadable — <reason>` when the read fails;
+- `--json` carries a `nested` object on that worktree (see `NestedSnapshot` below);
+- a nested workspace with a dirty env, or one whose state could not be read, counts as a dirty worktree for the exit
+  code, in a scoped run as well as an unscoped one. Unpushed nested work does not change the exit code; it is what
+  `ws destroy` refuses on.
+
+A failed read, including a status document that does not have the schema-v1 shape, never aborts `ws status`; it is
+recorded in `nested.error`. A `winter` in the nested root that resolves any other workspace is refused, as for every
+nested call. Every nested worktree's read runs concurrently.
+
+The read is recursive: the nested workspace's own status reads any workspaces nested inside it, and both signals carry
+up. A nested env worktree counts as dirty when it has changes, or holds a workspace that is dirty or unreadable. It
+holds unpushed work when it has commits its upstream lacks (`tracking_ahead`), when it has commits beyond its main
+branch (`ahead`) and no upstream ref to hold them (`upstream` null or `tracking_ref_present` false), or when it holds a
+workspace with unpushed work; a branch pushed to its upstream but not yet merged holds none. The nested workspace's own
+source checkouts and standalones hold unpushed work when they are dirty, ahead of origin (`ahead_origin`), or hold
+local-only commits (`local_only_commits`) or stashes (`stashes`).
+
 ## JSON schema (`schema_version: 1`)
 
 `--json` emits a single JSON object (not NDJSON) on **stdout**; all diagnostics (including those enabled by
@@ -81,7 +111,7 @@ jsonschema.validate(data, schema)
 | ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `schema_version` | `int`    | Schema version; currently `1`.                                                                                                                                                                                                                                                                                      |
 | `environments`   | `array`  | One `EnvSnapshot` object per matching feature environment. When patterns are given, only the matched environments appear here; the projects, standalones, and workspace sections remain unfiltered.                                                                                                                 |
-| `projects`       | `array`  | One `ProjectCheckoutSnapshot` per project repo's `projects/<name>` main clone with drift or non-zero counts. Always the full workspace view regardless of patterns. Empty array when every project clone is clean.                                                                                                  |
+| `projects`       | `array`  | One `ProjectCheckoutSnapshot` per declared project repo whose `projects/<name>` main clone was probed, clean or not, plus one per declared repo missing from `projects/` and one per undeclared directory under it, each carrying its drift. Always the full workspace view regardless of patterns.                 |
 | `standalones`    | `array`  | One `StandaloneCheckoutSnapshot` per declared `[[standalone_repository]]` checkout (under `.winter/ext/`) — git status only. Dirty/diverged standalones included; a standalone absent on disk or whose probe fails is omitted (logged, never aborts status). Always the full workspace view regardless of patterns. |
 | `workspace`      | `object` | `WorkspaceLevelSnapshot` — extensions, orphans, config drift. Always the full workspace view regardless of patterns.                                                                                                                                                                                                |
 | `dashboard`      | `object` | `DashboardSnapshot` — the configured dashboard grid layout and the concrete layout it resolves to for the current workspace shape. Always the full-workspace view regardless of patterns.                                                                                                                           |
@@ -116,6 +146,16 @@ jsonschema.validate(data, schema)
 | `last_commit_subject`  | `string \| null` | First line of the most recent commit message, or `null` when the branch has no commits beyond `origin/<main>`.                                                                                                     |
 | `pinned`               | `bool`           | Whether the repo is pinned to its main branch (does not participate in feature branching).                                                                                                                         |
 | `main_branch`          | `string \| null` | The repo's configured main branch (e.g. `"master"` or `"main"`), or `null` when unknown. Non-TUI clients use this to reproduce the `tracking_differs_from_main` divergence-marker logic without re-reading config. |
+| `nested`               | `object`         | Present only on a worktree of a `nested = true` repo: a `NestedSnapshot` (below). Absent on every other worktree.                                                                                                  |
+
+**`environments[].worktrees[].nested` — `NestedSnapshot`:**
+
+| Field       | Type             | Description                                                                                                   |
+| ----------- | ---------------- | ------------------------------------------------------------------------------------------------------------- |
+| `env_count` | `int \| null`    | Number of feature envs the nested workspace holds, or `null` when its state could not be read.                |
+| `dirty`     | `bool`           | `true` when any nested env has a dirty worktree, at any depth.                                                |
+| `unpushed`  | `bool`           | `true` when the nested workspace holds work that exists nowhere else, at any depth — see above.               |
+| `error`     | `string \| null` | Why the nested workspace's state could not be read, or `null` when it was read. Non-null counts as dirty too. |
 
 > **Note — per-worktree extension badges:** `WorktreeRepoStatus.extensions` is populated by worktree-repo decorator
 > plugins (used by the Textual TUI to render per-cell badges), but is deliberately not serialized into the JSON
@@ -124,14 +164,16 @@ jsonschema.validate(data, schema)
 
 **`projects[]` — `ProjectCheckoutSnapshot`:**
 
-| Field           | Type             | Description                                                                                                       |
-| --------------- | ---------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `repo`          | `string`         | Repository name.                                                                                                  |
-| `branch`        | `string \| null` | Current local branch in the source checkout.                                                                      |
-| `behind_origin` | `int`            | Commits behind `origin/<main-branch>`.                                                                            |
-| `ahead_origin`  | `int`            | Commits ahead of `origin/<main-branch>` (shouldn't happen on a well-managed main checkout).                       |
-| `dirty`         | `int`            | Count of changed files (staged + unstaged + untracked) in the source checkout.                                    |
-| `drift`         | `array[string]`  | Drift findings for this checkout (e.g. `missing from projects/`, `undeclared in config`). Empty array when clean. |
+| Field                | Type             | Description                                                                                                                                                                                                     |
+| -------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repo`               | `string`         | Repository name.                                                                                                                                                                                                |
+| `branch`             | `string \| null` | Current local branch in the source checkout.                                                                                                                                                                    |
+| `behind_origin`      | `int`            | Commits behind `origin/<main-branch>`.                                                                                                                                                                          |
+| `ahead_origin`       | `int`            | Commits ahead of `origin/<main-branch>` (shouldn't happen on a well-managed main checkout).                                                                                                                     |
+| `dirty`              | `int`            | Count of changed files (staged + unstaged + untracked) in the source checkout.                                                                                                                                  |
+| `drift`              | `array[string]`  | Drift findings for this checkout (e.g. `missing from projects/`, `undeclared in config`). Empty array when clean.                                                                                               |
+| `local_only_commits` | `int`            | Commits reachable from any local branch of the clone but from no remote-tracking ref (`git rev-list --count --branches --not --remotes`): work no remote holds, including a branch no worktree has checked out. |
+| `stashes`            | `int`            | Number of stash entries in the clone.                                                                                                                                                                           |
 
 **`standalones[]` — `StandaloneCheckoutSnapshot`:**
 
@@ -140,13 +182,15 @@ parity with the Textual TUI's standalone panel. Git status only — no service/r
 (standalones are not subject to `projects/` drift detection; an absent or unprobeable standalone is simply omitted). The
 probe is tolerant: a broken extension repo is logged and skipped, never aborting `ws status`.
 
-| Field           | Type             | Description                                                                        |
-| --------------- | ---------------- | ---------------------------------------------------------------------------------- |
-| `repo`          | `string`         | Standalone repository name (matches `[[standalone_repository]].name`).             |
-| `branch`        | `string \| null` | Current local branch in the standalone checkout, or `null` when detached/unborn.   |
-| `behind_origin` | `int`            | Commits behind the standalone's configured upstream tracking ref.                  |
-| `ahead_origin`  | `int`            | Commits ahead of the standalone's configured upstream tracking ref.                |
-| `dirty`         | `int`            | Count of changed files (staged + unstaged + untracked) in the standalone checkout. |
+| Field                | Type             | Description                                                                                |
+| -------------------- | ---------------- | ------------------------------------------------------------------------------------------ |
+| `repo`               | `string`         | Standalone repository name (matches `[[standalone_repository]].name`).                     |
+| `branch`             | `string \| null` | Current local branch in the standalone checkout, or `null` when detached/unborn.           |
+| `behind_origin`      | `int`            | Commits behind the standalone's configured upstream tracking ref.                          |
+| `ahead_origin`       | `int`            | Commits ahead of the standalone's configured upstream tracking ref.                        |
+| `dirty`              | `int`            | Count of changed files (staged + unstaged + untracked) in the standalone checkout.         |
+| `local_only_commits` | `int`            | Commits reachable from any local branch of the standalone but from no remote-tracking ref. |
+| `stashes`            | `int`            | Number of stash entries in the standalone.                                                 |
 
 **`workspace` — `WorkspaceLevelSnapshot`:**
 

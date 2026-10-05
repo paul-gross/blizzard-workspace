@@ -82,6 +82,68 @@ precedence order, how `load` and `entry` resolve, and which repos they opt into 
 Validation fails config load with a `ConfigError` for an `extension` that is not a boolean, an unknown `load`, an empty
 or non-list `entry`, and an `entry` path that is empty, absolute, or holds a `..` segment.
 
+## `nested` — a project repo that is itself a workspace
+
+`nested = true` on a `[[project_repository]]` declares that the repo is itself a winter workspace. Winter worktrees it
+into each env like any project repo, then drives each env's copy as a workspace in its own right:
+
+```toml
+[[project_repository]]
+name = "lab"
+url = "git@example.com:org/lab-workspace.git"
+nested = true
+cmd = ["<bootstrap the nested workspace's toolchain>"]  # whatever it needs before its own CLI can run
+```
+
+- **`winter ws init <env>`** runs the entry's `cmd` in `<env>/lab/`, then initializes the nested workspace there — see
+  [ws init — Nested workspaces](../usage/ws/init.md#nested-workspaces).
+- **`winter ws destroy <env>`** destroys every feature env the nested workspace holds and stops its workspace-scope
+  services before it tears down the outer env, and refuses while that would lose work — see
+  [ws destroy — Nested workspaces](../usage/ws/destroy.md#nested-workspaces).
+- **`winter ws status`** shows each nested workspace's env count, whether it is dirty, and whether it holds unpushed
+  work, and a dirty one counts as a dirty worktree — see
+  [ws status — Nested workspaces](../usage/ws/status.md#nested-workspaces).
+- **Never an extension.** `nested = true` implies `extension = false`, so the repo's root `AGENTS.md`,
+  `winter-ext.toml`, skills, and agents reach nothing in the outer workspace.
+- **The source checkout stays plain.** `projects/lab/` is cloned, and its `cmd` runs there as for any project repo, but
+  it is never initialized as a workspace — only the env copies are.
+
+**Which `winter` runs.** Every nested call runs a `winter` from `PATH` with its working directory at the nested root,
+and that `winter` must resolve the nested root as its workspace. Winter verifies that it does: before the first call
+into a nested root, it checks that the root holds `.winter/config.toml` and that its `winter ws status --json` reports
+that same root as `workspace.root_path`; later calls into that root in the same run reuse the check. A `winter` that
+resolves any other workspace, such as the outer one, is refused and nothing else runs. The child runs without the outer
+CLI's own runtime environment: none of the outer CLI's `WINTER_*` variables except `WINTER_LOG_LEVEL` and
+`WINTER_OTEL_*`, and nothing the outer CLI's installation put in the environment to run itself.
+
+**Recursion stops at a mis-resolved winter.** Every nested call sets `WINTER_NESTED_CHAIN` to the caller's own chain
+plus the caller's workspace root. A winter whose own root is already on its chain was started by a nested call but
+resolved an enclosing workspace instead of the nested one, so it refuses every nested call of its own: it costs one
+status read rather than fanning out to every sibling nested worktree. A call into a root already on the chain is refused
+the same way. A correctly resolved nested workspace is not on its own chain, so it reads and drives the workspaces
+nested inside it in turn.
+
+**The entry's `cmd` runs scrubbed too.** For a `nested = true` entry, each `cmd` runs with the same environment as a
+nested call, minus `WINTER_NESTED_CHAIN`, so the bootstrap sees the environment the nested workspace's own CLI will run
+in, not the outer CLI's runtime environment.
+
+**Gitignore the nested workspace's local files.** The nested workspace's exclude file keeps `projects/`, its feature-env
+directories, and its projected skills and agents out of `git status`. The nested repo must gitignore every other file
+the nested workspace's `ws init` and CLI install write at its root, or the outer worktree reads as dirty and
+`ws destroy` refuses. Winter's own are:
+
+```gitignore
+/.winter/config.local.toml
+/.winter/state.toml
+/AGENTS.winter.md
+```
+
+Add whatever the nested workspace's CLI install writes there besides.
+
+Validation fails config load with a `ConfigError` for a `nested` that is not a boolean, for `nested = true` on a
+`[[standalone_repository]]` (a standalone is one checkout shared by the whole workspace, not one per env), and for
+`nested = true` together with `load`, `entry`, or `extension = true`.
+
 ## `config_dir` — per-extension writable config/asset directory
 
 The optional `config_dir` field overrides where winter stores and exports this extension's writable config/asset

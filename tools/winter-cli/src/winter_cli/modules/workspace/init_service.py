@@ -31,6 +31,8 @@ from winter_cli.modules.workspace.models import (
     StandaloneRepository,
 )
 from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
+from winter_cli.modules.workspace.nested_env import scrubbed_env
+from winter_cli.modules.workspace.nested_workspace_service import NestedWorkspaceService
 from winter_cli.modules.workspace.repository_factory import RepositoryFactory
 from winter_cli.modules.workspace.workspace_exclude import IWorkspaceExcludeWriteLocator
 from winter_cli.modules.workspace.workspace_skill_service import WorkspaceSkillService
@@ -91,6 +93,7 @@ class InitService:
         config_lock_repo: IConfigLockRepository | None = None,
         workspace_skill_svc: WorkspaceSkillService | None = None,
         extension_agent_svc: ExtensionAgentService | None = None,
+        nested_svc: NestedWorkspaceService | None = None,
     ) -> None:
         self._config = config
         self._exclude_locator = exclude_locator
@@ -107,6 +110,7 @@ class InitService:
         self._workspace_skill_svc = workspace_skill_svc
         self._extension_agent_svc = extension_agent_svc
         self._registry = registry
+        self._nested_svc = nested_svc
 
     # ── Public API ────────────────────────────────────────────────────────
 
@@ -570,6 +574,12 @@ class InitService:
 
         Every feature worktree is created under a branch named for its env, so `env_name` is
         also the branch the worktree is created on.
+
+        A `nested = true` repo's worktree is a workspace root: once the entry's
+        `cmd` has bootstrapped it, the nested workspace's own `winter ws init`
+        runs there. A `cmd` failure skips it; a nested failure fails the repo.
+        Only env worktrees are initialized — `_reconcile_source_checkout` never
+        initializes the `projects/` checkout.
         """
         worktree_path = env_root / repo.name
         location = str(worktree_path)
@@ -589,6 +599,8 @@ class InitService:
                 repo, worktree_path, env_name, inferred_upstream, reporter, newly_created
             )
             self._run_cmds(worktree_path, repo, reporter)
+            if repo.nested and self._nested_svc is not None:
+                self._nested_svc.reconcile(repo, worktree_path, reporter)
         except (RepoError, OSError) as exc:
             reporter.repo_error(label, str(exc))
             return False
@@ -905,7 +917,10 @@ class InitService:
     ) -> None:
         if not repo.cmd:
             return
-        env = os.environ.copy()
+        # A nested workspace's `cmd` bootstraps that workspace's own toolchain,
+        # so it must not see the outer CLI's virtualenv or `WINTER_*` variables.
+        nested = isinstance(repo, ProjectRepository) and repo.nested
+        env = scrubbed_env(os.environ) if nested else os.environ.copy()
         env.update(TUI_SUPPRESS_ENV)
         for command in repo.cmd:
             reporter.cmd_started(repo.name, command)

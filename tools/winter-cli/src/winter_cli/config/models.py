@@ -260,6 +260,16 @@ class ProjectRepositoryConfig(BaseModel):
     repo with no `winter-ext.toml` an explicit `entry` is itself an opt-in to
     context delivery, at the repo kind's default load. Non-empty; absolute paths and `..` segments are rejected."""
 
+    nested: bool = False
+    """Whether the repo is itself a winter workspace, nested inside each env.
+
+    `winter ws init <env>` runs `winter ws init` inside the env's worktree of it
+    after the entry's `cmd`, and `winter ws destroy <env>` destroys every
+    feature env the nested workspace holds before removing the worktree. The
+    source checkout under `projects/` is cloned but never initialized. Implies
+    `extension = False`; declaring it with `load`, `entry`, or `extension =
+    true` is a `ConfigError`."""
+
 
 class StandaloneRepositoryConfig(BaseModel):
     """A standalone repo declared in `[[standalone_repository]]`.

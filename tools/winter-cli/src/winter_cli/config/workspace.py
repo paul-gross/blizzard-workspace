@@ -158,7 +158,10 @@ class WorkspaceConfigService:
                     pinned=bool(entry.get("pinned", False)),
                     git_excludes=list(entry.get("git_excludes", []) or []),
                     cmd=list(entry.get("cmd", []) or []),
-                    **self._parse_extension_keys(entry, "project", name or url),
+                    **{
+                        **self._parse_extension_keys(entry, "project", name or url),
+                        **self._parse_nested_keys(entry, "project", name or url),
+                    },
                 )
             )
 
@@ -181,6 +184,7 @@ class WorkspaceConfigService:
                     f"Each [[standalone_repository]] must have a unique name."
                 )
             _seen_standalone_names[resolved_name] = label
+            self._parse_nested_keys(entry, "standalone", name or url)
             path_value = entry.get("path")
             if path_value is not None:
                 self._validate_relative_path(path_value, name or url)
@@ -818,6 +822,37 @@ class WorkspaceConfigService:
                     )
             parsed["entry"] = list(candidates)
         return parsed
+
+    @staticmethod
+    def _parse_nested_keys(entry: dict, kind: str, label: object) -> dict:
+        """Validate and return the `nested` key of a repo entry.
+
+        `nested = true` makes the repo data rather than an extension, so it also
+        returns `extension = False` — every extension consumer then excludes it.
+        A non-boolean `nested`, `nested = true` on a standalone (one checkout
+        shared by the whole workspace, not one per env), and `nested = true`
+        alongside `load`, `entry`, or `extension = true` each raise
+        `ConfigError` naming the repo.
+        """
+        if "nested" not in entry:
+            return {}
+        where = f"{kind} repo {label!r}"
+        nested = entry["nested"]
+        if not isinstance(nested, bool):
+            raise ConfigError(f"Invalid `nested` {nested!r} for {where}: must be true or false.")
+        if not nested:
+            return {"nested": False}
+        if kind == "standalone":
+            raise ConfigError(
+                f"Invalid `nested = true` for {where}: a standalone is one checkout shared by the whole "
+                f"workspace, so only a [[project_repository]] can be a nested workspace."
+            )
+        for key in ("load", "entry"):
+            if key in entry:
+                raise ConfigError(f"Invalid `{key}` for {where}: a nested workspace is never an extension.")
+        if entry.get("extension") is True:
+            raise ConfigError(f"Invalid `extension = true` for {where}: `nested = true` implies `extension = false`.")
+        return {"nested": True, "extension": False}
 
     @staticmethod
     def _validate_relative_path(value: str, label: str | None) -> None:

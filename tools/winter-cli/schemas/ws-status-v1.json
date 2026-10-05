@@ -21,7 +21,7 @@
     },
     "projects": {
       "type": "array",
-      "description": "One ProjectCheckoutSnapshot per project repo's projects/<name> main clone with drift or non-zero counts. Always the full workspace view regardless of patterns.",
+      "description": "One ProjectCheckoutSnapshot per declared project repo whose projects/<name> main clone was probed, clean or not, plus one per declared repo missing from projects/ and one per undeclared directory under it. Always the full workspace view regardless of patterns.",
       "items": {
         "$ref": "#/$defs/ProjectCheckoutSnapshot"
       }
@@ -185,6 +185,34 @@
         "main_branch": {
           "type": ["string", "null"],
           "description": "The repo's configured main branch (e.g. \"master\" or \"main\"), or null when unknown. Used by non-TUI clients to reproduce the tracking_differs_from_main divergence-marker logic."
+        },
+        "nested": {
+          "$ref": "#/$defs/NestedSnapshot",
+          "description": "Present only for a repo declared `nested = true`: the state of the nested workspace in this worktree, read through its own `ws status --json`."
+        }
+      }
+    },
+    "NestedSnapshot": {
+      "type": "object",
+      "required": ["env_count", "dirty", "unpushed", "error"],
+      "additionalProperties": false,
+      "properties": {
+        "env_count": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "description": "Number of feature envs the nested workspace holds, or null when its state could not be read."
+        },
+        "dirty": {
+          "type": "boolean",
+          "description": "true when any nested env has a dirty worktree — one with changes, or holding a workspace of its own that is dirty or unreadable, at any depth. Counts as a dirty worktree for the ws status exit code."
+        },
+        "unpushed": {
+          "type": "boolean",
+          "description": "true when the nested workspace holds work that exists nowhere else, at any depth; the rule is in the ws status reference. Does not change the ws status exit code; ws destroy refuses on it without --force."
+        },
+        "error": {
+          "type": ["string", "null"],
+          "description": "Why the nested workspace's state could not be read, or null when it was read. A non-null error counts as a dirty worktree for the ws status exit code."
         }
       }
     },
@@ -222,6 +250,16 @@
             "type": "string"
           },
           "description": "Drift findings for this checkout (e.g. missing from projects/, undeclared in config). Empty array when clean."
+        },
+        "local_only_commits": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Commits reachable from any local branch of this clone but from no remote-tracking ref — local work no remote holds, including on branches no worktree has checked out."
+        },
+        "stashes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of stash entries in this clone."
         }
       }
     },
@@ -252,6 +290,16 @@
           "type": "integer",
           "minimum": 0,
           "description": "Count of changed files (staged + unstaged + untracked) in the standalone checkout."
+        },
+        "local_only_commits": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Commits reachable from any local branch of the standalone but from no remote-tracking ref."
+        },
+        "stashes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of stash entries in the standalone."
         }
       }
     },
