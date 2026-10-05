@@ -17,6 +17,7 @@ from tests.conftest import (
 )
 from winter_cli.config.models import (
     AdoptExtensions,
+    ExtensionLoad,
     GitIdentity,
     ProjectRepositoryConfig,
     StandaloneRepositoryConfig,
@@ -1079,6 +1080,176 @@ def test_reconcile_standalones_does_not_double_project_skills_for_dual_declared_
     assert fs.is_symlink(skill_link)
 
 
+# ── extension = false ─────────────────────────────────────────────────────────
+
+
+def _opted_out_standalone_workspace(*, ref: str | None = None) -> tuple[WorkspaceConfig, FakeFilesystem, dict, Path]:
+    """A cloned standalone that ships a winter-ext.toml, skills, an agent, and an index.md — but opts out."""
+    ext_path = WORKSPACE_ROOT / "corpus"
+    skill_dir = ext_path / "skills" / "do-thing"
+    agents_dir = ext_path / "agents"
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / ".git", ext_path, skill_dir, agents_dir])
+    manifest_path = ext_path / "winter-ext.toml"
+    fs.files[manifest_path] = ""
+    fs.files[ext_path / "index.md"] = "# corpus\n"
+    fs.files[skill_dir / "SKILL.md"] = "---\ndescription: An example skill\n---\n\n# do-thing\n"
+    fs.files[agents_dir / "reviewer.md"] = (
+        "---\nname: reviewer\ndescription: Reviews code\nmodel: sonnet\n---\nYou review code.\n"
+    )
+    config_files: dict = {manifest_path: {"name": "corpus", "prefix": "co"}}
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=None,
+        standalone_repos=[
+            StandaloneRepositoryConfig(name="corpus", url="git@example.com:org/corpus.git", extension=False, ref=ref),
+        ],
+    )
+    return cfg, fs, config_files, ext_path
+
+
+def test_reconcile_standalones_projects_nothing_for_a_standalone_declaring_extension_false(
+    init_reporter: FakeInitReporter,
+) -> None:
+    cfg, fs, config_files, _ = _opted_out_standalone_workspace()
+
+    svc = _service_with_ext_and_agents(cfg, fs, config_files, FakeSubprocessRunner(), FakeGitRepository())
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    assert not fs.is_symlink(WORKSPACE_ROOT / ".claude" / "skills" / "co-do-thing")
+    assert WORKSPACE_ROOT / ".claude" / "agents" / "co-reviewer.md" not in fs.files
+    assert WORKSPACE_ROOT / "AGENTS.winter.md" not in fs.files
+
+
+def test_reconcile_standalones_still_clones_and_pins_a_standalone_declaring_extension_false(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """The repo is data, not nothing: clone and `ref` pinning (with its lock entry) still apply."""
+    cfg, _, config_files, ext_path = _opted_out_standalone_workspace(ref="develop")
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT])  # not cloned yet
+    git = FakeGitRepository()
+    git.clean_worktrees.add(ext_path)
+    git.resolved_refs[(ext_path, "develop")] = (RefKind.branch, "d" * 40)
+    lock_repo = FakeConfigLockRepository()
+
+    manifest_loader = ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files))
+    svc = InitService(
+        config=cfg,
+        repo_factory=RepositoryFactory(cfg, fs=fs),
+        extension_symlink_svc=ExtensionSymlinkService(config=cfg, fs=fs, manifest_loader=manifest_loader),
+        extension_hook_svc=ExtensionHookService(
+            config=cfg, fs=fs, subprocess_runner=FakeSubprocessRunner(), manifest_loader=manifest_loader
+        ),
+        extension_exclude_svc=ExtensionExcludeService(
+            config=cfg,
+            fs=fs,
+            manifest_loader=manifest_loader,
+            exclude_locator=FakeWorkspaceExcludeLocator(fs, cfg.workspace_root),
+        ),
+        extension_agentsmd_svc=ExtensionAgentsMdService(config=cfg, fs=fs, manifest_loader=manifest_loader),
+        fs=fs,
+        subprocess_runner=FakeSubprocessRunner(),
+        git_repo=git,
+        git_ops=GitOpsService(RepoErrorFactory()),
+        registry=FakeEnvIndexRegistry(),
+        config_lock_repo=lock_repo,
+        exclude_locator=FakeWorkspaceExcludeLocator(fs, cfg.workspace_root),
+    )
+
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    assert git.clones == [("git@example.com:org/corpus.git", ext_path)]
+    assert git.branch_checkouts == [(ext_path, "develop")]
+    assert lock_repo.write_calls[0]["corpus"].commit == "d" * 40
+
+
+def test_reconcile_standalones_prunes_projections_left_before_extension_false(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """Skills and agents an earlier `ws init` projected are retracted; the clone itself stays."""
+    cfg, fs, config_files, ext_path = _opted_out_standalone_workspace()
+    earlier = cfg.model_copy(
+        update={
+            "standalone_repos": [cfg.standalone_repos[0].model_copy(update={"extension": True})],
+        }
+    )
+    projecting = _service_with_ext_and_agents(earlier, fs, config_files, FakeSubprocessRunner(), FakeGitRepository())
+    assert projecting.reconcile_standalones(FakeInitReporter()) is True
+    skill_link = WORKSPACE_ROOT / ".claude" / "skills" / "co-do-thing"
+    agent_copy = WORKSPACE_ROOT / ".claude" / "agents" / "co-reviewer.md"
+    assert fs.is_symlink(skill_link)
+    assert agent_copy in fs.files
+    assert WORKSPACE_ROOT / "AGENTS.winter.md" in fs.files
+
+    svc = _service_with_ext_and_agents(cfg, fs, config_files, FakeSubprocessRunner(), FakeGitRepository())
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    assert not fs.is_symlink(skill_link)
+    assert agent_copy not in fs.files
+    assert WORKSPACE_ROOT / "AGENTS.winter.md" not in fs.files
+    assert fs.is_file(ext_path / "index.md")
+
+
+def test_reconcile_standalones_keeps_a_path_only_exclude_for_an_extension_false_standalone(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """The clone stays out of the workspace's `git status`, with none of the projection globs."""
+    cfg, fs, config_files, _ = _opted_out_standalone_workspace()
+
+    svc = _service_with_ext_and_agents(cfg, fs, config_files, FakeSubprocessRunner(), FakeGitRepository())
+    assert svc.reconcile_standalones(init_reporter) is True
+
+    exclude = fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"]
+    assert "/corpus/" in exclude
+    assert ".claude/skills/co-" not in exclude
+
+
+def test_reconcile_standalones_retracts_a_manifest_bearing_project_repo_declaring_extension_false(
+    init_reporter: FakeInitReporter,
+) -> None:
+    ext_path = WORKSPACE_ROOT / "projects" / "winter-product"
+    skill_dir = ext_path / "skills" / "do-thing"
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", ext_path, skill_dir])
+    manifest_path = ext_path / "winter-ext.toml"
+    fs.files[manifest_path] = ""
+    fs.files[ext_path / "index.md"] = "# product\n"
+    fs.files[skill_dir / "SKILL.md"] = "---\ndescription: An example skill\n---\n\n# do-thing\n"
+    config_files: dict = {manifest_path: {"name": "winter-product", "prefix": "wp"}}
+
+    def config(extension: bool) -> WorkspaceConfig:
+        return WorkspaceConfig(
+            workspace_root=WORKSPACE_ROOT,
+            service_prefix="t",
+            main_branch="main",
+            adopt_extensions=AdoptExtensions.winter,
+            git_identity=None,
+            project_repos=[
+                ProjectRepositoryConfig(
+                    name="winter-product", url="git@example.com:org/winter-product.git", extension=extension
+                ),
+            ],
+        )
+
+    first = _service_with_ext_and_agents(config(True), fs, config_files, FakeSubprocessRunner(), FakeGitRepository())
+    assert first.reconcile_standalones(FakeInitReporter()) is True
+    skill_link = WORKSPACE_ROOT / ".claude" / "skills" / "wp-do-thing"
+    assert fs.is_symlink(skill_link)
+    assert "winter-product" in fs.files[WORKSPACE_ROOT / "AGENTS.winter.md"]
+
+    second = _service_with_ext_and_agents(config(False), fs, config_files, FakeSubprocessRunner(), FakeGitRepository())
+    ok = second.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    assert not fs.is_symlink(skill_link)
+    assert WORKSPACE_ROOT / "AGENTS.winter.md" not in fs.files
+    assert fs.is_file(ext_path / "index.md")
+
+
 # ── Upstream inference tests ──────────────────────────────────────────────────
 
 
@@ -1799,3 +1970,84 @@ def test_reconcile_projects_and_standalones_name_no_env(
     assert {env for _method, _path, env in git.env_calls} == {None}
     # Only the pinned standalone runs git here (no identity is configured); its calls name it.
     assert {(path, repo_name) for _method, path, repo_name in git.repo_name_calls} == {(ext_path, "my-ext")}
+
+
+def test_reconcile_standalones_keeps_a_live_extensions_projection_when_an_extension_false_mirror_shares_its_prefix(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """A mirror cloned as data under a live extension's prefix must not retract that extension, on any run."""
+    live_path = WORKSPACE_ROOT / "my-ext"
+    mirror_path = WORKSPACE_ROOT / "mirrors" / "my-ext"
+    skill_dir = live_path / "skills" / "do-thing"
+    agents_dir = live_path / "agents"
+    mirror_skill_dir = mirror_path / "skills" / "do-thing"
+    fs = FakeFilesystem(
+        directories=[live_path, skill_dir, agents_dir, mirror_path, mirror_skill_dir],
+    )
+    live_manifest = live_path / "winter-ext.toml"
+    mirror_manifest = mirror_path / "winter-ext.toml"
+    fs.files[live_manifest] = ""
+    fs.files[mirror_manifest] = ""
+    fs.files[skill_dir / "SKILL.md"] = "---\ndescription: An example skill\n---\n\n# do-thing\n"
+    fs.files[mirror_skill_dir / "SKILL.md"] = "---\ndescription: An example skill\n---\n\n# do-thing\n"
+    fs.files[agents_dir / "reviewer.md"] = (
+        "---\nname: reviewer\ndescription: Reviews code\nmodel: sonnet\n---\nYou review code.\n"
+    )
+    config_files: dict = {live_manifest: {"name": "my-ext", "prefix": "me"}, mirror_manifest: {"prefix": "me"}}
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        git_identity=None,
+        standalone_repos=[
+            StandaloneRepositoryConfig(name="my-ext", url="git@example.com:org/my-ext.git"),
+            StandaloneRepositoryConfig(
+                name="my-ext-mirror",
+                url="git@example.com:org/my-ext-mirror.git",
+                path="mirrors/my-ext",
+                extension=False,
+            ),
+        ],
+    )
+    skill_link = WORKSPACE_ROOT / ".claude" / "skills" / "me-do-thing"
+    agent_copy = WORKSPACE_ROOT / ".claude" / "agents" / "me-reviewer.md"
+
+    for _ in range(3):
+        svc = _service_with_ext_and_agents(cfg, fs, config_files, FakeSubprocessRunner(), FakeGitRepository())
+        assert svc.reconcile_standalones(init_reporter) is True
+        assert fs.is_symlink(skill_link)
+        assert agent_copy in fs.files
+
+    # The live extension's source is what the link resolves to, never the mirror's.
+    assert fs.symlinks[skill_link].as_posix().endswith("my-ext/skills/do-thing")
+    assert "mirrors" not in fs.symlinks[skill_link].as_posix()
+
+
+def test_reconcile_standalones_renders_a_routing_row_for_a_manifest_less_project_repo_declaring_load(
+    init_reporter: FakeInitReporter,
+) -> None:
+    repo_path = WORKSPACE_ROOT / "projects" / "app"
+    fs = FakeFilesystem(directories=[WORKSPACE_ROOT / "projects", repo_path])
+    fs.files[repo_path / "AGENTS.md"] = "# app\n"
+    skill_dir = repo_path / "skills" / "do-thing"
+    fs.directories.add(skill_dir)
+    fs.files[skill_dir / "SKILL.md"] = "---\ndescription: An example skill\n---\n\n# do-thing\n"
+    cfg = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.all,
+        git_identity=None,
+        project_repos=[
+            ProjectRepositoryConfig(name="app", url="git@example.com:org/app.git", load=ExtensionLoad.lazy),
+        ],
+    )
+
+    svc = _service_with_ext_and_agents(cfg, fs, {}, FakeSubprocessRunner(), FakeGitRepository())
+    ok = svc.reconcile_standalones(init_reporter)
+
+    assert ok is True
+    assert "- **app**: `<env>/app/AGENTS.md`" in fs.files[WORKSPACE_ROOT / "AGENTS.winter.md"]
+    # Context delivery only: nothing is projected for it, even under `adopt_extensions = "all"`.
+    assert not fs.is_symlink(WORKSPACE_ROOT / ".claude" / "skills" / "app-do-thing")

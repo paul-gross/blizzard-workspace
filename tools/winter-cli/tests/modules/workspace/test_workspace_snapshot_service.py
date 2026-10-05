@@ -722,6 +722,33 @@ def test_collect_extensions_lists_declared_standalones_without_probing(workspace
     assert snapshot.standalones == []
 
 
+def test_collect_extensions_excludes_a_standalone_declaring_extension_false(workspace: Workspace) -> None:
+    """A repo cloned as data is not an installed extension, so the status JSON does not list it."""
+    config = WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        project_repos=[ProjectRepositoryConfig(name="repo-a", url="git@example.com:org/repo-a.git")],
+        standalone_repos=[
+            StandaloneRepositoryConfig(name="ext-a", url="git@example.com:org/ext-a.git"),
+            StandaloneRepositoryConfig(name="corpus", url="git@example.com:org/corpus.git", extension=False),
+        ],
+    )
+    alpha = _make_env(workspace, "alpha", 1)
+    svc = _service(
+        workspace,
+        config,
+        envs=[alpha],
+        feature_branch="feature/x",
+        worktree_statuses={"repo-a": _clean_repo_status("repo-a")},
+    )
+
+    snapshot = svc.collect()
+
+    assert snapshot.workspace.extensions == ["ext-a"]
+
+
 def _config_with_two_standalones() -> WorkspaceConfig:
     return WorkspaceConfig(
         workspace_root=WORKSPACE_ROOT,

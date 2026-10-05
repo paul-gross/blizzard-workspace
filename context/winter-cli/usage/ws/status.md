@@ -150,14 +150,14 @@ probe is tolerant: a broken extension repo is logged and skipped, never aborting
 
 **`workspace` — `WorkspaceLevelSnapshot`:**
 
-| Field              | Type            | Description                                                                                                                                                                                      |
-| ------------------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `root_path`        | `string`        | Absolute path to the workspace root.                                                                                                                                                             |
-| `extensions`       | `array[string]` | Names of installed standalone repos (extensions), e.g. `["winter-github", "winter-context"]`. A config-only read — see the exit-codes note below.                                                |
-| `orphans`          | `array`         | `OrphanSnapshot` objects for filesystem entries with no declared owner. Each has: `kind` (short label, e.g. `"worktree_dir"`), `path` (absolute), `safe_to_remove` (`bool`), `notes` (`string`). |
-| `drift_missing`    | `array[string]` | Repo names declared in config but absent on disk (run `winter ws init` to fix).                                                                                                                  |
-| `drift_undeclared` | `array[string]` | Directory names present under `projects/` but not in config.                                                                                                                                     |
-| `standalone_pins`  | `array`         | One `StandalonePinSnapshot` per declared standalone repo that has a `ref` configured. Empty array when no standalone repos have a pin. See below.                                                |
+| Field              | Type            | Description                                                                                                                                                                                                                  |
+| ------------------ | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `root_path`        | `string`        | Absolute path to the workspace root.                                                                                                                                                                                         |
+| `extensions`       | `array[string]` | Names of installed standalone repos that act as extensions (a repo declaring `extension = false` is data and is not listed), e.g. `["winter-github", "winter-context"]`. A config-only read — see the exit-codes note below. |
+| `orphans`          | `array`         | `OrphanSnapshot` objects for filesystem entries with no declared owner. Each has: `kind` (short label, e.g. `"worktree_dir"`), `path` (absolute), `safe_to_remove` (`bool`), `notes` (`string`).                             |
+| `drift_missing`    | `array[string]` | Repo names declared in config but absent on disk (run `winter ws init` to fix).                                                                                                                                              |
+| `drift_undeclared` | `array[string]` | Directory names present under `projects/` but not in config.                                                                                                                                                                 |
+| `standalone_pins`  | `array`         | One `StandalonePinSnapshot` per declared standalone repo that has a `ref` configured. Empty array when no standalone repos have a pin. See below.                                                                            |
 
 **`dashboard` — `DashboardSnapshot`:**
 

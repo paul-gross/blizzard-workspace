@@ -12,6 +12,7 @@ from winter_cli.config.models import (
     EnvCommandEntry,
     EnvCommandFormat,
     EnvVarBands,
+    ExtensionLoad,
     FileSizeLintConfig,
     GitIdentity,
     KeybindingsConfig,
@@ -157,6 +158,7 @@ class WorkspaceConfigService:
                     pinned=bool(entry.get("pinned", False)),
                     git_excludes=list(entry.get("git_excludes", []) or []),
                     cmd=list(entry.get("cmd", []) or []),
+                    **self._parse_extension_keys(entry, "project", name or url),
                 )
             )
 
@@ -196,6 +198,7 @@ class WorkspaceConfigService:
                     config_dir=config_dir_value,
                     git_excludes=list(entry.get("git_excludes", []) or []),
                     cmd=list(entry.get("cmd", []) or []),
+                    **self._parse_extension_keys(entry, "standalone", name or url),
                 )
             )
 
@@ -773,6 +776,48 @@ class WorkspaceConfigService:
         cut = max(stripped.rfind("/"), stripped.rfind(":"))
         candidate = stripped[cut + 1 :] if cut != -1 else stripped
         return candidate.removesuffix(".git")
+
+    @staticmethod
+    def _parse_extension_keys(entry: dict, kind: str, label: object) -> dict:
+        """Validate and return the `extension` / `load` / `entry` keys of a repo entry.
+
+        Only keys the entry declares are returned, so an absent key leaves the
+        model default (and the precedence chain below the workspace) in force.
+        An unknown `load`, a non-boolean `extension`, an empty or non-list
+        `entry`, or an `entry` path that is empty, absolute, or holds a `..`
+        segment raises `ConfigError` naming the repo.
+        """
+        where = f"{kind} repo {label!r}"
+        parsed: dict = {}
+        if "extension" in entry:
+            extension = entry["extension"]
+            if not isinstance(extension, bool):
+                raise ConfigError(f"Invalid `extension` {extension!r} for {where}: must be true or false.")
+            parsed["extension"] = extension
+        if "load" in entry:
+            load = entry["load"]
+            try:
+                parsed["load"] = ExtensionLoad(load)
+            except ValueError as exc:
+                accepted = ", ".join(f'"{member.value}"' for member in ExtensionLoad)
+                raise ConfigError(f"Invalid `load` {load!r} for {where}: must be one of {accepted}.") from exc
+        if "entry" in entry:
+            candidates = entry["entry"]
+            if not isinstance(candidates, list) or not candidates:
+                raise ConfigError(
+                    f"Invalid `entry` {candidates!r} for {where}: must be a non-empty list of repo-relative paths."
+                )
+            for candidate in candidates:
+                if not isinstance(candidate, str) or not candidate:
+                    raise ConfigError(f"Invalid `entry` path {candidate!r} for {where}: must be a non-empty string.")
+                path = Path(candidate)
+                if path.is_absolute() or ".." in path.parts:
+                    raise ConfigError(
+                        f"Invalid `entry` path {candidate!r} for {where}: "
+                        f"must be a path relative to the repo root with no `..` segments."
+                    )
+            parsed["entry"] = list(candidates)
+        return parsed
 
     @staticmethod
     def _validate_relative_path(value: str, label: str | None) -> None:

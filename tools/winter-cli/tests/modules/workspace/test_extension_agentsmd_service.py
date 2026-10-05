@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from tests.conftest import FakeConfigFileReader, FakeFilesystem, FakeInitReporter
-from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
+from winter_cli.config.models import AdoptExtensions, ExtensionLoad, WorkspaceConfig
 from winter_cli.modules.workspace.extension_agentsmd_service import ExtensionAgentsMdService
 from winter_cli.modules.workspace.extension_manifest import (
     AGENTS_WINTER_FILENAME,
@@ -32,12 +32,24 @@ def _manifest_loader(config_files: dict | None = None) -> ExtensionManifestLoade
     return ExtensionManifestLoader(config_file_reader=FakeConfigFileReader(config_files or {}))
 
 
-def _seed_extension_with_index(fs: FakeFilesystem, name: str) -> StandaloneRepository:
-    """Plant an extension repo with an index.md so the service treats it as eligible."""
+def _seed_extension_with_index(fs: FakeFilesystem, name: str, *, manifest: bool = True) -> StandaloneRepository:
+    """Plant an extension repo with an index.md so the service treats it as eligible.
+
+    A real extension ships a `winter-ext.toml`; pass `manifest=False` for a plain
+    repo that carries only context. Pair the manifest-bearing form with
+    `_manifests_for` so the loader can read it.
+    """
     ext_path = WORKSPACE_ROOT / name
     fs.directories.add(ext_path)
     fs.files[ext_path / "index.md"] = "# index\n"
+    if manifest:
+        fs.files[ext_path / EXT_MANIFEST] = ""
     return StandaloneRepository(name=name, path=ext_path)
+
+
+def _manifests_for(*repos: StandaloneRepository) -> dict:
+    """Empty manifest contents for each repo, keyed for `_manifest_loader`."""
+    return {repo.path / EXT_MANIFEST: {} for repo in repos}
 
 
 def _seed_standalone_with_manifest(
@@ -78,7 +90,9 @@ def test_finalize_agentsmd_writes_agents_winter_for_eligible_repos(
     fs = FakeFilesystem()
     ext_a = _seed_extension_with_index(fs, "ext-a")
     ext_b = _seed_extension_with_index(fs, "ext-b")
-    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader())
+    svc = ExtensionAgentsMdService(
+        config=workspace_config, fs=fs, manifest_loader=_manifest_loader(_manifests_for(ext_a, ext_b))
+    )
 
     ok = svc.finalize_agentsmd([ext_a, ext_b], init_reporter)
     assert ok is True
@@ -96,7 +110,9 @@ def test_finalize_agentsmd_does_not_write_claude_winter_shim(
     """CLAUDE.winter.md is never written — winter only generates AGENTS.winter.md."""
     fs = FakeFilesystem()
     ext_a = _seed_extension_with_index(fs, "ext-a")
-    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader())
+    svc = ExtensionAgentsMdService(
+        config=workspace_config, fs=fs, manifest_loader=_manifest_loader(_manifests_for(ext_a))
+    )
 
     ok = svc.finalize_agentsmd([ext_a], init_reporter)
     assert ok is True
@@ -113,7 +129,9 @@ def test_finalize_agentsmd_removes_stale_claude_winter_md(
     shim_path = WORKSPACE_ROOT / CLAUDEMD_WINTER_FILENAME
     fs.files[shim_path] = "@AGENTS.winter.md\n"
     ext_a = _seed_extension_with_index(fs, "ext-a")
-    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader())
+    svc = ExtensionAgentsMdService(
+        config=workspace_config, fs=fs, manifest_loader=_manifest_loader(_manifests_for(ext_a))
+    )
 
     ok = svc.finalize_agentsmd([ext_a], init_reporter)
     assert ok is True
@@ -152,7 +170,9 @@ def test_finalize_agentsmd_idempotent_no_reporter_action_on_second_run(
     """A second run with identical input writes nothing and emits no reporter actions."""
     fs = FakeFilesystem()
     ext_a = _seed_extension_with_index(fs, "ext-a")
-    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader())
+    svc = ExtensionAgentsMdService(
+        config=workspace_config, fs=fs, manifest_loader=_manifest_loader(_manifests_for(ext_a))
+    )
 
     # First run: writes AGENTS.winter.md.
     reporter_first = FakeInitReporter()
@@ -215,8 +235,11 @@ def test_finalize_agentsmd_falls_back_to_agents_md_entry_point(
     ext_path = WORKSPACE_ROOT / "ext-agents"
     fs.directories.add(ext_path)
     fs.files[ext_path / "AGENTS.md"] = "# agents\n"
+    fs.files[ext_path / EXT_MANIFEST] = ""
     repo = StandaloneRepository(name="ext-agents", path=ext_path)
-    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader())
+    svc = ExtensionAgentsMdService(
+        config=workspace_config, fs=fs, manifest_loader=_manifest_loader(_manifests_for(repo))
+    )
 
     ok = svc.finalize_agentsmd([repo], init_reporter)
     assert ok is True
@@ -233,8 +256,11 @@ def test_finalize_agentsmd_falls_back_to_context_index_entry_point(
     ext_path = WORKSPACE_ROOT / "ext-context"
     fs.directories.add(ext_path)
     fs.files[ext_path / "context" / "index.md"] = "# context index\n"
+    fs.files[ext_path / EXT_MANIFEST] = ""
     repo = StandaloneRepository(name="ext-context", path=ext_path)
-    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader())
+    svc = ExtensionAgentsMdService(
+        config=workspace_config, fs=fs, manifest_loader=_manifest_loader(_manifests_for(repo))
+    )
 
     ok = svc.finalize_agentsmd([repo], init_reporter)
     assert ok is True
@@ -285,7 +311,11 @@ def test_finalize_agentsmd_mixes_standalone_and_project_repo_extensions(
     fs = FakeFilesystem()
     standalone = _seed_extension_with_index(fs, "ext-a")
     project_repo, config_files = _seed_project_extension(fs, "winter-docs", description="Docs generator.")
-    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+    svc = ExtensionAgentsMdService(
+        config=workspace_config,
+        fs=fs,
+        manifest_loader=_manifest_loader({**config_files, **_manifests_for(standalone)}),
+    )
 
     ok = svc.finalize_agentsmd([standalone, project_repo], init_reporter)
     assert ok is True
@@ -301,7 +331,9 @@ def test_finalize_agentsmd_no_env_binding_note_when_no_project_rows(
     """The `<env>`-binding note is only emitted when at least one routing row renders."""
     fs = FakeFilesystem()
     ext_a = _seed_extension_with_index(fs, "ext-a")
-    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader())
+    svc = ExtensionAgentsMdService(
+        config=workspace_config, fs=fs, manifest_loader=_manifest_loader(_manifests_for(ext_a))
+    )
 
     ok = svc.finalize_agentsmd([ext_a], init_reporter)
     assert ok is True
@@ -472,7 +504,9 @@ def test_finalize_agentsmd_groups_eager_lazy_and_project_rows_in_order(
     lazy, lazy_files = _seed_standalone_with_manifest(fs, "ext-lazy", load="lazy", description="Lazy one.")
     project, project_files = _seed_project_extension(fs, "winter-docs", description="Docs generator.")
     svc = ExtensionAgentsMdService(
-        config=workspace_config, fs=fs, manifest_loader=_manifest_loader({**lazy_files, **project_files})
+        config=workspace_config,
+        fs=fs,
+        manifest_loader=_manifest_loader({**lazy_files, **project_files, **_manifests_for(eager)}),
     )
 
     ok = svc.finalize_agentsmd([project, lazy, eager], init_reporter)
@@ -484,3 +518,324 @@ def test_finalize_agentsmd_groups_eager_lazy_and_project_rows_in_order(
     note_at = content.index("binds to the feature-env directory")
     project_at = content.index("<env>/winter-docs/index.md")
     assert eager_at < lazy_at < note_at < project_at
+
+
+# ── adopt_extensions gating of manifest-less repos ─────────────────────────
+
+
+def _config_with(mode: AdoptExtensions) -> WorkspaceConfig:
+    return WorkspaceConfig(workspace_root=WORKSPACE_ROOT, service_prefix="t", main_branch="main", adopt_extensions=mode)
+
+
+def _seed_agents_md_repo(fs: FakeFilesystem, name: str) -> StandaloneRepository:
+    """Plant a manifest-less repo that carries only a root AGENTS.md — a cloned-as-data repo."""
+    repo_path = WORKSPACE_ROOT / "mirrors" / name
+    fs.directories.add(repo_path)
+    fs.files[repo_path / "AGENTS.md"] = "# contributor instructions\n"
+    return StandaloneRepository(name=name, path=repo_path)
+
+
+def test_finalize_agentsmd_winter_mode_renders_no_bullet_for_manifest_less_repo(
+    init_reporter: FakeInitReporter,
+) -> None:
+    """Context delivery honors `adopt_extensions = "winter"` the way skill projection does."""
+    fs = FakeFilesystem()
+    repo = _seed_agents_md_repo(fs, "blizzard-workspace")
+    svc = ExtensionAgentsMdService(
+        config=_config_with(AdoptExtensions.winter), fs=fs, manifest_loader=_manifest_loader()
+    )
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+
+    assert ok is True
+    assert WORKSPACE_ROOT / AGENTS_WINTER_FILENAME not in fs.files
+
+
+def test_finalize_agentsmd_all_mode_renders_manifest_less_repo(init_reporter: FakeInitReporter) -> None:
+    fs = FakeFilesystem()
+    repo = _seed_agents_md_repo(fs, "blizzard-workspace")
+    svc = ExtensionAgentsMdService(config=_config_with(AdoptExtensions.all), fs=fs, manifest_loader=_manifest_loader())
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+
+    assert ok is True
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **blizzard-workspace**: @mirrors/blizzard-workspace/AGENTS.md" in content
+
+
+# ── repo-entry `load` ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("load", "expected"),
+    [
+        (ExtensionLoad.eager, "- **blizzard-workspace**: @mirrors/blizzard-workspace/AGENTS.md"),
+        (ExtensionLoad.lazy, "- **[blizzard-workspace](mirrors/blizzard-workspace/AGENTS.md)**"),
+    ],
+)
+def test_finalize_agentsmd_explicit_load_opts_a_manifest_less_repo_in_under_winter(
+    load: ExtensionLoad, expected: str, init_reporter: FakeInitReporter
+) -> None:
+    fs = FakeFilesystem()
+    repo = _seed_agents_md_repo(fs, "blizzard-workspace")
+    repo.load = load
+    svc = ExtensionAgentsMdService(
+        config=_config_with(AdoptExtensions.winter), fs=fs, manifest_loader=_manifest_loader()
+    )
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+
+    assert ok is True
+    assert expected in fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+
+
+def test_finalize_agentsmd_load_none_renders_no_bullet_for_a_manifest_bearing_repo(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    fs = FakeFilesystem()
+    repo, config_files = _seed_standalone_with_manifest(fs, "ext-a")
+    repo.load = ExtensionLoad.none
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+
+    assert ok is True
+    assert WORKSPACE_ROOT / AGENTS_WINTER_FILENAME not in fs.files
+
+
+def test_finalize_agentsmd_load_none_leaves_other_repos_rendering(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    fs = FakeFilesystem()
+    quiet, quiet_files = _seed_standalone_with_manifest(fs, "ext-quiet")
+    quiet.load = ExtensionLoad.none
+    loud, loud_files = _seed_standalone_with_manifest(fs, "ext-loud")
+    svc = ExtensionAgentsMdService(
+        config=workspace_config, fs=fs, manifest_loader=_manifest_loader({**quiet_files, **loud_files})
+    )
+
+    svc.finalize_agentsmd([quiet, loud], init_reporter)
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "ext-loud" in content
+    assert "ext-quiet" not in content
+
+
+def test_finalize_agentsmd_repo_entry_load_wins_over_the_manifest_load(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    fs = FakeFilesystem()
+    repo, config_files = _seed_standalone_with_manifest(fs, "ext-a", load="lazy")
+    repo.load = ExtensionLoad.eager
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    svc.finalize_agentsmd([repo], init_reporter)
+
+    assert "- **ext-a**: @ext-a/index.md" in fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+
+
+def test_finalize_agentsmd_repo_entry_eager_on_a_project_repo_is_reported_and_downgraded(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    fs = FakeFilesystem()
+    repo, config_files = _seed_project_extension(fs, "winter-docs")
+    repo.load = ExtensionLoad.eager
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+
+    assert ok is True
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **winter-docs**: `<env>/winter-docs/index.md`" in content
+    assert "@" not in content
+    assert any(name == "winter-docs" and "repo entry" in message for name, message in init_reporter.errors)
+
+
+# ── repo-entry `entry` ─────────────────────────────────────────────────────
+
+
+def test_finalize_agentsmd_entry_takes_the_first_existing_candidate(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """Earlier candidates that are missing are skipped; later ones that also exist are ignored."""
+    fs = FakeFilesystem()
+    repo, config_files = _seed_standalone_with_manifest(fs, "ext-a")
+    fs.files[repo.path / "docs" / "agents.md"] = "# agents\n"
+    fs.files[repo.path / "docs" / "more.md"] = "# more\n"
+    repo.entry = ("missing.md", "docs/agents.md", "docs/more.md")
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    svc.finalize_agentsmd([repo], init_reporter)
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **ext-a**: @ext-a/docs/agents.md\n" in content
+    assert "more.md" not in content
+
+
+def test_finalize_agentsmd_entry_replaces_the_default_candidates_entirely(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """An existing `index.md` is not a fallback once `entry` is declared — and the miss is reported."""
+    fs = FakeFilesystem()
+    repo, config_files = _seed_standalone_with_manifest(fs, "ext-a")  # ships index.md
+    repo.entry = ("docs/agents.md",)
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    ok = svc.finalize_agentsmd([repo], init_reporter)
+
+    assert ok is True
+    assert WORKSPACE_ROOT / AGENTS_WINTER_FILENAME not in fs.files
+
+
+def test_finalize_agentsmd_entry_matching_none_warns_naming_the_paths_tried(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    fs = FakeFilesystem()
+    repo, config_files = _seed_standalone_with_manifest(fs, "ext-a")
+    repo.entry = ("docs/agents.md", "AGENT.md")
+    svc = ExtensionAgentsMdService(config=workspace_config, fs=fs, manifest_loader=_manifest_loader(config_files))
+
+    svc.finalize_agentsmd([repo], init_reporter)
+
+    warnings = [a for a in init_reporter.actions if a[2] == "extension_warning"]
+    assert len(warnings) == 1
+    assert warnings[0][0] == "ext-a"
+    assert "docs/agents.md" in warnings[0][3]
+    assert "AGENT.md" in warnings[0][3]
+    assert init_reporter.errors == []
+
+
+def test_finalize_agentsmd_default_candidates_miss_is_silent(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """Only a workspace-declared `entry` warns; a repo with no default entry point just renders nothing."""
+    fs = FakeFilesystem()
+    repo_path = WORKSPACE_ROOT / "bare"
+    fs.directories.add(repo_path)
+    fs.files[repo_path / EXT_MANIFEST] = ""
+    repo = StandaloneRepository(name="bare", path=repo_path)
+    svc = ExtensionAgentsMdService(
+        config=workspace_config, fs=fs, manifest_loader=_manifest_loader({repo_path / EXT_MANIFEST: {}})
+    )
+
+    svc.finalize_agentsmd([repo], init_reporter)
+
+    assert [a for a in init_reporter.actions if a[2] == "extension_warning"] == []
+
+
+def test_finalize_agentsmd_entry_opts_a_manifest_less_repo_in_alongside_load(
+    init_reporter: FakeInitReporter,
+) -> None:
+    fs = FakeFilesystem()
+    repo = _seed_agents_md_repo(fs, "blizzard-workspace")
+    fs.files[repo.path / "docs" / "agents.md"] = "# agents\n"
+    repo.load = ExtensionLoad.lazy
+    repo.entry = ("docs/agents.md",)
+    svc = ExtensionAgentsMdService(
+        config=_config_with(AdoptExtensions.winter), fs=fs, manifest_loader=_manifest_loader()
+    )
+
+    svc.finalize_agentsmd([repo], init_reporter)
+
+    assert (
+        "- **[blizzard-workspace](mirrors/blizzard-workspace/docs/agents.md)**"
+        in fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    )
+
+
+def test_finalize_agentsmd_entry_alone_opts_a_manifest_less_standalone_in_at_the_eager_default(
+    init_reporter: FakeInitReporter,
+) -> None:
+    fs = FakeFilesystem()
+    repo = _seed_agents_md_repo(fs, "blizzard-workspace")
+    fs.files[repo.path / "docs" / "agents.md"] = "# agents\n"
+    repo.entry = ("docs/agents.md",)
+    svc = ExtensionAgentsMdService(
+        config=_config_with(AdoptExtensions.winter), fs=fs, manifest_loader=_manifest_loader()
+    )
+
+    svc.finalize_agentsmd([repo], init_reporter)
+
+    assert (
+        "- **blizzard-workspace**: @mirrors/blizzard-workspace/docs/agents.md\n"
+        in fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    )
+
+
+def test_finalize_agentsmd_entry_alone_matching_none_warns_for_a_manifest_less_standalone(
+    init_reporter: FakeInitReporter,
+) -> None:
+    fs = FakeFilesystem()
+    repo = _seed_agents_md_repo(fs, "blizzard-workspace")
+    repo.entry = ("docs/agents.md",)
+    svc = ExtensionAgentsMdService(
+        config=_config_with(AdoptExtensions.winter), fs=fs, manifest_loader=_manifest_loader()
+    )
+
+    svc.finalize_agentsmd([repo], init_reporter)
+
+    assert WORKSPACE_ROOT / AGENTS_WINTER_FILENAME not in fs.files
+    warnings = [a for a in init_reporter.actions if a[2] == "extension_warning"]
+    assert len(warnings) == 1
+    assert "docs/agents.md" in warnings[0][3]
+
+
+def _seed_manifest_less_project_repo(fs: FakeFilesystem, name: str) -> StandaloneRepository:
+    """Plant a manifest-less project repo under `projects/<name>/` carrying only an AGENTS.md."""
+    repo_path = WORKSPACE_ROOT / "projects" / name
+    fs.directories.add(repo_path)
+    fs.files[repo_path / "AGENTS.md"] = "# contributor instructions\n"
+    return StandaloneRepository(name=name, path=repo_path)
+
+
+def test_finalize_agentsmd_load_lazy_renders_a_routing_row_for_a_manifest_less_project_repo(
+    init_reporter: FakeInitReporter,
+) -> None:
+    fs = FakeFilesystem()
+    repo = _seed_manifest_less_project_repo(fs, "app")
+    repo.load = ExtensionLoad.lazy
+    svc = ExtensionAgentsMdService(
+        config=_config_with(AdoptExtensions.winter), fs=fs, manifest_loader=_manifest_loader()
+    )
+
+    svc.finalize_agentsmd([repo], init_reporter)
+
+    content = fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+    assert "- **app**: `<env>/app/AGENTS.md`" in content
+    assert "@" not in content.replace("@AGENTS", "")
+    assert init_reporter.errors == []
+
+
+def test_finalize_agentsmd_entry_alone_renders_a_lazy_routing_row_for_a_manifest_less_project_repo(
+    init_reporter: FakeInitReporter,
+) -> None:
+    fs = FakeFilesystem()
+    repo = _seed_manifest_less_project_repo(fs, "app")
+    fs.files[repo.path / "docs" / "agents.md"] = "# agents\n"
+    repo.entry = ("docs/agents.md",)
+    svc = ExtensionAgentsMdService(
+        config=_config_with(AdoptExtensions.winter), fs=fs, manifest_loader=_manifest_loader()
+    )
+
+    svc.finalize_agentsmd([repo], init_reporter)
+
+    assert "- **app**: `<env>/app/docs/agents.md`" in fs.files[WORKSPACE_ROOT / AGENTS_WINTER_FILENAME]
+
+
+def test_finalize_agentsmd_entry_matching_none_warns_for_a_manifest_less_project_repo(
+    init_reporter: FakeInitReporter,
+) -> None:
+    fs = FakeFilesystem()
+    repo = _seed_manifest_less_project_repo(fs, "app")
+    repo.load = ExtensionLoad.lazy
+    repo.entry = ("docs/agents.md",)
+    svc = ExtensionAgentsMdService(
+        config=_config_with(AdoptExtensions.winter), fs=fs, manifest_loader=_manifest_loader()
+    )
+
+    svc.finalize_agentsmd([repo], init_reporter)
+
+    assert WORKSPACE_ROOT / AGENTS_WINTER_FILENAME not in fs.files
+    warnings = [a for a in init_reporter.actions if a[2] == "extension_warning"]
+    assert len(warnings) == 1
+    assert "docs/agents.md" in warnings[0][3]

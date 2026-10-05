@@ -521,7 +521,7 @@ def test_load_leaves_load_undeclared_when_absent_or_empty(value: object) -> None
     assert manifest.load is None
 
 
-@pytest.mark.parametrize("value", ["EAGER", "deferred", True, 3])
+@pytest.mark.parametrize("value", ["EAGER", "deferred", "none", True, 3])
 def test_load_raises_repo_error_on_unrecognized_load_value(value: object) -> None:
     """An unrecognized `load` is a typo the author meant to be honored — raise, don't default."""
     manifest_path = WORKSPACE_ROOT / "my-ext" / "winter-ext.toml"
@@ -531,3 +531,21 @@ def test_load_raises_repo_error_on_unrecognized_load_value(value: object) -> Non
     with pytest.raises(RepoError) as excinfo:
         loader.load(repo, manifest_path=manifest_path)
     assert "`load` must be one of" in str(excinfo.value)
+    # `none` is workspace authority, so the manifest's accepted values leave it out.
+    assert '"none"' not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "expected"),
+    [
+        ("wf", "wf", True),
+        ("wf", "wf-extra", True),
+        ("wf-extra", "wf", True),
+        ("wf", "wfx", False),
+        ("alpha", "beta", False),
+    ],
+)
+def test_prefixes_overlap(a: str, b: str, expected: bool) -> None:
+    from winter_cli.modules.workspace.extension_manifest import prefixes_overlap
+
+    assert prefixes_overlap(a, b) is expected

@@ -8,11 +8,13 @@ from tests.conftest import (
     FakeConfigFileReader,
     FakeFilesystem,
     FakeGitRepository,
+    FakeInitReporter,
     FakeWorkspaceExcludeLocator,
 )
 from winter_cli.config.models import (
     AdoptExtensions,
     ProjectRepositoryConfig,
+    StandaloneRepositoryConfig,
     WorkspaceConfig,
 )
 from winter_cli.modules.workspace.extension_exclude_service import ExtensionExcludeService
@@ -485,3 +487,62 @@ def test_find_orphans_skips_the_exclude_driven_scans_when_the_exclude_file_canno
 
     assert orphans == []
     assert "dubious ownership" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# extension = false
+# ---------------------------------------------------------------------------
+
+
+def _opted_out_config() -> WorkspaceConfig:
+    return WorkspaceConfig(
+        workspace_root=WORKSPACE_ROOT,
+        service_prefix="t",
+        main_branch="main",
+        adopt_extensions=AdoptExtensions.winter,
+        standalone_repos=[
+            StandaloneRepositoryConfig(name="old-ext", url="git@example.com:org/old-ext.git", extension=False),
+        ],
+    )
+
+
+def test_find_orphans_never_flags_a_declared_standalone_declaring_extension_false_as_orphan_clone() -> None:
+    """The repo is still cloned, fetched, and pulled: its exclude block is a directory exclude, not an orphan."""
+    clone = WORKSPACE_ROOT / "old-ext"
+    fs = FakeFilesystem(directories=[PROJECTS_DIR, clone], files={clone / ".git" / "HEAD": "ref: refs/heads/main\n"})
+    _write_exclude(fs, WORKSPACE_ROOT, "# >>> old-ext (managed by winter)\n/old-ext/\n# <<< old-ext\n")
+    git = FakeGitRepository()
+    git.clean_worktrees.add(clone)
+    svc = _service(_opted_out_config(), fs, git)
+
+    orphans = svc.find_orphans()
+
+    assert [o for o in orphans if o.kind == "standalone_clone"] == []
+
+
+def test_find_orphan_agent_copies_flags_copies_of_a_repo_that_became_extension_false() -> None:
+    """Projections an earlier init left behind are orphans like any other once the repo stops being an extension."""
+    clone = WORKSPACE_ROOT / "old-ext"
+    agents_dir = WORKSPACE_ROOT / ".claude" / "agents"
+    stale = agents_dir / "old-reviewer.md"
+    fs = FakeFilesystem(directories=[PROJECTS_DIR, clone, agents_dir], files={stale: "# stale\n"})
+    _write_exclude(fs, WORKSPACE_ROOT, _EXCLUDE_WITH_OLD_EXT)
+    svc = _service(_opted_out_config(), fs)
+
+    orphans = svc.find_orphans()
+
+    assert [o.path for o in orphans if o.kind == "orphan_agent_copy"] == [stale]
+    assert [o for o in orphans if o.kind == "standalone_clone"] == []
+
+
+def test_reaggregate_excludes_keeps_a_path_only_block_for_an_extension_false_standalone() -> None:
+    clone = WORKSPACE_ROOT / "old-ext"
+    fs = FakeFilesystem(directories=[PROJECTS_DIR, clone])
+    _write_exclude(fs, WORKSPACE_ROOT, _EXCLUDE_WITH_OLD_EXT)
+    svc = _service(_opted_out_config(), fs)
+
+    assert svc.reaggregate_excludes(FakeInitReporter()) is True
+
+    exclude = fs.files[WORKSPACE_ROOT / ".git" / "info" / "exclude"]
+    assert "/old-ext/" in exclude
+    assert ".claude/skills/old-*" not in exclude

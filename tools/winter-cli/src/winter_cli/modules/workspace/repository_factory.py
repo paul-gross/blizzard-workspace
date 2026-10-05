@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from winter_cli.config.models import (
+    ExtensionLoad,
     ProjectRepositoryConfig,
     SingletonType,
     StandaloneRepositoryConfig,
@@ -104,10 +105,12 @@ class RepositoryFactory:
         file at the repo root.
         """
         result: list[StandaloneRepository] = []
+        project_entries = self._project_entries()
         for r in self._config.standalone_repos:
             name = self._resolve_standalone_name(r)
             relative_path = r.path or name
             config_dir = (self._config.workspace_root / (r.config_dir or f".winter/config/{name}")).resolve()
+            project_entry = project_entries.get(name)
             result.append(
                 StandaloneRepository(
                     name=name,
@@ -119,6 +122,9 @@ class RepositoryFactory:
                     prefix=r.prefix,
                     ref=r.ref,
                     config_dir=config_dir,
+                    extension=r.extension and (project_entry is None or project_entry.extension),
+                    load=r.load or (project_entry.load if project_entry is not None else None),
+                    entry=self._entry_candidates(r.entry or (project_entry.entry if project_entry else None)),
                 )
             )
         return result
@@ -148,23 +154,35 @@ class RepositoryFactory:
         declarations exist: the repo keeps rendering as its eager `@`-import
         instead of switching to a no-`@` routing row. Drop the standalone
         declaration and the project-repo entry takes over automatically.
+
+        A repo entry declaring `extension = false` is data, not an extension:
+        it is dropped here — the one filter every extension consumer shares —
+        while `get_standalone_repos()` / `get_project_repos()` still return it
+        for the git lifecycle (clone, fetch, pull, `ref` pinning). On a double
+        declaration, `extension = false` on either entry excludes the repo
+        (`get_standalone_repos()` folds the project-repo entry's value in).
         """
         result: list[StandaloneRepository] = []
         seen: set[str] = set()
+        project_entries = self._project_entries()
 
         for repo in self.get_standalone_repos():
-            result.append(repo)
             seen.add(repo.name)
+            if repo.extension:
+                result.append(repo)
 
         for project_repo in self.get_project_repos():
             if project_repo.name in seen:
+                continue
+            project_entry = project_entries[project_repo.name]
+            if not project_entry.extension:
                 continue
             manifest_path = project_repo.main_path / EXT_MANIFEST
             if not self._fs.is_file(manifest_path):
                 continue
             # `ProjectRepositoryConfig` declares no `config_dir`/`prefix`/`ref`
-            # override fields, so there is nothing to carry over for those —
-            # but `config_dir` is set explicitly here (matching the same
+            # override fields, so there is nothing to carry over for those
+            # (its `load`/`entry` are carried over below) — but `config_dir` is set explicitly here (matching the same
             # default formula `get_standalone_repos()` uses) rather than left
             # None to fall through to `ServiceOrchestratorResolver`'s
             # synthetic-config-dir fallback, which only happens to compute the
@@ -175,10 +193,94 @@ class RepositoryFactory:
                     path=project_repo.main_path,
                     main_branch=project_repo.main_branch,
                     config_dir=(self._config.workspace_root / f".winter/config/{project_repo.name}").resolve(),
+                    load=project_entry.load,
+                    entry=self._entry_candidates(project_entry.entry),
                 )
             )
             seen.add(project_repo.name)
 
+        return result
+
+    def get_context_only_repos(self) -> list[StandaloneRepository]:
+        """Return the manifest-less project repos that opted into context delivery only.
+
+        A `[[project_repository]]` entry with no root `winter-ext.toml` is not
+        an extension, so `get_extension_repos()` skips it. When the entry
+        explicitly declares `load = "eager"` or `"lazy"`, or an `entry` list, it
+        asks for its entry point to reach `AGENTS.winter.md` all the same: this
+        returns it, shaped as a `StandaloneRepository` rooted at the source
+        checkout, for the context-delivery renderer alone. It is never fed to a
+        skill, agent, hook, or any other extension feature — those keep drawing
+        from `get_extension_repos()`. A repo that also has a
+        `[[standalone_repository]]` declaration is excluded (the standalone
+        entry already carries the merged `load`/`entry`), as is one declaring
+        `extension = false` or `load = "none"`.
+        """
+        result: list[StandaloneRepository] = []
+        seen = {repo.name for repo in self.get_standalone_repos()}
+        project_entries = self._project_entries()
+        for project_repo in self.get_project_repos():
+            if project_repo.name in seen:
+                continue
+            project_entry = project_entries[project_repo.name]
+            if not project_entry.extension or project_entry.load is ExtensionLoad.none:
+                continue
+            if project_entry.load is None and project_entry.entry is None:
+                continue
+            if self._fs.is_file(project_repo.main_path / EXT_MANIFEST):
+                continue
+            result.append(
+                StandaloneRepository(
+                    name=project_repo.name,
+                    path=project_repo.main_path,
+                    main_branch=project_repo.main_branch,
+                    load=project_entry.load,
+                    entry=self._entry_candidates(project_entry.entry),
+                )
+            )
+        return result
+
+    def get_extension_standalone_repos(self) -> list[StandaloneRepository]:
+        """Return the standalones that act as extensions — `get_standalone_repos()` minus `extension = false`.
+
+        For the one extension consumer that is standalone-only by design
+        (dashboard plugin discovery), where `get_extension_repos()` would also
+        fold in project-repo extensions.
+        """
+        return [repo for repo in self.get_standalone_repos() if repo.extension]
+
+    def get_non_extension_standalone_repos(self) -> list[StandaloneRepository]:
+        """Return the standalones that opted out with `extension = false`.
+
+        They keep a path-only managed exclude block (so the clone stays out of
+        the workspace repo's `git status`) but project nothing.
+        """
+        return [repo for repo in self.get_standalone_repos() if not repo.extension]
+
+    def get_non_extension_repos(self) -> list[StandaloneRepository]:
+        """Return every declared repo whose entry opts out with `extension = false`.
+
+        Standalones and project repos alike, each shaped as a
+        `StandaloneRepository` rooted where its checkout lives (a project
+        repo's `projects/<name>/` source checkout). The complement of
+        `get_extension_repos()` over the declared repos: callers use it to
+        retract what an earlier `winter ws init` projected for a repo that has
+        since stopped being an extension.
+        """
+        result = self.get_non_extension_standalone_repos()
+        seen = {repo.name for repo in self.get_standalone_repos()}
+        project_entries = self._project_entries()
+        for project_repo in self.get_project_repos():
+            if project_repo.name in seen or project_entries[project_repo.name].extension:
+                continue
+            result.append(
+                StandaloneRepository(
+                    name=project_repo.name,
+                    path=project_repo.main_path,
+                    main_branch=project_repo.main_branch,
+                    extension=False,
+                )
+            )
         return result
 
     def find_standalone(self, name: str) -> StandaloneRepository | None:
@@ -192,6 +294,14 @@ class RepositoryFactory:
             if repo.name == name:
                 return repo
         return None
+
+    def _project_entries(self) -> dict[str, ProjectRepositoryConfig]:
+        """Index the `[[project_repository]]` entries by resolved name."""
+        return {self._resolve_project_name(r): r for r in self._config.project_repos}
+
+    @staticmethod
+    def _entry_candidates(entry: list[str] | None) -> tuple[str, ...] | None:
+        return tuple(entry) if entry is not None else None
 
     def _resolve_project_name(self, repo: ProjectRepositoryConfig) -> str:
         if repo.name:

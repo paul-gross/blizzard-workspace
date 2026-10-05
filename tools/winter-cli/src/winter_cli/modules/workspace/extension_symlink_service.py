@@ -8,6 +8,7 @@ from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.modules.workspace.extension_manifest import (
     EXT_MANIFEST,
     ExtensionManifestLoader,
+    prefixes_overlap,
 )
 from winter_cli.modules.workspace.extension_skill_install import (
     CopySkillStrategy,
@@ -102,6 +103,57 @@ class ExtensionSymlinkService:
             detail = f"prefix={manifest.prefix} skills={len(skill_names)}"
             reporter.repo_action(repo.name, str(repo.path), "extension_installed", detail)
 
+        return True
+
+    def projected_prefix(self, repo: StandaloneRepository) -> str | None:
+        """Return the prefix `process` would project `repo` under, or None when it projects nothing.
+
+        Mirrors `process`'s eligibility. A manifest that no longer parses yields
+        None: there is no prefix to resolve from it.
+        """
+        mode = self._config.adopt_extensions
+        if mode == AdoptExtensions.none:
+            return None
+        manifest_path = repo.path / EXT_MANIFEST
+        manifest_present = self._fs.is_file(manifest_path)
+        if mode == AdoptExtensions.winter and not manifest_present:
+            return None
+        try:
+            return self._manifest_loader.load(repo, manifest_path if manifest_present else None).prefix
+        except RepoError:
+            return None
+
+    def retract(self, repo: StandaloneRepository, live_prefixes: frozenset[str]) -> bool:
+        """Remove the skills an earlier `process` projected for a repo that is no longer an extension.
+
+        Called for a repo whose entry declares `extension = false`: prunes its
+        `<prefix>-*` entries from every vendor skills dir by installing from no
+        source. Mirrors `process`'s eligibility so it only touches what
+        `process` could have written, and resolves the prefix the same way. A
+        manifest that no longer parses leaves nothing to resolve a prefix from,
+        so it is skipped rather than reported — the repo is data now, and what
+        its manifest declares is not winter's business.
+
+        A prefix that a live extension in `live_prefixes` also claims is left
+        alone: its `<prefix>-*` entries cannot be told apart from the live
+        extension's, and that extension's own install keeps them current.
+        """
+        prefix = self.projected_prefix(repo)
+        if prefix is None:
+            return True
+        if any(prefixes_overlap(prefix, live) for live in live_prefixes):
+            logger.info("retract skills: %s skipped — prefix %s is claimed by a live extension", repo.name, prefix)
+            return True
+        try:
+            for vendor in CodeAgentVendor:
+                self._skill_strategy(vendor).install(
+                    source_root=None,
+                    target_root=self._config.workspace_root / vendor.skills_subpath,
+                    prefix=prefix,
+                )
+        except (RepoError, OSError) as exc:
+            logger.warning("retract skills: failed for %s — %s", repo.name, exc)
+            return False
         return True
 
     # ── Frontmatter validation ────────────────────────────────────────────

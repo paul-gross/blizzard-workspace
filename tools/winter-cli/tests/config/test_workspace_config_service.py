@@ -12,6 +12,7 @@ from winter_cli.config.models import (
     EnvCommandEntry,
     EnvCommandFormat,
     EnvVarBands,
+    ExtensionLoad,
     SingletonType,
     SpaceConfig,
     WorkspaceConfig,
@@ -1725,3 +1726,61 @@ def test_space_dir_unknown_kind_defaults_to_named_subdir() -> None:
     config = _config_with_space(SpaceConfig(kinds={"scores": "audits"}))
     # A kind with no override falls back to a `<root>/<kind>` directory.
     assert config.space_dir("workflows") == WORKSPACE_ROOT / ".winter" / "workflows"
+
+
+# ── repo entry extension / load / entry keys ─────────────────────────────────
+
+
+def _load_with_repo(table: str, entry: dict):
+    config_path = WORKSPACE_ROOT / WINTER_DIR / CONFIG_FILE
+    fs = FakeFilesystem(files={config_path: ""})
+    repo = {"name": "mirror", "url": "git@example.com:org/mirror.git", **entry}
+    return _service(fs, {config_path: {table: [repo]}}).load()
+
+
+@pytest.mark.parametrize("table", ["standalone_repository", "project_repository"])
+def test_repo_entry_extension_keys_default_to_unset(table: str) -> None:
+    config = _load_with_repo(table, {})
+
+    repo = (config.standalone_repos or config.project_repos)[0]
+    assert repo.extension is True
+    assert repo.load is None
+    assert repo.entry is None
+
+
+@pytest.mark.parametrize("table", ["standalone_repository", "project_repository"])
+def test_repo_entry_parses_extension_load_and_entry(table: str) -> None:
+    config = _load_with_repo(table, {"extension": False, "load": "none", "entry": ["docs/agents.md", "index.md"]})
+
+    repo = (config.standalone_repos or config.project_repos)[0]
+    assert repo.extension is False
+    assert repo.load is ExtensionLoad.none
+    assert repo.entry == ["docs/agents.md", "index.md"]
+
+
+@pytest.mark.parametrize("load", ["eager", "lazy", "none"])
+def test_repo_entry_accepts_every_load_value(load: str) -> None:
+    config = _load_with_repo("standalone_repository", {"load": load})
+
+    assert config.standalone_repos[0].load is ExtensionLoad(load)
+
+
+@pytest.mark.parametrize("table", ["standalone_repository", "project_repository"])
+@pytest.mark.parametrize(
+    ("entry", "message"),
+    [
+        ({"load": "deferred"}, "load"),
+        ({"load": ""}, "load"),
+        ({"extension": "no"}, "extension"),
+        ({"entry": []}, "entry"),
+        ({"entry": "AGENTS.md"}, "entry"),
+        ({"entry": [""]}, "entry"),
+        ({"entry": [3]}, "entry"),
+        ({"entry": ["/etc/agents.md"]}, "entry"),
+        ({"entry": ["docs/../../agents.md"]}, "entry"),
+        ({"entry": ["AGENTS.md", "../AGENTS.md"]}, "entry"),
+    ],
+)
+def test_repo_entry_rejects_invalid_extension_keys(table: str, entry: dict, message: str) -> None:
+    with pytest.raises(ConfigError, match=message):
+        _load_with_repo(table, entry)

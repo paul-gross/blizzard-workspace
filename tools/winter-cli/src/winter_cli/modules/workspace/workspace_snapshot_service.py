@@ -287,14 +287,16 @@ class WorkspaceSnapshotService:
         ]
 
         # The v1 `extensions` field lists the installed extension modules by
-        # name — the user-declared standalones, excluding the implicit singletons
-        # (workspace/product/harness) the dashboard additionally surfaces. This
-        # is a pure config read with NO git probe: `ws status` / `--json` must
-        # not fail on a broken extension repo just to list its name. Each
-        # standalone's git status is serialized separately in the `standalones`
-        # section above (tolerant probe via `_collect_standalone_statuses`).
+        # name — the user-declared standalones that act as extensions (a repo
+        # declaring `extension = false` is data, so it is left out), excluding
+        # the implicit singletons (workspace/product/harness) the dashboard
+        # additionally surfaces. This is a pure config read with NO git probe:
+        # `ws status` / `--json` must not fail on a broken extension repo just
+        # to list its name. Each standalone's git status is serialized
+        # separately in the `standalones` section above (tolerant probe via
+        # `_collect_standalone_statuses`).
         standalone_repos = self._repo_factory.get_standalone_repos()
-        extension_names = [repo.name for repo in standalone_repos]
+        extension_names = [repo.name for repo in self._repo_factory.get_extension_standalone_repos()]
 
         # Populate standalone_pins for every declared standalone with a ref.
         # We read the lock file once and do a best-effort HEAD probe per repo —

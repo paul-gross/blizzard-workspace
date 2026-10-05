@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import enum
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from winter_cli.config.models import ExtensionLoad
 from winter_cli.core.config_file import ConfigError, ConfigFileReadError, IConfigFileReader
 from winter_cli.modules.provision.manifest import ProvisionHandler, ProvisionManifestParser
 from winter_cli.modules.service.ext_service_manifest import ExtServiceDef, ExtServiceManifestParser
@@ -30,20 +30,13 @@ EXTENSION_BLOCK_NAME = "winter-extensions"
 EXTENSION_INDEX_FILENAME = "index.md"
 
 
-class ExtensionLoad(enum.Enum):
-    """How an extension's entry point is delivered into `AGENTS.winter.md`.
+def prefixes_overlap(a: str, b: str) -> bool:
+    """Whether two extension prefixes can name the same projected `<prefix>-*` artifact.
 
-    Declared as `load` in `winter-ext.toml`. Absent means undeclared — the
-    renderer then picks the default for the extension's repo kind rather than
-    assuming one here, so `ExtensionManifest.load` is `None`, never a default
-    member.
+    Equal prefixes collide, and so does one that extends the other at a dash
+    (`wf` and `wf-extra`): `wf-*` also matches `wf-extra-skill`.
     """
-
-    eager = "eager"
-    """`@`-import the entry point — always-on context, injected into every session."""
-
-    lazy = "lazy"
-    """Link the entry point — the agent opens it only when its subject is in scope."""
+    return a == b or a.startswith(f"{b}-") or b.startswith(f"{a}-")
 
 
 def _coerce_load(value: object) -> ExtensionLoad | None:
@@ -58,10 +51,14 @@ def _coerce_load(value: object) -> ExtensionLoad | None:
         return None
     if isinstance(value, str):
         try:
-            return ExtensionLoad(value)
+            declared = ExtensionLoad(value)
         except ValueError:
             pass
-    accepted = ", ".join(f'"{member.value}"' for member in ExtensionLoad)
+        else:
+            if declared is not ExtensionLoad.none:
+                return declared
+    # `none` is workspace authority (a repo entry's `load`), never a manifest value.
+    accepted = ", ".join(f'"{member.value}"' for member in ExtensionLoad if member is not ExtensionLoad.none)
     raise ConfigError(f"`load` must be one of {accepted}; got {value!r}")
 
 

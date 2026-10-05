@@ -183,7 +183,9 @@ class ExtensionExcludeService:
         mode = self._config.adopt_extensions
         manifest_path = repo.path / EXT_MANIFEST
         manifest_present = self._fs.is_file(manifest_path)
-        extension_eligible = mode != AdoptExtensions.none and (manifest_present or mode == AdoptExtensions.all)
+        extension_eligible = (
+            repo.extension and mode != AdoptExtensions.none and (manifest_present or mode == AdoptExtensions.all)
+        )
         if not extension_eligible:
             return relative, None
         try:

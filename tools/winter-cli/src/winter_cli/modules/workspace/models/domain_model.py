@@ -5,6 +5,8 @@ import enum
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
+from winter_cli.config.models import ExtensionLoad
+
 
 @runtime_checkable
 class IWorkspaceRepository(Protocol):
@@ -73,6 +75,11 @@ class StandaloneRepository:
     optional `prefix` that overrides the extension symlink prefix, and an
     optional `ref` (branch, tag, or commit) that pins the checkout.
 
+    `extension`, `load`, and `entry` carry the workspace's governance of the
+    repo's extension role and context delivery (see `StandaloneRepositoryConfig`).
+    `extension = False` marks a repo that is cloned and pinned like any other
+    but is no extension; `get_extension_repos()` never returns it.
+
     ``ref`` semantics:
     - absent → clone tracks the default branch; pull integrates tracked upstream.
     - branch ref → checkout on that tracking branch; pull fast-forwards it
@@ -94,6 +101,9 @@ class StandaloneRepository:
     prefix: str | None = None
     ref: str | None = None
     config_dir: Path | None = None
+    extension: bool = True
+    load: ExtensionLoad | None = None
+    entry: tuple[str, ...] | None = None
 
 
 class RefKind(enum.StrEnum):

@@ -136,7 +136,13 @@ class InitService:
     def reconcile_standalones(self, reporter: IInitReporter) -> bool:
         repos = self._repo_factory.get_standalone_repos()
         extension_repos = self._repo_factory.get_extension_repos()
-        if not repos and not extension_repos:
+        context_only_repos = self._repo_factory.get_context_only_repos()
+        if (
+            not repos
+            and not extension_repos
+            and not context_only_repos
+            and not self._repo_factory.get_non_extension_repos()
+        ):
             return True
 
         target = "standalone/"
@@ -169,6 +175,18 @@ class InitService:
         ):
             success = False
 
+        # A repo that opted out with `extension = false` (a standalone or a project
+        # repo) is cloned like any other but is no extension: retract what an
+        # earlier run projected for it. Runs only after every live extension has
+        # projected, so a prefix it shares with one is never torn down while that
+        # extension installs, and skips any prefix a live extension still claims.
+        live_prefixes = frozenset(
+            prefix for r in extension_repos if (prefix := self._extension_symlink_svc.projected_prefix(r)) is not None
+        )
+        for opted_out in self._repo_factory.get_non_extension_repos():
+            if self._fs.exists(opted_out.path):
+                success &= self._retract_extension(opted_out, live_prefixes)
+
         # Aggregate-update workspace CLAUDE.md and the workspace exclude file from all
         # standalones that were successfully reconciled (i.e. exist on disk now),
         # plus the project-repo-only extensions just projected above so their
@@ -181,13 +199,17 @@ class InitService:
         if not self._extension_exclude_svc.finalize_excludes(exclude_eligible_repos, reporter):
             success = False
         if self._extension_agent_svc is not None:
-            self._extension_agent_svc.check_unknown_overrides(exclude_eligible_repos, reporter)
+            self._extension_agent_svc.check_unknown_overrides(
+                [r for r in exclude_eligible_repos if r.extension], reporter
+            )
 
         # AGENTS.winter.md additionally covers project-repo extensions (a
         # projects/<name>/ root carrying its own winter-ext.toml), rendered as
         # routing rows — those aren't reconciled by the clone loop above, so
         # they get their own on-disk presence check.
-        present_extension_repos = [r for r in extension_repos if self._fs.exists(r.path)]
+        # A manifest-less project repo whose entry explicitly asks for context
+        # delivery (`load` or `entry`) joins that render, and only that one.
+        present_extension_repos = [r for r in (*extension_repos, *context_only_repos) if self._fs.exists(r.path)]
         if not self._extension_agentsmd_svc.finalize_agentsmd(present_extension_repos, reporter):
             success = False
 
@@ -422,6 +444,8 @@ class InitService:
             reporter.repo_error(label, str(exc))
             return False
 
+        if not repo.extension:
+            return True
         return self._project_extension(repo, reporter)
 
     # ── Skills/agents projection (standalones and project-repo extensions) ─
@@ -443,6 +467,13 @@ class InitService:
         ok = self._extension_symlink_svc.process(repo, reporter)
         if self._extension_agent_svc is not None:
             ok &= self._extension_agent_svc.process(repo, reporter)
+        return ok
+
+    def _retract_extension(self, repo: StandaloneRepository, live_prefixes: frozenset[str]) -> bool:
+        """Prune what an earlier `winter ws init` projected for a repo that opted out with `extension = false`."""
+        ok = self._extension_symlink_svc.retract(repo, live_prefixes)
+        if self._extension_agent_svc is not None:
+            ok &= self._extension_agent_svc.retract(repo, live_prefixes)
         return ok
 
     # ── Standalone pin ────────────────────────────────────────────────────

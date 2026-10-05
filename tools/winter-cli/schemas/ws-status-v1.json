@@ -269,7 +269,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Names of installed standalone repos (extensions). A config-only read."
+          "description": "Names of installed standalone repos that act as extensions; a repo declaring `extension = false` is data and is not listed. A config-only read."
         },
         "orphans": {
           "type": "array",

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-from winter_cli.config.models import AdoptExtensions, WorkspaceConfig
+from winter_cli.config.models import AdoptExtensions, ExtensionLoad, WorkspaceConfig
 from winter_cli.core.filesystem import IFilesystemWriter
 from winter_cli.modules.workspace.extension_manifest import (
     AGENTS_WINTER_FILENAME,
@@ -10,7 +8,6 @@ from winter_cli.modules.workspace.extension_manifest import (
     DEFAULT_ENTRY_POINT_PATHS,
     EXT_MANIFEST,
     EXTENSION_BLOCK_NAME,
-    ExtensionLoad,
     ExtensionManifest,
     IExtensionManifestLoader,
 )
@@ -50,13 +47,24 @@ class ExtensionAgentsMdService:
       them stating how `<env>` binds and what a workspace-root reader (no env in
       scope) opens instead.
 
-    The load mode comes from the manifest's `load` key. Undeclared, it defaults
-    per repo kind — standalones eager, project repos lazy — so the rendering
-    predates the key and is unchanged by adding it. `load = "eager"` on a
-    project repo is refused (reported, then rendered lazily): an eager import
-    there would inject the `master` copy that goes stale against whatever
-    feature branch the reading agent is on, which is the reason project repos
-    render lazily in the first place.
+    The load mode follows the same precedence as the skill `prefix`: the
+    workspace repo entry's `load`, then the manifest's `load`, then the repo-kind
+    default — standalones eager, project repos lazy. `load = "none"` on the repo
+    entry renders no bullet. `load = "eager"` on a project repo is refused
+    (reported, then rendered lazily): an eager import there would inject the
+    `master` copy that goes stale against whatever feature branch the reading
+    agent is on, which is the reason project repos render lazily in the first
+    place.
+
+    Under `adopt_extensions = "winter"` a repo with no `winter-ext.toml` renders
+    no bullet, matching skill/agent projection — unless its repo entry declares
+    `load = "eager"` or `"lazy"`, or declares an `entry` list, an explicit opt-in
+    (an `entry` alone renders at the repo kind's default load). The opt-in covers
+    a manifest-less project repo too — `RepositoryFactory.get_context_only_repos`
+    hands those to this service alone, so it gains a lazy routing row and nothing
+    else. Under `all` every standalone with an entry point renders. The entry
+    point is the first existing path of the repo entry's `entry` list when it
+    declares one, else of `DEFAULT_ENTRY_POINT_PATHS`.
 
     A stale `CLAUDE.winter.md` at the workspace root (written by older versions of
     winter that generated a paired shim) is removed on every run as a migration
@@ -81,12 +89,14 @@ class ExtensionAgentsMdService:
         """Aggregate-update `AGENTS.winter.md`.
 
         Called once after all standalones are reconciled, with every extension
-        repo (standalones plus project-repo extensions) that exists on disk.
+        repo (standalones plus project-repo extensions) that exists on disk,
+        plus any manifest-less project repo that opted into context delivery.
         Each entry renders as an eager `@`-import, a lazy link, or a lazy
-        path-template bullet — see the class docstring for how the manifest's
-        `load` key and the repo kind select between them. A repo of any kind is
-        eligible only when an entry point (`index.md`, `AGENTS.md`, then
-        `context/index.md`, in that order) exists at its root.
+        path-template bullet — see the class docstring for how the repo entry's
+        `load`, the manifest's `load`, and the repo kind select between them. A
+        repo is eligible only when an entry point exists at its root: the first
+        existing path of its `entry` list, else of `index.md`, `AGENTS.md`,
+        `context/index.md` in that order.
 
         Also removes any stale `CLAUDE.winter.md` left by an older version of
         winter (migration cleanup). When no extensions are eligible,
@@ -114,8 +124,17 @@ class ExtensionAgentsMdService:
         lazy_lines: list[tuple[str, str]] = []
         project_rows: list[tuple[str, str]] = []
         for repo in repos:
-            entry_point = self._find_entry_point(repo.path)
+            if not self._renders_a_bullet(repo):
+                continue
+            entry_point = self._find_entry_point(repo)
             if entry_point is None:
+                if repo.entry:
+                    reporter.repo_action(
+                        repo.name,
+                        str(repo.path),
+                        "extension_warning",
+                        f"no entry point found; tried {', '.join(repo.entry)}. Rendering no AGENTS.winter.md bullet.",
+                    )
                 continue
             manifest = self._load_manifest(repo, reporter)
             description = manifest.description if manifest is not None else None
@@ -196,15 +215,34 @@ class ExtensionAgentsMdService:
 
         return True
 
-    def _find_entry_point(self, repo_path: Path) -> str | None:
-        """Return the first candidate entry-point path that exists at `repo_path`'s root.
+    def _renders_a_bullet(self, repo: StandaloneRepository) -> bool:
+        """Whether `repo` is in scope for a bullet before its entry point is looked up.
 
-        Tries `index.md`, `AGENTS.md`, then `context/index.md`, in order —
-        mirrors the `DEFAULT_SKILLS_DIRS` first-match fallback pattern used to
-        locate a manifest's skills/agents dirs. Returns None when none exist.
+        `load = "none"` on the repo entry opts out. Without a declared `load` or
+        `entry`, a repo with no `winter-ext.toml` renders only under
+        `adopt_extensions = "all"`, so `winter` mode matches skill/agent
+        projection; a declared `eager` or `lazy`, or a declared `entry`, is an
+        explicit opt-in that holds in either mode (an `entry` alone renders at
+        the repo kind's default load).
         """
-        for candidate in DEFAULT_ENTRY_POINT_PATHS:
-            if self._fs.is_file(repo_path / candidate):
+        if repo.load is ExtensionLoad.none:
+            return False
+        if repo.load is not None or repo.entry is not None:
+            return True
+        manifest_present = self._fs.is_file(repo.path / EXT_MANIFEST)
+        return manifest_present or self._config.adopt_extensions == AdoptExtensions.all
+
+    def _find_entry_point(self, repo: StandaloneRepository) -> str | None:
+        """Return the first candidate entry-point path that exists at `repo`'s root.
+
+        The candidates are the repo entry's `entry` list when it declares one —
+        which replaces the defaults entirely — else `index.md`, `AGENTS.md`,
+        then `context/index.md`, in order, mirroring the `DEFAULT_SKILLS_DIRS`
+        first-match fallback pattern used to locate a manifest's skills/agents
+        dirs. Returns None when none exist.
+        """
+        for candidate in repo.entry or DEFAULT_ENTRY_POINT_PATHS:
+            if self._fs.is_file(repo.path / candidate):
                 return candidate
         return None
 
@@ -231,23 +269,26 @@ class ExtensionAgentsMdService:
     ) -> ExtensionLoad:
         """Resolve the effective load mode for `repo`.
 
-        An undeclared `load` falls back to the default for the repo kind —
-        standalones eager, project repos lazy — which is the behavior that
-        predates the key, so existing manifests render unchanged.
+        Precedence: the repo entry's `load`, then the manifest's `load`, then the
+        default for the repo kind — standalones eager, project repos lazy, which
+        is the behavior that predates the key, so existing manifests render
+        unchanged. A `none` never reaches here: `_renders_a_bullet` filters it.
 
         `load = "eager"` on a project repo is refused and downgraded to lazy
         rather than failing the run: the `@`-import it asks for would inject the
         `projects/<name>/` master copy, which goes stale against whatever
-        feature branch the reading agent is on. Reported so the manifest gets
+        feature branch the reading agent is on. Reported so the declaration gets
         fixed, non-fatal so one bad key doesn't trap a reconcile.
         """
-        declared = manifest.load if manifest is not None else None
+        workspace_declared = repo.load
+        declared = workspace_declared or (manifest.load if manifest is not None else None)
         if declared is None:
             return ExtensionLoad.lazy if is_project_repo else ExtensionLoad.eager
         if is_project_repo and declared is ExtensionLoad.eager:
+            source = "the repo entry" if workspace_declared is not None else EXT_MANIFEST
             reporter.repo_error(
                 repo.name,
-                f'{EXT_MANIFEST} — `load = "eager"` is not available to a project-repo extension '
+                f'{source} — `load = "eager"` is not available to a project-repo extension '
                 f"(it has one copy per feature env; an eager import would inject the stale master "
                 f"copy). Rendering it lazily.",
             )

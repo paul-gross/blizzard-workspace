@@ -36,6 +36,28 @@ class AdoptExtensions(enum.Enum):
     """Symlink skills/agents from any standalone repo, with or without winter-ext.toml."""
 
 
+class ExtensionLoad(enum.Enum):
+    """How a repo's entry point is delivered into `AGENTS.winter.md`.
+
+    Declared as `load` in `winter-ext.toml` (`eager` or `lazy`) or on a
+    `[[standalone_repository]]` / `[[project_repository]]` entry (any member).
+    Absent means undeclared — the renderer then picks the default for the
+    repo's kind rather than assuming one here, so a declared `load` is `None`,
+    never a default member.
+    """
+
+    eager = "eager"
+    """`@`-import the entry point — always-on context, injected into every session."""
+
+    lazy = "lazy"
+    """Link the entry point — the agent opens it only when its subject is in scope."""
+
+    none = "none"
+    """Render no bullet — the repo stays an extension in every other respect.
+
+    Workspace authority only: a `winter-ext.toml` `load` of `none` is rejected."""
+
+
 class SkillInstall(enum.Enum):
     """How a code-agent vendor wants extension skills materialized into its skills dir.
 
@@ -210,6 +232,34 @@ class ProjectRepositoryConfig(BaseModel):
     dependency installs, resource creation, and data loading as `[[provision.*]]`
     handlers run by `winter provision <env>` instead."""
 
+    extension: bool = True
+    """Whether this repo may act as an extension. `False` makes it data only.
+
+    Winter still clones, fetches, pulls, and pins the repo, but no extension
+    feature sees it (`AGENTS.winter.md`, skills/agents, hooks, provision
+    handlers, services, capabilities, doctor probes, lint scripts, `winter
+    graph`), whatever its `winter-ext.toml` declares. On a repo declared as both
+    a project and a standalone, `False` on either entry excludes it."""
+
+    load: ExtensionLoad | None = None
+    """Workspace override of how the entry point reaches `AGENTS.winter.md`.
+
+    Takes precedence over the manifest's `load`, which takes precedence over the
+    repo-kind default. `none` renders no bullet. `eager` or `lazy` on a repo with
+    no `winter-ext.toml` is an explicit opt-in to context delivery only, rendered
+    even under `adopt_extensions = "winter"`: a project repo gains a lazy routing
+    row and is never projected skills, agents, or hooks. `eager` on a project repo
+    is still refused and rendered lazily."""
+
+    entry: list[str] | None = None
+    """Prioritized entry-point candidates, repo-relative.
+
+    Only the first candidate that exists is used, and the list replaces the
+    default `index.md`, `AGENTS.md`, `context/index.md` list entirely. When no
+    candidate exists the repo renders no bullet and `winter ws init` warns. On a
+    repo with no `winter-ext.toml` an explicit `entry` is itself an opt-in to
+    context delivery, at the repo kind's default load. Non-empty; absolute paths and `..` segments are rejected."""
+
 
 class StandaloneRepositoryConfig(BaseModel):
     """A standalone repo declared in `[[standalone_repository]]`.
@@ -287,6 +337,33 @@ class StandaloneRepositoryConfig(BaseModel):
     A lightweight trust/bootstrap step (e.g. the `mise trust` equivalent), NOT
     dependency installation — declare those as `[[provision.*]]` handlers run by
     `winter provision` instead."""
+
+    extension: bool = True
+    """Whether this repo may act as an extension. `False` makes it data only.
+
+    Winter still clones, fetches, pulls, and pins the repo, but no extension
+    feature sees it (`AGENTS.winter.md`, skills/agents, hooks, provision
+    handlers, services, capabilities, doctor probes, lint scripts, `winter
+    graph`), whatever its `winter-ext.toml` declares. On a repo declared as both
+    a project and a standalone, `False` on either entry excludes it."""
+
+    load: ExtensionLoad | None = None
+    """Workspace override of how the entry point reaches `AGENTS.winter.md`.
+
+    Takes precedence over the manifest's `load`, which takes precedence over the
+    repo-kind default. `none` renders no bullet. `eager` or `lazy` on a repo with
+    no `winter-ext.toml` is an explicit opt-in, rendered even under
+    `adopt_extensions = "winter"`. `eager` on a project repo is still refused and
+    rendered lazily."""
+
+    entry: list[str] | None = None
+    """Prioritized entry-point candidates, repo-relative.
+
+    Only the first candidate that exists is used, and the list replaces the
+    default `index.md`, `AGENTS.md`, `context/index.md` list entirely. When no
+    candidate exists the repo renders no bullet and `winter ws init` warns. On a
+    repo with no `winter-ext.toml` an explicit `entry` is itself an opt-in to
+    context delivery, at the repo kind's default load. Non-empty; absolute paths and `..` segments are rejected."""
 
 
 class ModelTiersConfig(BaseModel):

@@ -41,10 +41,46 @@ prefix = "wsb"                                # optional symlink-prefix override
 path = "extensions/winter-backlog"            # optional; relative to the workspace root, defaults to `name`
 ref = "v1.4.2"                                # optional; pin this repo to a branch, tag, or commit SHA
 config_dir = ".winter/config/winter-backlog"  # optional; override where WINTER_EXT_CONFIG_DIR points
+
+# A repo cloned only as data — a mirror, a corpus, a fixture — says so, and may pick its own context.
+[[standalone_repository]]
+name = "blizzard-workspace"
+url = "git@github.com:paul-gross/blizzard-workspace.git"
+path = "mirrors/blizzard-workspace"
+extension = false                             # optional; the repo is data, never an extension
+# load = "lazy"                               # optional; "eager" | "lazy" | "none" — see below
+# entry = ["docs/agents.md", "index.md"]      # optional; prioritized entry-point candidates
 ```
 
 The workspace-wide `git_excludes` list is appended to every repo's `.git/info/exclude` on `winter ws init`; a per-repo
 `git_excludes` merges with it.
+
+## `extension`, `load`, `entry` — the workspace governs a repo's extension role
+
+Whether a repo acts as an extension, and what it injects into the workspace's agent context, is the workspace's call.
+Three optional keys on a `[[standalone_repository]]` or `[[project_repository]]` entry take precedence over what the
+repo's own `winter-ext.toml` declares; [extensions.md — Context delivery](./extensions.md#context-delivery) owns the
+precedence order, how `load` and `entry` resolve, and which repos they opt into context delivery.
+
+| Key         | Value                         | Effect                                                                                                                                                                             |
+| ----------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `extension` | `false`                       | The repo is data. Winter still clones, fetches, pulls, and pins it (including `ref` and `config.lock`), but no extension feature sees it, whatever its `winter-ext.toml` declares. |
+| `load`      | `"eager"`, `"lazy"`, `"none"` | Replaces the manifest's `load` for the repo's `AGENTS.winter.md` bullet. `none` renders no bullet and leaves every other extension feature in place.                               |
+| `entry`     | non-empty list of repo paths  | Prioritized entry-point candidates: the first that exists is the one entry point, and the list replaces the default `index.md`, `AGENTS.md`, `context/index.md` entirely.          |
+
+- **`extension = false`** removes the repo from every extension consumer at once: `AGENTS.winter.md`, skill and agent
+  projection, hooks, provision handlers, services, capabilities, `winter doctor` probes, lint scripts, and the
+  `winter graph` node. What an earlier `winter ws init` projected for it (skills, agent copies, its `AGENTS.winter.md`
+  bullet) is retracted on the next run, except under a prefix a live extension still claims; the clone is kept. On a
+  repo declared as both a project and a standalone, `extension = false` on either entry excludes it.
+- **`load`** and **`entry`** govern context delivery only. An explicit `load = "eager"` or `"lazy"`, or an explicit
+  `entry`, on a repo with no `winter-ext.toml` is an opt-in to context delivery and to nothing else — on a
+  `[[project_repository]]` it adds a lazy routing row to `AGENTS.winter.md` and never projects skills, agents, or hooks.
+- On a repo declared as both a project and a standalone, the standalone entry's `load` and `entry` win; the project
+  entry's fill whatever the standalone leaves unset.
+
+Validation fails config load with a `ConfigError` for an `extension` that is not a boolean, an unknown `load`, an empty
+or non-list `entry`, and an `entry` path that is empty, absolute, or holds a `..` segment.
 
 ## `config_dir` — per-extension writable config/asset directory
 

@@ -6,6 +6,7 @@ import pytest
 
 from tests.conftest import FakeFilesystem
 from winter_cli.config.models import (
+    ExtensionLoad,
     ProjectRepositoryConfig,
     SingletonRepository,
     SingletonType,
@@ -225,3 +226,225 @@ def test_get_extension_repos_defaults_fs_to_local_filesystem(
     factory = RepositoryFactory(config)
 
     assert factory.get_extension_repos() == []
+
+
+# ── extension = false / load / entry ────────────────────────────────────────
+
+
+def test_get_extension_repos_excludes_a_standalone_declaring_extension_false(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """The repo stays a standalone — cloned, fetched, pulled, pinned — but no extension feature sees it."""
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [],
+            "standalone_repos": [
+                StandaloneRepositoryConfig(name="corpus", url="git@example.com:org/corpus.git", extension=False),
+                StandaloneRepositoryConfig(name="my-ext", url="git@example.com:org/my-ext.git"),
+            ],
+        },
+    )
+    factory = RepositoryFactory(config, fs=FakeFilesystem())
+
+    assert [r.name for r in factory.get_extension_repos()] == ["my-ext"]
+    assert [r.name for r in factory.get_standalone_repos()] == ["corpus", "my-ext"]
+    assert [r.name for r in factory.get_extension_standalone_repos()] == ["my-ext"]
+    assert [r.name for r in factory.get_non_extension_repos()] == ["corpus"]
+
+
+def test_get_extension_repos_excludes_a_manifest_bearing_project_repo_declaring_extension_false(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """`extension = false` wins over a root winter-ext.toml; the project repo still worktrees."""
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [
+                ProjectRepositoryConfig(name="winter-docs", url="git@example.com:org/winter-docs.git", extension=False),
+            ],
+            "standalone_repos": [],
+        },
+    )
+    main_path = config.workspace_root / "projects" / "winter-docs"
+    factory = RepositoryFactory(config, fs=FakeFilesystem(files={main_path / EXT_MANIFEST: ""}))
+
+    assert factory.get_extension_repos() == []
+    assert [r.name for r in factory.get_project_repos()] == ["winter-docs"]
+    opted_out = factory.get_non_extension_repos()
+    assert [(r.name, r.path) for r in opted_out] == [("winter-docs", main_path)]
+
+
+@pytest.mark.parametrize(
+    ("standalone_extension", "project_extension"),
+    [(False, True), (True, False), (False, False)],
+)
+def test_get_extension_repos_excludes_a_double_declaration_when_either_entry_says_false(
+    workspace_config: WorkspaceConfig, standalone_extension: bool, project_extension: bool
+) -> None:
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [
+                ProjectRepositoryConfig(
+                    name="winter-context",
+                    url="git@example.com:org/winter-context.git",
+                    extension=project_extension,
+                ),
+            ],
+            "standalone_repos": [
+                StandaloneRepositoryConfig(
+                    name="winter-context",
+                    url="git@example.com:org/winter-context.git",
+                    path=".winter/ext/context",
+                    extension=standalone_extension,
+                ),
+            ],
+        },
+    )
+    main_path = config.workspace_root / "projects" / "winter-context"
+    factory = RepositoryFactory(config, fs=FakeFilesystem(files={main_path / EXT_MANIFEST: ""}))
+
+    assert factory.get_extension_repos() == []
+    assert [r.name for r in factory.get_standalone_repos()] == ["winter-context"]
+    assert [r.name for r in factory.get_non_extension_repos()] == ["winter-context"]
+
+
+def test_get_standalone_repos_threads_load_and_entry_from_config(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [],
+            "standalone_repos": [
+                StandaloneRepositoryConfig(
+                    name="mirror",
+                    url="git@example.com:org/mirror.git",
+                    load=ExtensionLoad.lazy,
+                    entry=["docs/agents.md", "index.md"],
+                ),
+            ],
+        },
+    )
+
+    repo = RepositoryFactory(config, fs=FakeFilesystem()).get_standalone_repos()[0]
+
+    assert repo.extension is True
+    assert repo.load is ExtensionLoad.lazy
+    assert repo.entry == ("docs/agents.md", "index.md")
+
+
+def test_get_extension_repos_carries_a_project_repo_entrys_load_and_entry(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [
+                ProjectRepositoryConfig(
+                    name="winter-docs",
+                    url="git@example.com:org/winter-docs.git",
+                    load=ExtensionLoad.none,
+                    entry=["docs/agents.md"],
+                ),
+            ],
+            "standalone_repos": [],
+        },
+    )
+    main_path = config.workspace_root / "projects" / "winter-docs"
+    factory = RepositoryFactory(config, fs=FakeFilesystem(files={main_path / EXT_MANIFEST: ""}))
+
+    repo = factory.get_extension_repos()[0]
+
+    assert repo.load is ExtensionLoad.none
+    assert repo.entry == ("docs/agents.md",)
+
+
+def test_get_extension_repos_double_declaration_takes_load_from_the_standalone_entry_first(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """The standalone entry wins; the project entry fills only what the standalone leaves unset."""
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [
+                ProjectRepositoryConfig(
+                    name="winter-context",
+                    url="git@example.com:org/winter-context.git",
+                    load=ExtensionLoad.lazy,
+                    entry=["docs/agents.md"],
+                ),
+            ],
+            "standalone_repos": [
+                StandaloneRepositoryConfig(
+                    name="winter-context",
+                    url="git@example.com:org/winter-context.git",
+                    load=ExtensionLoad.eager,
+                ),
+            ],
+        },
+    )
+    main_path = config.workspace_root / "projects" / "winter-context"
+    factory = RepositoryFactory(config, fs=FakeFilesystem(files={main_path / EXT_MANIFEST: ""}))
+
+    repo = factory.get_extension_repos()[0]
+
+    assert repo.load is ExtensionLoad.eager
+    assert repo.entry == ("docs/agents.md",)
+
+
+def _context_only_config(workspace_config: WorkspaceConfig, **project_keys: object) -> WorkspaceConfig:
+    return workspace_config.model_copy(
+        update={
+            "project_repos": [
+                ProjectRepositoryConfig(name="app", url="git@example.com:org/app.git", **project_keys),  # type: ignore[arg-type]
+            ],
+            "standalone_repos": [],
+        },
+    )
+
+
+@pytest.mark.parametrize("keys", [{"load": ExtensionLoad.lazy}, {"load": ExtensionLoad.eager}, {"entry": ["a.md"]}])
+def test_get_context_only_repos_returns_a_manifest_less_project_repo_with_an_explicit_opt_in(
+    workspace_config: WorkspaceConfig, keys: dict[str, object]
+) -> None:
+    config = _context_only_config(workspace_config, **keys)
+    factory = RepositoryFactory(config, fs=FakeFilesystem())
+
+    repos = factory.get_context_only_repos()
+
+    assert [r.name for r in repos] == ["app"]
+    assert repos[0].path == config.workspace_root / "projects" / "app"
+    assert repos[0].load is keys.get("load")
+    # Never an extension: no skill, agent, hook, or service feature sees it.
+    assert factory.get_extension_repos() == []
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [{}, {"load": ExtensionLoad.none}, {"load": ExtensionLoad.lazy, "extension": False}],
+)
+def test_get_context_only_repos_skips_a_project_repo_without_an_opt_in_or_that_opted_out(
+    workspace_config: WorkspaceConfig, keys: dict[str, object]
+) -> None:
+    factory = RepositoryFactory(_context_only_config(workspace_config, **keys), fs=FakeFilesystem())
+
+    assert factory.get_context_only_repos() == []
+
+
+def test_get_context_only_repos_skips_a_project_repo_that_has_a_manifest(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    """A manifest-bearing project repo is already an extension, rendered through `get_extension_repos`."""
+    config = _context_only_config(workspace_config, load=ExtensionLoad.lazy)
+    main_path = config.workspace_root / "projects" / "app"
+    factory = RepositoryFactory(config, fs=FakeFilesystem(files={main_path / EXT_MANIFEST: ""}))
+
+    assert factory.get_context_only_repos() == []
+    assert [r.name for r in factory.get_extension_repos()] == ["app"]
+
+
+def test_get_context_only_repos_skips_a_project_repo_also_declared_as_a_standalone(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    config = _context_only_config(workspace_config, load=ExtensionLoad.lazy).model_copy(
+        update={"standalone_repos": [StandaloneRepositoryConfig(name="app", url="git@example.com:org/app.git")]}
+    )
+    factory = RepositoryFactory(config, fs=FakeFilesystem())
+
+    assert factory.get_context_only_repos() == []

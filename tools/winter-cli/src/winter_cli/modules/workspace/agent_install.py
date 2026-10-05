@@ -13,6 +13,7 @@ from winter_cli.modules.workspace.agent_transform.renderers import resolve_agent
 from winter_cli.modules.workspace.extension_manifest import (
     EXT_MANIFEST,
     ExtensionManifestLoader,
+    prefixes_overlap,
 )
 from winter_cli.modules.workspace.init_reporter import IInitReporter
 from winter_cli.modules.workspace.models import RepoError, StandaloneRepository
@@ -160,6 +161,42 @@ class ExtensionAgentService:
             reporter.repo_error(repo.name, str(exc))
             return False
 
+        return True
+
+    def retract(self, repo: StandaloneRepository, live_prefixes: frozenset[str]) -> bool:
+        """Remove the agent copies an earlier `process` rendered for a repo that is no longer an extension.
+
+        Counterpart of `ExtensionSymlinkService.retract` for a repo whose entry
+        declares `extension = false`: prunes every `<prefix>-*` artifact from
+        each vendor agents dir, with the same eligibility and prefix resolution
+        as `process`, and skips (rather than reports) a manifest that no longer
+        parses. A prefix a live extension in `live_prefixes` also claims is left
+        alone — rendered copies carry no record of which repo wrote them, and
+        that extension's own `process` keeps them current.
+        """
+        mode = self._config.adopt_extensions
+        if mode == AdoptExtensions.none:
+            return True
+        manifest_path = repo.path / EXT_MANIFEST
+        manifest_present = self._fs.is_file(manifest_path)
+        if mode == AdoptExtensions.winter and not manifest_present:
+            return True
+        try:
+            manifest = self._manifest_loader.load(repo, manifest_path if manifest_present else None)
+            if any(prefixes_overlap(manifest.prefix, live) for live in live_prefixes):
+                logger.info(
+                    "retract agents: %s skipped — prefix %s is claimed by a live extension",
+                    repo.name,
+                    manifest.prefix,
+                )
+                return True
+            for vendor in CodeAgentVendor:
+                self._prune(self._config.workspace_root / vendor.agents_subpath, manifest.prefix, set())
+        except RepoError as exc:
+            logger.info("retract agents: %s skipped — manifest unreadable: %s", repo.name, exc)
+        except OSError as exc:
+            logger.warning("retract agents: failed for %s — %s", repo.name, exc)
+            return False
         return True
 
     def check_unknown_overrides(

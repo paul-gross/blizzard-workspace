@@ -96,12 +96,14 @@ alpha, beta, …) have fixed indices (alpha=1, beta=2, …) so alpha starts at 4
 environments can run their services simultaneously without colliding.
 
 **Extensions** are independent repos that drop in skills, agents, and winter process hooks. They install themselves on
-`winter ws init` — each one is cloned into the workspace and `@`-mentioned in `AGENTS.md`/`CLAUDE.md`, so its context
-loads automatically. This is how multi-repo agent configuration stays organized: rather than scattering skills and
-agents across every project repo (where they'd be duplicated, diverge, and pollute the application code), the workspace
-pulls them all into a single place. Extensions are cross-harness — the same skills work across Claude Code, Codex, and
-OpenCode, reducing the vendor lock-in of per-tool skill marketplaces. Your agent then operates across every project
-worktree with the full set available at once — one context, one toolkit, every repo.
+`winter ws init` — each one is cloned into the workspace, and the workspace chooses per repo how its context is
+delivered: eager (always loaded), lazy (a routing row an agent follows when the subject is in scope), or none (see the
+[repository configuration reference](context/winter-cli/configuration/repositories.md)). This is how multi-repo agent
+configuration stays organized: rather than scattering skills and agents across every project repo (where they'd be
+duplicated, diverge, and pollute the application code), the workspace pulls them all into a single place. Extensions are
+cross-harness — the same skills work across Claude Code, Codex, and OpenCode, reducing the vendor lock-in of per-tool
+skill marketplaces. Your agent then operates across every project worktree with the full set available at once — one
+context, one toolkit, every repo.
 
 ## 🌲 Winter Ecosystem
 

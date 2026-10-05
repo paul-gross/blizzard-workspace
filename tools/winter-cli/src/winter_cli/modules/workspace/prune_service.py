@@ -90,7 +90,14 @@ class PruneService:
         # wrote the blocks for. get_standalone_repos() here would strip a
         # project-repo extension's block on every prune, which init then
         # re-adds on the next `winter ws init` (permanent init<->prune churn).
-        return self._extension_exclude_svc.finalize_excludes(self._repo_factory.get_extension_repos(), reporter)
+        #
+        # A standalone that opted out with `extension = false` still keeps its
+        # directory exclude (a path-only block), exactly as InitService writes it.
+        repos = [
+            *self._repo_factory.get_extension_repos(),
+            *self._repo_factory.get_non_extension_standalone_repos(),
+        ]
+        return self._extension_exclude_svc.finalize_excludes(repos, reporter)
 
     # ── detection ────────────────────────────────────────────────────────
 
@@ -142,7 +149,12 @@ class PruneService:
         # project-repo extension. get_standalone_repos() here would mark a
         # declared project repo's projects/<name>/ block as orphaned — reporting
         # the declared repo's own source checkout as an orphan clone.
+        #
+        # A declared standalone that opted out with `extension = false` is not an
+        # orphan clone: its block is its directory exclude, and the repo is still
+        # cloned, fetched, and pulled.
         eligible = {repo.name for repo in self._repo_factory.get_extension_repos()}
+        eligible.update(repo.name for repo in self._repo_factory.get_non_extension_standalone_repos())
         orphans: list[PruneOrphan] = []
         seen_paths: set[Path] = set()
 

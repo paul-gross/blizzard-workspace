@@ -467,3 +467,86 @@ def test_extension_skill_dir_equal_to_prefix_projects_bare() -> None:
     assert names == ["wf"]
     assert fs.is_symlink(target_root / "wf")
     assert not fs.exists(target_root / "wf-wf"), "double-prefixed 'wf-wf' must not be created"
+
+
+# ── retract ───────────────────────────────────────────────────────────────
+
+
+def test_retract_prunes_what_process_projected(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """A repo that stops being an extension loses its skill projections in every vendor dir."""
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    ext = _seed_extension(fs, config_files)
+    svc = _service(workspace_config, fs, config_files)
+    svc.process(ext, init_reporter)
+    other = WORKSPACE_ROOT / ".claude" / "skills" / "other-ext-keep"
+    fs.symlinks[other] = Path("../../other-ext/skills/keep")
+    assert fs.is_symlink(WORKSPACE_ROOT / ".claude" / "skills" / "my-ext-do-thing")
+
+    assert svc.retract(ext, frozenset()) is True
+
+    assert not fs.is_symlink(WORKSPACE_ROOT / ".claude" / "skills" / "my-ext-do-thing")
+    assert not fs.is_symlink(WORKSPACE_ROOT / ".codex" / "skills" / "my-ext-do-thing")
+    assert not fs.is_dir(WORKSPACE_ROOT / ".opencode" / "skill" / "my-ext-do-thing")
+    assert fs.is_symlink(other)
+    # The source checkout is untouched — the repo is still cloned.
+    assert fs.is_file(ext.path / "skills" / "do-thing" / "SKILL.md")
+
+
+def test_retract_leaves_a_manifest_less_repo_alone_in_winter_mode(workspace_config: WorkspaceConfig) -> None:
+    """`process` never projected it, so a same-named `<name>-*` entry is not winter's to remove."""
+    fs = FakeFilesystem()
+    ext = StandaloneRepository(name="vanilla", path=WORKSPACE_ROOT / "vanilla")
+    fs.directories.add(ext.path)
+    foreign = WORKSPACE_ROOT / ".claude" / "skills" / "vanilla-mine"
+    fs.symlinks[foreign] = Path("../../elsewhere")
+    svc = _service(workspace_config, fs)
+
+    assert svc.retract(ext, frozenset()) is True
+    assert fs.is_symlink(foreign)
+
+
+def test_retract_skips_an_unreadable_manifest_without_reporting(workspace_config: WorkspaceConfig) -> None:
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    ext = _seed_extension(fs, config_files)
+    loader = ExtensionManifestLoader(
+        config_file_reader=FakeConfigFileReader(config_files, broken={ext.path / "winter-ext.toml"})
+    )
+    svc = ExtensionSymlinkService(config=workspace_config, fs=fs, manifest_loader=loader)
+
+    assert svc.retract(ext, frozenset()) is True
+
+
+def test_retract_leaves_a_prefix_a_live_extension_claims(
+    workspace_config: WorkspaceConfig, init_reporter: FakeInitReporter
+) -> None:
+    """A mirror sharing a live extension's prefix must not tear down that extension's skills."""
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    live = _seed_extension(fs, config_files, name="my-ext")
+    mirror = _seed_extension(fs, config_files, name="my-ext-mirror")
+    config_files[mirror.path / "winter-ext.toml"] = {"name": "my-ext-mirror", "prefix": "my-ext"}
+    svc = _service(workspace_config, fs, config_files)
+    svc.process(live, init_reporter)
+    claude_link = WORKSPACE_ROOT / ".claude" / "skills" / "my-ext-do-thing"
+    opencode_copy = WORKSPACE_ROOT / ".opencode" / "skill" / "my-ext-do-thing"
+    assert fs.is_symlink(claude_link)
+
+    live_prefix = svc.projected_prefix(live)
+    assert live_prefix == "my-ext"
+    assert svc.retract(mirror, frozenset({live_prefix})) is True
+
+    assert fs.is_symlink(claude_link)
+    assert fs.is_dir(opencode_copy)
+
+
+def test_projected_prefix_is_none_for_a_repo_process_would_skip(workspace_config: WorkspaceConfig) -> None:
+    fs = FakeFilesystem()
+    ext = StandaloneRepository(name="vanilla", path=WORKSPACE_ROOT / "vanilla")
+    fs.directories.add(ext.path)
+    svc = _service(workspace_config, fs)
+
+    assert svc.projected_prefix(ext) is None

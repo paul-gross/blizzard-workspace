@@ -205,8 +205,8 @@ use) when a hook failure must surface as a user-actionable error before any work
 `AGENTS.winter.md` opens with a single `# Path notation resolution` heading; every bullet under it binds an extension
 name (its `<name>:` path-notation prefix) to the location that resolves it. The entry point is resolved the same way for
 every extension — `index.md`, then `AGENTS.md`, then `context/index.md`, first match wins (mirroring the
-`skills_dir`/`agents_dir` default-discovery fallback above) — but how that entry point reaches an agent is set by the
-manifest's `load` key.
+`skills_dir`/`agents_dir` default-discovery fallback above) — unless the repo's workspace entry declares `entry`, which
+replaces that list (see below). How the entry point reaches an agent is set by `load`.
 
 | `load`  | Bullet <!-- winter-lint:example -->                              | Cost                                                                                   |
 | ------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
@@ -217,13 +217,32 @@ Pick `eager` for context every session needs regardless of the task; pick `lazy`
 subject is in scope. `description` is what tells a reader whether to follow a lazy link, so an extension that declares
 `load = "lazy"` should declare one too — it is not required, and a row without it renders as the bare link.
 
-**Defaults.** When `load` is absent, the mode falls back to the extension's repo kind — a standalone is `eager`, a
-project repo is `lazy`. That is the behavior that predates the key, so adding it to the schema changed no existing
-workspace's generated file.
+**Precedence.** `load` is resolved as: the repo's workspace entry (`[[standalone_repository]]` /
+`[[project_repository]]`) > `load` in `winter-ext.toml` > the repo-kind default. The workspace entry also accepts
+`load = "none"`, which renders no bullet while leaving every other extension feature in place; a manifest may not
+declare `none`. The keys themselves are defined in
+[repositories.md](./repositories.md#extension-load-entry--the-workspace-governs-a-repos-extension-role).
 
-**`load = "eager"` is refused for a project repo.** A project repo has N copies on disk (see below), and an eager import
-resolves to exactly one of them. `winter ws init` reports the declaration and renders the bullet lazily rather than
-failing the reconcile.
+**Defaults.** When neither declares `load`, the mode falls back to the extension's repo kind — a standalone is `eager`,
+a project repo is `lazy`.
+
+**Manifest-less repos.** A repo with no `winter-ext.toml` renders a bullet only under `adopt_extensions = "all"` or when
+its workspace entry opts it in explicitly. The opt-in is a declared `load = "eager"` or `"lazy"`, or a declared `entry`;
+an `entry` alone renders at the repo kind's default load. It holds under `winter` too, and it opts the repo into context
+delivery only, never into skills, agents, hooks, or any other extension feature. For a `[[project_repository]]` with no
+manifest it yields the lazy routing row described under [Project-repo extensions](#project-repo-extensions). Under the
+default `winter` mode a plain repo cloned for its data (a root `AGENTS.md` written for contributors to that repo)
+otherwise injects nothing, the same gate skill and agent projection apply.
+
+**`entry`.** The workspace entry's `entry` is a prioritized candidate list: winter takes the first listed path that
+exists in the repo — one entry point, never several — in place of the default `index.md`, `AGENTS.md`,
+`context/index.md`. A repo that needs several files injected `@`-imports them from its entry point. When no listed path
+exists, the repo renders no bullet and `winter ws init` reports a per-repo warning naming the paths it tried, since the
+workspace asked for one by name. A repo with no declared `entry` and none of the defaults renders no bullet, silently.
+
+**`load = "eager"` is refused for a project repo**, whether declared by the manifest or the workspace entry. A project
+repo has N copies on disk (see below), and an eager import resolves to exactly one of them. `winter ws init` reports the
+declaration and renders the bullet lazily rather than failing the reconcile.
 
 ## Project-repo extensions
 
@@ -231,7 +250,9 @@ A `[[project_repository]]` whose `projects/<name>/` root carries a `winter-ext.t
 separate `[[standalone_repository]]` clone is needed. Every extension feature (`winter doctor`, `winter lint`,
 `winter graph`, the capability registry, service-manifest collection, provision handlers, hooks, skills/agents
 projection) resolves it exactly like a standalone, reading `winter-ext.toml` and everything it declares from the
-`projects/<name>/` root — the source checkout, never a per-env worktree.
+`projects/<name>/` root — the source checkout, never a per-env worktree. A project repo with no manifest is not
+extension-eligible; the explicit `load` / `entry` opt-in described under [Context delivery](#context-delivery) gives it
+the routing row below and nothing more.
 
 Context delivery is the one place a project-repo extension renders differently from a standalone. A project repo has N
 copies on disk — the source checkout plus one worktree per feature env — so it defaults to `load = "lazy"` and cannot
@@ -263,8 +284,10 @@ a no-`@` path-template bullet instead.
 
 The top-level `adopt_extensions` field controls when winter processes a standalone repo's skills and agents:
 
-| Value              | Behavior                                                                                                                                                                                                                              |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `winter` (default) | Process only standalone repos that have a `winter-ext.toml` at the repo root. SKILL.md frontmatter is strictly validated.                                                                                                             |
-| `all`              | Process any standalone repo with `skills/`, `agents/`, `.claude/skills/`, or `.claude/agents/` directories, with or without a manifest. Frontmatter validation downgrades from refuse-to-warn — collisions become the user's problem. |
-| `none`             | Skip all extension processing. Standalone repos are still cloned, but no symlinks are created.                                                                                                                                        |
+| Value              | Behavior                                                                                                                                                                                                                                                                                       |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `winter` (default) | Process only standalone repos that have a `winter-ext.toml` at the repo root — skills, agents, and the `AGENTS.winter.md` bullet alike. SKILL.md frontmatter is strictly validated. A manifest-less repo renders a bullet only on explicit opt-in (see [Context delivery](#context-delivery)). |
+| `all`              | Process any standalone repo with `skills/`, `agents/`, `.claude/skills/`, or `.claude/agents/` directories, with or without a manifest, and render a bullet for any with an entry point. Frontmatter validation downgrades from refuse-to-warn — collisions become the user's problem.         |
+| `none`             | Skip all extension processing. Standalone repos are still cloned, but no symlinks are created.                                                                                                                                                                                                 |
+
+A repo entry's `extension = false` overrides all three modes: the repo is cloned and pinned but processed by nothing.

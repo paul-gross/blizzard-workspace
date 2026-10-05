@@ -286,7 +286,8 @@ class Container(containers.DeclarativeContainer):
         # dashboard-TUI plugin.py discovery, not the skills/agents/doctor/lint/
         # graph extension surface winter#160 moved to project-repo extensions.
         # Revisit if a project-repo extension ever needs to ship a dashboard plugin.
-        standalone_repos=repo_factory.provided.get_standalone_repos.call(),
+        # A standalone that opted out with `extension = false` is data, so it ships none.
+        standalone_repos=repo_factory.provided.get_extension_standalone_repos.call(),
     )
 
     # `DashboardSnapshotService._build` rebuilds its own ReadWorkspaceRepository

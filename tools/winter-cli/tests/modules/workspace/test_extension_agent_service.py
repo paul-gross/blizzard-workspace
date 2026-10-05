@@ -626,3 +626,51 @@ def test_process_does_not_partially_write_when_a_later_vendor_fails(init_reporte
     assert render_warnings, "expected agent_render_warning for the partially-mapped tier"
     combined = " ".join(a[3] for a in render_warnings)
     assert "claude-only" in combined
+
+
+def test_retract_prunes_rendered_copies_from_every_vendor_dir(init_reporter: FakeInitReporter) -> None:
+    """A repo that stops being an extension loses its rendered agent copies; other prefixes survive."""
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    ext = _seed_extension(fs, config_files, agent_files={"reviewer.md": _CANONICAL_AGENT})
+    svc = _service(_config(), fs, config_files)
+    svc.process(ext, init_reporter)
+    other = WORKSPACE_ROOT / ".claude" / "agents" / "other-keep.md"
+    fs.files[other] = "# keep\n"
+    claude_copy = WORKSPACE_ROOT / ".claude" / "agents" / "wf-reviewer.md"
+    assert fs.is_file(claude_copy)
+
+    assert svc.retract(ext, frozenset()) is True
+
+    assert not fs.is_file(claude_copy)
+    assert fs.is_file(other)
+    assert fs.is_file(ext.path / "agents" / "reviewer.md")
+
+
+def test_retract_is_a_no_op_when_adoption_is_disabled() -> None:
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    ext = _seed_extension(fs, config_files)
+    stray = WORKSPACE_ROOT / ".claude" / "agents" / "wf-reviewer.md"
+    fs.files[stray] = "# stray\n"
+    svc = _service(_config(AdoptExtensions.none), fs, config_files)
+
+    assert svc.retract(ext, frozenset()) is True
+    assert fs.is_file(stray)
+
+
+def test_retract_leaves_a_prefix_a_live_extension_claims(init_reporter: FakeInitReporter) -> None:
+    """A mirror sharing a live extension's prefix must not tear down that extension's agent copies."""
+    fs = FakeFilesystem()
+    config_files: dict[Path, dict] = {}
+    live = _seed_extension(fs, config_files, name="wf")
+    mirror = _seed_extension(fs, config_files, name="wf-mirror")
+    config_files[mirror.path / "winter-ext.toml"] = {"name": "wf-mirror", "prefix": "wf"}
+    svc = _service(_config(), fs, config_files)
+    svc.process(live, init_reporter)
+    claude_copy = WORKSPACE_ROOT / ".claude" / "agents" / "wf-reviewer.md"
+    assert fs.is_file(claude_copy)
+
+    assert svc.retract(mirror, frozenset({"wf"})) is True
+
+    assert fs.is_file(claude_copy)
