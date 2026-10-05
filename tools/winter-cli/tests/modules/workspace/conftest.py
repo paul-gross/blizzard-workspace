@@ -20,15 +20,17 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from tests.conftest import FakeFilesystem, make_workspace_config
+from tests.conftest import FakeEnvIndexRegistry, FakeFilesystem, make_workspace_config
+from winter_cli.config.local_overlay_repository import ILocalOverlayRepository
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.config.workspace import CONFIG_FILE, WINTER_DIR
-from winter_cli.core.config_file import ConfigFileReadError, IConfigFileReader
+from winter_cli.core.config_file import ConfigFileReadError
 from winter_cli.core.filesystem import IFilesystemReader
+from winter_cli.modules.workspace.env_index import EnvPortBaseResolver
 from winter_cli.modules.workspace.models import ProjectRepository, RepoError, Workspace
 from winter_cli.modules.workspace.nested_workspace_runner import INestedWorkspaceRunner
 from winter_cli.modules.workspace.nested_workspace_service import NestedWorkspaceService
@@ -209,23 +211,48 @@ class EveryRootHasConfigFilesystem(FakeFilesystem):
         return (path.name == CONFIG_FILE and path.parent.name == WINTER_DIR) or super().is_file(path)
 
 
-class FakeNestedConfigFiles:
-    """IConfigFileReader fake for nested config files — a path absent from `files` parses as `{}`.
+class FakeLocalOverlayRepository:
+    """ILocalOverlayRepository fake — in-memory committed and local layers per nested root.
 
-    A path in `broken` raises `ConfigFileReadError`.
+    `committed` / `local` map a root to its parsed `config.toml` / `config.local.toml`;
+    a root absent from either reads as `{}`, and a root in `malformed` raises
+    `ConfigFileReadError` from both methods. `upsert_local` merges into `local`, returns
+    whether anything changed, and records each call in `upserts` and, when given, the
+    shared `events` log so a test can assert the write precedes the nested init.
     """
 
-    def __init__(self, files: Mapping[Path, dict] | None = None, broken: Iterable[Path] = ()) -> None:
-        self.files = dict(files or {})
-        self.broken = set(broken)
+    def __init__(
+        self,
+        *,
+        committed: dict[Path, dict[str, Any]] | None = None,
+        local: dict[Path, dict[str, Any]] | None = None,
+        events: list[str] | None = None,
+    ) -> None:
+        self.committed = dict(committed or {})
+        self.local = {root: dict(values) for root, values in (local or {}).items()}
+        self.events = events if events is not None else []
+        self.upserts: list[tuple[Path, dict[str, Any]]] = []
+        self.malformed: set[Path] = set()
 
-    def load(self, path: Path) -> dict:
-        if path in self.broken:
-            raise ConfigFileReadError(f"reading {path} — Invalid value (at line 1)")
-        return self.files.get(path, {})
+    def read_layers(self, root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
+        self._refuse_malformed(root)
+        return dict(self.committed.get(root, {})), dict(self.local.get(root, {}))
+
+    def upsert_local(self, root: Path, values: Mapping[str, Any]) -> bool:
+        self._refuse_malformed(root)
+        self.events.append(f"overlay_write:{root}")
+        self.upserts.append((root, dict(values)))
+        current = self.local.setdefault(root, {})
+        changed = any(key not in current or current[key] != value for key, value in values.items())
+        current.update(values)
+        return changed
+
+    def _refuse_malformed(self, root: Path) -> None:
+        if root in self.malformed:
+            raise ConfigFileReadError(f"reading {root / '.winter' / 'config.local.toml'} — Invalid value (at line 1)")
 
 
-def _conforms_fake_nested_config_files(x: FakeNestedConfigFiles) -> IConfigFileReader:
+def _conforms_fake_local_overlay_repository(x: FakeLocalOverlayRepository) -> ILocalOverlayRepository:
     return x
 
 
@@ -233,26 +260,26 @@ def make_nested_service(
     runner: INestedWorkspaceRunner,
     *,
     config: WorkspaceConfig | None = None,
+    registry: FakeEnvIndexRegistry | None = None,
+    overlay: FakeLocalOverlayRepository | None = None,
     fs: IFilesystemReader | None = None,
     environ: Mapping[str, str] | None = None,
-    config_files: Mapping[Path, dict] | None = None,
-    broken_config_files: Iterable[Path] = (),
 ) -> NestedWorkspaceService:
     """A `NestedWorkspaceService` over fakes.
 
-    The outer workspace root defaults to `/ws`; every nested root holds a
-    `.winter/config.toml` unless *fs* says otherwise, and the process
-    environment is empty unless *environ* is given. *config_files* maps a
-    nested config file to its parsed content, and each one exists on the
-    default filesystem; any other config file parses as `{}`, and one in
-    *broken_config_files* is not valid TOML.
+    The outer config defaults to prefix `t` at `/ws` with a band wide enough
+    for any nested footprint; every nested root holds a `.winter/config.toml`
+    unless *fs* says otherwise, and the process environment is empty unless
+    *environ* is given.
     """
-    outer = config or make_workspace_config()
-    files = dict(config_files or {})
+    outer = config or make_workspace_config(ports_per_env=1000)
     return NestedWorkspaceService(
         runner,
-        fs=fs or EveryRootHasConfigFilesystem(files=dict.fromkeys(files, "")),
+        fs=fs or EveryRootHasConfigFilesystem(),
         workspace_root=outer.workspace_root,
         environ=environ if environ is not None else {},
-        config_file_reader=FakeNestedConfigFiles(files, broken_config_files),
+        port_bases=EnvPortBaseResolver(outer, registry or FakeEnvIndexRegistry()),
+        service_prefix=outer.service_prefix,
+        ports_per_env=outer.ports_per_env,
+        overlay_repo=overlay or FakeLocalOverlayRepository(),
     )

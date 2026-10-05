@@ -85,6 +85,7 @@ def test_container_resolves_command_entry_runner_and_env_provisioner(container: 
 
 def test_container_injects_the_nested_workspace_service_into_init_destroy_and_status(container: Container) -> None:
     """The nested runner runs `winter` from PATH, and one service instance reaches every nested call site."""
+    from winter_cli.config.internal.tomlkit_local_overlay_repository import TomlkitLocalOverlayRepository
     from winter_cli.modules.workspace.destroy_service import DestroyService
     from winter_cli.modules.workspace.internal.subprocess_nested_workspace_runner import (
         SubprocessNestedWorkspaceRunner,
@@ -102,6 +103,8 @@ def test_container_injects_the_nested_workspace_service_into_init_destroy_and_st
     for svc in (container.init_svc(), destroy_svc, container.workspace_snapshot_svc()):
         assert svc._nested_svc is nested_svc
     assert nested_svc._runner is runner
+    overlay_repo = container.nested_workspace_svc()._overlay_repo
+    assert isinstance(overlay_repo, TomlkitLocalOverlayRepository)
 
 
 def test_container_resolves_restack_providers(container: Container) -> None:

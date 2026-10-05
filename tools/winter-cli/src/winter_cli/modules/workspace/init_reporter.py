@@ -85,6 +85,8 @@ class StreamReporter:
             self._echo(f"[{repo}] would stop nested workspace services at {location}")
         elif action == "nested_workspace_services_stopped":
             self._echo(f"[{repo}] nested workspace services stopped at {location}")
+        elif action == "nested_overlay_written":
+            self._echo(f"[{repo}] nested config.local.toml updated: {detail}")
         elif action == "would_remove_workspace_exclude":
             self._echo(f"[{repo}] would strip workspace exclude block: {detail}")
         elif action == "pinned":

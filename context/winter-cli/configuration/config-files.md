@@ -81,6 +81,11 @@ user.email = "john.doe@example.com"
 The overlay uses the same schema as the shared config. Keys in the overlay override the shared config key-by-key. The
 `[git]` identity is applied to every repo winter-cli manages during `winter ws init`.
 
+**Keys winter writes.** For a [`nested = true`](./repositories.md#nested--a-project-repo-that-is-itself-a-workspace)
+project repo, `winter ws init <env>` writes the outer env's delegated port and prefix keys into the *nested* workspace's
+`.winter/config.local.toml`, creating the file when it is missing. Which keys, and how the rest of the file is kept, is
+owned by [ports-and-environments.md — Nested workspaces](./ports-and-environments.md#nested-workspaces).
+
 **Merge depth.** How deep a key merges is per-key, not uniform. A scalar key is replaced outright. Table keys — `[git]`,
 `[keybindings]`, `[tui]`, `[capabilities]`, `[env]`, `[model_tiers]`, `[agent_model_overrides]` — merge **one level
 deep**: the overlay's immediate sub-keys override the shared config's, but each sub-key's *value* is replaced wholesale

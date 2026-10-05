@@ -15,6 +15,7 @@ from tests.conftest import (
     FakeWorkspaceExcludeLocator,
 )
 from tests.modules.workspace.conftest import (
+    FakeLocalOverlayRepository,
     FakeNestedWorkspaceRunner,
     make_nested_service,
     nested_env,
@@ -84,24 +85,21 @@ def _service(
         ),
         provision_svc=provision_svc,
         nested_svc=(
-            make_nested_service(
-                nested_runner,
-                config_files=_config_files(nested_layers or {}),
-                broken_config_files=_config_files(nested_layers or {}) if malformed_nested_config else (),
-            )
+            make_nested_service(nested_runner, overlay=_overlay(nested_layers or {}, malformed_nested_config))
             if nested_runner is not None
             else None
         ),
     )
 
 
-def _config_files(layers: dict[Path, tuple[dict[str, Any], dict[str, Any]]]) -> dict[Path, dict[str, Any]]:
-    """Each nested root's committed and local layers, keyed by the config file each is read from."""
-    files: dict[Path, dict[str, Any]] = {}
-    for root, (committed, local) in layers.items():
-        files[root / ".winter" / "config.toml"] = committed
-        files[root / ".winter" / "config.local.toml"] = local
-    return files
+def _overlay(layers: dict[Path, tuple[dict[str, Any], dict[str, Any]]], malformed: bool) -> FakeLocalOverlayRepository:
+    overlay = FakeLocalOverlayRepository(
+        committed={root: committed for root, (committed, _) in layers.items()},
+        local={root: local for root, (_, local) in layers.items()},
+    )
+    if malformed:
+        overlay.malformed.update(layers)
+    return overlay
 
 
 def test_destroy_env_removes_worktree_dir_and_env_dir(

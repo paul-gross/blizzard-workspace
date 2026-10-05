@@ -92,8 +92,14 @@ into each env like any project repo, then drives each env's copy as a workspace 
 name = "lab"
 url = "git@example.com:org/lab-workspace.git"
 nested = true
+envs = 3                                                # optional; usable nested feature envs
 cmd = ["<bootstrap the nested workspace's toolchain>"]  # whatever it needs before its own CLI can run
 ```
+
+| Key      | Value          | Effect                                                                                                                                                                                                                |
+| -------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nested` | `true`         | The repo is itself a workspace, initialized, reported, and destroyed inside each env's worktree of it.                                                                                                                |
+| `envs`   | integer `>= 1` | The number of usable feature envs the nested workspace holds; what winter writes from it is in [ports-and-environments.md — Nested workspaces](./ports-and-environments.md#nested-workspaces). Needs `nested = true`. |
 
 - **`winter ws init <env>`** runs the entry's `cmd` in `<env>/lab/`, then initializes the nested workspace there — see
   [ws init — Nested workspaces](../usage/ws/init.md#nested-workspaces).

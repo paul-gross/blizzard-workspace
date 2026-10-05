@@ -9,6 +9,7 @@ import click
 from dependency_injector import containers, providers
 
 from winter_cli.config.internal.cwd_workspace_locator import CwdWorkspaceLocator
+from winter_cli.config.internal.tomlkit_local_overlay_repository import TomlkitLocalOverlayRepository
 from winter_cli.config.internal.write_winter_configuration_repository import (
     WriteWinterConfigurationRepository,
 )
@@ -37,6 +38,7 @@ from winter_cli.modules.workspace.destroy_service import DestroyService
 from winter_cli.modules.workspace.drift import DriftWarningService
 from winter_cli.modules.workspace.env_checkout_service import EnvCheckoutService
 from winter_cli.modules.workspace.env_clean_service import EnvCleanService
+from winter_cli.modules.workspace.env_index import EnvPortBaseResolver
 from winter_cli.modules.workspace.env_reset_service import EnvResetService
 from winter_cli.modules.workspace.env_restack_plan_service import EnvRestackPlanService
 from winter_cli.modules.workspace.env_restack_service import EnvRestackService
@@ -480,12 +482,25 @@ class Container(containers.DeclarativeContainer):
         exclude_locator=workspace_exclude_locator,
     )
 
+    # Reads and writes another workspace root's config files — how a nested
+    # workspace receives the port band and prefix its outer env delegates.
+    local_overlay_repo = providers.Singleton(
+        TomlkitLocalOverlayRepository,
+        fs=fs,
+        config_file_reader=config_file_reader,
+    )
+
     # Runs a `nested = true` repo's own winter CLI inside each env's worktree of
     # it — `winter` from PATH, so the shim resolves the nested root's CLI.
     nested_workspace_runner = providers.Singleton(
         SubprocessNestedWorkspaceRunner,
         subprocess_runner=subprocess_runner,
         error_factory=repo_error_factory,
+    )
+    outer_env_port_bases = providers.Factory(
+        EnvPortBaseResolver,
+        config=workspace_config,
+        registry=env_index_registry,
     )
     # One per process: it verifies each nested root once and reuses that for
     # every later call into it, across init, status, and destroy.
@@ -495,7 +510,10 @@ class Container(containers.DeclarativeContainer):
         fs=fs,
         workspace_root=workspace_config.provided.workspace_root,
         environ=providers.Object(os.environ),
-        config_file_reader=config_file_reader,
+        port_bases=outer_env_port_bases,
+        service_prefix=workspace_config.provided.service_prefix,
+        ports_per_env=workspace_config.provided.ports_per_env,
+        overlay_repo=local_overlay_repo,
     )
 
     # `DashboardSnapshotService._build` rebuilds this same graph (workspace,

@@ -270,6 +270,19 @@ class ProjectRepositoryConfig(BaseModel):
     `extension = False`; declaring it with `load`, `entry`, or `extension =
     true` is a `ConfigError`."""
 
+    envs: int | None = None
+    """The number of usable feature envs a `nested = true` workspace holds.
+
+    An integer >= 1, valid only with `nested = true`. `winter ws init <env>`
+    writes `env_aliases = []` and `envs_per_workspace = envs + 1` into the nested
+    workspace's `.winter/config.local.toml` (with no aliases, index 1 is the
+    reserved buffer slot), so the nested workspace's port footprint is
+    `(envs + 2) * ports_per_env` of the nested workspace. Unset, winter writes
+    neither key. Removing `envs` once it was set deletes nothing — winter cannot
+    tell its own writes from the user's — so the last-written `env_aliases` and
+    `envs_per_workspace` stay in the nested `config.local.toml`; delete them by
+    hand to restore the nested workspace's own values."""
+
 
 class StandaloneRepositoryConfig(BaseModel):
     """A standalone repo declared in `[[standalone_repository]]`.

@@ -138,3 +138,46 @@ workspace-scoped services (shared db, broker) get a stable port window that sits
 immediately after the aliases (`N+1`, default index 11 with the 10-alias default) is reserved as a buffer between the
 fixed alias band and the hash band; this is why the invariant requires `envs_per_workspace >= len(env_aliases) + 2` (not
 `+1`).
+
+## Nested workspaces
+
+A [`nested = true`](./repositories.md#nested--a-project-repo-that-is-itself-a-workspace) project repo is a workspace of
+its own, running inside one outer env. Left alone it would compute ports from its own committed `base_port` and name its
+services under its own committed `service_prefix`, claiming the same ports and the same namespace as every other copy of
+that workspace on the host. So `winter ws init <env>` delegates the outer env's band and namespace to it.
+
+Before the nested `winter ws init` runs, winter writes these keys into the nested workspace's
+`.winter/config.local.toml`:
+
+| Key                  | Value                                              | Written                    |
+| -------------------- | -------------------------------------------------- | -------------------------- |
+| `base_port`          | the outer env's `WINTER_PORT_BASE`                 | always                     |
+| `service_prefix`     | `<outer service_prefix>-<env>`, e.g. `outer-alpha` | always                     |
+| `env_aliases`        | `[]`                                               | when the entry sets `envs` |
+| `envs_per_workspace` | `envs + 1`                                         | when the entry sets `envs` |
+
+The outer env's `WINTER_PORT_BASE` is its recorded index's band, resolved the same way `winter env <env>` resolves it.
+The nested workspace's index 0 band therefore starts at that port, so its `winter env workspace` reports a
+`WINTER_WORKSPACE_PORT_BASE` equal to the outer env's `WINTER_PORT_BASE`, and every nested env reports a
+`WINTER_SERVICE_PREFIX` of `<outer service_prefix>-<env>`.
+
+Winter sets only these keys. Every other key, comment, and table already in the nested `config.local.toml` is preserved,
+and the file is rewritten only when a value changed. The keys are rewritten on every `winter ws init <env>`, so they
+track the outer env; do not edit them by hand. The nested repo must gitignore `.winter/config.local.toml` (see
+[repositories.md — nested](./repositories.md#nested--a-project-repo-that-is-itself-a-workspace)).
+
+**`envs = N` means N usable nested feature envs.** With no aliases, the first slot after index 0 (index 1) is the
+reserved buffer slot and is never assigned to a feature env, so N usable envs need `envs_per_workspace = N + 1`. With
+`envs` unset, winter writes neither key. Removing `envs` once it was set deletes nothing — winter cannot tell its own
+writes from yours — so the last-written `env_aliases` and `envs_per_workspace` stay in the nested `config.local.toml`;
+delete them by hand to restore the nested workspace's own values. Changing `envs` after the nested workspace holds envs
+can leave a recorded index outside the new range; `winter doctor` warns about an out-of-range index in the nested
+workspace.
+
+**The footprint must fit the outer band.** A workspace uses indices `0..envs_per_workspace`, so a nested workspace can
+use `(envs_per_workspace + 1) x ports_per_env` ports, with its own `ports_per_env` (default 20) and the
+`envs_per_workspace` after the delegation (default 48). With `envs = N` that is `(N + 2) x ports_per_env`. When the
+footprint exceeds the outer `ports_per_env`, `winter ws init <env>` refuses that env: it names both numbers, writes
+nothing, and does not run the nested init. The error names a fitting change — a smaller `envs`, or a larger outer
+`ports_per_env`. For example, an outer `ports_per_env = 100` and a nested `ports_per_env = 20` fit `envs = 3`
+(`(3 + 2) x 20 = 100`) and refuse `envs = 4` (`120`).

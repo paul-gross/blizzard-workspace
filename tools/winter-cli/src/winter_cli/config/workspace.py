@@ -832,15 +832,21 @@ class WorkspaceConfigService:
         A non-boolean `nested`, `nested = true` on a standalone (one checkout
         shared by the whole workspace, not one per env), and `nested = true`
         alongside `load`, `entry`, or `extension = true` each raise
-        `ConfigError` naming the repo.
+        `ConfigError` naming the repo. `envs` — the nested workspace's usable
+        env count — must be an integer >= 1 on a `nested = true` repo and is
+        a `ConfigError` anywhere else.
         """
-        if "nested" not in entry:
-            return {}
         where = f"{kind} repo {label!r}"
+        if "nested" not in entry:
+            if "envs" in entry:
+                raise ConfigError(f"Invalid `envs` for {where}: only a `nested = true` repo can set `envs`.")
+            return {}
         nested = entry["nested"]
         if not isinstance(nested, bool):
             raise ConfigError(f"Invalid `nested` {nested!r} for {where}: must be true or false.")
         if not nested:
+            if "envs" in entry:
+                raise ConfigError(f"Invalid `envs` for {where}: only a `nested = true` repo can set `envs`.")
             return {"nested": False}
         if kind == "standalone":
             raise ConfigError(
@@ -852,7 +858,13 @@ class WorkspaceConfigService:
                 raise ConfigError(f"Invalid `{key}` for {where}: a nested workspace is never an extension.")
         if entry.get("extension") is True:
             raise ConfigError(f"Invalid `extension = true` for {where}: `nested = true` implies `extension = false`.")
-        return {"nested": True, "extension": False}
+        parsed: dict = {"nested": True, "extension": False}
+        if "envs" in entry:
+            envs = entry["envs"]
+            if not isinstance(envs, int) or isinstance(envs, bool) or envs < 1:
+                raise ConfigError(f"Invalid `envs` {envs!r} for {where}: must be an integer >= 1.")
+            parsed["envs"] = envs
+        return parsed
 
     @staticmethod
     def _validate_relative_path(value: str, label: str | None) -> None:

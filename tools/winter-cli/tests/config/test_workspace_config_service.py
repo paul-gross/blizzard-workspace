@@ -1833,3 +1833,31 @@ def test_project_repo_rejects_invalid_nested_combinations(entry: dict, message: 
 def test_standalone_repo_rejects_nested_true() -> None:
     with pytest.raises(ConfigError, match="only a \\[\\[project_repository\\]\\] can be a nested workspace"):
         _load_with_repo("standalone_repository", {"nested": True})
+
+
+# ── repo entry envs key ───────────────────────────────────────────────────────
+
+
+def test_project_repo_envs_defaults_to_none() -> None:
+    assert _load_with_repo("project_repository", {"nested": True}).project_repos[0].envs is None
+
+
+def test_project_repo_envs_is_read_on_a_nested_repo() -> None:
+    assert _load_with_repo("project_repository", {"nested": True, "envs": 3}).project_repos[0].envs == 3
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, "3", 2.5])
+def test_project_repo_rejects_an_envs_that_is_not_an_integer_of_at_least_one(bad: object) -> None:
+    with pytest.raises(ConfigError, match=r"envs.*integer >= 1"):
+        _load_with_repo("project_repository", {"nested": True, "envs": bad})
+
+
+@pytest.mark.parametrize("entry", [{"envs": 2}, {"nested": False, "envs": 2}])
+def test_project_repo_rejects_envs_without_nested_true(entry: dict) -> None:
+    with pytest.raises(ConfigError, match="only a `nested = true` repo can set `envs`"):
+        _load_with_repo("project_repository", entry)
+
+
+def test_standalone_repo_rejects_envs() -> None:
+    with pytest.raises(ConfigError, match="envs"):
+        _load_with_repo("standalone_repository", {"envs": 2})

@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from textwrap import dedent
 
@@ -69,11 +70,14 @@ def outer_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     outer_config = f"""\
         main_branch = "main"
         service_prefix = "outer"
+        base_port = 5000
+        ports_per_env = 100
 
         [[project_repository]]
         name = "lab"
         url = "{lab}"
         nested = true
+        envs = 3
         """
     (root / ".winter").mkdir()
     (root / ".winter" / "config.toml").write_text(dedent(outer_config))
@@ -106,6 +110,14 @@ def test_nested_workspace_is_initialized_reported_and_destroyed_with_its_env(out
     # The nested workspace was initialized inside the env worktree, cloning its own projects...
     assert (lab_alpha / "projects" / "app" / "README").is_file()
     assert ("lab", "winter ws init", 0) in reporter.cmds_completed
+    # The outer env's band and prefix were delegated: alpha is index 1, so its band starts at 5000 + 1 * 100.
+    delegated = tomllib.loads((lab_alpha / ".winter" / "config.local.toml").read_text())
+    assert delegated == {
+        "base_port": 5100,
+        "service_prefix": "outer-alpha",
+        "env_aliases": [],
+        "envs_per_workspace": 4,
+    }
     # ...while the outer source checkout was cloned but never initialized as a workspace.
     assert (outer_root / "projects" / "lab" / ".winter" / "config.toml").is_file()
     assert not (outer_root / "projects" / "lab" / "projects").exists()
@@ -213,6 +225,7 @@ def test_destroy_stops_the_nested_workspace_services_of_a_bound_provider(
     outer_config = f"""\
         main_branch = "main"
         service_prefix = "outer"
+        ports_per_env = 1000
 
         [[project_repository]]
         name = "lab"

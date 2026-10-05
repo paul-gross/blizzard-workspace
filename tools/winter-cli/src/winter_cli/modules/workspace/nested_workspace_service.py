@@ -4,18 +4,20 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from winter_cli.config.workspace import CONFIG_FILE, LOCAL_CONFIG_FILE, WINTER_DIR
+from winter_cli.config.workspace import CONFIG_FILE, WINTER_DIR
 from winter_cli.core.config_file import ConfigFileReadError
 from winter_cli.modules.workspace.models import RepoError
 from winter_cli.modules.workspace.nested_env import nested_chain, nested_child_env
+from winter_cli.modules.workspace.nested_overlay import delegated_keys, effective_ports_per_env, footprint
 from winter_cli.modules.workspace.nested_status import NestedStatusShapeError, parse_state, reported_root
 from winter_cli.util import deep_merge
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
 
-    from winter_cli.core.config_file import IConfigFileReader
+    from winter_cli.config.local_overlay_repository import ILocalOverlayRepository
     from winter_cli.core.filesystem import IFilesystemReader
+    from winter_cli.modules.workspace.env_index import EnvPortBaseResolver
     from winter_cli.modules.workspace.init_reporter import IInitReporter
     from winter_cli.modules.workspace.models import NestedWorkspaceState, ProjectRepository
     from winter_cli.modules.workspace.nested_workspace_runner import INestedWorkspaceRunner
@@ -59,27 +61,81 @@ class NestedWorkspaceService:
         fs: IFilesystemReader,
         workspace_root: Path,
         environ: Mapping[str, str],
-        config_file_reader: IConfigFileReader,
+        port_bases: EnvPortBaseResolver,
+        service_prefix: str,
+        ports_per_env: int,
+        overlay_repo: ILocalOverlayRepository,
     ) -> None:
         self._runner = runner
         self._fs = fs
         self._workspace_root = workspace_root
         self._environ = environ
-        self._config_file_reader = config_file_reader
+        self._port_bases = port_bases
+        self._service_prefix = service_prefix
+        self._ports_per_env = ports_per_env
+        self._overlay_repo = overlay_repo
         self._verified: set[Path] = set()
 
-    def reconcile(self, repo: ProjectRepository, root: Path, reporter: IInitReporter) -> None:
-        """Verify the nested *root*, then run `winter ws init` there; raise `RepoError` when either fails.
+    def reconcile(self, repo: ProjectRepository, root: Path, env: str, reporter: IInitReporter) -> None:
+        """Verify the nested *root*, delegate the outer *env*'s ports and prefix to it, then run `winter ws init` there.
 
-        A bare `ws init` reconciles the nested workspace and clones its
-        projects but creates no nested env, so init never recurses further.
+        Raises `RepoError` when the root fails verification, a config file the
+        delegation reads or writes is malformed, the delegation is refused, or
+        the init fails; any of the first three writes nothing and skips the init.
         """
         self._ensure_verified(root)
+        self._delegate(repo, root, env, reporter)
         reporter.cmd_started(repo.name, INIT_COMMAND)
         returncode = self._run(root, ["ws", "init"], lambda line: reporter.cmd_output_line(repo.name, line))
         reporter.cmd_completed(repo.name, INIT_COMMAND, returncode)
         if returncode != 0:
             raise RepoError(f"nested `{INIT_COMMAND}` exited with code {returncode}", cwd=str(root))
+
+    def _delegate(self, repo: ProjectRepository, root: Path, env: str, reporter: IInitReporter) -> None:
+        """Write the outer env's port base and service prefix into the nested `config.local.toml`.
+
+        The outer env's band is its `WINTER_PORT_BASE`, resolved registry-first
+        as every other consumer does, and the prefix is `<service_prefix>-<env>`.
+        Rewritten on every init so the nested workspace tracks the outer env.
+        A config file that is not valid TOML raises `RepoError` naming it.
+        """
+        try:
+            self._write_delegation(repo, root, env, reporter)
+        except ConfigFileReadError as exc:
+            raise RepoError(f"cannot delegate to the nested workspace at {root}: {exc}", cwd=str(root)) from exc
+
+    def _write_delegation(self, repo: ProjectRepository, root: Path, env: str, reporter: IInitReporter) -> None:
+        values = delegated_keys(self._port_bases.port_base(env), f"{self._service_prefix}-{env}", repo.envs)
+        committed, local = self._overlay_repo.read_layers(root)
+        local_after = {**local, **values}
+        used = footprint(committed, local_after)
+        available = self._ports_per_env
+        if used > available:
+            raise RepoError(self._refusal(repo, env, committed, local_after, used, available), cwd=str(root))
+        if self._overlay_repo.upsert_local(root, values):
+            summary = ", ".join(f"{key} = {value!r}" for key, value in values.items())
+            reporter.repo_action(repo.name, str(root), "nested_overlay_written", summary)
+
+    def _refusal(
+        self,
+        repo: ProjectRepository,
+        env: str,
+        committed: dict,
+        local_after: dict,
+        used: int,
+        available: int,
+    ) -> str:
+        """The refusal naming the footprint, the band, and a fitting change, all from the layers the check used."""
+        per_env = effective_ports_per_env(committed, local_after)
+        usable_that_fit = available // per_env - 2
+        message = (
+            f"nested workspace {repo.name!r} needs {used} ports for env {env!r} "
+            f"((envs_per_workspace + 1) x ports_per_env of {per_env}), but the outer env band holds only "
+            f"{available} (ports_per_env). Raise the outer `ports_per_env` to at least {used}"
+        )
+        if usable_that_fit >= 1:
+            return f"{message}, or set `envs = {usable_that_fit}` or fewer on its [[project_repository]] entry."
+        return f"{message}, or lower the nested workspace's `ports_per_env`."
 
     def state(self, root: Path) -> NestedWorkspaceState:
         """What the nested workspace at *root* holds, read from its `ws status --json`.
@@ -143,8 +199,7 @@ class NestedWorkspaceService:
         winter layers them. Raises `RepoError` when either is not valid TOML.
         """
         try:
-            committed = self._read_config(root / WINTER_DIR / CONFIG_FILE)
-            local = self._read_config(root / WINTER_DIR / LOCAL_CONFIG_FILE)
+            committed, local = self._overlay_repo.read_layers(root)
         except ConfigFileReadError as exc:
             raise RepoError(f"cannot read the nested workspace config at {root}: {exc}", cwd=str(root)) from exc
         return _binds_service(deep_merge(committed, local))
@@ -176,9 +231,6 @@ class NestedWorkspaceService:
             return False
         reporter.repo_action(repo.name, str(root), "nested_workspace_services_stopped")
         return True
-
-    def _read_config(self, path: Path) -> dict[str, Any]:
-        return self._config_file_reader.load(path) if self._fs.is_file(path) else {}
 
     def _ensure_verified(self, root: Path) -> None:
         """Refuse a guarded *root*, and verify it unless an earlier call in this process already did."""

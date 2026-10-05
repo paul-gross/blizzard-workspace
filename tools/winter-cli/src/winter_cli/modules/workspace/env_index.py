@@ -152,6 +152,22 @@ def build_env_trio(
     }
 
 
+class EnvPortBaseResolver:
+    """Resolves an env's `WINTER_PORT_BASE` as an int, the way `winter env <env>` does.
+
+    Registry-first via `build_env_trio`, so a consumer that only needs the port
+    base (the nested workspace delegating a band) takes this instead of the whole
+    `WorkspaceConfig`.
+    """
+
+    def __init__(self, config: WorkspaceConfig, registry: IEnvIndexRegistry | None) -> None:
+        self._config = config
+        self._registry = registry
+
+    def port_base(self, env_name: str) -> int:
+        return int(build_env_trio(env_name, self._config, self._registry)["WINTER_PORT_BASE"])
+
+
 class EnvIndexAllocator:
     """Allocates stable, collision-free env indices, persisting them to the registry.
 

@@ -600,7 +600,7 @@ class InitService:
             )
             self._run_cmds(worktree_path, repo, reporter)
             if repo.nested and self._nested_svc is not None:
-                self._nested_svc.reconcile(repo, worktree_path, reporter)
+                self._nested_svc.reconcile(repo, worktree_path, env_name, reporter)
         except (RepoError, OSError) as exc:
             reporter.repo_error(label, str(exc))
             return False

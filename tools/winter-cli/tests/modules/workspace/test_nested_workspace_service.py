@@ -7,8 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from tests.conftest import FakeFilesystem, FakeInitReporter, make_workspace_config
+from tests.conftest import FakeEnvIndexRegistry, FakeFilesystem, FakeInitReporter, make_workspace_config
 from tests.modules.workspace.conftest import (
+    FakeLocalOverlayRepository,
     FakeNestedWorkspaceRunner,
     make_nested_service,
     nested_env,
@@ -27,7 +28,7 @@ TWO_ENVS = NestedWorkspaceState(envs=(NestedEnvState(name="n1"), NestedEnvState(
 def test_reconcile_runs_nested_init_and_streams_its_output_as_the_repo(init_reporter: FakeInitReporter) -> None:
     runner = FakeNestedWorkspaceRunner(init_lines=["→ projects/", "✓ projects/ done"])
 
-    make_nested_service(runner).reconcile(LAB, ROOT, init_reporter)
+    make_nested_service(runner).reconcile(LAB, ROOT, "alpha", init_reporter)
 
     assert runner.status_calls == [ROOT]
     assert runner.calls == [("init", ROOT)]
@@ -36,11 +37,164 @@ def test_reconcile_runs_nested_init_and_streams_its_output_as_the_repo(init_repo
     assert init_reporter.cmds_completed == [("lab", "winter ws init", 0)]
 
 
+def _delegating(
+    *, envs: int | None = None, outer_ppe: int = 100, committed: dict | None = None, local: dict | None = None
+) -> tuple[ProjectRepository, FakeLocalOverlayRepository, list[str], FakeNestedWorkspaceRunner]:
+    events: list[str] = []
+    repo = ProjectRepository(name="lab", main_path=Path("/ws/projects/lab"), main_branch="main", nested=True, envs=envs)
+    overlay = FakeLocalOverlayRepository(
+        committed={ROOT: committed or {"ports_per_env": 20, "envs_per_workspace": 4}},
+        local={ROOT: local or {}},
+        events=events,
+    )
+    return repo, overlay, events, FakeNestedWorkspaceRunner(events=events)
+
+
+def _service(runner: FakeNestedWorkspaceRunner, overlay: FakeLocalOverlayRepository, *, outer_ppe: int = 100):
+    return make_nested_service(
+        runner,
+        config=make_workspace_config(service_prefix="outer", ports_per_env=outer_ppe, base_port=4000),
+        registry=FakeEnvIndexRegistry({"alpha": 1}),
+        overlay=overlay,
+    )
+
+
+def test_reconcile_delegates_the_outer_port_base_and_prefix_before_the_nested_init(
+    init_reporter: FakeInitReporter,
+) -> None:
+    repo, overlay, events, runner = _delegating()
+
+    _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    # Index 1 of an outer band of 100 starts at 4000 + 1 * 100.
+    assert overlay.local[ROOT] == {"base_port": 4100, "service_prefix": "outer-alpha"}
+    assert events == [f"overlay_write:{ROOT}", f"nested_init:{ROOT}"]
+    assert [a[2] for a in init_reporter.actions] == ["nested_overlay_written"]
+
+
+def test_reconcile_with_envs_clears_the_aliases_and_sets_the_envs_per_workspace(
+    init_reporter: FakeInitReporter,
+) -> None:
+    repo, overlay, _, runner = _delegating(envs=3)
+
+    _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.local[ROOT] == {
+        "base_port": 4100,
+        "service_prefix": "outer-alpha",
+        "env_aliases": [],
+        "envs_per_workspace": 4,
+    }
+
+
+def test_reconcile_resolves_the_outer_port_base_from_the_registry_before_the_formula(
+    init_reporter: FakeInitReporter,
+) -> None:
+    repo, overlay, _, runner = _delegating()
+    service = make_nested_service(
+        runner,
+        config=make_workspace_config(service_prefix="outer", ports_per_env=100, base_port=4000),
+        registry=FakeEnvIndexRegistry({"alpha": 7}),
+        overlay=overlay,
+    )
+
+    service.reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.local[ROOT]["base_port"] == 4700
+
+
+def test_reconcile_rewrites_the_delegated_keys_on_every_init(init_reporter: FakeInitReporter) -> None:
+    repo, overlay, _, runner = _delegating(local={"base_port": 9999, "service_prefix": "stale", "keep": "me"})
+    service = _service(runner, overlay)
+
+    service.reconcile(repo, ROOT, "alpha", init_reporter)
+    service.reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.local[ROOT] == {"base_port": 4100, "service_prefix": "outer-alpha", "keep": "me"}
+    assert len(overlay.upserts) == 2
+    assert [a[2] for a in init_reporter.actions] == ["nested_overlay_written"]
+
+
+def test_reconcile_reports_a_malformed_nested_config_as_a_repo_error_and_runs_nothing(
+    init_reporter: FakeInitReporter,
+) -> None:
+    repo, overlay, _, runner = _delegating()
+    overlay.malformed.add(ROOT)
+
+    with pytest.raises(RepoError, match=r"config\.local\.toml — Invalid value"):
+        _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.upserts == []
+    assert runner.calls == []
+
+
+def test_reconcile_refuses_a_footprint_larger_than_the_outer_band_and_writes_and_runs_nothing(
+    init_reporter: FakeInitReporter,
+) -> None:
+    repo, overlay, _, runner = _delegating(envs=4)
+
+    with pytest.raises(RepoError) as refused:
+        _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    message = str(refused.value)
+    assert "120 ports" in message
+    assert "holds only 100" in message
+    assert "`envs = 3`" in message
+    assert "`ports_per_env` to at least 120" in message
+    assert overlay.upserts == []
+    assert runner.calls == []
+    assert init_reporter.cmds_started == []
+
+
+def test_reconcile_refusal_names_the_ports_per_env_set_only_in_the_nested_local_overlay(
+    init_reporter: FakeInitReporter,
+) -> None:
+    repo, overlay, _, runner = _delegating(envs=4, committed={"envs_per_workspace": 4}, local={"ports_per_env": 25})
+
+    with pytest.raises(RepoError) as refused:
+        _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    # (4 + 1 + 1) x 25: the local layer's ports_per_env, not the default 20 of the committed one.
+    message = str(refused.value)
+    assert "150 ports" in message
+    assert "ports_per_env of 25" in message
+    assert "`envs = 2`" in message
+    assert overlay.upserts == []
+
+
+def test_reconcile_judges_the_nested_defaults_when_envs_is_unset(init_reporter: FakeInitReporter) -> None:
+    repo, overlay, _, runner = _delegating(committed={"ports_per_env": 20})
+
+    with pytest.raises(RepoError, match=r"980 ports.*holds only 100"):
+        _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.upserts == []
+
+
+def test_reconcile_suggests_lowering_the_nested_ports_when_no_envs_count_can_fit(
+    init_reporter: FakeInitReporter,
+) -> None:
+    repo, overlay, _, runner = _delegating(envs=1, committed={"ports_per_env": 50})
+
+    with pytest.raises(RepoError, match="lower the nested workspace's `ports_per_env`") as refused:
+        _service(runner, overlay, outer_ppe=100).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert "150 ports" in str(refused.value)
+
+
+def test_reconcile_accepts_a_footprint_that_exactly_fills_the_outer_band(init_reporter: FakeInitReporter) -> None:
+    repo, overlay, _, runner = _delegating(envs=3)
+
+    _service(runner, overlay, outer_ppe=100).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert runner.calls == [("init", ROOT)]
+
+
 def test_reconcile_raises_when_nested_init_exits_non_zero(init_reporter: FakeInitReporter) -> None:
     runner = FakeNestedWorkspaceRunner(init_returncode=1)
 
     with pytest.raises(RepoError, match="exited with code 1"):
-        make_nested_service(runner).reconcile(LAB, ROOT, init_reporter)
+        make_nested_service(runner).reconcile(LAB, ROOT, "alpha", init_reporter)
 
     assert init_reporter.cmds_completed == [("lab", "winter ws init", 1)]
 
@@ -105,11 +259,12 @@ def test_nested_workspace_state_counts_envs_dirtiness_and_unpushed_work() -> Non
 
 def test_a_root_path_mismatch_raises_and_runs_no_nested_command(init_reporter: FakeInitReporter) -> None:
     runner = FakeNestedWorkspaceRunner(statuses={ROOT: nested_status(OUTER, nested_env("n1"))})
-    service = make_nested_service(runner)
+    overlay = FakeLocalOverlayRepository()
+    service = make_nested_service(runner, overlay=overlay)
 
     for call in (
         lambda: service.state(ROOT),
-        lambda: service.reconcile(LAB, ROOT, init_reporter),
+        lambda: service.reconcile(LAB, ROOT, "alpha", init_reporter),
     ):
         with pytest.raises(RepoError, match="resolved workspace '/ws', not the nested workspace"):
             call()
@@ -119,6 +274,7 @@ def test_a_root_path_mismatch_raises_and_runs_no_nested_command(init_reporter: F
 
     assert destroyed is False
     assert runner.calls == []
+    assert overlay.upserts == []
     assert sum("not the nested workspace" in msg for _, msg in init_reporter.errors) == 2
 
 
@@ -133,7 +289,7 @@ def test_a_root_without_a_winter_config_raises_before_running_anything(init_repo
     runner = FakeNestedWorkspaceRunner()
 
     with pytest.raises(RepoError, match=r"no \.winter/config\.toml"):
-        make_nested_service(runner, fs=FakeFilesystem()).reconcile(LAB, ROOT, init_reporter)
+        make_nested_service(runner, fs=FakeFilesystem()).reconcile(LAB, ROOT, "alpha", init_reporter)
 
     assert runner.status_calls == []
     assert runner.calls == []
@@ -172,7 +328,7 @@ def test_a_root_is_verified_once_and_reused_by_every_later_call(init_reporter: F
 
     state = service.state(ROOT)
     service.destroy_envs(LAB, ROOT, state, force=False, strict=False, provision_teardown=True, reporter=init_reporter)
-    service.reconcile(LAB, ROOT, init_reporter)
+    service.reconcile(LAB, ROOT, "alpha", init_reporter)
 
     assert runner.status_calls == [ROOT]
     assert [c[0] for c in runner.calls] == ["destroy_env", "destroy_env", "init"]
@@ -191,7 +347,7 @@ def test_every_child_runs_with_the_scrubbed_env_and_the_chain_extended_by_this_w
     }
     runner = FakeNestedWorkspaceRunner()
 
-    make_nested_service(runner, environ=environ).reconcile(LAB, ROOT, init_reporter)
+    make_nested_service(runner, environ=environ).reconcile(LAB, ROOT, "alpha", init_reporter)
 
     assert len(runner.envs) == 2
     for env in runner.envs:
@@ -205,7 +361,7 @@ def test_a_process_whose_own_root_is_on_the_chain_refuses_every_nested_call(init
     with pytest.raises(RepoError, match="which an enclosing nested call already runs in"):
         service.state(ROOT)
     with pytest.raises(RepoError, match="which an enclosing nested call already runs in"):
-        service.reconcile(LAB, ROOT, init_reporter)
+        service.reconcile(LAB, ROOT, "alpha", init_reporter)
 
     assert runner.status_calls == []
     assert runner.calls == []

@@ -63,6 +63,8 @@ class ProjectRepository:
     cmd: list[str] = dataclasses.field(default_factory=list)
     nested: bool = False
     """The repo is itself a winter workspace, initialized and destroyed inside each env's worktree of it."""
+    envs: int | None = None
+    """The nested workspace's usable feature-env count, when the entry sets one."""
 
 
 @dataclasses.dataclass(frozen=True)

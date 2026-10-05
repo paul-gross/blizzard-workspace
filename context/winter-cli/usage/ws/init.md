@@ -55,14 +55,17 @@ For a `[[project_repository]]` declaring `nested = true` (see
 1. Create or reuse `<name>/<repo>/`, apply identity and excludes, and run the entry's `cmd` there, without the outer
    CLI's own runtime environment (see
    [repositories.md — nested](../../configuration/repositories.md#nested--a-project-repo-that-is-itself-a-workspace)).
-2. Run `winter ws init` inside `<name>/<repo>/`, streaming its output under the repo's name as `[<repo>] ...` lines.
+2. Write the delegated port and prefix keys into `<name>/<repo>/.winter/config.local.toml` — see
+   [ports-and-environments.md — Nested workspaces](../../configuration/ports-and-environments.md#nested-workspaces). A
+   delegation that does not fit the outer env's port band is refused here.
+3. Run `winter ws init` inside `<name>/<repo>/`, streaming its output under the repo's name as `[<repo>] ...` lines.
 
-A failing `cmd` skips step 2. A failing nested init (non-zero exit, or a `winter` that resolves some workspace other
-than `<name>/<repo>/`) is reported as that repo's error and fails the env; which workspace `winter` resolves is checked
-before the nested init runs. The nested init is bare, so it clones the nested workspace's projects but creates none of
-its feature envs; create those from inside the nested root with its own `winter ws init <nested-env>`. `winter ws init`
-with no target never initializes `projects/<repo>/` as a workspace, and `--all` initializes each existing env's copy
-again.
+A failing `cmd` skips steps 2 and 3, and a refused delegation skips step 3. A failing nested init (non-zero exit, or a
+`winter` that resolves some workspace other than `<name>/<repo>/`) is reported as that repo's error and fails the env;
+which workspace `winter` resolves is checked before step 2, so a mis-resolved one writes nothing. The nested init is
+bare, so it clones the nested workspace's projects but creates none of its feature envs; create those from inside the
+nested root with its own `winter ws init <nested-env>`. `winter ws init` with no target never initializes
+`projects/<repo>/` as a workspace, and `--all` initializes each existing env's copy again.
 
 ## Workspace exclude file
 
