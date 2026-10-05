@@ -474,3 +474,31 @@ def test_a_nested_repo_is_a_project_repo_but_never_an_extension_or_context_sourc
     assert factory.get_extension_repos() == []
     assert factory.get_context_only_repos() == []
     assert [r.name for r in factory.get_non_extension_repos()] == ["lab"]
+
+
+@pytest.mark.parametrize(
+    ("configured", "resolved"),
+    [(None, ("git",)), ([], ()), (["git", "secret"], ("git", "secret"))],
+)
+def test_a_nested_repo_resolves_inherit_local_with_git_as_the_default(
+    workspace_config: WorkspaceConfig, configured: list[str] | None, resolved: tuple[str, ...]
+) -> None:
+    """An unset `inherit_local` resolves to the `[git]` identity; an empty list passes nothing."""
+    config = workspace_config.model_copy(
+        update={
+            "project_repos": [
+                ProjectRepositoryConfig(
+                    name="lab",
+                    url="git@example.com:org/lab.git",
+                    nested=True,
+                    extension=False,
+                    inherit_local=configured,
+                ),
+            ],
+            "standalone_repos": [],
+        },
+    )
+
+    (lab,) = RepositoryFactory(config, fs=FakeFilesystem()).get_project_repos()
+
+    assert lab.inherit_local == resolved

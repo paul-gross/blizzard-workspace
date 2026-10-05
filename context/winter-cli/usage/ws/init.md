@@ -55,8 +55,10 @@ For a `[[project_repository]]` declaring `nested = true` (see
 1. Create or reuse `<name>/<repo>/`, apply identity and excludes, and run the entry's `cmd` there, without the outer
    CLI's own runtime environment (see
    [repositories.md — nested](../../configuration/repositories.md#nested--a-project-repo-that-is-itself-a-workspace)).
-2. Write the delegated port and prefix keys into `<name>/<repo>/.winter/config.local.toml` — see
-   [ports-and-environments.md — Nested workspaces](../../configuration/ports-and-environments.md#nested-workspaces). A
+2. Write the delegated port and prefix keys, plus the outer `config.local.toml` keys the entry's `inherit_local` names
+   (default `["git"]`), into `<name>/<repo>/.winter/config.local.toml` — see
+   [ports-and-environments.md — Nested workspaces](../../configuration/ports-and-environments.md#nested-workspaces) and
+   [config-files.md — Local overlay](../../configuration/config-files.md#local-overlay-winterconfiglocaltoml). A
    delegation that does not fit the outer env's port band is refused here.
 3. Run `winter ws init` inside `<name>/<repo>/`, streaming its output under the repo's name as `[<repo>] ...` lines.
 

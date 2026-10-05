@@ -96,10 +96,11 @@ envs = 3                                                # optional; usable neste
 cmd = ["<bootstrap the nested workspace's toolchain>"]  # whatever it needs before its own CLI can run
 ```
 
-| Key      | Value          | Effect                                                                                                                                                                                                                |
-| -------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `nested` | `true`         | The repo is itself a workspace, initialized, reported, and destroyed inside each env's worktree of it.                                                                                                                |
-| `envs`   | integer `>= 1` | The number of usable feature envs the nested workspace holds; what winter writes from it is in [ports-and-environments.md — Nested workspaces](./ports-and-environments.md#nested-workspaces). Needs `nested = true`. |
+| Key             | Value             | Effect                                                                                                                                                                                                                |
+| --------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nested`        | `true`            | The repo is itself a workspace, initialized, reported, and destroyed inside each env's worktree of it.                                                                                                                |
+| `envs`          | integer `>= 1`    | The number of usable feature envs the nested workspace holds; what winter writes from it is in [ports-and-environments.md — Nested workspaces](./ports-and-environments.md#nested-workspaces). Needs `nested = true`. |
+| `inherit_local` | list of key names | The top-level keys or tables of the outer `config.local.toml` copied into the nested workspace's `.winter/config.local.toml`. Defaults to `["git"]`; `[]` copies nothing. Needs `nested = true`.                      |
 
 - **`winter ws init <env>`** runs the entry's `cmd` in `<env>/lab/`, then initializes the nested workspace there — see
   [ws init — Nested workspaces](../usage/ws/init.md#nested-workspaces).
@@ -113,6 +114,11 @@ cmd = ["<bootstrap the nested workspace's toolchain>"]  # whatever it needs befo
   `winter-ext.toml`, skills, and agents reach nothing in the outer workspace.
 - **The source checkout stays plain.** `projects/lab/` is cloned, and its `cmd` runs there as for any project repo, but
   it is never initialized as a workspace — only the env copies are.
+
+**`inherit_local`** names top-level keys or tables of the outer `.winter/config.local.toml`; what is copied, and how, is
+owned by [config-files.md — Local overlay](./config-files.md#local-overlay-winterconfiglocaltoml) ("What reaches a
+nested workspace"). A name must be a non-empty top-level key without a `.`, so `["git"]` names the whole `[git]` table;
+a value that is not a list, any other name, or the key on a repo without `nested = true` is a `ConfigError`.
 
 **Which `winter` runs.** Every nested call runs a `winter` from `PATH` with its working directory at the nested root,
 and that `winter` must resolve the nested root as its workspace. Winter verifies that it does: before the first call

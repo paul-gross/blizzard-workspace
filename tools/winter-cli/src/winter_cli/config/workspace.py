@@ -833,20 +833,20 @@ class WorkspaceConfigService:
         shared by the whole workspace, not one per env), and `nested = true`
         alongside `load`, `entry`, or `extension = true` each raise
         `ConfigError` naming the repo. `envs` — the nested workspace's usable
-        env count — must be an integer >= 1 on a `nested = true` repo and is
-        a `ConfigError` anywhere else.
+        env count — must be an integer >= 1 on a `nested = true` repo, and
+        `inherit_local` — the outer local-overlay keys the nested workspace
+        inherits — a list of non-empty, undotted names; each is a `ConfigError`
+        anywhere but a `nested = true` repo.
         """
         where = f"{kind} repo {label!r}"
         if "nested" not in entry:
-            if "envs" in entry:
-                raise ConfigError(f"Invalid `envs` for {where}: only a `nested = true` repo can set `envs`.")
+            WorkspaceConfigService._reject_nested_only_keys(entry, where)
             return {}
         nested = entry["nested"]
         if not isinstance(nested, bool):
             raise ConfigError(f"Invalid `nested` {nested!r} for {where}: must be true or false.")
         if not nested:
-            if "envs" in entry:
-                raise ConfigError(f"Invalid `envs` for {where}: only a `nested = true` repo can set `envs`.")
+            WorkspaceConfigService._reject_nested_only_keys(entry, where)
             return {"nested": False}
         if kind == "standalone":
             raise ConfigError(
@@ -864,7 +864,26 @@ class WorkspaceConfigService:
             if not isinstance(envs, int) or isinstance(envs, bool) or envs < 1:
                 raise ConfigError(f"Invalid `envs` {envs!r} for {where}: must be an integer >= 1.")
             parsed["envs"] = envs
+        if "inherit_local" in entry:
+            names = entry["inherit_local"]
+            if (
+                not isinstance(names, list)
+                or not all(isinstance(name, str) for name in names)
+                or any(not name or "." in name for name in names)
+            ):
+                raise ConfigError(
+                    f"Invalid `inherit_local` {names!r} for {where}: "
+                    f"must be a list of top-level key names, each non-empty and without a `.`."
+                )
+            parsed["inherit_local"] = list(names)
         return parsed
+
+    @staticmethod
+    def _reject_nested_only_keys(entry: dict, where: str) -> None:
+        """Raise `ConfigError` for a key that only a `nested = true` repo may set."""
+        for key in ("envs", "inherit_local"):
+            if key in entry:
+                raise ConfigError(f"Invalid `{key}` for {where}: only a `nested = true` repo can set `{key}`.")
 
     @staticmethod
     def _validate_relative_path(value: str, label: str | None) -> None:

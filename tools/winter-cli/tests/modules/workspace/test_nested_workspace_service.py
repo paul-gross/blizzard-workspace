@@ -38,13 +38,26 @@ def test_reconcile_runs_nested_init_and_streams_its_output_as_the_repo(init_repo
 
 
 def _delegating(
-    *, envs: int | None = None, outer_ppe: int = 100, committed: dict | None = None, local: dict | None = None
+    *,
+    envs: int | None = None,
+    outer_ppe: int = 100,
+    committed: dict | None = None,
+    local: dict | None = None,
+    outer_local: dict | None = None,
+    inherit_local: tuple[str, ...] = ("git",),
 ) -> tuple[ProjectRepository, FakeLocalOverlayRepository, list[str], FakeNestedWorkspaceRunner]:
     events: list[str] = []
-    repo = ProjectRepository(name="lab", main_path=Path("/ws/projects/lab"), main_branch="main", nested=True, envs=envs)
+    repo = ProjectRepository(
+        name="lab",
+        main_path=Path("/ws/projects/lab"),
+        main_branch="main",
+        nested=True,
+        envs=envs,
+        inherit_local=inherit_local,
+    )
     overlay = FakeLocalOverlayRepository(
         committed={ROOT: committed or {"ports_per_env": 20, "envs_per_workspace": 4}},
-        local={ROOT: local or {}},
+        local={ROOT: local or {}, OUTER: outer_local or {}},
         events=events,
     )
     return repo, overlay, events, FakeNestedWorkspaceRunner(events=events)
@@ -188,6 +201,116 @@ def test_reconcile_accepts_a_footprint_that_exactly_fills_the_outer_band(init_re
     _service(runner, overlay, outer_ppe=100).reconcile(repo, ROOT, "alpha", init_reporter)
 
     assert runner.calls == [("init", ROOT)]
+
+
+OUTER_LOCAL = {
+    "git": {"user": {"name": "Ada", "email": "ada@example.com"}},
+    "secret": "x",
+    "base_port": 1,
+    "project_repository": [{"name": "private", "url": "git@example.com:me/private.git"}],
+    "standalone_repository": [{"name": "shared", "url": "git@example.com:me/shared.git"}],
+}
+DELEGATED = {"base_port": 4100, "service_prefix": "outer-alpha"}
+
+
+def test_reconcile_inherits_only_the_git_table_by_default(init_reporter: FakeInitReporter) -> None:
+    repo, overlay, events, runner = _delegating(outer_local=OUTER_LOCAL)
+
+    _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.local[ROOT] == {"git": OUTER_LOCAL["git"], **DELEGATED}
+    assert events == [f"overlay_write:{ROOT}", f"nested_init:{ROOT}"]
+    (written,) = [a for a in init_reporter.actions if a[2] == "nested_overlay_written"]
+    assert written[3] == "base_port = 4100, service_prefix = 'outer-alpha'; inherited git"
+    assert "ada@example.com" not in written[3]
+
+
+def test_reconcile_reads_the_inherited_keys_from_the_outer_root_not_the_nested_one(
+    init_reporter: FakeInitReporter,
+) -> None:
+    repo, overlay, _, runner = _delegating(
+        local={"git": {"user": {"name": "nested"}}}, outer_local={"git": {"user": {"name": "outer"}}}
+    )
+
+    _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.local[ROOT]["git"] == {"user": {"name": "outer"}}
+
+
+def test_reconcile_inherits_exactly_the_named_keys(init_reporter: FakeInitReporter) -> None:
+    repo, overlay, _, runner = _delegating(outer_local=OUTER_LOCAL, inherit_local=("secret",))
+
+    _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.local[ROOT] == {"secret": "x", **DELEGATED}
+
+
+def test_reconcile_with_an_empty_inherit_list_copies_nothing_and_leaves_the_nested_keys_alone(
+    init_reporter: FakeInitReporter,
+) -> None:
+    repo, overlay, _, runner = _delegating(
+        outer_local=OUTER_LOCAL, inherit_local=(), local={"git": {"user": {"name": "nested"}}, "keep": 1}
+    )
+
+    _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.local[ROOT] == {"git": {"user": {"name": "nested"}}, "keep": 1, **DELEGATED}
+    (written,) = [a for a in init_reporter.actions if a[2] == "nested_overlay_written"]
+    assert "inherited" not in written[3]
+
+
+def test_reconcile_skips_a_named_key_the_outer_overlay_does_not_hold(init_reporter: FakeInitReporter) -> None:
+    repo, overlay, _, runner = _delegating(outer_local=OUTER_LOCAL, inherit_local=("git", "missing"))
+
+    _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.local[ROOT] == {"git": OUTER_LOCAL["git"], **DELEGATED}
+    assert runner.calls == [("init", ROOT)]
+
+
+def test_reconcile_never_inherits_a_repository_array_even_when_named(init_reporter: FakeInitReporter) -> None:
+    repo, overlay, _, runner = _delegating(
+        outer_local=OUTER_LOCAL, inherit_local=("git", "project_repository", "standalone_repository")
+    )
+
+    _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.local[ROOT] == {"git": OUTER_LOCAL["git"], **DELEGATED}
+
+
+def test_reconcile_lets_a_delegated_key_win_over_an_inherited_one(init_reporter: FakeInitReporter) -> None:
+    repo, overlay, _, runner = _delegating(outer_local=OUTER_LOCAL, inherit_local=("base_port", "git"))
+
+    _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.local[ROOT]["base_port"] == 4100
+
+
+def test_reconcile_judges_the_footprint_with_the_inherited_keys_applied(init_reporter: FakeInitReporter) -> None:
+    repo, overlay, _, runner = _delegating(outer_local={"ports_per_env": 50}, inherit_local=("ports_per_env",))
+
+    with pytest.raises(RepoError, match="250 ports"):
+        _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.upserts == []
+    assert runner.calls == []
+
+
+def test_reconcile_leaves_the_nested_keys_it_is_not_told_to_inherit(init_reporter: FakeInitReporter) -> None:
+    repo, overlay, _, runner = _delegating(outer_local=OUTER_LOCAL, local={"secret": "nested", "keep": 1})
+
+    _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+
+    assert overlay.local[ROOT] == {"secret": "nested", "keep": 1, "git": OUTER_LOCAL["git"], **DELEGATED}
+
+
+def test_the_inherited_table_is_a_copy_of_the_outer_overlay(init_reporter: FakeInitReporter) -> None:
+    repo, overlay, _, runner = _delegating(outer_local={"git": {"user": {"name": "Ada"}}})
+
+    _service(runner, overlay).reconcile(repo, ROOT, "alpha", init_reporter)
+    overlay.local[ROOT]["git"]["user"]["name"] = "changed"
+
+    assert overlay.local[OUTER]["git"] == {"user": {"name": "Ada"}}
 
 
 def test_reconcile_raises_when_nested_init_exits_non_zero(init_reporter: FakeInitReporter) -> None:

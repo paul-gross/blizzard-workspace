@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 import tomlkit
 from tomlkit.exceptions import ParseError
-from tomlkit.items import AoT, Comment, Table, Whitespace
+from tomlkit.items import AoT, Comment, Item, Table, Whitespace
 
 from winter_cli.config.local_overlay_repository import ILocalOverlayRepository
 from winter_cli.config.workspace import CONFIG_FILE, LOCAL_CONFIG_FILE, WINTER_DIR
@@ -64,21 +64,44 @@ class TomlkitLocalOverlayRepository:
 
         A key appended after a `[table]` header would parse as that table's
         member, so a new top-level scalar goes ahead of the first table or
-        array-of-tables: after the last top-level scalar already there, else
+        array-of-tables header: after the last top-level key already there, else
         before the table and the comment lines attached to it. The last key
-        placed ahead of a table carries a blank line after it. tomlkit exposes
+        placed ahead of a table carries a blank line after it. A new table or
+        array-of-tables goes at the end, after every other key. tomlkit exposes
         no public positional insert, hence `_insert_at`.
+
+        An existing key is replaced wholesale, so a table value takes the place
+        of the table already there — sub-tables included — and the comments
+        inside the replaced table go with it. It is replaced in place only when
+        the new value is written in the same form as the old one: a key/value
+        line among the top-level keys, or a `[table]` / `[[array]]` header. Any
+        other existing entry — a dotted key such as `git.user.name = "x"`, a
+        super-table `[git.user]` with no `[git]` of its own, a table split
+        across the file, or a header replacing a key/value line or the reverse —
+        is removed and the new value placed as a new key is. In place, a header
+        written where a dotted key stood would take every top-level key after it
+        as its own member.
         """
+        item = tomlkit.item(value)
         if key in doc:
-            if doc[key] != value:
+            if doc[key] == value:
+                return
+            if _same_form_in_place(doc, key, item):
                 doc[key] = value
-            return
+                return
+            del doc[key]
         body = doc.body
-        first_table = next((i for i, (_, item) in enumerate(body) if isinstance(item, (Table, AoT))), None)
-        if first_table is None:
+        first_table = next(
+            (
+                i
+                for i, (existing_key, existing) in enumerate(body)
+                if isinstance(existing, (Table, AoT)) and not (existing_key is not None and existing_key.is_dotted())
+            ),
+            None,
+        )
+        if first_table is None or isinstance(item, (Table, AoT)):
             doc[key] = value
             return
-        item = tomlkit.item(value)
         last_scalar = max((i for i in range(first_table) if body[i][0] is not None), default=None)
         if last_scalar is not None:
             at = last_scalar + 1
@@ -93,6 +116,19 @@ class TomlkitLocalOverlayRepository:
             if not isinstance(body[at][1], Whitespace):
                 item.trivia.trail = _BLANK_AFTER
         doc._insert_at(at, key, item)
+
+
+def _same_form_in_place(doc: tomlkit.TOMLDocument, key: str, item: Item) -> bool:
+    """Whether *key* is one entry of *doc* written in the form *item* would take: a key/value line, or a header."""
+    entries = [(k, existing) for k, existing in doc.body if k is not None and k.key == key]
+    if len(entries) != 1:
+        return False
+    existing_key, existing = entries[0]
+    if isinstance(existing, (Table, AoT)) and not existing_key.is_dotted():
+        if isinstance(existing, Table) and existing.is_super_table():
+            return False
+        return isinstance(item, (Table, AoT))
+    return not isinstance(item, (Table, AoT))
 
 
 def _conforms_tomlkit_local_overlay_repository(x: TomlkitLocalOverlayRepository) -> ILocalOverlayRepository:

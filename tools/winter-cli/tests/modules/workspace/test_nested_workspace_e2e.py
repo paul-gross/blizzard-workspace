@@ -81,6 +81,10 @@ def outer_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         """
     (root / ".winter").mkdir()
     (root / ".winter" / "config.toml").write_text(dedent(outer_config))
+    # The outer machine-local overlay: only the `[git]` identity is meant to reach the nested workspace.
+    (root / ".winter" / "config.local.toml").write_text(
+        'secret = "x"\n\n[git]\nuser.name = "Ada"\nuser.email = "ada@example.com"\n'
+    )
     commit(root, ".gitignore", "/projects/\n/alpha/\n/.winter/state.toml\n/AGENTS.winter.md\n", "init")
     monkeypatch.chdir(root)
     return root
@@ -112,12 +116,17 @@ def test_nested_workspace_is_initialized_reported_and_destroyed_with_its_env(out
     assert ("lab", "winter ws init", 0) in reporter.cmds_completed
     # The outer env's band and prefix were delegated: alpha is index 1, so its band starts at 5000 + 1 * 100.
     delegated = tomllib.loads((lab_alpha / ".winter" / "config.local.toml").read_text())
+    # ...and so was the `[git]` identity the entry inherits by default, but not the outer `secret`.
     assert delegated == {
+        "git": {"user": {"name": "Ada", "email": "ada@example.com"}},
         "base_port": 5100,
         "service_prefix": "outer-alpha",
         "env_aliases": [],
         "envs_per_workspace": 4,
     }
+    # The nested init applied the inherited identity to the clones it made.
+    identity = git_cmd(lab_alpha / "projects" / "app", "config", "user.email")
+    assert identity.strip() == "ada@example.com"
     # ...while the outer source checkout was cloned but never initialized as a workspace.
     assert (outer_root / "projects" / "lab" / ".winter" / "config.toml").is_file()
     assert not (outer_root / "projects" / "lab" / "projects").exists()

@@ -65,6 +65,8 @@ class ProjectRepository:
     """The repo is itself a winter workspace, initialized and destroyed inside each env's worktree of it."""
     envs: int | None = None
     """The nested workspace's usable feature-env count, when the entry sets one."""
+    inherit_local: tuple[str, ...] = ("git",)
+    """The outer local-overlay keys a nested workspace inherits; winter's default is the `[git]` identity."""
 
 
 @dataclasses.dataclass(frozen=True)

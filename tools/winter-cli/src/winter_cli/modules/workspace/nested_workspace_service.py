@@ -8,7 +8,12 @@ from winter_cli.config.workspace import CONFIG_FILE, WINTER_DIR
 from winter_cli.core.config_file import ConfigFileReadError
 from winter_cli.modules.workspace.models import RepoError
 from winter_cli.modules.workspace.nested_env import nested_chain, nested_child_env
-from winter_cli.modules.workspace.nested_overlay import delegated_keys, effective_ports_per_env, footprint
+from winter_cli.modules.workspace.nested_overlay import (
+    delegated_keys,
+    effective_ports_per_env,
+    footprint,
+    inherited_keys,
+)
 from winter_cli.modules.workspace.nested_status import NestedStatusShapeError, parse_state, reported_root
 from winter_cli.util import deep_merge
 
@@ -92,12 +97,15 @@ class NestedWorkspaceService:
             raise RepoError(f"nested `{INIT_COMMAND}` exited with code {returncode}", cwd=str(root))
 
     def _delegate(self, repo: ProjectRepository, root: Path, env: str, reporter: IInitReporter) -> None:
-        """Write the outer env's port base and service prefix into the nested `config.local.toml`.
+        """Write the outer env's port base and prefix, plus the inherited keys, into the nested `config.local.toml`.
 
         The outer env's band is its `WINTER_PORT_BASE`, resolved registry-first
         as every other consumer does, and the prefix is `<service_prefix>-<env>`.
-        Rewritten on every init so the nested workspace tracks the outer env.
-        A config file that is not valid TOML raises `RepoError` naming it.
+        The keys the repo's `inherit_local` names are copied from the outer
+        workspace's raw `config.local.toml`; a delegated key wins over an
+        inherited one of the same name. Rewritten on every init so the nested
+        workspace tracks the outer env. A config file that is not valid TOML
+        raises `RepoError` naming it.
         """
         try:
             self._write_delegation(repo, root, env, reporter)
@@ -105,7 +113,9 @@ class NestedWorkspaceService:
             raise RepoError(f"cannot delegate to the nested workspace at {root}: {exc}", cwd=str(root)) from exc
 
     def _write_delegation(self, repo: ProjectRepository, root: Path, env: str, reporter: IInitReporter) -> None:
-        values = delegated_keys(self._port_bases.port_base(env), f"{self._service_prefix}-{env}", repo.envs)
+        delegated = delegated_keys(self._port_bases.port_base(env), f"{self._service_prefix}-{env}", repo.envs)
+        inherited = inherited_keys(self._outer_local(repo), repo.inherit_local)
+        values = {**inherited, **delegated}
         committed, local = self._overlay_repo.read_layers(root)
         local_after = {**local, **values}
         used = footprint(committed, local_after)
@@ -113,8 +123,16 @@ class NestedWorkspaceService:
         if used > available:
             raise RepoError(self._refusal(repo, env, committed, local_after, used, available), cwd=str(root))
         if self._overlay_repo.upsert_local(root, values):
-            summary = ", ".join(f"{key} = {value!r}" for key, value in values.items())
+            summary = ", ".join(f"{key} = {value!r}" for key, value in delegated.items())
+            if inherited:
+                summary += f"; inherited {', '.join(inherited)}"
             reporter.repo_action(repo.name, str(root), "nested_overlay_written", summary)
+
+    def _outer_local(self, repo: ProjectRepository) -> dict[str, Any]:
+        """The outer workspace's raw `config.local.toml`; unread when the repo inherits nothing."""
+        if not repo.inherit_local:
+            return {}
+        return self._overlay_repo.read_layers(self._workspace_root)[1]
 
     def _refusal(
         self,

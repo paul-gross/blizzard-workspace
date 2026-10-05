@@ -69,6 +69,7 @@ class RepositoryFactory:
                     cmd=list(r.cmd),
                     nested=r.nested,
                     envs=r.envs,
+                    inherit_local=("git",) if r.inherit_local is None else tuple(r.inherit_local),
                 )
             )
         return result

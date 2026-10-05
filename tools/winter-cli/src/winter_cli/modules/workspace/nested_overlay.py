@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import copy
 from typing import TYPE_CHECKING, Any
 
 from winter_cli.config.models import WorkspaceConfig
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Iterable, Mapping
 
 _DEFAULT_PORTS_PER_ENV = WorkspaceConfig.model_fields["ports_per_env"].default
 _DEFAULT_ENVS_PER_WORKSPACE = WorkspaceConfig.model_fields["envs_per_workspace"].default
@@ -26,6 +27,26 @@ def delegated_keys(port_base: int, service_prefix: str, envs: int | None) -> dic
         keys["env_aliases"] = []
         keys["envs_per_workspace"] = envs + 1
     return keys
+
+
+REPOSITORY_ARRAYS = ("project_repository", "standalone_repository")
+"""Overlay keys that declare repositories; never inherited, even when named."""
+
+
+def inherited_keys(outer_local: Mapping[str, Any], names: Iterable[str]) -> dict[str, Any]:
+    """The named top-level keys and tables of the outer workspace's raw local overlay.
+
+    *outer_local* is the outer `config.local.toml` as written, not the merged
+    config, so a key from the committed config or a default is never passed
+    down. A name the overlay does not hold is skipped, and the repository
+    arrays are skipped even when named. Values are copied, so the nested
+    write cannot alias the outer overlay.
+    """
+    return {
+        name: copy.deepcopy(outer_local[name])
+        for name in names
+        if name in outer_local and name not in REPOSITORY_ARRAYS
+    }
 
 
 def _int(value: Any, default: int) -> int:

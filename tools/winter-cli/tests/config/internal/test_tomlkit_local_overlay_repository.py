@@ -80,6 +80,100 @@ def test_a_comment_attached_to_a_table_stays_attached() -> None:
     assert "# about git\n[git]" in fs.files[LOCAL]
 
 
+GIT = {"user": {"name": "Ada", "email": "ada@example.com"}, "core": {"autocrlf": False}, "sub": {"deep": {"k": 1}}}
+
+
+def test_a_whole_table_with_nested_sub_tables_round_trips_into_a_missing_overlay() -> None:
+    fs = FakeFilesystem()
+
+    _repo(fs).upsert_local(ROOT, {"git": GIT, **VALUES})
+
+    assert tomllib.loads(fs.files[LOCAL]) == {"git": GIT, **VALUES}
+
+
+def test_a_new_table_lands_after_every_scalar_and_existing_table() -> None:
+    fs = FakeFilesystem(files={LOCAL: "top = 1\n\n[other]\nx = 1\n"})
+
+    _repo(fs).upsert_local(ROOT, {"git": GIT, **VALUES})
+
+    text = fs.files[LOCAL]
+    assert tomllib.loads(text) == {"top": 1, "other": {"x": 1}, "git": GIT, **VALUES}
+    assert text.index("base_port") < text.index("[other]") < text.index("[git")
+
+
+def test_a_named_table_replaces_the_table_already_in_the_file() -> None:
+    original = '# about git\n[git]\n# stale\nname = "old"\nstale = true\n\n[git.gone]\nx = 1\n\n[other]\nx = 1\n'
+    fs = FakeFilesystem(files={LOCAL: original})
+
+    changed = _repo(fs).upsert_local(ROOT, {"git": GIT})
+
+    assert changed is True
+    text = fs.files[LOCAL]
+    assert tomllib.loads(text) == {"git": GIT, "other": {"x": 1}}
+    assert "# about git" in text
+    assert "stale" not in text
+    assert text.index("[git") < text.index("[other]")
+
+
+@pytest.mark.parametrize(
+    "original",
+    [
+        "git.user.name = 'old'\nbase_port = 1\nservice_prefix = 'mine'\n",
+        "top = 1\ngit.user.name = 'old'\ngit.user.email = 'old@example.com'\nbase_port = 1\n\n[other]\nx = 1\n",
+        "git = { user = { name = 'old' } }\nbase_port = 1\n",
+    ],
+    ids=["dotted", "dotted-split-before-a-table", "inline"],
+)
+def test_a_named_table_replacing_a_key_value_form_leaves_the_keys_after_it_top_level(original: str) -> None:
+    fs = FakeFilesystem(files={LOCAL: original})
+
+    _repo(fs).upsert_local(ROOT, {"git": GIT, **VALUES})
+
+    expected = {k: v for k, v in tomllib.loads(original).items() if k != "git"}
+    assert tomllib.loads(fs.files[LOCAL]) == {**expected, "git": GIT, **VALUES}
+
+
+def test_a_named_table_replacing_a_super_table_lands_after_every_table() -> None:
+    original = "base_port = 1\n\n[git.user]\nname = 'old'\n\n[other]\nx = 1\n"
+    fs = FakeFilesystem(files={LOCAL: original})
+
+    _repo(fs).upsert_local(ROOT, {"git": GIT, **VALUES})
+
+    text = fs.files[LOCAL]
+    assert tomllib.loads(text) == {"other": {"x": 1}, "git": GIT, **VALUES}
+    assert "'old'" not in text
+    assert text.index("[other]") < text.index("[git")
+
+
+def test_a_scalar_replacing_a_table_header_lands_among_the_top_level_keys() -> None:
+    fs = FakeFilesystem(files={LOCAL: "top = 1\n\n[git]\nname = 'old'\n\n[other]\nx = 1\n"})
+
+    _repo(fs).upsert_local(ROOT, {"git": "flat"})
+
+    assert tomllib.loads(fs.files[LOCAL]) == {"top": 1, "git": "flat", "other": {"x": 1}}
+
+
+def test_a_named_table_replaces_a_scalar_of_the_same_name_and_the_reverse() -> None:
+    fs = FakeFilesystem(files={LOCAL: "git = 5\n"})
+    repo = _repo(fs)
+
+    repo.upsert_local(ROOT, {"git": GIT})
+    assert tomllib.loads(fs.files[LOCAL]) == {"git": GIT}
+
+    repo.upsert_local(ROOT, {"git": "flat"})
+    assert tomllib.loads(fs.files[LOCAL]) == {"git": "flat"}
+
+
+def test_upserting_the_same_table_again_writes_nothing() -> None:
+    fs = FakeFilesystem(files={LOCAL: "[other]\nx = 1\n"})
+    repo = _repo(fs)
+    repo.upsert_local(ROOT, {"git": GIT, **VALUES})
+    written = fs.files[LOCAL]
+
+    assert repo.upsert_local(ROOT, {"git": GIT, **VALUES}) is False
+    assert fs.files[LOCAL] == written
+
+
 def test_upsert_writes_nothing_when_the_values_already_hold() -> None:
     fs = FakeFilesystem()
     repo = _repo(fs)

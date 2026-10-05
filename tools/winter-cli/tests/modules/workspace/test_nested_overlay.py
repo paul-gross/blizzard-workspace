@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from winter_cli.modules.workspace.nested_overlay import delegated_keys, footprint
+from winter_cli.modules.workspace.nested_overlay import delegated_keys, footprint, inherited_keys
 
 
 def test_delegated_keys_without_envs_set_only_the_port_base_and_prefix() -> None:
@@ -36,3 +36,32 @@ def test_the_delegated_envs_count_shrinks_the_footprint_below_the_committed_one(
 
 def test_a_non_integer_value_falls_back_to_the_default() -> None:
     assert footprint({"ports_per_env": True, "envs_per_workspace": "x"}, {}) == (48 + 1) * 20
+
+
+OUTER = {"git": {"user": {"name": "Ada"}}, "secret": "x", "project_repository": [{"name": "p"}]}
+
+
+def test_inherited_keys_copies_exactly_the_named_keys() -> None:
+    assert inherited_keys(OUTER, ["git"]) == {"git": {"user": {"name": "Ada"}}}
+    assert inherited_keys(OUTER, ["git", "secret"]) == {"git": {"user": {"name": "Ada"}}, "secret": "x"}
+
+
+def test_inherited_keys_with_no_names_copies_nothing() -> None:
+    assert inherited_keys(OUTER, []) == {}
+
+
+def test_inherited_keys_skips_a_name_the_overlay_does_not_hold() -> None:
+    assert inherited_keys(OUTER, ["missing", "git"]) == {"git": {"user": {"name": "Ada"}}}
+
+
+def test_inherited_keys_never_copies_the_repository_arrays() -> None:
+    outer = {**OUTER, "standalone_repository": [{"name": "s"}]}
+
+    assert inherited_keys(outer, ["project_repository", "standalone_repository"]) == {}
+
+
+def test_inherited_keys_does_not_alias_the_outer_overlay() -> None:
+    inherited = inherited_keys(OUTER, ["git"])
+    inherited["git"]["user"]["name"] = "changed"
+
+    assert OUTER["git"]["user"]["name"] == "Ada"

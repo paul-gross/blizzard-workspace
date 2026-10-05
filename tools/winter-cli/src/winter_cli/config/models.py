@@ -283,6 +283,16 @@ class ProjectRepositoryConfig(BaseModel):
     `envs_per_workspace` stay in the nested `config.local.toml`; delete them by
     hand to restore the nested workspace's own values."""
 
+    inherit_local: list[str] | None = None
+    """The top-level keys of the outer `config.local.toml` that a `nested = true` workspace inherits.
+
+    A list of non-empty, undotted key or table names, valid only with `nested =
+    true`. `winter ws init <env>` copies exactly those keys from the outer
+    workspace's raw local overlay into the nested workspace's
+    `.winter/config.local.toml`; a name the outer overlay does not hold is
+    skipped, and `project_repository` and `standalone_repository` are never
+    copied. Unset resolves to `["git"]`; `[]` passes nothing."""
+
 
 class StandaloneRepositoryConfig(BaseModel):
     """A standalone repo declared in `[[standalone_repository]]`.

@@ -1861,3 +1861,34 @@ def test_project_repo_rejects_envs_without_nested_true(entry: dict) -> None:
 def test_standalone_repo_rejects_envs() -> None:
     with pytest.raises(ConfigError, match="envs"):
         _load_with_repo("standalone_repository", {"envs": 2})
+
+
+# ── repo entry inherit_local key ──────────────────────────────────────────────
+
+
+def test_project_repo_inherit_local_defaults_to_none() -> None:
+    assert _load_with_repo("project_repository", {"nested": True}).project_repos[0].inherit_local is None
+
+
+@pytest.mark.parametrize("names", [["git"], ["git", "secret"], []])
+def test_project_repo_inherit_local_is_read_on_a_nested_repo(names: list[str]) -> None:
+    entry = {"nested": True, "inherit_local": names}
+
+    assert _load_with_repo("project_repository", entry).project_repos[0].inherit_local == names
+
+
+@pytest.mark.parametrize("bad", ["git", {"git": True}, 3, [""], ["git", ""], ["git.user"], ["git", 1], [["git"]]])
+def test_project_repo_rejects_an_invalid_inherit_local(bad: object) -> None:
+    with pytest.raises(ConfigError, match=r"inherit_local.*list of top-level key names"):
+        _load_with_repo("project_repository", {"nested": True, "inherit_local": bad})
+
+
+@pytest.mark.parametrize("entry", [{"inherit_local": ["git"]}, {"nested": False, "inherit_local": []}])
+def test_project_repo_rejects_inherit_local_without_nested_true(entry: dict) -> None:
+    with pytest.raises(ConfigError, match="only a `nested = true` repo can set `inherit_local`"):
+        _load_with_repo("project_repository", entry)
+
+
+def test_standalone_repo_rejects_inherit_local() -> None:
+    with pytest.raises(ConfigError, match="inherit_local"):
+        _load_with_repo("standalone_repository", {"inherit_local": ["git"]})

@@ -86,6 +86,20 @@ project repo, `winter ws init <env>` writes the outer env's delegated port and p
 `.winter/config.local.toml`, creating the file when it is missing. Which keys, and how the rest of the file is kept, is
 owned by [ports-and-environments.md — Nested workspaces](./ports-and-environments.md#nested-workspaces).
 
+**What reaches a nested workspace.** The outer overlay is never copied down whole: it can hold secrets, private
+repository declarations, and per-environment settings meant for the outer workspace. Only the top-level keys and tables
+the repo's [`inherit_local`](./repositories.md#nested--a-project-repo-that-is-itself-a-workspace) names are copied — by
+default `["git"]`, so the identity commits inside the nested workspace need; `[]` copies nothing.
+
+- The source is the outer `config.local.toml` as written, not the merged config. A named key the outer overlay does not
+  hold is skipped without error.
+- `project_repository` and `standalone_repository` are never copied, even when named.
+- A copied table replaces the nested file's table of the same name, sub-tables included. Keys already in the nested file
+  that are not named stay as they are.
+- The delegated keys win over an inherited key of the same name, and the port-footprint check sees the merged result.
+- The copy happens on every `winter ws init <env>`, through the same write as the delegated keys, so the nested file
+  tracks the outer overlay.
+
 **Merge depth.** How deep a key merges is per-key, not uniform. A scalar key is replaced outright. Table keys — `[git]`,
 `[keybindings]`, `[tui]`, `[capabilities]`, `[env]`, `[model_tiers]`, `[agent_model_overrides]` — merge **one level
 deep**: the overlay's immediate sub-keys override the shared config's, but each sub-key's *value* is replaced wholesale
