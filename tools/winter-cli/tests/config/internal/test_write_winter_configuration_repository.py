@@ -89,3 +89,108 @@ def test_remove_matches_url_derived_name(fs: FakeFilesystem, repo: WriteWinterCo
     """When `name` is omitted on append, removal matches the URL-derived name."""
     repo.append_project_repository(ProjectRepositoryConfig(url="git@example.com:org/derived.git"))
     assert repo.remove_project_repository("derived") is True
+
+
+COMMENTED_CONFIG = """\
+# Workspace config — keep this header.
+main_branch = "main"
+
+# Pinned on purpose.
+[[standalone_repository]]
+name = "pinned-lib"      # trailing comment
+ref = "v1.0"
+
+# Floats today.
+[[standalone_repository]]
+url = "git@example.com:org/floating-lib.git"
+path = "libs/floating-lib"   # nested clone
+
+[[project_repository]]
+name = "api"
+"""
+
+
+def test_set_standalone_ref_writes_ref_preserving_comments_and_ordering(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    fs = FakeFilesystem(files={SHARED_CONFIG: COMMENTED_CONFIG})
+    repo = WriteWinterConfigurationRepository(workspace_config, fs=fs)
+
+    assert repo.set_standalone_ref("floating-lib", "a" * 40) is True
+
+    expected = COMMENTED_CONFIG.replace(
+        'path = "libs/floating-lib"   # nested clone\n',
+        'path = "libs/floating-lib"   # nested clone\nref = "' + "a" * 40 + '"\n',
+    )
+    assert fs.files[SHARED_CONFIG] == expected
+
+
+def test_set_standalone_ref_matches_explicit_name_over_url(workspace_config: WorkspaceConfig) -> None:
+    fs = FakeFilesystem(files={SHARED_CONFIG: COMMENTED_CONFIG})
+    repo = WriteWinterConfigurationRepository(workspace_config, fs=fs)
+
+    assert repo.set_standalone_ref("pinned-lib", "b" * 40) is True
+
+    assert fs.files[SHARED_CONFIG].count("b" * 40) == 1
+    assert 'ref = "v1.0"' not in fs.files[SHARED_CONFIG]
+
+
+def test_set_standalone_ref_unknown_name_returns_false_and_writes_nothing(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    fs = FakeFilesystem(files={SHARED_CONFIG: COMMENTED_CONFIG})
+    repo = WriteWinterConfigurationRepository(workspace_config, fs=fs)
+
+    assert repo.set_standalone_ref("api", "a" * 40) is False  # a project repo, never pinned
+    assert repo.set_standalone_ref("nope", "a" * 40) is False
+    assert fs.files[SHARED_CONFIG] == COMMENTED_CONFIG
+
+
+def test_set_standalone_ref_local_missing_overlay_returns_false(workspace_config: WorkspaceConfig) -> None:
+    fs = FakeFilesystem(files={SHARED_CONFIG: COMMENTED_CONFIG})
+    repo = WriteWinterConfigurationRepository(workspace_config, fs=fs)
+
+    assert repo.set_standalone_ref("floating-lib", "a" * 40, local=True) is False
+    assert LOCAL_CONFIG not in fs.files
+
+
+def test_set_standalone_ref_local_targets_the_overlay(workspace_config: WorkspaceConfig) -> None:
+    local = '[[standalone_repository]]\nname = "mine"  # local only\n'
+    fs = FakeFilesystem(files={SHARED_CONFIG: COMMENTED_CONFIG, LOCAL_CONFIG: local})
+    repo = WriteWinterConfigurationRepository(workspace_config, fs=fs)
+
+    assert repo.set_standalone_ref("mine", "c" * 40, local=True) is True
+
+    assert fs.files[LOCAL_CONFIG] == local + f'ref = "{"c" * 40}"\n'
+    assert fs.files[SHARED_CONFIG] == COMMENTED_CONFIG
+
+
+def test_set_standalone_ref_keeps_the_next_blocks_leading_comment_in_place(
+    workspace_config: WorkspaceConfig,
+) -> None:
+    config = (
+        "[[standalone_repository]]\n"
+        'name = "first"  # inline\n'
+        "\n"
+        "# Describes the second block.\n"
+        "\n"
+        "[[standalone_repository]]\n"
+        'name = "second"'  # no trailing newline at end of file
+    )
+    fs = FakeFilesystem(files={SHARED_CONFIG: config})
+    repo = WriteWinterConfigurationRepository(workspace_config, fs=fs)
+
+    assert repo.set_standalone_ref("first", "a" * 40) is True
+    assert repo.set_standalone_ref("second", "b" * 40) is True
+
+    assert fs.files[SHARED_CONFIG] == (
+        "[[standalone_repository]]\n"
+        'name = "first"  # inline\n'
+        f'ref = "{"a" * 40}"\n'
+        "\n"
+        "# Describes the second block.\n"
+        "\n"
+        "[[standalone_repository]]\n"
+        'name = "second"\n'
+        f'ref = "{"b" * 40}"\n'
+    )

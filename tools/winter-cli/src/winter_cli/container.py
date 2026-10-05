@@ -347,6 +347,7 @@ class Container(containers.DeclarativeContainer):
         git_ops=git_ops_svc,
         git_repo=git_repo,
         config_lock_repo=config_lock_repo,
+        write_config_repo=write_winter_config_repo,
     )
 
     workspace_push_svc = providers.Factory(

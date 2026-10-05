@@ -281,6 +281,12 @@ class GitPythonRepository:
                 message=f"rev-parse HEAD failed at {path}",
                 cwd=path,
             ) from exc
+        except (git.InvalidGitRepositoryError, git.NoSuchPathError) as exc:
+            raise self._error_factory.from_exception(
+                exc,
+                message=f"rev-parse HEAD failed at {path}: not a git repository",
+                cwd=path,
+            ) from exc
 
     @GitOperationDeclaration("stash push")
     def stash_push(self, path: Path, *, repo_name: str, env: str | None) -> None:

@@ -179,3 +179,60 @@ def test_json_repo_synced_re_pinned_envelope() -> None:
         "behind": 0,
         "pin_ref": "abc12345",
     }
+
+
+# --- ws update --freeze outcomes ---------------------------------------------
+
+
+def test_stream_repo_synced_pinned_shows_short_sha() -> None:
+    click = _CapturingClick()
+    reporter = StreamPullReporter(click)
+
+    reporter.repo_synced("standalone", "my-lib", SyncResult.pinned, commits=0, ahead=0, behind=0, pin_ref="abc12345")
+
+    assert click.lines == [("[standalone/my-lib] pinned → abc12345", False)]
+
+
+def test_stream_repo_synced_already_pinned_shows_the_existing_ref() -> None:
+    click = _CapturingClick()
+    reporter = StreamPullReporter(click)
+
+    reporter.repo_synced(
+        "standalone", "my-lib", SyncResult.already_pinned, commits=0, ahead=0, behind=0, pin_ref="v1.4.2"
+    )
+
+    assert click.lines == [("[standalone/my-lib] already pinned @ v1.4.2", False)]
+
+
+def test_stream_repo_synced_refused_goes_to_stderr_with_the_reason() -> None:
+    click = _CapturingClick()
+    reporter = StreamPullReporter(click)
+
+    reporter.repo_synced(
+        "standalone",
+        "my-lib",
+        SyncResult.refused,
+        commits=0,
+        ahead=0,
+        behind=0,
+        pin_ref="'my-lib' has uncommitted changes",
+    )
+
+    assert click.lines == [("[standalone/my-lib] refused: 'my-lib' has uncommitted changes", True)]
+
+
+def test_json_repo_synced_freeze_outcomes_carry_result_and_pin_ref() -> None:
+    click = _CapturingClick()
+    reporter = JsonPullReporter(click)
+
+    reporter.repo_synced("standalone", "a", SyncResult.pinned, commits=0, ahead=0, behind=0, pin_ref="abc12345")
+    reporter.repo_synced("standalone", "b", SyncResult.already_pinned, commits=0, ahead=0, behind=0, pin_ref="v1.0")
+    reporter.repo_synced("standalone", "c", SyncResult.refused, commits=0, ahead=0, behind=0, pin_ref="not cloned")
+
+    payloads = [json.loads(line) for line, _err in click.lines]
+    assert [(p["repo"], p["result"], p["pin_ref"]) for p in payloads] == [
+        ("a", "pinned", "abc12345"),
+        ("b", "already_pinned", "v1.0"),
+        ("c", "refused", "not cloned"),
+    ]
+    assert all(p["type"] == "repo_synced" and p["scope"] == "standalone" for p in payloads)

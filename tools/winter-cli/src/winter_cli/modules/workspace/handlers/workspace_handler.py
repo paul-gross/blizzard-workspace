@@ -152,6 +152,8 @@ class EnvUpdateParams:
     repos: list[str]
     autostash: bool
     output_json: bool
+    freeze: bool = False
+    force: bool = False
 
 
 @dataclasses.dataclass
@@ -720,11 +722,18 @@ class WorkspaceHandler:
         self._drift_warning_svc.raise_warning()
         reporter = self._reporter_factory.get_pull_reporter(params.output_json)
         try:
-            report = self._workspace_sync_svc.update_pins(
-                repo_patterns=params.repos,
-                autostash=params.autostash,
-                reporter=reporter,
-            )
+            if params.freeze:
+                report = self._workspace_sync_svc.freeze_pins(
+                    repo_patterns=params.repos,
+                    force=params.force,
+                    reporter=reporter,
+                )
+            else:
+                report = self._workspace_sync_svc.update_pins(
+                    repo_patterns=params.repos,
+                    autostash=params.autostash,
+                    reporter=reporter,
+                )
         except RepoError as exc:
             raise click.ClickException(str(exc)) from exc
 

@@ -6,6 +6,7 @@ import logging
 
 import click
 
+from winter_cli.config.winter_configuration_repository import IWriteWinterConfigurationRepository
 from winter_cli.modules.workspace.config_lock_repository import IConfigLockRepository
 from winter_cli.modules.workspace.env_status_service import EnvStatusService
 from winter_cli.modules.workspace.fetch_reporter import IFetchReporter
@@ -76,6 +77,7 @@ class WorkspaceSyncService:
         git_ops: GitOpsService,
         git_repo: IGitRepository | None = None,
         config_lock_repo: IConfigLockRepository | None = None,
+        write_config_repo: IWriteWinterConfigurationRepository | None = None,
     ) -> None:
         self._env_status_svc = env_status_svc
         self._worktree_repo = worktree_repo
@@ -85,6 +87,7 @@ class WorkspaceSyncService:
         self._git_ops = git_ops
         self._git_repo = git_repo
         self._config_lock_repo = config_lock_repo
+        self._write_config_repo = write_config_repo
 
     def fetch_all(
         self,
@@ -583,6 +586,96 @@ class WorkspaceSyncService:
         report = PullReport(envs=[], standalone=outcomes, skipped=[])
         reporter.pull_completed(success)
         return report
+
+    def freeze_pins(
+        self,
+        repo_patterns: list[str],
+        force: bool,
+        reporter: IPullReporter,
+    ) -> PullReport:
+        """Pin every matched unpinned standalone to its current checkout and write the lock.
+
+        Bare call (``repo_patterns=[]``) → every standalone. Targeted call
+        matches names and globs exactly as `update_pins` does, except a literal
+        name may name any standalone (pinned or not) — a name that matches no
+        standalone raises ``RepoError``. A glob matching nothing is a no-op.
+
+        For each in-scope repo:
+          - already carries a ``ref`` → ``already_pinned`` (config and lock untouched).
+          - checkout missing on disk, or not a readable git repository (HEAD cannot
+            be read) → ``refused``, naming the repo and the cause.
+          - dirty worktree and ``force`` is False → ``refused``, naming the repo.
+          - otherwise → ``ref = "<full HEAD sha>"`` is written into the config
+            file that declares the repo (``config.toml``, falling back to
+            ``config.local.toml``) and the commit is upserted into the lock →
+            ``pinned``.
+
+        The commit is not required to exist on origin: a locally-only commit
+        pins fine. Nothing here touches the network or the checkout.
+        """
+        if self._git_repo is None or self._write_config_repo is None:
+            raise RepoError("freeze_pins requires IGitRepository and IWriteWinterConfigurationRepository", cwd="")
+
+        all_standalones = self._repo_factory.get_standalone_repos()
+        if repo_patterns:
+            all_names = {r.name for r in all_standalones}
+            for name in (p for p in repo_patterns if not has_glob(p)):
+                if name not in all_names:
+                    raise RepoError(f"no standalone repo named {name!r}", cwd="")
+            in_scope = [r for r in all_standalones if matches_any_pattern(r.name, "", repo_patterns)]
+        else:
+            in_scope = all_standalones
+
+        reporter.pull_started()
+        outcomes = [self._freeze_one(repo, force, reporter) for repo in in_scope]
+        report = PullReport(envs=[], standalone=outcomes, skipped=[])
+        reporter.pull_completed(report.success)
+        return report
+
+    def _freeze_one(
+        self,
+        repo: StandaloneRepository,
+        force: bool,
+        reporter: IPullReporter,
+    ) -> RepoSyncOutcome:
+        """Pin a single standalone to its HEAD. Reports the event and returns the outcome."""
+        assert self._git_repo is not None
+        assert self._write_config_repo is not None
+
+        def _report(result: SyncResult, detail: str = "") -> RepoSyncOutcome:
+            reporter.repo_synced("standalone", repo.name, result, 0, 0, 0, detail)
+            return RepoSyncOutcome(repo_name=repo.name, sync_result=result, pin_ref=detail)
+
+        if repo.ref is not None:
+            return _report(SyncResult.already_pinned, repo.ref)
+
+        if not repo.path.exists():
+            return _report(SyncResult.refused, f"{repo.name!r} is not cloned (run `winter ws init`)")
+
+        # Read HEAD before the dirty guard: `is_worktree_clean` answers False on any git
+        # failure, so a directory that is not a git repo would otherwise be refused as
+        # "uncommitted changes". A failure here is reported as itself.
+        try:
+            commit = self._git_repo.get_head_commit(repo.path, repo_name=repo.name, env=None)
+        except RepoError as exc:
+            return _report(SyncResult.refused, exc.message)
+
+        if not force and not self._git_repo.is_worktree_clean(repo.path, repo_name=repo.name, env=None):
+            return _report(
+                SyncResult.refused,
+                f"{repo.name!r} has uncommitted changes, so its commit does not describe it; "
+                "commit/stash or pass --force",
+            )
+
+        if not (
+            self._write_config_repo.set_standalone_ref(repo.name, commit)
+            or self._write_config_repo.set_standalone_ref(repo.name, commit, local=True)
+        ):
+            return _report(SyncResult.refused, f"{repo.name!r} is not declared in config.toml or config.local.toml")
+
+        if self._config_lock_repo is not None:
+            self._config_lock_repo.upsert(LockEntry(name=repo.name, ref=commit, kind=RefKind.commit, commit=commit))
+        return _report(SyncResult.pinned, commit[:8])
 
     def _update_one_pin(
         self,

@@ -181,6 +181,14 @@ class SyncResult(enum.Enum):
     no_upstream = "no_upstream"
     held_pin = "held_pin"
     re_pinned = "re_pinned"
+    pinned = "pinned"
+    """`ws update --freeze` wrote a `ref` for a previously unpinned standalone."""
+    already_pinned = "already_pinned"
+    """`ws update --freeze` left a standalone alone because it already carries a `ref`."""
+    refused = "refused"
+    """`ws update --freeze` declined to pin a standalone — a dirty tree without `--force`;
+    a checkout that is missing (not cloned) or not a git repository, or whose HEAD commit
+    could not be read; or a repo declared in neither `config.toml` nor `config.local.toml`."""
     pin_error = "pin_error"
     """A re-pin or branch-pin advance failed (dirty-tree refusal, unresolvable ref,
     or checkout error) — distinct from a genuine upstream divergence (``diverged``).
@@ -491,7 +499,7 @@ class PullReport:
         if any(not e.success for e in self.envs):
             return False
         if any(
-            o.sync_result in (SyncResult.diverged, SyncResult.no_upstream, SyncResult.pin_error)
+            o.sync_result in (SyncResult.diverged, SyncResult.no_upstream, SyncResult.pin_error, SyncResult.refused)
             for o in self.standalone
         ):
             return False

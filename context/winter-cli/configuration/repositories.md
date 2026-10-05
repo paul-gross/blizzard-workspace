@@ -107,6 +107,9 @@ fetched remote refs in this order: `refs/remotes/origin/<ref>` (branch) → `ref
 | branch name       | Checkout on that tracking branch (`main_branch` effectively set to `<ref>`); `pull` fast-forwards to `origin/<ref>` | Lock written; rewritten on each `pull` advance   |
 | tag or commit SHA | Detached checkout held exactly at the resolved commit; `pull` **never** advances it                                 | Lock written; only updated by `winter ws update` |
 
+To pin every unpinned standalone to its current checkout, see
+[`winter ws update --freeze`](../usage/ws/update.md#freezing-the-workspace----freeze).
+
 **`ref` vs `pinned` vs `main_branch`** — three distinct concepts that are easy to conflate:
 
 - **`pinned`** (`[[project_repository]]` only, UNRELATED) — means "exclude this *project* repo from feature branching
@@ -141,13 +144,14 @@ commit = "9f3c1ab2e4d5c6f7089a1b2c3d4e5f60718293a4"  # full 40-char SHA
 
 **What rewrites the lock:**
 
-| Command            | Condition                  | Action                                     |
-| ------------------ | -------------------------- | ------------------------------------------ |
-| `winter ws init`   | Lock absent or stale       | Resolves `ref`, checks out, writes lock    |
-| `winter ws init`   | Lock present and fresh     | Checks out locked commit; no rewrite       |
-| `winter ws pull`   | Branch `ref` fast-forwards | Checks out new tip, rewrites lock          |
-| `winter ws pull`   | Tag / commit `ref`         | Held; lock unchanged                       |
-| `winter ws update` | Always (explicit re-pin)   | Fetches, re-resolves, checks out, rewrites |
+| Command                     | Condition                  | Action                                                                       |
+| --------------------------- | -------------------------- | ---------------------------------------------------------------------------- |
+| `winter ws init`            | Lock absent or stale       | Resolves `ref`, checks out, writes lock                                      |
+| `winter ws init`            | Lock present and fresh     | Checks out locked commit; no rewrite                                         |
+| `winter ws pull`            | Branch `ref` fast-forwards | Checks out new tip, rewrites lock                                            |
+| `winter ws pull`            | Tag / commit `ref`         | Held; lock unchanged                                                         |
+| `winter ws update`          | Always (explicit re-pin)   | Fetches, re-resolves, checks out, rewrites                                   |
+| `winter ws update --freeze` | Repo has no `ref`          | Writes `ref` to config; lock entry (`kind = "commit"`) for HEAD; no checkout |
 
 ## Display names and ordering
 

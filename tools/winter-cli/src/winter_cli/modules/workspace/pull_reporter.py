@@ -79,6 +79,12 @@ class StreamPullReporter:
             self._echo(f"{prefix} held @ {pin_ref}")
         elif result == SyncResult.re_pinned:
             self._echo(f"{prefix} re-pinned → {pin_ref}")
+        elif result == SyncResult.pinned:
+            self._echo(f"{prefix} pinned → {pin_ref}")
+        elif result == SyncResult.already_pinned:
+            self._echo(f"{prefix} already pinned @ {pin_ref}")
+        elif result == SyncResult.refused:
+            self._echo(f"{prefix} refused: {pin_ref}", err=True)
         else:
             self._echo(f"{prefix} fast-forwarded (+{commits})")
 

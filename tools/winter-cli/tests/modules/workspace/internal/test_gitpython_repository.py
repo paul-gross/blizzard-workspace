@@ -626,6 +626,19 @@ def test_get_head_commit_raises_repo_error_on_git_command_error(
     assert ei.value.subcommand == "rev-parse"
 
 
+@pytest.mark.parametrize("exc", [git.InvalidGitRepositoryError("not a git repo"), git.NoSuchPathError("no such path")])
+def test_get_head_commit_wraps_invalid_repo_and_missing_path_as_repo_error(
+    monkeypatch: pytest.MonkeyPatch, adapter: GitPythonRepository, exc: Exception
+) -> None:
+    git_mock = _fake_git_repo(monkeypatch)
+    git_mock.Repo.side_effect = exc
+
+    with pytest.raises(RepoError, match="not a git repository") as raised:
+        adapter.get_head_commit(_REPO_PATH, repo_name="repo", env=None)
+
+    assert raised.value.cwd == str(_REPO_PATH)
+
+
 # ── add_worktree (real-git regression: issue #148) ─────────────────────────
 #
 # These use a real `git init` repo rather than mocks so the `--no-track` fix

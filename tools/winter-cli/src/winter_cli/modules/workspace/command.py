@@ -848,9 +848,28 @@ def ws_pull(
     default=False,
     help="Stash dirty working tree before re-pinning, restore after.",
 )
+@click.option(
+    "--freeze",
+    is_flag=True,
+    default=False,
+    help="Pin every matched unpinned standalone to its current checkout instead of re-resolving.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="With --freeze, also pin a standalone that has uncommitted changes.",
+)
 @click.option("--json", "output_json", is_flag=True, default=False, help="Output as JSON.")
 @click.pass_context
-def ws_update(ctx: click.Context, repos: tuple[str, ...], autostash: bool, output_json: bool):
+def ws_update(
+    ctx: click.Context,
+    repos: tuple[str, ...],
+    autostash: bool,
+    freeze: bool,
+    force: bool,
+    output_json: bool,
+):
     """Re-resolve `ref` pins for standalone repos and rewrite the lock.
 
     Fetches the latest origin refs, re-resolves each pinned standalone's `ref`,
@@ -860,9 +879,18 @@ def ws_update(ctx: click.Context, repos: tuple[str, ...], autostash: bool, outpu
 
     Each REPO is a bare glob over standalone-repo names (no `<env>/<repo>`
     segment — standalone repos aren't scoped to an env). Pass any number of
-    literal names or a glob to re-pin exactly the set you want; a literal name
-    that doesn't match a pinned standalone raises a clear error, while a glob
-    matching zero repos is a no-op.
+    literal names or a glob to re-pin exactly the set you want. Without
+    --freeze, a literal name that doesn't match a pinned standalone raises a
+    clear error; a glob matching zero repos is a no-op.
+
+    With --freeze, nothing is re-resolved: each matched standalone that has no
+    `ref` gets `ref = "<full sha>"` of its current checkout written into
+    `.winter/config.toml`, or into `.winter/config.local.toml` for a repo
+    declared only there (comments and layout preserved), and the lock is
+    written. A literal name may name any standalone, pinned or not (only a name
+    matching no standalone raises). Already-pinned standalones are left alone. A
+    dirty standalone is refused unless --force. The commit need not exist on
+    origin.
 
     \b
       winter ws update              # re-pin all pinned standalones
@@ -870,12 +898,26 @@ def ws_update(ctx: click.Context, repos: tuple[str, ...], autostash: bool, outpu
       winter ws update my-lib other-lib   # re-pin exactly those two
       winter ws update 'winter-*'   # re-pin every pinned standalone matching the glob
       winter ws update --autostash  # allow re-pin of a dirty working tree
+      winter ws update --freeze     # pin every unpinned standalone to its checkout
+      winter ws update --freeze 'winter-*' --force   # ...matching the glob, dirty or not
     """
+    if force and not freeze:
+        raise click.UsageError("--force only applies with --freeze")
+    if freeze and autostash:
+        raise click.UsageError("--autostash does not apply with --freeze")
     for repo in repos:
         validate_bare_name_pattern(repo)
     container = cli_ctx(ctx).container
     handler = container.workspace_handler()
-    handler.update(EnvUpdateParams(repos=list(repos), autostash=autostash, output_json=output_json))
+    handler.update(
+        EnvUpdateParams(
+            repos=list(repos),
+            autostash=autostash,
+            output_json=output_json,
+            freeze=freeze,
+            force=force,
+        )
+    )
 
 
 @ws_group.command("merge")

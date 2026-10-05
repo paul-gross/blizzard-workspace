@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import tomlkit
 from tomlkit.items import AoT
@@ -52,6 +53,22 @@ class WriteWinterConfigurationRepository:
     def remove_standalone_repository(self, name: str, local: bool = False) -> bool:
         return self._remove_block("standalone_repository", name, local)
 
+    def set_standalone_ref(self, name: str, ref: str, local: bool = False) -> bool:
+        path = self._path_for(local)
+        if local and not self._fs.exists(path):
+            return False
+        doc = self._load(path, allow_missing=False)
+        aot = doc.get("standalone_repository")
+        if aot is None:
+            return False
+        for block in aot:
+            if self._effective_name(block) != name:
+                continue
+            self._set_key_after_last_entry(block, "ref", ref)
+            self._fs.write_text(path, tomlkit.dumps(doc))
+            return True
+        return False
+
     def _append_block(self, table_name: str, fields: dict, local: bool) -> None:
         path = self._path_for(local)
         doc = self._load(path, allow_missing=local)
@@ -77,10 +94,7 @@ class WriteWinterConfigurationRepository:
         if aot is None:
             return False
         for index, block in enumerate(aot):
-            explicit = block.get("name")
-            url = block.get("url")
-            effective = str(explicit) if explicit is not None else (self._name_from_url(str(url)) if url else None)
-            if effective != target_name:
+            if self._effective_name(block) != target_name:
                 continue
             del aot[index]
             self._fs.write_text(path, tomlkit.dumps(doc))
@@ -96,6 +110,34 @@ class WriteWinterConfigurationRepository:
                 return tomlkit.document()
             raise FileNotFoundError(f"Config file not found: {path}")
         return tomlkit.parse(self._fs.read_text(path))
+
+    @staticmethod
+    def _set_key_after_last_entry(block: Any, key: str, value: str) -> None:
+        """Set `key` on a table block, placing a new key right after its last key/value line.
+
+        Plain `block[key] = value` appends to the end of the table's body, which in tomlkit
+        includes the comment and blank lines between this block and the next one — the
+        comment describing the *next* block would end up above the new key. Inserting
+        after the last real entry keeps those lines where they are. tomlkit exposes no
+        public positional insert, hence `_insert_at`.
+        """
+        if key in block:
+            block[key] = value
+            return
+        body = block.value.body
+        last_entry = max(index for index, (entry_key, _) in enumerate(body) if entry_key is not None)
+        if last_entry == len(body) - 1:
+            block[key] = value  # nothing trails the last entry, so appending is already "after" it
+        else:
+            block.value._insert_at(last_entry + 1, key, tomlkit.item(value))
+
+    @classmethod
+    def _effective_name(cls, block: Any) -> str | None:
+        explicit = block.get("name")
+        url = block.get("url")
+        if explicit is not None:
+            return str(explicit)
+        return cls._name_from_url(str(url)) if url else None
 
     @staticmethod
     def _name_from_url(url: str) -> str:
