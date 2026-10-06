@@ -78,16 +78,17 @@ target = "Application startup complete"
 
 # --- P5/P6: blizzard hub (blizzard) — the code under test ---------------------
 # Runs the hub daemon from the env's blizzard worktree over a disposable per-env
-# sqlite runtime (BZ_HUB_RUNTIME). `init` scaffolds config + migrates the store
-# (idempotent); `host` becomes the daemon on BZ_HUB_PORT (band +2). The forge seam
-# is wired from the injected BZ_FORGE_PORT (build_hosted_app reads it); BZ_FORGE_OWNER
-# defaults to `blizzard`. Ordered after the forge so a `--wait` up brings the git
-# truth up first.
+# sqlite runtime (BZ_HUB_RUNTIME), through hub-host.sh: `init` scaffolds config +
+# migrates the store (idempotent), `host` serves on BZ_HUB_PORT (band +2), and once
+# it answers the script seeds the forge records — work sources and repositories for
+# the fixture's toy-api / toy-web, aimed at the mock forge on BZ_FORGE_PORT. The hub
+# refuses to start with BZ_FORGE_* set, so the forge is never wired through the env.
+# Ordered after the forge so a `--wait` up brings the git truth up first.
 [[service]]
 name = "hub"
 target = "0.1"  # split from forge's pane in layout-hook.sh
 cwd = "blizzard"
-cmd = 'uv run blizzard hub init "$BZ_HUB_RUNTIME" && exec uv run blizzard hub host --dir "$BZ_HUB_RUNTIME" --host 127.0.0.1 --port "$BZ_HUB_PORT"'
+cmd = 'exec sh ../../.winter/config/winter-service-tmux/hub-host.sh'
 port = "WINTER_PORT_BASE + 2"
 depends_on = ["forge"]
 
