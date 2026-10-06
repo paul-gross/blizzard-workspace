@@ -65,3 +65,8 @@ at different data.
    mutates real worktrees, and claims real chunks from the hosted hub; two runners double-drive the fleet. And avoid
    client mode against `https://blizzard.grosscode.net` for development — see the rule above; operators inspecting live
    state by hand (`blizzard hub status`, after `blizzard hub login`) are the exception.
+
+**Resetting an env's own hub store strands its runner.** A `reset` of the store under `BZ_HUB_RUNTIME`, or deleting that
+dir, leaves the runner's runtime dir holding a token the hub no longer knows, and every call it makes is refused.
+Restart it with `winter service restart <env>/runner`: the service runs `runner init --allow-readd`, which adds the
+runner afresh under a new id (`blizzard/docs/deployment/runner-auth.md` §Adding a runner owns the flag).
