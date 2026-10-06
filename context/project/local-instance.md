@@ -289,14 +289,15 @@ the agents it is running).
 
 ## The hub's work sources
 
-Which repos the hub can ingest from is set by `[[work_source]]` blocks in its config, which lives on the host.
-`blizzard`, `blizzard-mock`, `blizzard-infra`, and `blizzard-context` are configured. Changing them is a host operation,
-owned by `blizzard-infra` along with the rule its own tests enforce about how a source must be named.
+Which repos the hub ingests from and delivers to are records in its store — work sources and repository records, each
+naming the stored secret `github-forge` that holds the forge PAT. `blizzard`, `blizzard-mock`, `blizzard-infra`, and
+`blizzard-context` are configured. Change them through the hub, with `blizzard hub source …`, `blizzard hub repo …`, and
+`blizzard hub secret set github-forge` — no host operation and no restart. The hub refuses to start while its config
+declares a `[[work_source]]` block or its environment sets a `BZ_FORGE_*` variable, so neither ever goes back into
+`blizzard-infra`'s `deploy/`.
 
-**A committed block is not a live source.** The config is bind-mounted onto the host, so a change reaches the hub only
-when `blizzard-infra`'s `scripts/deploy.sh` ships `deploy/` — the image channel's unattended updater carries code, never
-this file. The forge PAT is the other half: it selects its repos explicitly, so a source whose repo the token does not
-cover fails at ingest with a 404 that reads as a missing issue.
+**The PAT selects its repos explicitly.** A source whose repo the token does not cover fails at ingest with a 404 that
+reads as a missing issue — re-scope the token before adding the source.
 
 ## Operating the fleet
 
