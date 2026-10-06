@@ -104,12 +104,14 @@ target = "http://localhost:${BZ_HUB_PORT}/api/health"
 # acquired env dir as cwd), so it is resolved from the sibling blizzard-mock worktree
 # here; the remaining loop seams (workspace root, env pool, hub url, base branch) ride
 # the injected env into `runner init`'s scaffold. The stale toml is cleared first so
-# each `up` re-derives config from the current env. Ordered after the hub.
+# each `up` re-derives config from the current env. The runtime dir outlives a reset
+# of the env's hub data, so init runs with --allow-readd: a hub that no longer knows
+# the token in the runtime dir's .env adds the runner afresh. Ordered after the hub.
 [[service]]
 name = "runner"
 target = "0.2"  # split in layout-hook.sh
 cwd = "blizzard"
-cmd = 'export BZ_HARNESS_BINARY="$(cd ../blizzard-mock && pwd)/.venv/bin/mock-claude-code"; rm -f "$BZ_RUNNER_RUNTIME/blizzard-runner.toml"; uv run blizzard runner init "$BZ_RUNNER_RUNTIME" && exec uv run blizzard runner host --dir "$BZ_RUNNER_RUNTIME" --host 127.0.0.1 --port "$BZ_RUNNER_PORT"'
+cmd = 'export BZ_HARNESS_BINARY="$(cd ../blizzard-mock && pwd)/.venv/bin/mock-claude-code"; rm -f "$BZ_RUNNER_RUNTIME/blizzard-runner.toml"; uv run blizzard runner init --allow-readd "$BZ_RUNNER_RUNTIME" && exec uv run blizzard runner host --dir "$BZ_RUNNER_RUNTIME" --host 127.0.0.1 --port "$BZ_RUNNER_PORT"'
 port = "WINTER_PORT_BASE + 3"
 depends_on = ["hub"]
 
