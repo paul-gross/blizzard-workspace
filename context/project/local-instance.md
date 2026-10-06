@@ -36,7 +36,8 @@ its plan's quota runs out while the other keeps working. Both share `workspace_r
 
 |                         | Claude Code runner                                                      | OpenCode runner                                    |
 | ----------------------- | ----------------------------------------------------------------------- | -------------------------------------------------- |
-| `runner_id`             | `r-claude`                                                              | `r-chatgpt`                                        |
+| Hub id                  | `rn_01M3MY1NGQR8WE1ZBRKNREFNE4`                                         | `rn_01M3JK4RX4BQJ74W7T3CK4NQ1B`                    |
+| Name                    | `r-claude`                                                              | `r-chatgpt`                                        |
 | Runtime dir             | `../runner`                                                             | `../runner-opencode`                               |
 | Harness                 | `[opencode] enabled = false`                                            | `[claude_code] enabled = false`                    |
 | Envs (`workspace_envs`) | `r1`–`r6`                                                               | `oce1`–`oce4`                                      |
@@ -50,6 +51,11 @@ its plan's quota runs out while the other keeps working. Both share `workspace_r
 Each runtime dir holds its own `blizzard-runner.toml`, `data/runner.db`, `worker-settings.json`, and OpenCode worker
 config. Health is `GET /api/health` on each port.
 
+**Operator verbs take the hub id, never the name** — `hub runner show r-claude` answers `unknown runner`, and
+`hub runner list` maps each name to its id. The id never changes. The name is a label the runner declares in its toml —
+here under the `runner_id` key, which a runner reads as its `name` (`blizzard/docs/remote-runner.md` §Point it at the
+hub).
+
 **Keep the env pools disjoint.** Nothing at the hub stops two runners holding the same env, so a pool that overlaps the
 other runner's lets both drive one worktree.
 
@@ -58,25 +64,22 @@ every runner node the chunk can still reach, so a graph whose sessions accept on
 accepting only `opencode` to `r-chatgpt`, and one accepting both to whichever claims first. A session with no harness
 set runs under the claiming runner's default — its one enabled harness — so it too goes to whichever claims first.
 
-**Adding or renaming a runner needs a hub-side window.** The hosted hub runs `runner_auth_mode = "enforce"`, and
-enrollment requires a prior registration, which `enforce` refuses to an unenrolled id — so a new `runner_id` (a rename
-included) cannot join unaided. The sequence is `blizzard/docs/remote-runner.md` §Enroll: set the host's hub config to
-`warn` and restart the hub (a `blizzard-infra` host operation), start the runner so it registers, `hub runner pause` it,
-`hub runner enroll <runner-id>`, write the token to its `.env` as `BZ_HUB_TOKEN`, restart the runner, restore `enforce`,
-then `hub runner resume` it. Keep the window short — `warn` relaxes enforcement fleet-wide. A **rename** also strands
-every chunk the hub routes to the old id, so drain the runner first (`hub runner pause` the old id and let its running
-chunks finish).
+**Adding a runner** is `hub runner add <name>` under an operator session: it prints the new id and, once, the token for
+the runtime dir's `.env` (the unit's `EnvironmentFile`). `blizzard/docs/deployment/runner-auth.md` §Adding a runner owns
+the rest, including `runner init`'s one-step form. **Pause it before its first start** — `hub runner pause <id>` takes a
+runner that has never connected, so it boots braked rather than claiming on its first tick. Resume it once
+`hub runner list` shows it `online`.
 
-Two traps in that sequence. **A new id registers unpaused** — the hub's pause is keyed by id, so the runner can claim on
-its very first tick, before `hub runner pause` can reach it. Boot it with `max_agents = 0` until
-`blizzard runner status --dir <runtime-dir>` shows `paused [hub]` (the mirrored brake survives a restart), then restore
-capacity. **The old id stays live until you retire it** — its registration stays in `hub runner list` with its token
-still resolving. Once the rename is done and the new id is claiming on its own token, `hub runner retire <old-id>`
-revokes the old token and refuses its claims and registrations. Expect it to refuse with a 409 listing held chunks even
-when every one is `done`: a chunk that finishes normally never releases its route. Confirm each listed chunk is `done`
-or `stopped` in `hub status`, then re-run with `--force` — on a terminal chunk the release only records itself, while a
-`running` one would go back to the queue. A long list can time out the client mid-release; re-running finishes it. Then
-delete the pre-rename `.env` rather than leaving the revoked token lying beside the new one.
+**Renaming a runner** is editing the name in its toml and restarting it — the id stays (`blizzard/docs/remote-runner.md`
+§Point it at the hub). The restart terminates the fleet workers it holds
+([post-delivery.md](./post-delivery.md#the-restart-is-fleet-wide)).
+
+**Retiring a runner** — `hub runner retire <id>` revokes its token and refuses its claims and registrations. Expect it
+to refuse with a 409 listing held chunks even when every one is `done`: a chunk that finishes normally never releases
+its route. Confirm each listed chunk is `done` or `stopped` in `hub status`, then re-run with `--force` — on a terminal
+chunk the release only records itself, while a `running` one would go back to the queue. A long list can time out the
+client mid-release; re-running finishes it. Then delete the runner's `.env` rather than leaving its revoked token on
+disk.
 
 ### The runners' trace collector
 
@@ -241,6 +244,9 @@ for u in blizzard-blizzard-runner blizzard-blizzard-runner-opencode; do
 done
 ```
 
+`blizzard runner status --dir <runtime-dir>` opens with the runner's name and hub id; `not registered` in place of the
+id means the hub has not accepted its token.
+
 **A runner's version names the commit it was built from.** A local build stamps a PEP 440 local segment, so
 `GET /api/health` reports something like `0.1.0+4efdf334a` — check it against the commit you deployed:
 
@@ -305,19 +311,21 @@ Drive the hub with the venv binary (`../.venv/bin/blizzard`). **Every command be
 session** — see [The operator CLI needs a session](#the-operator-cli-needs-a-session). Operator verbs are grouped under
 a noun — `hub chunk …`, `hub runner …`, `hub graph …` — so the bare `hub <verb>` forms do not exist:
 
-| Intent                                                                            | Command                                                                                         |
-| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| See every chunk and its derived status                                            | `hub status`                                                                                    |
-| Ingest an issue as a chunk                                                        | `hub chunk ingest blizzard:<issue-number>`                                                      |
-| Make an ingested chunk claimable                                                  | `hub chunk promote <chunk-id>`                                                                  |
-| Pin a chunk to a graph (and/or model)                                             | `hub chunk set <chunk-id> --graph <graph-id>`                                                   |
-| Inspect one chunk in full                                                         | `hub chunk show <chunk-id>`                                                                     |
-| Stop a runner claiming new work — e.g. `r-chatgpt` when the OpenAI quota runs out | `hub runner pause <runner-id>`                                                                  |
-| Let it claim again                                                                | `hub runner resume <runner-id>`                                                                 |
-| One runner's liveness + paused state                                              | `hub runner show <runner-id>`                                                                   |
-| Retire a runner for good — revoke its token, refuse its claims                    | `hub runner retire <runner-id>` — see [The two runners](#the-two-runners) for a renamed-away id |
+| Intent                                                                            | Command                                                                         |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| See every chunk and its derived status                                            | `hub status`                                                                    |
+| Ingest an issue as a chunk                                                        | `hub chunk ingest blizzard:<issue-number>`                                      |
+| Make an ingested chunk claimable                                                  | `hub chunk promote <chunk-id>`                                                  |
+| Pin a chunk to a graph (and/or model)                                             | `hub chunk set <chunk-id> --graph <graph-id>`                                   |
+| Inspect one chunk in full                                                         | `hub chunk show <chunk-id>`                                                     |
+| Every runner, its id, liveness, and brakes                                        | `hub runner list`                                                               |
+| Stop a runner claiming new work — e.g. `r-chatgpt` when the OpenAI quota runs out | `hub runner pause <id>`                                                         |
+| Let it claim again                                                                | `hub runner resume <id>`                                                        |
+| One runner's liveness + paused state                                              | `hub runner show <id>`                                                          |
+| Retire a runner for good — revoke its token, refuse its claims                    | `hub runner retire <id>` — read [The two runners](#the-two-runners) for its 409 |
 
-Every one of these is a pure hub-API client and takes `--hub-url` (default `$BZ_HUB_URL`) — not `--url`.
+Every one of these is a pure hub-API client and takes `--hub-url` (default `$BZ_HUB_URL`) — not `--url`. A runner's
+`<id>` is its hub id; [The two runners](#the-two-runners) lists both.
 
 **Ingest mints a chunk `not_ready`.** It will never be claimed until `chunk promote` moves it to `ready`, so an ingest
 on its own looks like it worked and then nothing happens. To stage a run deliberately — pinning a non-default graph
