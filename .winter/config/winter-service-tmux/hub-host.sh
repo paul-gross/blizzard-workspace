@@ -45,6 +45,7 @@ done
 # A failed seed leaves the hub serving without a forge rather than taking it down.
 seed() {
     uv run blizzard hub secret show mock-forge --hub-url "$BZ_HUB_URL" >/dev/null 2>&1 \
+        || printf 'mock-forge-token' | uv run blizzard hub secret create mock-forge --hub-url "$BZ_HUB_URL" >/dev/null 2>&1 \
         || printf 'mock-forge-token' | uv run blizzard hub secret set mock-forge --hub-url "$BZ_HUB_URL" >/dev/null \
         || return 1
     uv run blizzard hub config apply "$records" --hub-url "$BZ_HUB_URL"
