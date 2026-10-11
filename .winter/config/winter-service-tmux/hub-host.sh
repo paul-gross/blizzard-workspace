@@ -5,8 +5,10 @@
 # start while BZ_FORGE_URL or a [[work_source]] block is set. So once the daemon
 # answers, this declares the forge for it: a `mock-forge` secret (the mock accepts any
 # token), plus a work source and a repository record per fixture repo, aimed at the
-# mock forge on BZ_FORGE_PORT. `config apply` is idempotent, so every `up` re-asserts
-# the records and a restart rewrites nothing.
+# mock forge on BZ_FORGE_PORT, and links both to the tenant's `default` project — a
+# project ingests only from the sources it links and lands only in the repositories it
+# links, so unlinked fixtures would refuse every ingest. `config apply` is idempotent,
+# so every `up` re-asserts the records and links and a restart rewrites nothing.
 #
 # Runs with cwd at the env's blizzard worktree (the hub service's `cwd`).
 set -eu
@@ -25,6 +27,8 @@ work_sources:
 repositories:
   - {name: toy-api, forge_api_url: "${forge_url}", owner: blizzard, repo: toy-api, base_branch: "${BZ_BASE_BRANCH}", secret_name: mock-forge}
   - {name: toy-web, forge_api_url: "${forge_url}", owner: blizzard, repo: toy-web, base_branch: "${BZ_BASE_BRANCH}", secret_name: mock-forge}
+projects:
+  - {slug: default, name: Default, sources: [toy-api, toy-web], repositories: [toy-api, toy-web]}
 EOF
 
 uv run blizzard hub host --dir "$BZ_HUB_RUNTIME" --host 127.0.0.1 --port "$BZ_HUB_PORT" &
