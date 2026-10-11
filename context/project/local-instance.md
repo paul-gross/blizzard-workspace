@@ -41,7 +41,7 @@ its plan's quota runs out while the other keeps working. Both share `workspace_r
 | Runtime dir             | `../runner`                                                             | `../runner-opencode`                               |
 | Harness                 | `[opencode] enabled = false`                                            | `[claude_code] enabled = false`                    |
 | Envs (`workspace_envs`) | `r1`–`r6`                                                               | `oce1`–`oce4`                                      |
-| `max_agents`            | 4                                                                       | 1                                                  |
+| `max_agents`            | 2                                                                       | 1                                                  |
 | Port / `public_url`     | `127.0.0.1:8431`, plus the tailnet origin                               | `127.0.0.1:8432`, loopback only                    |
 | Subscription sampled    | `anthropic`                                                             | `openai`                                           |
 | Systemd unit            | `blizzard-blizzard-runner.service`                                      | `blizzard-blizzard-runner-opencode.service`        |
