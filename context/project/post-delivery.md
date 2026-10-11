@@ -50,6 +50,21 @@ Catch it here rather than downstream. Each runner does report the commit it was 
 (`GET /api/health` → `0.1.0+<short-sha>`), so a wrong-commit redeploy is detectable after the fact — but only after you
 have already restarted the fleet's runners onto it. Confirming the checkout first is cheaper than noticing afterward.
 
+## Before you build: read what the landing asks of its redeploy
+
+A landed issue can ask more of its redeploy than the runbook does. When the work you landed came from an issue with a
+`## Landing and deployment` section — `blizzard runner work-items <chunk-id>` names the issue — read that section before
+you build, and act on it:
+
+- **Extra redeploy steps** are yours to carry out where the section places them, before the runbook installs or migrates
+  anything. A step that fails is a stop under [Never restart onto a broken build](#never-restart-onto-a-broken-build),
+  exactly as a failed migration is.
+- **Deploy: by hand** means no fleet worker redeploys this landing: its deploy stops the runners, which no worker can do
+  from inside one. Run none of the runbook, report that the landing awaits its attended deploy, and stop.
+
+An issue with no such section, or one whose section asks for nothing beyond the standard pass, leaves the runbook as it
+is.
+
 ## Why the runner restarts go last
 
 **Restarting the runners is the step that terminates fleet workers — see below.** Anything you still owe the node must
