@@ -181,12 +181,19 @@ Error: not authenticated — run `blizzard hub login`
 
 ```bash
 export BZ_HUB_URL=https://blizzard.grosscode.net   # every hub command defaults --hub-url to it
+export FLEET_TENANT=ten_01M4N8ZW1AXGMFD9WCAFJ1FJZB  # the instance's tenant; pass it as --tenant "$FLEET_TENANT"
 blizzard hub login                                  # opens a browser
 ```
 
 **Export `BZ_HUB_URL` — treat it as a prerequisite, not a convenience.** With it unset and no explicit `--hub-url`,
 every `blizzard hub …` command falls back to its built-in default of `http://127.0.0.1:8421`, which is the dead port
 above.
+
+**Pass `--tenant "$FLEET_TENANT"` to every tenant-scoped verb.** The instance's fleet — its runners, chunks, graphs,
+sources, and repositories — lives in the `default` tenant, `ten_01M4N8ZW1AXGMFD9WCAFJ1FJZB`, and the operator account
+also administers `demo`, so a verb without the flag refuses with `you belong to several tenants` and lists both. The CLI
+keeps no saved tenant and reads no environment variable for it; `FLEET_TENANT` is only a shell convenience. Which verbs
+are hub-level and take no `--tenant` is `blizzard/docs/deployment/tenants.md`'s.
 
 ## Redeploy + restart runbook — the runner half
 
@@ -216,7 +223,7 @@ uv pip install --python ../../../.venv --reinstall dist/blizzard-*.whl
 # 5. re-mint every graph the deploy changed — see below. Reads the graph from the
 #    LOCAL venv and posts it to the HOSTED hub, so it needs $BZ_HUB_URL and a
 #    login. Sits BEFORE the runner restarts (which terminate fleet workers).
-../../../.venv/bin/blizzard hub graph mint --hub-url "$BZ_HUB_URL" \
+../../../.venv/bin/blizzard hub graph mint --hub-url "$BZ_HUB_URL" --tenant "$FLEET_TENANT" \
   ../../../.venv/lib/python3*/site-packages/blizzard/hub/graphs/<graph>/graph.yaml
 
 # 6. restart both runners. A fleet-worker shell has no user session bus, so
@@ -307,9 +314,10 @@ reads as a missing issue — re-scope the token before adding the source.
 
 ## Operating the fleet
 
-Drive the hub with the venv binary (`../.venv/bin/blizzard`). **Every command below needs `$BZ_HUB_URL` exported and a
-session** — see [The operator CLI needs a session](#the-operator-cli-needs-a-session). Operator verbs are grouped under
-a noun — `hub chunk …`, `hub runner …`, `hub graph …` — so the bare `hub <verb>` forms do not exist:
+Drive the hub with the venv binary (`../.venv/bin/blizzard`). **Every command below needs `$BZ_HUB_URL` exported, a
+session, and `--tenant "$FLEET_TENANT"`** — see [The operator CLI needs a session](#the-operator-cli-needs-a-session).
+Operator verbs are grouped under a noun — `hub chunk …`, `hub runner …`, `hub graph …` — so the bare `hub <verb>` forms
+do not exist:
 
 | Intent                                                                            | Command                                                                         |
 | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
