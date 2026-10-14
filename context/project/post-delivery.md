@@ -89,7 +89,7 @@ observe is simply your next turn arriving after a message like
 
 Plan for the interruption rather than trying to avoid it:
 
-- **Restart the runners last, in one `systemctl --user restart` naming both units** (the runbook's step 6), and finish
+- **Restart the runners last, in one `systemctl --user restart` naming both units** (the runbook's step 7), and finish
   everything else in the node first — the retrospective asset above all — so nothing valuable is riding on the wake-up.
   One command gets both restarts to systemd before your own runner stops; restart them one command at a time and the
   command after your own runner's restart never runs, leaving the other runner on the old code.
@@ -107,10 +107,11 @@ check health directly. It does still interrupt any fleet workers in flight; see 
 
 The runners you are redeploying drive the whole fleet, including chunks other than yours.
 
-**If the fetch, build, install, or either runner migration fails, stop and do not restart anything.** Leaving the
-runners on their current wheel is always the correct outcome of a failed deploy: the fleet keeps working, and the
-failure stays recoverable. Restarting onto a wheel that does not install or a store that did not migrate takes the fleet
-down — and, for a fleet worker, takes down the very runner that would otherwise bring you back to report it.
+**If the fetch, build, install, either migration, or either `host --check` fails, stop and do not restart anything.**
+Leaving the runners on their current wheel is always the correct outcome of a failed deploy: the fleet keeps working,
+and the failure stays recoverable. Restarting onto a wheel that does not install, a store that did not migrate, or a
+host directory that did not check takes the fleet down — and, for a fleet worker, takes down the very runner that would
+otherwise bring you back to report it.
 
 **You cannot stop the hub half the same way.** It follows `edge` on a timer, so a bad landing is already on its way to
 the hosted hub the moment CI publishes it — there is no gate here for you to hold. Keeping a landing off that hub means
