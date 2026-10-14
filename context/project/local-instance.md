@@ -31,30 +31,34 @@ relative to the workspace root.
 ### The two runners
 
 The fleet is split by subscription: each runner binds exactly one coding harness, so each can be paused on its own when
-its plan's quota runs out while the other keeps working. Both share `workspace_root` = this workspace,
-`hub_url = "https://blizzard.grosscode.net"`, `base_branch = master`, and the venv.
+its plan's quota runs out while the other keeps working. Each runs as a **host of one**: its own host daemon, host
+directory, and unit, with one `[[runner]]` in it. Both hosts' `[[workspace]]` share `root` = this workspace and
+`base_branch = master`, both set `hub_url = "https://blizzard.grosscode.net"`, and both run the venv.
 
-|                         | Claude Code runner                                                      | OpenCode runner                                    |
-| ----------------------- | ----------------------------------------------------------------------- | -------------------------------------------------- |
-| Hub id                  | `rn_01M3MY1NGQR8WE1ZBRKNREFNE4`                                         | `rn_01M3JK4RX4BQJ74W7T3CK4NQ1B`                    |
-| Name                    | `r-claude`                                                              | `r-chatgpt`                                        |
-| Runtime dir             | `../runner`                                                             | `../runner-opencode`                               |
-| Harness                 | `[opencode] enabled = false`                                            | `[claude_code] enabled = false`                    |
-| Envs (`workspace_envs`) | `r1`–`r6`                                                               | `oce1`–`oce4`                                      |
-| `max_agents`            | 2                                                                       | 1                                                  |
-| Port / `public_url`     | `127.0.0.1:8431`, plus the tailnet origin                               | `127.0.0.1:8432`, loopback only                    |
-| Subscription sampled    | `anthropic`                                                             | `openai`                                           |
-| Systemd unit            | `blizzard-blizzard-runner.service`                                      | `blizzard-blizzard-runner-opencode.service`        |
-| Hub token               | `../runner/.env` (unit drop-in `EnvironmentFile`)                       | `../runner-opencode/.env` (unit `EnvironmentFile`) |
-| Trace export            | `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` in `../runner/.env` | the same, in `../runner-opencode/.env`             |
+|                             | Claude Code runner                                                           | OpenCode runner                                                                |
+| --------------------------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Hub id                      | `rn_01M3MY1NGQR8WE1ZBRKNREFNE4`                                              | `rn_01M3JK4RX4BQJ74W7T3CK4NQ1B`                                                |
+| Name                        | `r-claude`                                                                   | `r-chatgpt`                                                                    |
+| Runtime dir                 | `../runner`                                                                  | `../runner-opencode`                                                           |
+| Harness                     | `[runner.opencode] enabled = false`                                          | `[runner.claude_code] enabled = false`                                         |
+| Envs (`[[workspace]] envs`) | `r1`–`r6`                                                                    | `oce1`–`oce4`                                                                  |
+| Agents (binding `agents`)   | 2, on its one `default` binding                                              | 1, on its one `default` binding                                                |
+| Port / `public_url`         | `127.0.0.1:8431`, plus the tailnet origin                                    | `127.0.0.1:8432`, loopback only                                                |
+| Subscription sampled        | `anthropic`                                                                  | `openai`                                                                       |
+| Systemd unit                | `blizzard-blizzard-runner.service`                                           | `blizzard-blizzard-runner-opencode.service`                                    |
+| Hub token                   | `BZ_HUB_TOKEN_R_CLAUDE` in `../runner/.env` (unit drop-in `EnvironmentFile`) | `BZ_HUB_TOKEN_R_CHATGPT` in `../runner-opencode/.env` (unit `EnvironmentFile`) |
+| Trace export                | `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` in `../runner/.env`      | the same, in `../runner-opencode/.env`                                         |
 
-Each runtime dir holds its own `blizzard-runner.toml`, `data/runner.db`, `worker-settings.json`, and OpenCode worker
-config. Health is `GET /api/health` on each port.
+Each runtime dir is a host directory: its `blizzard-host.toml` — the host keys at the top, one `[[workspace]]`, one
+`[[subscription]]`, and one `[[runner]]` carrying the hub id, its name, its subscription, its project binding, and every
+`[runner.*]` table — its store `data/host.db`, `worker-settings.json`, and OpenCode worker config. The pre-host
+`blizzard-runner.toml.graduated` and `backup-host-graduation-*/` beside them are kept only to go back by. Health is
+`GET /api/health` on each port.
 
 **Operator verbs take the hub id, never the name** — `hub runner show r-claude` answers `unknown runner`, and
-`hub runner list` maps each name to its id. The id never changes. The name is a label the runner declares in its toml —
-here under the `runner_id` key, which a runner reads as its `name` (`blizzard/docs/remote-runner.md` §Point it at the
-hub).
+`hub runner list` maps each name to its id. The id never changes, and is the `[[runner]] id` in the host file: a host
+refuses to start a runner whose store names another. The name is the `[[runner]] name`, a label that also names the
+runner's token variable, `BZ_HUB_TOKEN_<NAME>` (upper-cased, every character outside `A-Z0-9` replaced by `_`).
 
 **Keep the env pools disjoint.** Nothing at the hub stops two runners holding the same env, so a pool that overlaps the
 other runner's lets both drive one worktree.
@@ -64,15 +68,15 @@ every runner node the chunk can still reach, so a graph whose sessions accept on
 accepting only `opencode` to `r-chatgpt`, and one accepting both to whichever claims first. A session with no harness
 set runs under the claiming runner's default — its one enabled harness — so it too goes to whichever claims first.
 
-**Adding a runner** is `hub runner add <name>` under an operator session: it prints the new id and, once, the token for
-the runtime dir's `.env` (the unit's `EnvironmentFile`). `blizzard/docs/deployment/runner-auth.md` §Adding a runner owns
-the rest, including `runner init`'s one-step form. **Pause it before its first start** — `hub runner pause <id>` takes a
-runner that has never connected, so it boots braked rather than claiming on its first tick. Resume it once
-`hub runner list` shows it `online`.
+**Adding a runner** means a new host directory of one, with its own port and unit. `hub runner add <name>` under an
+operator session prints the new id and, once, the `BZ_HUB_TOKEN_<NAME>` line for that directory's `.env` (the unit's
+`EnvironmentFile`). `blizzard/docs/deployment/runner-auth.md` §Adding a runner owns the rest, including `runner init`'s
+one-step form. **Pause it before its first start** — `hub runner pause <id>` takes a runner that has never connected, so
+it boots braked rather than claiming on its first tick. Resume it once `hub runner list` shows it `online`.
 
-**Renaming a runner** is editing the name in its toml and restarting it — the id stays (`blizzard/docs/remote-runner.md`
-§Point it at the hub). The restart terminates the fleet workers it holds
-([post-delivery.md](./post-delivery.md#the-restart-is-fleet-wide)).
+**Renaming a runner** is editing its `[[runner]] name` and renaming its `BZ_HUB_TOKEN_<NAME>` in `.env` together, then
+restarting it — the id stays; rename one without the other and the host finds no token for the runner. The restart
+terminates the fleet workers it holds ([post-delivery.md](./post-delivery.md#the-restart-is-fleet-wide)).
 
 **Retiring a runner** — `hub runner retire <id>` revokes its token and refuses its claims and registrations. Expect it
 to refuse with a 409 listing held chunks even when every one is `done`: a chunk that finishes normally never releases
@@ -199,10 +203,10 @@ are hub-level and take no `--tenant` is `blizzard/docs/deployment/tenants.md`'s.
 
 The hub half is automatic (above). This is what a landing on `master` still costs by hand.
 
-Both runners run the one venv, so a single rebuild and reinstall redeploys both — but each has its own store and its own
-unit, so steps 4 and 6 run once per runner. Code changes need a rebuild and reinstall, not just a restart. **Gotcha:** a
-runner **fails fast on a stale store** when a new wheel adds a migration — always migrate both stores before restarting
-either.
+Both hosts run the one venv, so a single rebuild and reinstall redeploys both — but each has its own store and its own
+unit, so steps 4, 5 and 7 run once per host. Code changes need a rebuild and reinstall, not just a restart. **Gotcha:**
+a host **fails fast on a stale store** when a new wheel adds a migration — always migrate and check both host
+directories before restarting either.
 
 ```bash
 # 1. get master current — fast-forwards each projects/<repo> source checkout's
@@ -215,28 +219,34 @@ cd projects/blizzard && mise run build
 # 3. reinstall into the runtime venv (still in projects/blizzard from step 2)
 uv pip install --python ../../../.venv --reinstall dist/blizzard-*.whl
 
-# 4. migrate BOTH runner stores (idempotent — safe every deploy). There is no local
-#    hub store to migrate; the hosted hub migrates itself on boot.
+# 4. migrate BOTH host stores, each data/host.db (idempotent — safe every deploy). There is
+#    no local hub store to migrate; the hosted hub migrates itself on boot.
 ../../../.venv/bin/blizzard runner migrate --dir ../../../runner
 ../../../.venv/bin/blizzard runner migrate --dir ../../../runner-opencode
 
-# 5. re-mint every graph the deploy changed — see below. Reads the graph from the
+# 5. check BOTH host directories: loads blizzard-host.toml, verifies the store's revision
+#    and that it names the configured runner, and resolves each token at the hub, starting
+#    nothing. Both must print `host ok`; a refusal is a stop — restart nothing.
+../../../.venv/bin/blizzard runner host --check --dir ../../../runner
+../../../.venv/bin/blizzard runner host --check --dir ../../../runner-opencode
+
+# 6. re-mint every graph the deploy changed — see below. Reads the graph from the
 #    LOCAL venv and posts it to the HOSTED hub, so it needs $BZ_HUB_URL and a
 #    login. Sits BEFORE the runner restarts (which terminate fleet workers).
 ../../../.venv/bin/blizzard hub graph mint --hub-url "$BZ_HUB_URL" --tenant "$FLEET_TENANT" \
   ../../../.venv/lib/python3*/site-packages/blizzard/hub/graphs/<graph>/graph.yaml
 
-# 6. restart both runners. A fleet-worker shell has no user session bus, so
+# 7. restart both hosts. A fleet-worker shell has no user session bus, so
 #    systemctl --user fails there ("Failed to connect to bus") until these are set:
 export XDG_RUNTIME_DIR="/run/user/$(id -u)"
 export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 systemctl --user restart blizzard-blizzard-runner-opencode.service blizzard-blizzard-runner.service
 ```
 
-Paths in steps 3–5 are written from `projects/blizzard`, where step 2 leaves you: `../../../` is the workspace root's
+Paths in steps 3–6 are written from `projects/blizzard`, where step 2 leaves you: `../../../` is the workspace root's
 parent. Adjust if you run them from elsewhere.
 
-**Skip step 5 when the landed range did not touch `src/blizzard/hub/graphs/`** — check with the diff below rather than
+**Skip step 6 when the landed range did not touch `src/blizzard/hub/graphs/`** — check with the diff below rather than
 minting blindly.
 
 Verify each runner: the **version stamp below is the redeploy proof** — a `200` from `/api/health` alone can come from

@@ -12,10 +12,11 @@ hub**; the hosted one is for operator-driven inspection only, and needs `blizzar
 
 **There is no local hub DB.** `../hub/data/hub.db` exists but is a **frozen snapshot** — the fleet as it stood at the
 migration, not as it is. The live hub store is on the EC2 host and is not reachable as a file from here at all.
-`../runner/data/runner.db` and `../runner-opencode/data/runner.db` — one per runner — are the only live local databases.
+`../runner/data/host.db` and `../runner-opencode/data/host.db` — one per runner host — are the only live local
+databases.
 
 **Hard constraint (runner only):** SQLite is single-writer. Each systemd runner holds its own store —
-`../runner/data/runner.db` (`blizzard-blizzard-runner.service`) and `../runner-opencode/data/runner.db`
+`../runner/data/host.db` (`blizzard-blizzard-runner.service`) and `../runner-opencode/data/host.db`
 (`blizzard-blizzard-runner-opencode.service`) — and runs migrations on boot, so a second daemon writing either
 concurrently risks lock contention / corruption. **Do not point a live feature-env runner at a runner store while its
 unit is up.** This is a data-safety constraint, not a tooling gap — no config mechanism relaxes it.
