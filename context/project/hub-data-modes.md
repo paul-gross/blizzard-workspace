@@ -12,14 +12,12 @@ hub**; the hosted one is for operator-driven inspection only, and needs `blizzar
 
 **There is no local hub DB.** `../hub/data/hub.db` exists but is a **frozen snapshot** — the fleet as it stood at the
 migration, not as it is. The live hub store is on the EC2 host and is not reachable as a file from here at all.
-`../runner/data/host.db` and `../runner-opencode/data/host.db` — one per runner host — are the only live local
-databases.
+`../runner/data/host.db` — the one runner host's store, holding both runners' rows — is the only live local database.
 
-**Hard constraint (runner only):** SQLite is single-writer. Each systemd runner holds its own store —
-`../runner/data/host.db` (`blizzard-blizzard-runner.service`) and `../runner-opencode/data/host.db`
-(`blizzard-blizzard-runner-opencode.service`) — and runs migrations on boot, so a second daemon writing either
-concurrently risks lock contention / corruption. **Do not point a live feature-env runner at a runner store while its
-unit is up.** This is a data-safety constraint, not a tooling gap — no config mechanism relaxes it.
+**Hard constraint (runner only):** SQLite is single-writer. The systemd host holds its store — `../runner/data/host.db`
+(`blizzard-blizzard-runner.service`) — and runs migrations on boot, so a second daemon writing it concurrently risks
+lock contention / corruption. **Do not point a live feature-env runner at the host's store while its unit is up.** This
+is a data-safety constraint, not a tooling gap — no config mechanism relaxes it.
 
 Port 8421 answers **nothing** — the local hub unit is stopped and disabled. A dev surface still aimed there fails to
 connect rather than quietly reaching the wrong fleet.
@@ -62,10 +60,10 @@ at different data.
    store to clean; richer state seeds through the hub's own HTTP API (ingest → promote, with `blizzard-mock-forge` as
    the work source). The mock-data `fixture` subgroup (named one-command scenarios) is still stubbed — until it lands,
    rich synthetic worlds are assembled by hand.
-4. **Avoid:** a second live **runner** against either runner store — it spawns real `claude` or `opencode` workers,
-   mutates real worktrees, and claims real chunks from the hosted hub; two runners double-drive the fleet. And avoid
-   client mode against `https://blizzard.grosscode.net` for development — see the rule above; operators inspecting live
-   state by hand (`blizzard hub status`, after `blizzard hub login`) are the exception.
+4. **Avoid:** a second live **runner** against the host's store — it spawns real `claude` or `opencode` workers, mutates
+   real worktrees, and claims real chunks from the hosted hub; two runners double-drive the fleet. And avoid client mode
+   against `https://blizzard.grosscode.net` for development — see the rule above; operators inspecting live state by
+   hand (`blizzard hub status`, after `blizzard hub login`) are the exception.
 
 **Resetting an env's own hub store strands its runner.** A `reset` of the store under `BZ_HUB_RUNTIME`, or deleting that
 dir, leaves the runner's runtime dir holding a token the hub no longer knows, and every call it makes is refused.
