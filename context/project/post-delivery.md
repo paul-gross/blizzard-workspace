@@ -16,17 +16,16 @@ world. This file is about **this workspace's own dogfooding deployment**, which 
 
 ## The rule: landing on `master` means redeploying the runners
 
-A live blizzard hub and two runners drive blizzard's own development — the **instance**, whose deployed surface and
-commands are in [local-instance.md](./local-instance.md). Its two halves redeploy differently, and only one of them is
-your job: the **hub** redeploys itself from `master`, and the **runners** — `r-claude` (Claude Code) and `r-chatgpt`
-(OpenCode), one venv between them — are yours to rebuild by hand.
+A live blizzard hub and one local host of two runners drive blizzard's own development — the **instance**, whose
+deployed surface and commands are in [local-instance.md](./local-instance.md). Its two halves redeploy differently, and
+only one of them is your job: the **hub** redeploys itself from `master`, and the **runners** — `r-claude` (Claude Code)
+and `r-chatgpt` (OpenCode), one host daemon and one venv between them — are yours to rebuild by hand.
 
 **Every landing on `master` is followed by a rebuild and a redeploy of both runners, onto exactly the code that just
 landed.** The fleet dogfoods its own output, so a delivered change that never reaches the running runners is a change
-the fleet cannot feel. Both run the same venv, so one reinstall changes the code under both; restart only one and the
-other runs the old code in memory while its installed files are the new wheel. Do not wait to be asked and do not defer
-it to a later session: the redeploy is the second half of delivering, in the same way that pushing is the second half of
-committing.
+the fleet cannot feel. Both run in the one host process, so one reinstall and one restart move both together. Do not
+wait to be asked and do not defer it to a later session: the redeploy is the second half of delivering, in the same way
+that pushing is the second half of committing.
 
 Rebuild even when a landing looks like it cannot touch the runner. Judging that correctly means knowing exactly what the
 wheel carries, and the cost of being wrong is a fleet quietly running code you did not ship. (This is about the
@@ -89,15 +88,14 @@ observe is simply your next turn arriving after a message like
 
 Plan for the interruption rather than trying to avoid it:
 
-- **Restart the runners last, in one `systemctl --user restart` naming both units** (the runbook's step 7), and finish
-  everything else in the node first — the retrospective asset above all — so nothing valuable is riding on the wake-up.
-  One command gets both restarts to systemd before your own runner stops; restart them one command at a time and the
-  command after your own runner's restart never runs, leaving the other runner on the old code.
+- **Restart the host last** (the runbook's step 7), and finish everything else in the node first — the retrospective
+  asset above all — so nothing valuable is riding on the wake-up. Nothing can follow the restart in the same turn: the
+  command stops your own runner with it.
 - **When you wake up, do not start over.** Your own prior turns are still in the transcript; read them to see how far
   the deploy got. The restart you issued succeeded — that is why you are running again.
-- **Then finish**: confirm both runners' health endpoints answer and both units — `blizzard-blizzard-runner.service` and
-  `blizzard-blizzard-runner-opencode.service` — are active (the disabled hub unit is not a check), confirm the version
-  each reports carries the commit you landed, and declare done.
+- **Then finish**: confirm the host's health endpoint answers and `blizzard-blizzard-runner.service` is active (the
+  disabled hub and OpenCode units are not checks), confirm the version it reports carries the commit you landed, and
+  declare done.
 - **Do not restart the runners twice.** A second restart buys nothing and costs another round trip through resume.
 
 **If you are a standalone agent, none of this touches you** — the restart does not kill your session, so just run it and
@@ -107,10 +105,10 @@ check health directly. It does still interrupt any fleet workers in flight; see 
 
 The runners you are redeploying drive the whole fleet, including chunks other than yours.
 
-**If the fetch, build, install, either migration, or either `host --check` fails, stop and do not restart anything.**
-Leaving the runners on their current wheel is always the correct outcome of a failed deploy: the fleet keeps working,
-and the failure stays recoverable. Restarting onto a wheel that does not install, a store that did not migrate, or a
-host directory that did not check takes the fleet down — and, for a fleet worker, takes down the very runner that would
+**If the fetch, build, install, the migration, or `host --check` fails, stop and do not restart anything.** Leaving the
+runners on their current wheel is always the correct outcome of a failed deploy: the fleet keeps working, and the
+failure stays recoverable. Restarting onto a wheel that does not install, a store that did not migrate, or a host
+directory that did not check takes the fleet down — and, for a fleet worker, takes down the very runner that would
 otherwise bring you back to report it.
 
 **You cannot stop the hub half the same way.** It follows `edge` on a timer, so a bad landing is already on its way to
@@ -123,6 +121,6 @@ next chunk's work, not this one's.
 
 ## The restart is fleet-wide
 
-Restarting the runners interrupts **every** in-flight worker either one holds, not only you. They all come back the same
+Restarting the host interrupts **every** in-flight worker either runner holds, not only you. They all come back the same
 way, through the same restart-resume path, so the cost is a hiccup rather than lost work — but it is a real cost, and it
 is why the redeploy happens once, at the end.
