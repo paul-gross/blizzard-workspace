@@ -1,9 +1,9 @@
 # The instance
 
 This workspace **dogfoods blizzard**: a real blizzard hub and one runner host of two runners drive blizzard's own
-development (the `r1`–`r6` and `oce1`–`oce4` envs) against the **real** GitHub forge. **The instance** is what this file
-calls that deployment, and what "redeploy and restart the instance" means — **not** a feature env, and not the
-per-feature-env verification stacks.
+development (the `r-claude-1`–`r-claude-6` and `r-chatgpt-1`–`r-chatgpt-4` envs) against the **real** GitHub forge.
+**The instance** is what this file calls that deployment, and what "redeploy and restart the instance" means — **not** a
+feature env, and not the per-feature-env verification stacks.
 
 Its two halves run in different places, and that governs everything below:
 
@@ -47,20 +47,20 @@ holding both runners, and it reports both workspaces and both subscriptions to t
 | ------------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------- |
 | Hub id                         | `rn_01M3MY1NGQR8WE1ZBRKNREFNE4`             | `rn_01M3JK4RX4BQJ74W7T3CK4NQ1B`                                                        |
 | Name                           | `r-claude`                                  | `r-chatgpt`                                                                            |
-| Workspace (`[[workspace]] id`) | `workspace-local`                           | `blizzard-openai`                                                                      |
-| Envs (`[[workspace]] envs`)    | `r1`–`r6`                                   | `oce1`–`oce4`                                                                          |
+| Workspace (`[[workspace]] id`) | `blizzard-claude`                           | `blizzard-chatgpt`                                                                     |
+| Envs (`[[workspace]] envs`)    | `r-claude-1`–`r-claude-6`                   | `r-chatgpt-1`–`r-chatgpt-4`                                                            |
 | Agents (binding `agents`)      | 2, on its one `default` binding             | 1, on its one `default` binding                                                        |
 | Harness                        | `[runner.opencode] enabled = false`         | `[runner.claude_code] enabled = false`                                                 |
 | Subscription spent             | `anthropic`                                 | `openai`                                                                               |
 | Worker config                  | `../runner/worker-settings.json`            | `../runner/runners/r-chatgpt/` — `worker-settings.json`, `opencode-worker-config.json` |
 | Hub token                      | `BZ_HUB_TOKEN_R_CLAUDE` in `../runner/.env` | `BZ_HUB_TOKEN_R_CHATGPT` in `../runner/.env`                                           |
 
-Both workspaces share `root` = this workspace and `base_branch = master`; the host sets
-`hub_url = "https://blizzard.grosscode.net"` for both runners, and runs the venv. The host file holds the host keys at
-the top, then two `[[workspace]]`, two `[[subscription]]`, and two `[[runner]]` tables, each `[[runner]]` carrying its
-hub id, its name, its subscription, its project binding, and every `[runner.*]` table. Health is `GET /api/health` on
-8431. Every per-runner `blizzard runner …` verb — `status`, `traces status`, `traces replay`, and the rest — takes
-`--runner <name|id>` here, since the host runs more than one.
+Both workspaces share `root` = this workspace and `base_branch = master`, and each is named for the runner bound to it;
+the host sets `hub_url = "https://blizzard.grosscode.net"` for both runners, and runs the venv. The host file holds the
+host keys at the top, then two `[[workspace]]`, two `[[subscription]]`, and two `[[runner]]` tables, each `[[runner]]`
+carrying its hub id, its name, its subscription, its project binding, and every `[runner.*]` table. Health is
+`GET /api/health` on 8431. Every per-runner `blizzard runner …` verb — `status`, `traces status`, `traces replay`, and
+the rest — takes `--runner <name|id>` here, since the host runs more than one.
 
 **Operator verbs take the hub id, never the name** — `hub runner show r-claude` answers `unknown runner`, and
 `hub runner list` maps each name to its id; `hub runner-host show hs_01M521395MMCN3ANGMJVQPG1YK` lists the host with
