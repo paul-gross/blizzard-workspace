@@ -77,8 +77,8 @@ orders around.
 ## Restarting the runners, when you are a fleet worker
 
 **If you are a fleet worker, you are running inside one of the runners you are about to restart** — `r-claude` if your
-env is `r1`–`r6`, `r-chatgpt` if it is `oce1`–`oce4`. Restarting it kills your worker process mid-command. You will not
-see the output of the restart command, and you get no chance to tidy up first.
+env is `r-claude-<n>`, `r-chatgpt` if it is `r-chatgpt-<n>`. Restarting it kills your worker process mid-command. You
+will not see the output of the restart command, and you get no chance to tidy up first.
 
 **This is normal and designed for. Do not treat it as a crash, a mistake, or something to route around.** A graceful
 runner shutdown marks every in-flight lease for restart-resume, and the runner's first tick after startup re-attaches
