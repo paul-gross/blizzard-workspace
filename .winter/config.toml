@@ -162,6 +162,9 @@ BZ_RUNNER_PORT = "${WINTER_PORT_BASE+3}"  # blizzard runner (P6)
 # web-hub / web-runner slots in .winter/config/winter-service-tmux/config.toml.
 BZ_HUB_WEB_PORT    = "${WINTER_PORT_BASE+4}"  # `ng serve hub` — the board's HMR port
 BZ_RUNNER_WEB_PORT = "${WINTER_PORT_BASE+5}"  # `ng serve runner` — the panel's HMR port
+# The workshop — Storybook over the fleet kit (band +6). Needs no daemon; it compiles the
+# worktree's own web source, so a feature env's workshop shows that env's kit.
+BZ_STORYBOOK_PORT = "${WINTER_PORT_BASE+6}"
 # The hub URL the runner reconciliation loop points at (same host, band +2). Read by
 # `blizzard runner init`'s scaffold (RunnerConfig, BZ_HUB_URL).
 BZ_HUB_URL     = "http://127.0.0.1:${BZ_HUB_PORT}"
