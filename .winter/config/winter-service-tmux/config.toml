@@ -121,7 +121,8 @@ type = "url"
 target = "http://localhost:${BZ_RUNNER_PORT}/api/health"
 
 # ---------------------------------------------------------------------------
-# Web dev servers — the HMR surface for the two Angular apps (window 1).
+# Web dev servers — the HMR surface for the two Angular apps, plus the workshop
+# (window 1).
 #
 # Each daemon above already serves its app's BUILT bundle from the wheel's package
 # data (src/blizzard/static/<app>, mounted at / by foundation/web.py), so the board
@@ -136,7 +137,7 @@ target = "http://localhost:${BZ_RUNNER_PORT}/api/health"
 # from the injected band rather than pinning a literal.
 #
 # They live in window 1 (layout-hook.sh) to keep the daemon stack legible in window
-# 0 — five panes in one window is unreadable, and the daemon/dev-server split is the
+# 0 — six panes in one window is unreadable, and the daemon/dev-server split is the
 # natural seam. `winter service logs <env> web-hub` reads the compile output.
 # ---------------------------------------------------------------------------
 
@@ -171,3 +172,17 @@ depends_on = ["runner"]
 [service.health]
 type = "url"
 target = "http://localhost:${BZ_RUNNER_WEB_PORT}/"
+
+# --- The workshop (Storybook over projects/fleet) ------------------------------
+# `npm run storybook` on the band's +6 port. No depends_on: the workshop renders the
+# kit from source and reaches no daemon, so it is up even when the stack is not.
+[[service]]
+name = "storybook"
+target = "1.2"
+cwd = "blizzard/web"
+cmd = "exec npm run storybook"
+port = "WINTER_PORT_BASE + 6"
+
+[service.health]
+type = "url"
+target = "http://localhost:${BZ_STORYBOOK_PORT}/index.json"
