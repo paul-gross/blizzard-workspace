@@ -34,13 +34,15 @@ tmux split-window -v -t "${WINTER_TMUX_SESSION}:0.1" -c "${WINTER_TMUX_WORKTREE_
 tmux select-pane -t "${WINTER_TMUX_SESSION}:0.2" -T runner
 
 # ---------------------------------------------------------------------------
-# Window 1 — the Angular dev servers (`ng serve`), the web apps' HMR surface.
+# Window 1 — the Angular dev servers (`ng serve`), the web apps' HMR surface, and
+# the workshop.
 #
-# Two panes, one per app: the hub board (1.0) and the runner local panel (1.1).
-# They are split off into their own window rather than added to the stack above
-# for two reasons: five panes in one window leaves each too short to read a compile
-# error in, and the daemon/dev-server line is the natural seam — window 0 answers
-# "is the fleet up?", window 1 answers "did my component compile?".
+# Three panes: the hub board (1.0), the runner local panel (1.1), and the
+# Storybook workshop over the fleet kit (1.2). They are split off into their own
+# window rather than added to the stack above for two reasons: six panes in one
+# window leaves each too short to read a compile error in, and the daemon/dev-server
+# line is the natural seam — window 0 answers "is the fleet up?", window 1 answers
+# "did my component compile?".
 #
 # Named `web` so an attached session can jump straight to it.
 # ---------------------------------------------------------------------------
@@ -49,6 +51,10 @@ tmux new-window -t "${WINTER_TMUX_SESSION}" -n web -c "${WINTER_TMUX_WORKTREE_DI
 tmux select-pane -t "${WINTER_TMUX_SESSION}:1.0" -T web-hub
 tmux split-window -v -t "${WINTER_TMUX_SESSION}:1.0" -c "${WINTER_TMUX_WORKTREE_DIR}"  # 1.1 web-runner
 tmux select-pane -t "${WINTER_TMUX_SESSION}:1.1" -T web-runner
+tmux split-window -v -t "${WINTER_TMUX_SESSION}:1.1" -c "${WINTER_TMUX_WORKTREE_DIR}"  # 1.2 storybook
+tmux select-pane -t "${WINTER_TMUX_SESSION}:1.2" -T storybook
+# Each split halves the pane it splits; even the three out so none is too short.
+tmux select-layout -t "${WINTER_TMUX_SESSION}:1" even-vertical
 
 # Name window 0 to match, now that the session has more than one.
 tmux rename-window -t "${WINTER_TMUX_SESSION}:0" stack
