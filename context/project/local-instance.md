@@ -5,12 +5,14 @@ development (the `r-claude-1`–`r-claude-6` and `r-chatgpt-1`–`r-chatgpt-4` e
 against the **real** GitHub forge. **The instance** is what this file calls that deployment, and what "redeploy and
 restart the instance" means — **not** a feature env, and not the per-feature-env verification stacks.
 
-Its two halves run in different places, and that governs everything below:
+Its two halves run in different places, and that governs everything below. Both run one pinned **release**, never
+`master`: a landing reaches the instance only once a release carries it and someone moves the instance onto that
+release.
 
-| Half            | Where                                                                | Who redeploys it                               |
-| --------------- | -------------------------------------------------------------------- | ---------------------------------------------- |
-| **Hub**         | hosted, `https://blizzard.grosscode.net`                             | **itself** — continuous delivery from `master` |
-| **Runner host** | this machine, beside the workspace — one daemon running both runners | **you**, by hand, after every landing          |
+| Half            | Where                                                                | Who moves it                                    |
+| --------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
+| **Hub**         | hosted, `https://blizzard.grosscode.net`                             | the operator, by moving its pin onto a release  |
+| **Runner host** | this machine, beside the workspace — one daemon running both runners | **you**, by hand, onto the release the hub runs |
 
 ## Deployed surface
 
@@ -21,8 +23,8 @@ Its two halves run in different places, and that governs everything below:
 | **Hub**         | **`https://blizzard.grosscode.net`** — health `GET /api/health`, readiness `GET /api/ready`. GitHub OAuth; reads need a session                                                                                                                                                                                |
 | Hub deployment  | Owned end to end by the **`paul-gross/blizzard-infra`** repo (private; worktreed here only on a machine whose `config.local.toml` declares it). It holds the host, the image channel, the updater, rollback, and the operator entry points. Go there for anything about the host — none of it is restated here |
 | Runner host     | One host, `xps`, running two runners split by harness — see [The host and its runners](#the-host-and-its-runners) for its ids, workspaces, envs, tokens, and unit                                                                                                                                              |
-| Venv            | `../.venv` — the `blizzard` binary the host runs, and the operator CLI; installed from a **built wheel**, not editable                                                                                                                                                                                         |
-| Wheel source    | built from `projects/blizzard` (the source checkout on `master`) → `dist/blizzard-*.whl`                                                                                                                                                                                                                       |
+| Venv            | `../.venv` — the `blizzard` binary the host runs, and the operator CLI; installed from the **release's wheel**, never a build or an editable install                                                                                                                                                           |
+| Release         | **`v0.2.0-rc.2`** — the exact release both halves run: the venv holds its GitHub Release wheel, and the hub runs its image by digest, pinned as [The hub's pin](#the-hubs-pin) describes                                                                                                                       |
 | Forge           | **real GitHub** — owner `paul-gross`; the hub's token lives on the host, never in this repo                                                                                                                                                                                                                    |
 | Supervision     | one systemd **user** unit, `blizzard-blizzard-runner.service` (unit file and drop-ins in `~/.config/systemd/user/`)                                                                                                                                                                                            |
 | Trace collector | `../otel-collector` — a docker compose OpenTelemetry Collector on `127.0.0.1:4318` that forwards both runners' spans to Honeycomb; see [The runners' trace collector](#the-runners-trace-collector)                                                                                                            |
@@ -235,39 +237,58 @@ also administers `demo`, so a verb without the flag refuses with `you belong to 
 keeps no saved tenant and reads no environment variable for it; `FLEET_TENANT` is only a shell convenience. Which verbs
 are hub-level and take no `--tenant` is `blizzard/docs/deployment/tenants.md`'s.
 
-## Redeploy + restart runbook — the runner half
+## Redeploy + restart runbook — moving the instance onto a release
 
-The hub half is automatic (above). This is what a landing on `master` still costs by hand.
+This is the instance's binding of `bzh:release-deploy` (`blizzard-context:/workflows/release-deploy.md`), which owns the
+sequence — read the range's **Upgrade notes** first, move the hub before the runner host going forward and after it
+going back, and prove each half before touching the next. What follows is where each half's pin lives and this machine's
+commands for it.
 
-One host runs both runners from the venv, so one rebuild, one reinstall, one migration, and one restart redeploy both.
-Code changes need a rebuild and reinstall, not just a restart. **Gotcha:** the host **fails fast on a stale store** when
-a new wheel adds a migration — always migrate and check the host directory before restarting it.
+### The hub's pin
+
+The hub runs the image digest `BLIZZARD_HUB_IMAGE` names in the host's `/srv/blizzard/deploy/.env`. Set to a digest
+rather than the `edge` ref, that line is a pin: the updater logs `pinned to …; automatic updates disabled` on every run
+and follows nothing. Moving the hub is rewriting that line to the target release's digest over an SSM session and
+recreating the hub — `blizzard-infra`'s `docs/deployment.md` and `docs/rollback.md` §The swap is the pin own the
+commands. That line is where the pin lives until `blizzard-infra` carries `deploy/release.env`; from then the pin moves
+there, the updater applies it forward or back, and the `.env` line is removed.
+
+Moving the hub needs the operator's `blizzard-prod-admin` session, which no fleet worker holds: an agent driving the
+move asks for `! aws sso login --profile blizzard-prod-admin` to be run, and stops if it is not. **Proof:**
+`curl -s https://blizzard.grosscode.net/api/health | jq -r .version` equals the target in PEP 440 normal form —
+`0.2.0rc2` for `v0.2.0-rc.2` — and `GET /api/ready` reports ready.
+
+### The runner host
+
+One host runs both runners from the venv, so one install, one migration, and one restart move both. **Gotcha:** the host
+**fails fast on a stale store** when a release adds a migration — always migrate and check the host directory before
+restarting it. Paths are relative to the workspace root.
 
 ```bash
-# 1. get master current — fast-forwards each projects/<repo> source checkout's
-#    local master to origin/master. Without this you rebuild the PREVIOUS deploy.
-winter ws fetch --all
+# 1. confirm the hub runs the release being installed, or a newer one inside the window the
+#    `blizzard` repo's docs/versioning.md states. A runner host never runs ahead of its hub.
+curl -s https://blizzard.grosscode.net/api/health | jq -r .version
 
-# 2. rebuild the wheel (Angular apps + wheel + node-free verify)
-cd projects/blizzard && mise run build
+# 2. fetch the release's own wheel — never a build from projects/blizzard
+gh release download v<version> --repo paul-gross/blizzard --pattern 'blizzard-*.whl' --dir <scratch>
 
-# 3. reinstall into the runtime venv (still in projects/blizzard from step 2)
-uv pip install --python ../../../.venv --reinstall dist/blizzard-*.whl
+# 3. install it into the runtime venv
+uv pip install --python ../.venv --reinstall <scratch>/blizzard-*.whl
 
-# 4. migrate the host's store, data/host.db (idempotent — safe every deploy). There is
+# 4. migrate the host's store, data/host.db (idempotent — safe every move). There is
 #    no local hub store to migrate; the hosted hub migrates itself on boot.
-../../../.venv/bin/blizzard runner migrate --dir ../../../runner
+../.venv/bin/blizzard runner migrate --dir ../runner
 
 # 5. check the host directory: loads blizzard-host.toml, verifies the store's revision
 #    and that it names each configured runner, and resolves each token at the hub, starting
 #    nothing. It must print `host ok`; a refusal is a stop — restart nothing.
-../../../.venv/bin/blizzard runner host --check --dir ../../../runner
+../.venv/bin/blizzard runner host --check --dir ../runner
 
-# 6. re-mint every graph the deploy changed — see below. Reads the graph from the
+# 6. re-mint every graph the release range changed — see below. Reads the graph from the
 #    LOCAL venv and posts it to the HOSTED hub, so it needs $BZ_HUB_URL and a
 #    login. Sits BEFORE the runner restarts (which terminate fleet workers).
-../../../.venv/bin/blizzard hub graph mint --hub-url "$BZ_HUB_URL" --tenant "$FLEET_TENANT" \
-  ../../../.venv/lib/python3*/site-packages/blizzard/hub/graphs/<graph>/graph.yaml
+../.venv/bin/blizzard hub graph mint --hub-url "$BZ_HUB_URL" --tenant "$FLEET_TENANT" \
+  ../.venv/lib/python3*/site-packages/blizzard/hub/graphs/<graph>/graph.yaml
 
 # 7. restart the host. A fleet-worker shell has no user session bus, so
 #    systemctl --user fails there ("Failed to connect to bus") until these are set:
@@ -276,17 +297,21 @@ export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
 systemctl --user restart blizzard-blizzard-runner.service
 ```
 
-Paths in steps 3–6 are written from `projects/blizzard`, where step 2 leaves you: `../../../` is the workspace root's
-parent. Adjust if you run them from elsewhere.
-
-**Skip step 6 when the landed range did not touch `src/blizzard/hub/graphs/`** — check with the diff below rather than
+**Skip step 6 when the release range did not touch `src/blizzard/hub/graphs/`** — check with the diff below rather than
 minting blindly.
 
-Verify the host: the **version stamp below is the redeploy proof** — a `200` from `/api/health` alone can come from the
-*old* process and has, so it confirms liveness, never the deploy. Check
-`systemctl --user is-active blizzard-blizzard-runner.service` for the unit and
-`curl -s https://blizzard.grosscode.net/api/ready` for the hub. Then confirm each runner is actually reaching the hub —
-a runner that cannot reach it still reports healthy:
+Verify the host: the **version stamp is the proof** — a `200` from `/api/health` alone can come from the *old* process
+and has, so it confirms liveness, never the move. A release wheel carries no local segment, so the host reports the
+release exactly, and it must equal the **Release** row's version in PEP 440 normal form:
+
+```bash
+curl -s http://127.0.0.1:8431/api/health | jq -r .version   # -> 0.2.0rc2 for v0.2.0-rc.2
+```
+
+Any other version — a `+` local segment above all — means the venv runs a build, not the release the row names; stop
+there. Then check `systemctl --user is-active blizzard-blizzard-runner.service` for the unit,
+`curl -s http://127.0.0.1:8431/api/ready` for both runners `serving` under their hub ids, and that each runner is
+actually reaching the hub — a runner that cannot reach it still reports healthy:
 
 ```bash
 journalctl --user -u blizzard-blizzard-runner.service --since "-2 min" | grep -c '"event": "tick end"'
@@ -296,33 +321,41 @@ for r in r-claude r-chatgpt; do ../.venv/bin/blizzard runner status --dir ../run
 `blizzard runner status --runner <name|id>` opens with the runner's name and hub id; `not registered` in place of the id
 means the hub has not accepted its token.
 
-**The host's version names the commit it was built from.** A local build stamps a PEP 440 local segment, so
-`GET /api/health` reports something like `0.1.0+4efdf334a` — check it against the commit you deployed:
-
-```bash
-curl -s http://127.0.0.1:8431/api/health | jq -r .version   # -> 0.1.0+<short-sha>
-```
-
-A `.dirty` suffix means the wheel was built from a tree with uncommitted changes, which for a redeploy of `master` means
-something is wrong with the source checkout. The hosted hub answers the same question with `0.1.0.dev<run>`, stamped by
-CI from the workflow run.
-
 Last, confirm both runners still export traces — `blizzard runner traces status --runner` on each, per
 [Confirm both runners are reporting](#the-runners-trace-collector) — and that `docker compose ps` in `../otel-collector`
 shows the collector up. A host restart never touches the collector, but it is the moment a dropped `.env` line shows.
 
+Once both halves are proven, record the move: the **Release** row above changes in a workspace commit, so the row and
+the running instance never disagree for longer than one move.
+
+### Going back
+
+Going back is the same move towards an older release, **runner host first and hub after**. The host's store may be ahead
+of what the older release expects, so before its wheel is installed, with the unit stopped throughout:
+
+1. Read the head revision the older release expects: install its wheel into a throwaway venv and run
+   `blizzard runner migrate --head` from it.
+2. Downgrade on the **current** venv, which holds the downgrade code:
+   `../.venv/bin/blizzard runner migrate --dir ../runner --down <revision>`.
+3. Install the older wheel, check the directory, and restart, as in a forward move.
+
+A downgrade that fails leaves the unit stopped on the current venv, which is restarted unchanged. The hub's way back —
+its store downgraded on the outgoing image before the swap — is `bzh:release-deploy`'s and the `blizzard` repo's
+`docs/rollback.md`'s.
+
 ### Re-minting changed graphs
 
 **A deployed wheel's graph changes are inert until they are minted.** Graphs live in the hub's store, not on disk — the
-hub reads a *minted* graph per chunk and never consults the packaged YAML again. Nothing mints at boot, so a deploy that
+hub reads a *minted* graph per chunk and never consults the packaged YAML again. Nothing mints at boot, so a move that
 ships a changed graph and stops at the restart leaves every new chunk running the previous definition, with no error
 anywhere to say so.
 
-So after any deploy, check whether the landed range touched `src/blizzard/hub/graphs/` and mint each graph directory it
-did:
+So on every move, check whether the release range touched `src/blizzard/hub/graphs/` and mint each graph directory it
+did. Read it from the tags, so the answer is the same however far `master` has moved:
 
 ```bash
-git -C projects/blizzard diff --name-only <previous-deploy>..HEAD -- src/blizzard/hub/graphs/
+git -C projects/blizzard fetch --tags origin
+git -C projects/blizzard diff --name-only v<previous>..v<version> -- src/blizzard/hub/graphs/
 ```
 
 Two things make this easy to get wrong:
@@ -338,9 +371,9 @@ the definition they started on. Verify with `blizzard hub graph list` (the newes
 `... graph show <id>`. Note `show` renders nodes and edges but **not** prompt text — to confirm inlined prose landed,
 read `GET /api/graphs/<id>` instead.
 
-After a landing on `master`, this runbook is not the whole story — [post-delivery.md](./post-delivery.md) owns *when* it
-runs, what must be confirmed before building, and the one way it bites a fleet worker (restarting the host terminates
-the agents both runners are running).
+[post-delivery.md](./post-delivery.md) owns what a landing owes the instance — nothing — and the rules a move onto a
+release keeps: what to read before installing, never restarting onto a broken install, and the one way the restart bites
+a fleet worker (restarting the host terminates the agents both runners are running).
 
 ## The hub's work sources
 

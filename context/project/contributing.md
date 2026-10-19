@@ -100,8 +100,8 @@ By default, work lands through a pull request the agent drives to completion:
    `master` moved, rebase again, force-push, and watch again, so what lands is what CI proved. Not `--squash`: it
    rewrites the commit message from the PR title and collapses deliberately separate commits. Afterward the landed
    commits carry new SHAs, so resync the worktree from `origin/master` rather than pushing the old branch again.
-5. **Landing is not the end** — it starts a deploy to the hosted hub on its own, and still owes a local runner redeploy
-   by hand. Go to [post-delivery.md](./post-delivery.md) once it lands.
+5. **Read post-delivery once it lands** — a landing deploys nothing to the instance, which runs a pinned release;
+   [post-delivery.md](./post-delivery.md) owns what it does owe.
 
 A merge commit (`--merge`) is the exception, not the default: take one only when grouping a multi-commit branch under it
 tells a clearer story than landing the commits flat.
@@ -117,9 +117,7 @@ complete).
 No deploys and no changelog. A push to `master` publishes two dogfood artifacts: a dev-build wheel as a workflow
 artifact, and a multi-arch hub image to GHCR on the `edge` / `sha-<full-git-sha>` channel. A `v*` tag *is* the release:
 it runs the full suite, publishes the release image tags, and attaches the wheel to a GitHub Release — there is no
-package-index publish. **A push to `master` does deploy something.** The `edge` image it publishes is the channel this
-workspace's own hosted hub follows, so that hub picks the new build up unattended — no human step between landing and
-running ([local-instance.md](./local-instance.md)). Neither a `v*` tag nor the wheel deploys anywhere. The **runner**
-half is still redeployed by hand, which is what [post-delivery.md](./post-delivery.md) requires of you after every
-landing. The tag fan-out and what `latest` tracks are the `blizzard` repo's `docs/versioning.md`. See
-`blizzard-context:/workflows/release.md` for the sequence.
+package-index publish. Nothing of this workspace's follows `edge`: its instance runs one pinned release, and a release
+reaches it only when the instance is moved onto it by hand ([local-instance.md](./local-instance.md)) — neither a push
+nor a `v*` tag deploys anywhere on its own. The tag fan-out and what `latest` tracks are the `blizzard` repo's
+`docs/versioning.md`. See `blizzard-context:/workflows/release.md` for the sequence.
