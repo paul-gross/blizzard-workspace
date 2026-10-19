@@ -1,6 +1,7 @@
 # Post-delivery
 
-What this workspace owes a change once it has landed on `master`.
+What this workspace owes a change once it has landed on `master`, and what moving the instance onto a release owes the
+fleet.
 
 **Read this whenever work you were driving reaches `master`** — however it got there, and whoever you are. Both of
 [contributing.md](./contributing.md)'s delivery paths land here:
@@ -10,69 +11,59 @@ What this workspace owes a change once it has landed on `master`.
 | Fleet, `land-pr-ci` | the hub's `deliver` node merged its PR                                                         | you are working the `retrospective` node, or any node after `deliver` |
 | By hand             | your PR merged — or your push to `origin/master` landed, when the user asked for a direct push | the merge or push returned successfully                               |
 
+**Read it too before you move the instance onto a release** — the rest of this file is about that move.
+
 This is workspace policy, not project policy.
 [contributing.md § Release publishing](./contributing.md#release-publishing) covers how blizzard is *released* to the
 world. This file is about **this workspace's own dogfooding deployment**, which is a different thing entirely.
 
-## The rule: landing on `master` means redeploying the runners
+## The rule: a landing owes the instance nothing
 
 A live blizzard hub and one local host of two runners drive blizzard's own development — the **instance**, whose
-deployed surface and commands are in [local-instance.md](./local-instance.md). Its two halves redeploy differently, and
-only one of them is your job: the **hub** redeploys itself from `master`, and the **runners** — `r-claude` (Claude Code)
-and `r-chatgpt` (OpenCode), one host daemon and one venv between them — are yours to rebuild by hand.
+deployed surface and commands are in [local-instance.md](./local-instance.md). Both halves run one pinned **release**,
+never `master`: the hub runs a release's image by digest, and the runners — `r-claude` (Claude Code) and `r-chatgpt`
+(OpenCode), one host daemon and one venv between them — run that release's wheel.
 
-**Every landing on `master` is followed by a rebuild and a redeploy of both runners, onto exactly the code that just
-landed.** The fleet dogfoods its own output, so a delivered change that never reaches the running runners is a change
-the fleet cannot feel. Both run in the one host process, so one reinstall and one restart move both together. Do not
-wait to be asked and do not defer it to a later session: the redeploy is the second half of delivering, in the same way
-that pushing is the second half of committing.
+**Delivery ends at landing.** A landed change reaches the instance only once a release carries it and someone moves the
+instance onto that release. **Do not rebuild or reinstall the runner host from `master` after a landing** — that
+replaces the release the instance is pinned to with a build no release carries, and the instance no longer runs what its
+**Release** row says.
 
-Rebuild even when a landing looks like it cannot touch the runner. Judging that correctly means knowing exactly what the
-wheel carries, and the cost of being wrong is a fleet quietly running code you did not ship. (This is about the
-*rebuild*; the runbook's graph re-mint step really is conditional, and says so.)
+Moving the instance onto a release is the **redeploy + restart runbook** in [local-instance.md](./local-instance.md) —
+it owns the sequence, and this file does not restate it. What follows is what that runbook cannot tell you: what to read
+before you install, and how the move behaves differently depending on who you are.
 
-**Run the redeploy + restart runbook in [local-instance.md](./local-instance.md) — it owns the sequence, and this file
-does not restate it.** What follows is what that runbook cannot tell you: when to run it, what to check before you trust
-it, and how it behaves differently depending on who you are.
+## Before you install: read what the release asks of its move
 
-## Before you build: confirm you are deploying what you landed
+A release can ask more of its move than the runbook does. Before installing anything, read the **Upgrade notes** of
+every release the move crosses (`gh release view v<version> --repo paul-gross/blizzard`) and the `docs/upgrade.md`
+sections they point to, and act on them. Until every such step reaches a release's Upgrade notes, also read the
+`## Landing and deployment` section of each issue the release range closed:
 
-The runbook opens with `winter ws fetch --all`, which is what moves the source checkout the wheel gets built from
-([what fetch does to source checkouts](../winter-cli/usage/ws/fetch.md)). Run it and then **confirm the commit you just
-landed is actually in `projects/blizzard`** before you build.
+- **Extra deployment steps** are yours to carry out where they place them, before the runbook installs or migrates
+  anything. A step that fails is a stop under
+  [Never restart onto a broken install](#never-restart-onto-a-broken-install), exactly as a failed migration is.
+- **Deploy: by hand** means no fleet worker installs this release: its move stops the runners, which no worker can do
+  from inside one. Run none of the runbook, report that the release awaits its attended move, and stop.
 
-That check is the point of this section. Build from a source checkout that never advanced and everything still reports
-success — the wheel builds, the install succeeds, the runners come up healthy — and nothing you delivered is in any of
-it. A fetch that reports a **failed** repo (a diverged source checkout) is a stop, not a warning, for the same reason.
+A release that asks for nothing beyond the standard move leaves the runbook as it is.
 
-Catch it here rather than downstream. Each runner does report the commit it was built from once it restarts
-(`GET /api/health` → `0.1.0+<short-sha>`), so a wrong-commit redeploy is detectable after the fact — but only after you
-have already restarted the fleet's runners onto it. Confirming the checkout first is cheaper than noticing afterward.
+## Confirm you are installing the release you mean
 
-## Before you build: read what the landing asks of its redeploy
-
-A landed issue can ask more of its redeploy than the runbook does. When the work you landed came from an issue with a
-`## Landing and deployment` section — `blizzard runner work-items <chunk-id>` names the issue — read that section before
-you build, and act on it:
-
-- **Extra redeploy steps** are yours to carry out where the section places them, before the runbook installs or migrates
-  anything. A step that fails is a stop under [Never restart onto a broken build](#never-restart-onto-a-broken-build),
-  exactly as a failed migration is.
-- **Deploy: by hand** means no fleet worker redeploys this landing: its deploy stops the runners, which no worker can do
-  from inside one. Run none of the runbook, report that the landing awaits its attended deploy, and stop.
-
-An issue with no such section, or one whose section asks for nothing beyond the standard pass, leaves the runbook as it
-is.
+Install the wheel the release itself published — `gh release download`, never a build from `projects/blizzard`. A build
+from a source checkout still reports success at every step — the install succeeds, the runners come up healthy — while
+running code no release carries. The host reports what it runs once it restarts: a release wheel reports the release
+exactly (`GET /api/health` → `0.2.0rc2` for `v0.2.0-rc.2`), and a `+` local segment means the venv holds a build. Check
+it against the **Release** row before you trust the move.
 
 ## Why the runner restarts go last
 
-**Restarting the runners is the step that terminates fleet workers — see below.** Anything you still owe the node must
-be finished before it: the retrospective asset, and any graph re-mint (which targets the hosted hub and therefore does
-not depend on either runner at all).
+**Restarting the runners is the step that terminates fleet workers — see below.** Anything you still owe must be
+finished before it: any retrospective asset, and any graph re-mint (which targets the hosted hub and therefore does not
+depend on either runner at all).
 
-There is no local hub to sequence against. The hosted hub updates on its own schedule, independent of anything you run
-here, so runners briefly newer or older than the hub are the normal steady state rather than something the runbook
-orders around.
+The hub moves first going forward and last going back, so a runner host never runs a release newer than the hub it works
+against; the runbook's first step confirms the hub's version before anything is installed.
 
 ## Restarting the runners, when you are a fleet worker
 
@@ -88,39 +79,37 @@ observe is simply your next turn arriving after a message like
 
 Plan for the interruption rather than trying to avoid it:
 
-- **Restart the host last** (the runbook's step 7), and finish everything else in the node first — the retrospective
-  asset above all — so nothing valuable is riding on the wake-up. Nothing can follow the restart in the same turn: the
-  command stops your own runner with it.
+- **Restart the host last** (the runbook's step 7), and finish everything else first — the retrospective asset above all
+  — so nothing valuable is riding on the wake-up. Nothing can follow the restart in the same turn: the command stops
+  your own runner with it.
 - **When you wake up, do not start over.** Your own prior turns are still in the transcript; read them to see how far
-  the deploy got. The restart you issued succeeded — that is why you are running again.
+  the move got. The restart you issued succeeded — that is why you are running again.
 - **Then finish**: confirm the host's health endpoint answers and `blizzard-blizzard-runner.service` is active (the
-  disabled hub and OpenCode units are not checks), confirm the version it reports carries the commit you landed, and
+  disabled hub and OpenCode units are not checks), confirm the version it reports is the release you installed, and
   declare done.
 - **Do not restart the runners twice.** A second restart buys nothing and costs another round trip through resume.
 
 **If you are a standalone agent, none of this touches you** — the restart does not kill your session, so just run it and
 check health directly. It does still interrupt any fleet workers in flight; see the last section.
 
-## Never restart onto a broken build
+## Never restart onto a broken install
 
-The runners you are redeploying drive the whole fleet, including chunks other than yours.
+The runners you are moving drive the whole fleet, including chunks other than yours.
 
-**If the fetch, build, install, the migration, or `host --check` fails, stop and do not restart anything.** Leaving the
-runners on their current wheel is always the correct outcome of a failed deploy: the fleet keeps working, and the
+**If the download, install, the migration, or `host --check` fails, stop and do not restart anything.** Leaving the
+runners on their current release is always the correct outcome of a failed move: the fleet keeps working, and the
 failure stays recoverable. Restarting onto a wheel that does not install, a store that did not migrate, or a host
 directory that did not check takes the fleet down — and, for a fleet worker, takes down the very runner that would
 otherwise bring you back to report it.
 
-**You cannot stop the hub half the same way.** It follows `edge` on a timer, so a bad landing is already on its way to
-the hosted hub the moment CI publishes it — there is no gate here for you to hold. Keeping a landing off that hub means
-pinning the image, which is a `blizzard-infra` operation and has to happen before the next tick rather than after you
-notice.
+**The hub half is held the same way.** It runs the release its pin names, so a bad landing never reaches it on its own;
+only moving the pin does, and a hub move whose proof fails stops the runbook before the runner host is touched.
 
-Report the failure plainly and stop there. Do not attempt to fix the landed code from a post-delivery step; that is the
-next chunk's work, not this one's.
+Report the failure plainly and stop there. Do not attempt to fix the released code from a deployment step; that is the
+next chunk's work, and the next release's.
 
 ## The restart is fleet-wide
 
 Restarting the host interrupts **every** in-flight worker either runner holds, not only you. They all come back the same
 way, through the same restart-resume path, so the cost is a hiccup rather than lost work — but it is a real cost, and it
-is why the redeploy happens once, at the end.
+is why the move restarts the host once, at the end.

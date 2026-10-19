@@ -45,7 +45,7 @@ at different data.
    or 3) when the empty board is not enough.
 2. **Snapshot hub — realistic shape, zero live risk.** `../hub/` is a point-in-time copy of the fleet, frozen at the
    migration. Host a hub on a **copy of the copy** at a free port, migrating it first — the venv's wheel advances with
-   every landing while that store does not, and a hub fails fast on a store behind its code:
+   every release the instance moves onto while that store does not, and a hub fails fast on a store behind its code:
 
    ```text
    mkdir -p /tmp/hub-snap && cp -r ../hub/* /tmp/hub-snap/
