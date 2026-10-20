@@ -13,3 +13,4 @@ itself owns is below.
 | [post-delivery.md](./post-delivery.md)       | Work you were driving has reached `master`, by any delivery path                                                                                                                |
 | [local-instance.md](./local-instance.md)     | Touching the live instance this workspace dogfoods — a **hosted** hub and the local runner host, both pinned to one release and moved onto the next by hand — or minting chunks |
 | [hub-data-modes.md](./hub-data-modes.md)     | Running a feature env's board or CLI against hub data, and deciding which hub is safe to point it at                                                                            |
+| [proposal-review.md](./proposal-review.md)   | Told to run a proposal review, or to go through, triage, or decide the hub's open garden proposals                                                                              |
