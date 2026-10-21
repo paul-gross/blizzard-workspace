@@ -231,13 +231,15 @@ a destructive verb off live worktrees. To verify destructive-command behavior:
   working tree clean unless intentionally left dirty. For every verb but `ws restack`, also confirm the commits you
   expect are present — not silently stranded off every ref. `ws restack` rewrites history in place, so a sha-presence
   check doesn't work there: `git rebase --onto` abandons the original commits by design, so it fails a healthy run and
-  passes a bad one vacuously; use the subject-set comparison instead — see the `ws restack` post-run audit in
-  `winter-context:/verification/winter.md`. After a `ws clean`, also confirm no untracked file you meant to keep is gone
-  — read the per-path list the command prints, which is the only record of what it took. `winter ws status --json`
-  reports a per-repo `untracked` count, but it counts one entry per file and cannot see an empty untracked directory, so
-  it is a rough cross-check rather than a match. After a `winter clean`, the same rule applies to declared artifacts:
-  nothing else records what a handler's `clean` command removed, so the per-handler run report — not a status snapshot —
-  is the only audit trail.
+  passes a bad one vacuously. Compare commit subjects instead: for each repo that reported `rebased`, record
+  `git log --format=%s <boundary>..<env>` before the run (the boundary `--dry-run --json` prints) and confirm
+  `git log --format=%s <new-base>..<env>` names the identical set afterwards, `<new-base>` being the predecessor's
+  post-run tip; for a repo that reported `up-to-date`, confirm its env branch tip is unchanged. After a `ws clean`, also
+  confirm no untracked file you meant to keep is gone — read the per-path list the command prints, which is the only
+  record of what it took. `winter ws status --json` reports a per-repo `untracked` count, but it counts one entry per
+  file and cannot see an empty untracked directory, so it is a rough cross-check rather than a match. After a
+  `winter clean`, the same rule applies to declared artifacts: nothing else records what a handler's `clean` command
+  removed, so the per-handler run report — not a status snapshot — is the only audit trail.
 
 This came out of a real incident: an agent reproducing a bug ran `winter ws checkout alpha master --force` through the
 core-override against its own live `alpha` env; `ws checkout` has no repo-scoping flag, so it force-moved every worktree

@@ -112,8 +112,8 @@ cmd = ["<bootstrap the nested workspace's toolchain>"]  # whatever it needs befo
   [ws status — Nested workspaces](../usage/ws/status.md#nested-workspaces).
 - **Never an extension.** `nested = true` implies `extension = false`, so the repo's root `AGENTS.md`,
   `winter-ext.toml`, skills, and agents reach nothing in the outer workspace.
-- **The source checkout stays plain.** `projects/lab/` is cloned, and its `cmd` runs there as for any project repo, but
-  it is never initialized as a workspace — only the env copies are.
+- **The source checkout stays plain.** The repo's source checkout is cloned, and its `cmd` runs there as for any project
+  repo, but it is never initialized as a workspace — only the env copies are.
 
 **`inherit_local`** names top-level keys or tables of the outer `.winter/config.local.toml`; what is copied, and how, is
 owned by [config-files.md — Local overlay](./config-files.md#local-overlay-winterconfiglocaltoml) ("What reaches a
