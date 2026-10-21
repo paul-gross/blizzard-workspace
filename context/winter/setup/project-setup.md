@@ -115,7 +115,7 @@ apply = "npm ci"                         # string form — a single command
 
 Reach for a standalone `scripts/*.sh` file only when an existing project script already encapsulates the step — point
 `apply` at it; don't fabricate a wrapper script for a command that fits inline. See
-[winter-cli/configuration/provision.md](./winter-cli/configuration/provision.md) for the full `apply` grammar.
+[cli/configuration/provision.md](../cli/configuration/provision.md) for the full `apply` grammar.
 
 **If a step doesn't fit reasonably inline — heavy, complex, or multi-step setup with no ready-made script — defer it
 rather than inventing one.** Leave it out of the generated config and tell the user plainly that they must complete that
@@ -190,7 +190,7 @@ source <(winter env alpha)              # source into the current shell
 ```
 
 For the full band semantics and token grammar, see
-[winter-cli/configuration/ports-and-environments.md — Env var bands](./winter-cli/configuration/ports-and-environments.md#env-var-bands).
+[cli/configuration/ports-and-environments.md — Env var bands](../cli/configuration/ports-and-environments.md#env-var-bands).
 
 #### Other env files
 

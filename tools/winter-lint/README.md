@@ -105,7 +105,7 @@ It is a **built-in core lint check** — `winter lint` runs it on every invocati
 registration, the same way `winter doctor` runs its built-in core probes. The CLI's `CoreLintService` locates this
 script relative to the winter-cli source tree (its sibling `tools/winter-lint/` directory), runs it over the selected
 scope with the standard lint env (`WINTER_LINT_SCOPE`, `WINTER_LINT_PATHS`, `WINTER_CLI`, …), and aggregates its NDJSON
-findings under the `[core]` source group. See `workspace:/context/winter-cli/configuration/lint.md` ("Built-in core
+findings under the `[core]` source group. See `workspace:/context/winter/cli/configuration/lint.md` ("Built-in core
 checks").
 
 It can also be run directly:

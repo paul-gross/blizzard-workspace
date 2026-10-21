@@ -14,7 +14,7 @@ class EnvBandsProbeService:
     `EnvProvisionerService.compute()` looks up a per-env band by scope name only
     (`bands.named.get(scope, {})`) — a band naming an env that is not the current
     scope is simply never consulted. This is deliberate, documented, and tested
-    behavior (see `context/winter-cli/configuration/ports-and-environments.md`
+    behavior (see `context/winter/cli/configuration/ports-and-environments.md`
     and `test_env_provisioner.py::test_named_band_for_unknown_env_is_inert`): it
     lets an override outlive the env it was written for. But it means a typo
     (`[env.alfa.vars]` meaning `alpha`) parses clean, renders nothing, and

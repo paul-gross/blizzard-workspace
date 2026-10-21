@@ -27,7 +27,7 @@ The three built-in core checks are:
   a core module pointing at an extension (a layering inversion) or an undeclared sibling (a dead pointer at the
   consumption edge). It is graph-driven (it calls back into `$WINTER_CLI graph --json` rather than rebuilding the graph)
   and honors the `<!-- winter-lint:example -->` block exemption and fenced-code-block skip. Full rules in
-  [tools/winter-lint/README.md](../../../tools/winter-lint/README.md).
+  [tools/winter-lint/README.md](../../../../tools/winter-lint/README.md).
 
 - **file-size**: checks agent-facing markdown files against configurable size thresholds. Files in the auto-injected
   `@import` graph (rooted at `AGENTS.md`, `AGENTS.winter.md`, and the committed `CLAUDE.md` shim in the workspace root)

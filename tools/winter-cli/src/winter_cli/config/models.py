@@ -423,7 +423,7 @@ class ModelTiersConfig(BaseModel):
         [model_tiers.haiku]
         opencode = "anthropic/claude-haiku-4-5"  # override one vendor
 
-    See ``context/winter-cli/configuration/agents.md`` for the full reference.
+    See ``context/winter/cli/configuration/agents.md`` for the full reference.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -470,7 +470,7 @@ class AgentModelOverridesConfig(BaseModel):
         reviewer = "haiku"                        # tier, all vendors
         developer = { claude = "claude-opus-5-5" }  # concrete id, claude only
 
-    See ``context/winter-cli/configuration/agents.md`` for the full reference.
+    See ``context/winter/cli/configuration/agents.md`` for the full reference.
     """
 
     model_config = ConfigDict(frozen=True)

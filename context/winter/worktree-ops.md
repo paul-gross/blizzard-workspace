@@ -4,15 +4,15 @@ Git commands for the polyrepo workspace topology. Paths in prose are given relat
 `<workspace-root>` below is a placeholder for that directory's own absolute path — see
 [workspace-layout.md § Path notation](./workspace-layout.md#path-notation) for where it's registered. Resolve it from
 `winter ws status --json`'s `root_path` field (see
-[winter-cli/usage/ws/status.md](./winter-cli/usage/ws/status.md#json-schema-schema_version-1)), or a per-worktree path
-from `winter ws worktrees --json`'s `path` field (see the `worktrees` row in
-[winter-cli/usage/ws/index.md](./winter-cli/usage/ws/index.md)) — not `pwd`, which depends on the same untrustworthy cwd
-this file warns against.
+[cli/usage/ws/status.md](./cli/usage/ws/status.md#json-schema-schema_version-1)), or a per-worktree path from
+`winter ws worktrees --json`'s `path` field (see the `worktrees` row in
+[cli/usage/ws/index.md](./cli/usage/ws/index.md)) — not `pwd`, which depends on the same untrustworthy cwd this file
+warns against.
 
 > **Tip:** For multi-repo setup and bulk operations, prefer `winter ws init` and the other `winter ws` commands over the
 > raw git sequences below — the CLI is idempotent, reads the workspace config, handles pinned repos, and runs in
-> parallel. See [winter-cli/index.md](./winter-cli/index.md) for the full command reference. The raw git commands here
-> are still useful for single-repo work and for understanding what the CLI does under the hood.
+> parallel. See [cli/index.md](./cli/index.md) for the full command reference. The raw git commands here are still
+> useful for single-repo work and for understanding what the CLI does under the hood.
 
 ## Anchor raw git commands with `-C`
 
@@ -40,8 +40,8 @@ branch comes from the entry's `main_branch` field, falling back to the top-level
 
 For how each `winter ws` command treats pinned repos — init upstream wiring, connect/disconnect skip, pull from
 `origin/<main-branch>`, and push exclusion (`--include-pinned`/`--only-pinned`) — see the per-command leaves under
-[winter-cli/usage/ws/](./winter-cli/usage/ws/index.md); the pinned-scope table in
-[winter-cli/usage/ws/patterns.md](./winter-cli/usage/ws/patterns.md) is the cross-command summary.
+[cli/usage/ws/](./cli/usage/ws/index.md); the pinned-scope table in
+[cli/usage/ws/patterns.md](./cli/usage/ws/patterns.md) is the cross-command summary.
 
 ## Cloning (source checkouts)
 
@@ -98,8 +98,8 @@ winter provision <name>
 
 This installs dependencies, provisions resources (databases, queues, buckets), and loads seed data using
 `[[provision.*]]` handlers declared in `.winter/config.toml` and installed extension `winter-ext.toml` files. See
-[usage/provision.md](./winter-cli/usage/provision.md) for the full command reference. For any project-specific readiness
-steps not yet migrated to `[[provision.*]]` handlers, also follow `workspace:/context/project/project-setup.md`.
+[usage/provision.md](./cli/usage/provision.md) for the full command reference. For any project-specific readiness steps
+not yet migrated to `[[provision.*]]` handlers, also follow `workspace:/context/project/project-setup.md`.
 
 Raw equivalent, per repo:
 
@@ -155,14 +155,13 @@ Unsets upstream tracking on each non-pinned repo. With no upstream set, the env 
 
 `winter ws pull <name>` integrates each worktree's own tracked upstream. For per-repo target resolution, integration
 modes (`--ff-only`/`--merge`/`--rebase`/`--autostash`), and outcomes, see
-[winter-cli/usage/ws/pull.md](./winter-cli/usage/ws/pull.md). If a repo diverges, resolve it with raw git in that
-worktree.
+[cli/usage/ws/pull.md](./cli/usage/ws/pull.md). If a repo diverges, resolve it with raw git in that worktree.
 
 ## Destroying a feature environment
 
 `winter ws destroy <name>` is the symmetric counterpart to env creation. For the teardown order, the
 `--dry-run`/`--force`/`--strict`/`--no-provision-teardown` semantics, and why to prefer it over manual
-`rm -rf <name>/` + `git worktree remove`, see [winter-cli/usage/ws/destroy.md](./winter-cli/usage/ws/destroy.md).
+`rm -rf <name>/` + `git worktree remove`, see [cli/usage/ws/destroy.md](./cli/usage/ws/destroy.md).
 
 Raw equivalent, per repo (without provision teardown, hooks, or stripping the exclude block):
 
@@ -179,28 +178,27 @@ not just the one you meant to touch. `ws checkout` in particular has **no repo-s
 env-wide (see [Adopting a remote feature branch](#adopting-a-remote-feature-branch) below); use
 `ws reset <env>/<repo> REF` when you need to touch exactly one worktree. `ws restack` reaches every non-pinned project
 repo across its whole chain at once and, unlike the others, rewrites history rather than moving a pointer — see
-[winter-cli/usage/ws/restack.md](./winter-cli/usage/ws/restack.md) for the argument order, boundary derivation, and
-conflict-resume contract. It also runs with **no confirmation prompt and no `--force`** — it takes only `--cut`,
-`--dry-run`, and `--json`; do not assume a gate will stop a wrong invocation before it rewrites history. `winter clean`
-is a distinct verb from `winter ws clean` — it runs each provision handler's own declared `clean` command rather than
-`git clean -fd`; see [winter-cli/usage/clean.md](./winter-cli/usage/clean.md). For a `winter clean` run,
-`PATTERNS`/`ENV` does not even bound a `workspace`-scope handler the way it bounds everything else in this list: that
-scope resolves to the live workspace root with no per-env qualification, so the handler's `clean` command runs at the
-shared workspace root — not inside the matched env's own directory — once for every env `PATTERNS` matches, not once
-total.
+[cli/usage/ws/restack.md](./cli/usage/ws/restack.md) for the argument order, boundary derivation, and conflict-resume
+contract. It also runs with **no confirmation prompt and no `--force`** — it takes only `--cut`, `--dry-run`, and
+`--json`; do not assume a gate will stop a wrong invocation before it rewrites history. `winter clean` is a distinct
+verb from `winter ws clean` — it runs each provision handler's own declared `clean` command rather than `git clean -fd`;
+see [cli/usage/clean.md](./cli/usage/clean.md). For a `winter clean` run, `PATTERNS`/`ENV` does not even bound a
+`workspace`-scope handler the way it bounds everything else in this list: that scope resolves to the live workspace root
+with no per-env qualification, so the handler's `clean` command runs at the shared workspace root — not inside the
+matched env's own directory — once for every env `PATTERNS` matches, not once total.
 
 **`winter clean` and `ws restack` are the ungated verbs in this group — no prompt, no `--force` — and `winter clean`
 alone has no refusal guard either.** That's a deliberate exemption, not an oversight: `winter provision --destroy` is
 likewise ungated. Neither gate rests on a guarantee winter enforces — a declared `clean` (or `destroy`) command is an
 arbitrary shell string invoked via `sh -c`
-([winter-cli/configuration/provision.md](./winter-cli/configuration/provision.md#command-execution-semantics)), so
-winter neither knows nor checks what it removes; each handler's author is trusted to declare only what's safe to run
-unprompted, and that authoring convention, not the verb itself, is what the missing prompt relies on. The two verbs do
-differ in confinement: `provision --destroy` requires an explicit sub-target selector (`--stage` or `--name`), so one
-invocation reaches at most one stage or one named entry per matched env; `winter clean` has no such confinement — a bare
-invocation runs every matched handler across the whole `dependency → resource → data` chain. (Both fan out identically
-across every env `PATTERNS` matches — that part isn't what distinguishes them.) `--dry-run` is the operator's check in
-place of a prompt; preview with it every time the `PATTERNS` are not ones you have run before.
+([cli/configuration/provision.md](./cli/configuration/provision.md#command-execution-semantics)), so winter neither
+knows nor checks what it removes; each handler's author is trusted to declare only what's safe to run unprompted, and
+that authoring convention, not the verb itself, is what the missing prompt relies on. The two verbs do differ in
+confinement: `provision --destroy` requires an explicit sub-target selector (`--stage` or `--name`), so one invocation
+reaches at most one stage or one named entry per matched env; `winter clean` has no such confinement — a bare invocation
+runs every matched handler across the whole `dependency → resource → data` chain. (Both fan out identically across every
+env `PATTERNS` matches — that part isn't what distinguishes them.) `--dry-run` is the operator's check in place of a
+prompt; preview with it every time the `PATTERNS` are not ones you have run before.
 
 **`ws clean` and `winter clean` both need their own care, because the usual audit will not catch a bad one.** `checkout`
 and `reset` move refs, so a mistake is normally recoverable from the reflog and detectable by checking where each branch
@@ -228,7 +226,7 @@ a destructive verb off live worktrees. To verify destructive-command behavior:
   `winter clean`, reports the exact per-repo or per-handler effect with no side effects when it supports the flag,
   **except `ws restack`**: its `--dry-run` renders the plan alone — each link's boundary sha and source, per repo — and
   carries no per-repo outcome at all, because an upper link's outcome is unknowable before its predecessor actually
-  moves. See [restack.md § `--dry-run`](./winter-cli/usage/ws/restack.md#--dry-run--the-plan-not-outcomes).
+  moves. See [restack.md § `--dry-run`](./cli/usage/ws/restack.md#--dry-run--the-plan-not-outcomes).
 - Before finishing, audit every worktree you touched (or could have touched): branch attached where expected, and
   working tree clean unless intentionally left dirty. For every verb but `ws restack`, also confirm the commits you
   expect are present — not silently stranded off every ref. `ws restack` rewrites history in place, so a sha-presence
@@ -254,17 +252,17 @@ in a throwaway env or scratch workspace, never the live one) is what actually pr
 a detached one) and force-moves that branch to the target ref (use `--new` for a branch that doesn't exist anywhere
 yet). It is env-wide with no repo filter. For the `refused-unknown-branch` / `refused-missing-ref` refusals, the
 dirty/abandonment guard, and what `--force` does and doesn't bypass, see
-[winter-cli/usage/ws/checkout.md](./winter-cli/usage/ws/checkout.md).
+[cli/usage/ws/checkout.md](./cli/usage/ws/checkout.md).
 
 To move a single worktree's branch pointer without touching the rest of the env — or without re-attaching a detached
-HEAD — use `winter ws reset <name>/<repo-name> <ref>` instead; see
-[winter-cli/usage/ws/reset.md](./winter-cli/usage/ws/reset.md) for the soft/mixed/hard modes and safety-gate details.
+HEAD — use `winter ws reset <name>/<repo-name> <ref>` instead; see [cli/usage/ws/reset.md](./cli/usage/ws/reset.md) for
+the soft/mixed/hard modes and safety-gate details.
 
 ## Pushing completed work
 
 `winter ws push [<patterns>]` pushes each matched worktree to its own tracked upstream. For the pattern/scope
 vocabulary, the per-repo target rule, pinned exclusion (`--include-pinned`/`--only-pinned`), and the
-`N pinned repo(s) with commits skipped` signal, see [winter-cli/usage/ws/push.md](./winter-cli/usage/ws/push.md) and
-[winter-cli/usage/ws/patterns.md](./winter-cli/usage/ws/patterns.md).
+`N pinned repo(s) with commits skipped` signal, see [cli/usage/ws/push.md](./cli/usage/ws/push.md) and
+[cli/usage/ws/patterns.md](./cli/usage/ws/patterns.md).
 
 To push a single standalone repo, use raw git — patterns don't apply to standalone repos.

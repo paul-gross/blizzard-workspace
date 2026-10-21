@@ -267,11 +267,11 @@ Its bullet also differs in shape from a lazy standalone's. There is no single pa
 ```
 
 **`<env>` binding.** `AGENTS.winter.md` auto-loads into every session via the workspace's `# Winter Extensions` block,
-including a session with no feature env in scope — `context/workspace-layout.md` mandates subagents spawn from the
-workspace root, where `<env>` is unbound and no env directory may even exist yet. When one or more project-repo bullets
-are rendered, `AGENTS.winter.md` carries a one-line note ahead of them: `<env>` binds to the feature-env directory the
-reading agent is actually working in; a workspace-root reader with no env bound instead opens the source checkout at
-`projects/<name>/`.
+including a session with no feature env in scope — `context/winter/workspace-layout.md` mandates subagents spawn from
+the workspace root, where `<env>` is unbound and no env directory may even exist yet. When one or more project-repo
+bullets are rendered, `AGENTS.winter.md` carries a one-line note ahead of them: `<env>` binds to the feature-env
+directory the reading agent is actually working in; a workspace-root reader with no env bound instead opens the source
+checkout at `projects/<name>/`.
 
 A repo declared as **both** `[[project_repository]]` (with a root `winter-ext.toml`) and `[[standalone_repository]]`
 dedupes to a single extension entry: the **standalone** checkout wins, silently. Double-declaring is a supported way to

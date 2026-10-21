@@ -105,7 +105,7 @@ Report what was cloned vs. what already existed. Then confirm:
 **Post-clone note:** cloning registers each new extension in `workspace:/AGENTS.winter.md` (via the auto-managed
 `# Winter Extensions` block). Re-read that file — each newly-installed orchestrator now appears there naming its entry
 point: a standalone as an eager `@`-import, a project-repo extension as a no-`@` path-template bullet (see
-`context/winter-cli/configuration/extensions.md#project-repo-extensions`). That entry point is how Step 4 reaches each
+`context/winter/cli/configuration/extensions.md#project-repo-extensions`). That entry point is how Step 4 reaches each
 orchestrator's setup guide, which is where what the orchestrator does and how its services are wired is explained. Don't
 restate those per-orchestrator details here.
 
@@ -159,7 +159,7 @@ walk me through them. Which do you prefer?"*
 **If researching automatically:** Spawn an Opus-class subagent (from the workspace root, per workspace rules) to explore
 the project repos. Give it the schema from [`service-discovery.md`](./service-discovery.md) — `name`, `scope`,
 `start_command`, `port`, `container` — as its brief; that doc also lists the typical evidence for each field, so don't
-restate it here. This is the same schema `setup-project-setup.md` §6 gathers, so this fallback-path pass (used when
+restate it here. This is the same schema `setup/project-setup.md` §6 gathers, so this fallback-path pass (used when
 project settings were already configured without services) produces results indistinguishable from the primary path.
 
 Have the subagent end with a synthesis: the services to declare, each with a proposed name, scope, and whatever wiring

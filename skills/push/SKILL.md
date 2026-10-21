@@ -12,9 +12,9 @@ determine which — a single optional name.
 A feature environment contains a worktree for every project repo, so pushing one is a multi-repo operation. Use
 `winter ws push` — it pushes every matched worktree to its tracked upstream in parallel and honors pinned-repo rules.
 For the full reference, start at the CLI hub
-[workspace:/context/winter-cli/index.md](workspace:/context/winter-cli/index.md), then read the specific topic
-[workspace:/context/winter-cli/usage/ws/push.md](workspace:/context/winter-cli/usage/ws/push.md) — plus
-[workspace:/context/worktree-ops.md](workspace:/context/worktree-ops.md).
+[workspace:/context/winter/cli/index.md](workspace:/context/winter/cli/index.md), then read the specific topic
+[workspace:/context/winter/cli/usage/ws/push.md](workspace:/context/winter/cli/usage/ws/push.md) — plus
+[workspace:/context/winter/worktree-ops.md](workspace:/context/winter/worktree-ops.md).
 
 Use raw `git push` for the workspace branch itself — `winter ws push` doesn't operate on it. Standalone repos can be
 reached via `winter ws push --standalone` or with raw git, whichever is more convenient.
@@ -125,7 +125,7 @@ individually, not an env-wide group skip), while its connected siblings still pu
 
 **After a `winter ws restack`**, a rebased worktree's push is rejected as non-fast-forward — `winter ws push` never
 force-pushes and carries no force option at all. Recourse is a raw `git push --force` per repo, not a `push` flag; see
-[workspace:/context/winter-cli/usage/ws/restack.md § Publishing a restacked env](workspace:/context/winter-cli/usage/ws/restack.md#publishing-a-restacked-env).
+[workspace:/context/winter/cli/usage/ws/restack.md § Publishing a restacked env](workspace:/context/winter/cli/usage/ws/restack.md#publishing-a-restacked-env).
 
 ## Report
 

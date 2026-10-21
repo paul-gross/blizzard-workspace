@@ -11,8 +11,7 @@ mechanics live in its own reference, linked below — this page is the map, not 
 | Teardown   | `winter ws destroy <env>` | provision teardown → extension hooks → worktree/env removal                             |
 
 `winter clean <env>` sits outside this four-phase sequence: it is a handover reset between tenants, not a phase every
-env passes through once. See [winter-cli/usage/clean.md](./winter-cli/usage/clean.md) for what it runs and why it
-exists.
+env passes through once. See [cli/usage/clean.md](./cli/usage/clean.md) for what it runs and why it exists.
 
 ## Baseline rule: never run an env you have not provisioned
 
@@ -36,11 +35,9 @@ the lifecycle, the commands, and the ordering rule above are winter's regardless
 ## Where each phase is documented
 
 - Structural + teardown mechanics, and the raw-git equivalents: [worktree-ops.md](./worktree-ops.md)
-- Readiness command surface (stages, action flags, named selectors):
-  [winter-cli/usage/provision.md](./winter-cli/usage/provision.md)
-- Run command surface (`up`/`down`/`status`/`restart`, `--wait`, scopes):
-  [winter-cli/usage/service.md](./winter-cli/usage/service.md)
+- Readiness command surface (stages, action flags, named selectors): [cli/usage/provision.md](./cli/usage/provision.md)
+- Run command surface (`up`/`down`/`status`/`restart`, `--wait`, scopes): [cli/usage/service.md](./cli/usage/service.md)
 - The service provider protocol winter dispatches to:
-  [winter-cli/contracts/service-orchestrator.md](./winter-cli/contracts/service-orchestrator.md)
+  [cli/contracts/service-orchestrator.md](./cli/contracts/service-orchestrator.md)
 - Handover command surface (stages, named selectors, declared `clean` commands):
-  [winter-cli/usage/clean.md](./winter-cli/usage/clean.md)
+  [cli/usage/clean.md](./cli/usage/clean.md)

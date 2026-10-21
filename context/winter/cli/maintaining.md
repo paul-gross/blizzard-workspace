@@ -1,6 +1,6 @@
 # Maintaining the winter CLI docs
 
-Author- and reviewer-facing rules for changing the agent-facing markdown under `context/winter-cli/`. Read this before
+Author- and reviewer-facing rules for changing the agent-facing markdown under `context/winter/cli/`. Read this before
 adding, moving, or rewriting a CLI doc; cite it when reviewing such a change. It governs *where each CLI fact lives*,
 *how the hubs route to it*, and *what must move when the CLI changes* — not what the CLI does (for that, start at the
 [hub](./index.md)).
@@ -73,7 +73,7 @@ When the CLI changes, the docs move **in the same commit**. Match the change to 
 | Change to the CLI                            | Docs that must move with it                                                                                                                                                                                                                         |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Add a command**                            | New `usage/` leaf (or a row in `usage/ws/index.md` for a `ws` sub-command); a routing row in its nearest hub.                                                                                                                                       |
-| **Remove a command**                         | Delete the leaf, delete its routing row, and grep the tree for inbound links to it (`grep -rn '<name>' context/winter-cli`).                                                                                                                        |
+| **Remove a command**                         | Delete the leaf, delete its routing row, and grep the tree for inbound links to it (`grep -rn '<name>' context/winter/cli`).                                                                                                                        |
 | **Rename a command or flag**                 | The leaf's title and every example; the routing row; deep links from other leaves; the agents that load these docs (see Consumers below).                                                                                                           |
 | **Add / change / remove a flag**             | The command's `usage/` leaf — its example block and any behavior note.                                                                                                                                                                              |
 | **Add / rename / remove a config key**       | The concept's `configuration/` leaf; `configuration/config-files.md` if it is a workspace-level scalar; the routing row if a whole concept appears or disappears.                                                                                   |
@@ -92,12 +92,12 @@ freshness rows above). When a leaf outgrows `reference_bytes`, split the command
 These docs are loaded as source of truth by agents, so a rename or move is only done when their references move too:
 
 - In an assembled workspace (not the standalone repo), the workspace **`AGENTS.md`** (and the `CLAUDE.md` shim that
-  imports it) and **`context/workspace-layout.md`** name `context/winter-cli/` as the CLI command reference. A top-level
-  restructure updates those downstream pointers in the same change.
+  imports it) and **`context/winter/workspace-layout.md`** name `context/winter/cli/` as the CLI command reference. A
+  top-level restructure updates those downstream pointers in the same change.
 
 ## Reviewer checklist
 
-Cite this list when reviewing a change to `context/winter-cli/`:
+Cite this list when reviewing a change to `context/winter/cli/`:
 
 1. **Placement** — does each new or moved fact sit with the reader-task that owns it (usage / configuration / contracts
    / workflow), per the table above?

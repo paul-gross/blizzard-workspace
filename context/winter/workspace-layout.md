@@ -10,13 +10,15 @@ This workspace manages **multiple project repositories** as peers. All repos are
 ├── CLAUDE.md                   # Committed shim: @AGENTS.md (keeps Claude Code working)
 ├── AGENTS.winter.md            # Generated extension manifest (gitignored)
 ├── AGENTS.local.md             # User-local body (hand-authored, gitignored)
-├── context/                         # Workspace documentation
-│   ├── workspace-layout.md     # This file
-│   ├── worktree-ops.md         # Git commands for this topology
-│   ├── winter-cli/             # CLI command reference + setup guide
-│   ├── setup-project-setup.md  # Walkthrough for authoring project-setup.md
-│   ├── contributing-setup.md   # Walkthrough for authoring contributing.md
-│   └── project/                # Project-specific integration config (contributing.md, plus any extension config)
+├── context/                    # Workspace documentation
+│   ├── winter/                 # Inherited from upstream winter — never hand-edited here
+│   │   ├── workspace-layout.md # This file
+│   │   ├── worktree-ops.md     # Git commands for this topology
+│   │   ├── environment-lifecycle.md
+│   │   ├── cli/                # CLI command reference + setup guide
+│   │   └── setup/              # ws-setup guides (project-setup.md, contributing.md, service orchestration)
+│   ├── project/                # Workspace-owned: contributing.md, project-setup.md, extension config
+│   └── <anything-else>         # Workspace-owned, freeform
 ├── skills/                     # Canonical workspace skills source dir (author skills here)
 ├── .claude/                    # Workspace-level agents, skills, and settings (generated projections are git-ignored)
 │   ├── agents/                 # Top-level .md files plus <prefix>-* per-harness projected copies from extensions
@@ -54,7 +56,7 @@ This workspace manages **multiple project repositories** as peers. All repos are
 
 > **Workspace-root file shape.** The tree above shows the four agent-context files at the workspace root. For the
 > authoritative table — what each file contains, whether it is committed or gitignored, and the rationale — see
-> [context/winter-cli/configuration/config-files.md § Workspace-root file shape](./winter-cli/configuration/config-files.md#workspace-root-file-shape).
+> [context/winter/cli/configuration/config-files.md § Workspace-root file shape](./cli/configuration/config-files.md#workspace-root-file-shape).
 
 ## Source Checkouts
 
@@ -66,10 +68,20 @@ All development happens in feature worktrees (e.g., `./alpha/<repo-name>/`).
 
 ## Inherited docs at the workspace root
 
-Many files at the workspace root — most `context/` docs, `AGENTS.md`, and others — are **not authored here**. They are
-inherited copies carried in from an upstream project repo (chiefly the `winter` tool) by the shared-lineage rebase: the
-workspace sits one customization commit on top of `winter/master`, so everything that commit doesn't own arrives from
-upstream and travels downstream automatically on the next sync.
+Many files at the workspace root — everything under `context/winter/`, `AGENTS.md`, and others — are **not authored
+here**. They are inherited copies carried in from an upstream project repo (chiefly the `winter` tool) by the
+shared-lineage rebase: the workspace sits one customization commit on top of `winter/master`, so everything that commit
+doesn't own arrives from upstream and travels downstream automatically on the next sync.
+
+Within `context/`, ownership is a path prefix: `context/winter/**` is inherited; everything else under `context/` —
+`context/project/` and any file or directory the workspace adds beside it — is workspace-owned. Extensions read
+`workspace:/context/project/` by fixed path, so keep `contributing.md`, `project-setup.md`, and `index.md` there; the
+rest of `context/` is the workspace's to organize. Never add a file under `context/winter/` in the workspace.
+
+A workspace forked before this layout carries its own files beside the old flat upstream docs. On the first sync after
+the move, upstream's renames land on `context/winter/`; move any workspace-owned file that still sits beside them (and
+any link to an old `context/<doc>.md` or `context/winter-cli/` path) out of the upstream prefix in the customization
+commit.
 
 **Before editing any root file, check whether it is an inherited copy.** If it is, fix it at the source repo (in that
 repo's feature env) and let the sync carry it down — never hand-edit the downstream copy. The next rebase clobbers the
@@ -91,7 +103,7 @@ When working on a feature in `alpha/`:
   computed `[env.*]` band entries) are computed at runtime by `EnvProvisionerService` and injected into every provider
   subprocess — no static env file is written. (For the `workspace` scope, `WINTER_PORT_BASE` is not injected.) To
   inspect the current values for a scope, run `winter env alpha` (or `winter env workspace` for the workspace scope).
-  See [winter-cli/usage/env.md](./winter-cli/usage/env.md).
+  See [cli/usage/env.md](./cli/usage/env.md).
 
 ## Repo Inventory
 

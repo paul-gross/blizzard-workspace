@@ -23,21 +23,20 @@ interactive rebase — uses raw git.
 Bring a feature environment up in order: `winter ws init <env>`, then `winter provision <env>`, then
 `winter service up <env>`. Never run or exercise an environment that has not been provisioned — provisioning is a
 required baseline operation, not an optional step.
-[context/environment-lifecycle.md](./context/environment-lifecycle.md) owns the lifecycle phases and the
+[context/winter/environment-lifecycle.md](./context/winter/environment-lifecycle.md) owns the lifecycle phases and the
 provision-before-run baseline rule.
 
 ## Destructive commands
 
 Never run or exercise a destructive `winter` command against a live environment you do not intend to mutate. Which
 commands are destructive, and how to verify one safely, is owned by
-[Verifying destructive commands safely](./context/worktree-ops.md#verifying-destructive-commands-safely).
+[Verifying destructive commands safely](./context/winter/worktree-ops.md#verifying-destructive-commands-safely).
 
 ## Further reference
 
 | File                                                                                     | When to read                                                                                                                       |
 | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| [context/winter-cli/index.md](./context/winter-cli/index.md)                             | You need to run a `winter` command, edit `.winter/config.toml`, or install the CLI — the hub for the whole CLI documentation tree. |
-| [context/workspace-layout.md](./context/workspace-layout.md)                             | You need the workspace directory layout, feature environments, path notation, or layout rules.                                     |
-| [context/worktree-ops.md](./context/worktree-ops.md)                                     | You are performing worktree git operations — creating, pulling, or destroying worktrees.                                           |
+| [context/winter/cli/index.md](./context/winter/cli/index.md)                             | You need to run a `winter` command, edit `.winter/config.toml`, or install the CLI — the hub for the whole CLI documentation tree. |
+| [context/winter/workspace-layout.md](./context/winter/workspace-layout.md)               | You need the workspace directory layout, feature environments, path notation, or layout rules.                                     |
+| [context/winter/worktree-ops.md](./context/winter/worktree-ops.md)                       | You are performing worktree git operations — creating, pulling, or destroying worktrees.                                           |
 | [workspace:/context/project/contributing.md](workspace:/context/project/contributing.md) | You are merging, pushing, or delivering work — the contributing conventions.                                                       |
-| [context/github.md](./context/github.md)                                                 | You are performing a GitHub operation for this project, such as raising an issue.                                                  |

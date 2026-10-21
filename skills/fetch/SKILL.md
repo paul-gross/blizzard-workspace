@@ -14,9 +14,9 @@ A feature environment contains a worktree for every project repo, so fetching on
 refreshing refs, it also fast-forwards each matched project repo's **source checkout** (`projects/<repo>`) local main to
 `origin/<main-branch>`, keeping the base `winter ws init` branches new envs off of current (feature worktrees are never
 touched; a diverged source-checkout main is reported as a failed fetch). For the full reference, start at the CLI hub
-[workspace:/context/winter-cli/index.md](workspace:/context/winter-cli/index.md), then read the specific topic
-[workspace:/context/winter-cli/usage/ws/fetch.md](workspace:/context/winter-cli/usage/ws/fetch.md) — plus
-[workspace:/context/worktree-ops.md](workspace:/context/worktree-ops.md).
+[workspace:/context/winter/cli/index.md](workspace:/context/winter/cli/index.md), then read the specific topic
+[workspace:/context/winter/cli/usage/ws/fetch.md](workspace:/context/winter/cli/usage/ws/fetch.md) — plus
+[workspace:/context/winter/worktree-ops.md](workspace:/context/winter/worktree-ops.md).
 
 Use raw `git fetch` for the workspace branch itself — `winter ws fetch` doesn't operate on it. Standalone repos can be
 reached via `winter ws fetch --standalone` or with raw git, whichever is more convenient.

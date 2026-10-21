@@ -1,6 +1,6 @@
 # Winter CLI
 
-This is the top-level hub of the `context/winter-cli/` documentation tree. Enter here first, then open only the single
+This is the top-level hub of the `context/winter/cli/` documentation tree. Enter here first, then open only the single
 per-topic file that matches your task:
 
 | File                                                                     | When to read                                                                                                                                       |

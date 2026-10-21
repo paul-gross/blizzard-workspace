@@ -219,7 +219,7 @@ class ExtensionAgentService:
 
         Note: a typo'd/invalid *tier* name (as opposed to an unknown agent
         name) is validated separately, at config-load time, by
-        ``WorkspaceConfigService`` — see ``context/winter-cli/configuration/agents.md``.
+        ``WorkspaceConfigService`` — see ``context/winter/cli/configuration/agents.md``.
         """
         overrides = self._config.agent_model_overrides.overrides
         if not overrides:

@@ -185,7 +185,7 @@ class ExtensionAgentsMdService:
         if project_rows:
             # `<env>` in the bullets below is unbound for a reader with no feature env
             # in scope (e.g. a subagent spawned from the workspace root per
-            # `context/workspace-layout.md` rule 4) — state the binding and the
+            # `context/winter/workspace-layout.md` rule 4) — state the binding and the
             # workspace-root fallback once here rather than repeating it per bullet.
             if eager_lines or lazy_lines:
                 winter_lines.append("")
