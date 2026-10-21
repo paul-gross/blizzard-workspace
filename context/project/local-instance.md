@@ -24,7 +24,7 @@ release.
 | Hub deployment  | Owned end to end by the **`paul-gross/blizzard-infra`** repo (private; worktreed here only on a machine whose `config.local.toml` declares it). It holds the host, the image channel, the updater, rollback, and the operator entry points. Go there for anything about the host — none of it is restated here |
 | Runner host     | One host, `xps`, running two runners split by harness — see [The host and its runners](#the-host-and-its-runners) for its ids, workspaces, envs, tokens, and unit                                                                                                                                              |
 | Venv            | `../.venv` — the `blizzard` binary the host runs, and the operator CLI; installed from the **release's wheel**, never a build or an editable install                                                                                                                                                           |
-| Release         | **`v0.2.0-rc.2`** — the exact release both halves run: the venv holds its GitHub Release wheel, and the hub runs its image by digest, pinned as [The hub's pin](#the-hubs-pin) describes                                                                                                                       |
+| Release         | **`v0.2.0`** — the exact release both halves run: the venv holds its GitHub Release wheel, and the hub runs its image by digest, pinned as [The hub's pin](#the-hubs-pin) describes                                                                                                                            |
 | Forge           | **real GitHub** — owner `paul-gross`; the hub's token lives on the host, never in this repo                                                                                                                                                                                                                    |
 | Supervision     | one systemd **user** unit, `blizzard-blizzard-runner.service` (unit file and drop-ins in `~/.config/systemd/user/`)                                                                                                                                                                                            |
 | Trace collector | `../otel-collector` — a docker compose OpenTelemetry Collector on `127.0.0.1:4318` that forwards both runners' spans to Honeycomb; see [The runners' trace collector](#the-runners-trace-collector)                                                                                                            |
@@ -246,12 +246,12 @@ commands for it.
 
 ### The hub's pin
 
-The hub runs the image digest `BLIZZARD_HUB_IMAGE` names in the host's `/srv/blizzard/deploy/.env`. Set to a digest
-rather than the `edge` ref, that line is a pin: the updater logs `pinned to …; automatic updates disabled` on every run
-and follows nothing. Moving the hub is rewriting that line to the target release's digest over an SSM session and
-recreating the hub — `blizzard-infra`'s `docs/deployment.md` and `docs/rollback.md` §The swap is the pin own the
-commands. That line is where the pin lives until `blizzard-infra` carries `deploy/release.env`; from then the pin moves
-there, the updater applies it forward or back, and the `.env` line is removed.
+The hub runs the release `blizzard-infra`'s `deploy/release.env` pins, by version and index digest. Moving the hub is a
+change to that file on `blizzard-infra`'s `master`, then `scripts/deploy.sh` from a `blizzard-infra` worktree: the
+install syncs the pin to the host and runs the updater, which converges the hub on it, forward or back. Merging the
+change moves nothing until the deploy runs. A `BLIZZARD_HUB_IMAGE` line in the host's `/srv/blizzard/deploy/.env` is a
+hold that wins over the pin — the updater logs `held at …; release pin … not applied` — and is normally absent.
+`blizzard-infra`'s `docs/deployment.md` §The pin and the hold and `docs/rollback.md` own the commands and the way back.
 
 Moving the hub needs the operator's `blizzard-prod-admin` session, which no fleet worker holds: an agent driving the
 move asks for `! aws sso login --profile blizzard-prod-admin` to be run, and stops if it is not. **Proof:**
