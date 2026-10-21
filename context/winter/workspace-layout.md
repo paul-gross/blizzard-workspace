@@ -16,9 +16,9 @@ This workspace manages **multiple project repositories** as peers. All repos are
 │   │   ├── worktree-ops.md     # Git commands for this topology
 │   │   ├── environment-lifecycle.md
 │   │   ├── cli/                # CLI command reference + setup guide
-│   │   └── setup/              # ws-setup guides (project-setup.md, contributing.md, service orchestration)
-│   ├── project/                # Workspace-owned: contributing.md, project-setup.md, extension config
-│   └── <anything-else>         # Workspace-owned, freeform
+│   │   └── setup/              # ws-setup guides (project-setup, contributing, service orchestration + discovery)
+│   ├── project/                # Workspace-owned, read by extensions at fixed paths
+│   └── <anything-else>         # Workspace-owned, freeform; nothing reads it by fixed path
 ├── skills/                     # Canonical workspace skills source dir (author skills here)
 ├── .claude/                    # Workspace-level agents, skills, and settings (generated projections are git-ignored)
 │   ├── agents/                 # Top-level .md files plus <prefix>-* per-harness projected copies from extensions
@@ -73,15 +73,11 @@ here**. They are inherited copies carried in from an upstream project repo (chie
 shared-lineage rebase: the workspace sits one customization commit on top of `winter/master`, so everything that commit
 doesn't own arrives from upstream and travels downstream automatically on the next sync.
 
-Within `context/`, ownership is a path prefix: `context/winter/**` is inherited; everything else under `context/` —
-`context/project/` and any file or directory the workspace adds beside it — is workspace-owned. Extensions read
-`workspace:/context/project/` by fixed path, so keep `contributing.md`, `project-setup.md`, and `index.md` there; the
-rest of `context/` is the workspace's to organize. Never add a file under `context/winter/` in the workspace.
-
-A workspace forked before this layout carries its own files beside the old flat upstream docs. On the first sync after
-the move, upstream's renames land on `context/winter/`; move any workspace-owned file that still sits beside them (and
-any link to an old `context/<doc>.md` or `context/winter-cli/` path) out of the upstream prefix in the customization
-commit.
+Within `context/`, ownership is a path prefix: `context/winter/**` is inherited; everything else under `context/` is
+workspace-owned. `context/project/` is the one fixed slot — extensions read `workspace:/context/project/<file>` by path,
+so every file an extension reads (`index.md`, `contributing.md`, `project-setup.md`, and any extension-declared file)
+lives there. The rest of `context/` is the workspace's to organize. Never add a file under `context/winter/` in the
+workspace.
 
 **Before editing any root file, check whether it is an inherited copy.** If it is, fix it at the source repo (in that
 repo's feature env) and let the sync carry it down — never hand-edit the downstream copy. The next rebase clobbers the

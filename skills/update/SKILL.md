@@ -244,6 +244,20 @@ The integration must be complete: no rebase/merge in progress and no unmerged pa
 the integration isn't done — finish it before reporting success. (A modified `ws-update` SKILL.md from Step 6 is an
 expected, separate change — not an unfinished integration; mention it so the user can commit it.)
 
+Then confirm `context/` ownership survived the integration. Upstream owns `context/winter/**` and the workspace owns
+everything else under `context/` (see
+[workspace-layout.md § Inherited docs at the workspace root](workspace:/context/winter/workspace-layout.md#inherited-docs-at-the-workspace-root)).
+An upstream move can disturb that in two ways, each its own fix:
+
+- **A workspace file landed inside `context/winter/`.** Git's directory-rename detection carries a file the workspace
+  added inside an upstream directory along with that directory's move. List them with
+  `git diff --name-only --diff-filter=A winter/<branch> HEAD -- context/winter/` and relocate each outside the prefix
+  (into `context/project/` if an extension reads it).
+- **A workspace-owned link still names the old upstream path.** Run `winter lint` and rewrite each dead
+  `workspace:/context/…` reference in a workspace-owned file to the doc's new path.
+
+Fold both fixes into the customization commit.
+
 ## Report
 
 Summarize the integration in one block:
