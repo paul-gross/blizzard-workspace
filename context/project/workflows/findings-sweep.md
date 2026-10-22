@@ -13,7 +13,8 @@ rest into lane-sized garden proposals or withdrawals. Nothing is written to the 
 Without a standing drain, the live set grows past what anyone reads, and the correctness defects in it sink beneath
 hundreds of prose nits.
 
-**Scope.** An operator session against the instance's hub. Every `blizzard hub` verb needs `$BZ_HUB_URL` and a session
+**Scope.** An operator session against the instance's hub. Every `blizzard hub` verb needs `$BZ_HUB_URL`, a session,
+`--tenant`, and — for `finding list` and `garden-proposal create` — `--project`
 ([local-instance.md § The operator CLI needs a session](../local-instance.md#the-operator-cli-needs-a-session)). The
 sweep is read-only on code: it mints work and never fixes code itself. Each verb's `--help` owns its flags.
 
@@ -23,10 +24,11 @@ sweep is read-only on code: it mints work and never fixes code itself. Each verb
   keep its findings out of the draft. Draft no second proposal over findings an open one already cites.
 - **Live findings.** No verb lists every finding, so enumerate them. For each routine (`hub routine list`) and each
   scope (`hub scope list`), run `hub finding list --routine <routine> --scope <scope> --source routine --json`. For each
-  scope, run `hub finding list --source review --scope <scope> --json`. Dedupe by `finding_id`.
+  scope, run `hub finding list --source review --scope <scope> --json`. Give every call `--project`, set to its scope
+  row's `project_slug`. Dedupe by `finding_id`.
 - **Check every call.** A failed list call leaves no output, which looks exactly like an empty scope. Check each call's
-  exit status, keep its stderr, and retry a failure until it succeeds. A pair that never succeeds is a gap in the
-  inventory, not an empty result.
+  exit status, keep its stderr, and retry a failure until it succeeds — but a refusal naming a missing flag fails every
+  time, so fix the call instead. A pair that never succeeds is a gap in the inventory, not an empty result.
 - **Join.** Map each finding to the proposals whose `findings` cite it, and to each proposal's closure.
 
 ## 2. Re-verify against `master`
@@ -78,7 +80,7 @@ Once the user approves the draft, write it in this order:
 ```bash
 blizzard hub finding confirm-gone --note "…" <finding-id>…
 blizzard hub finding wont-fix --note "…" <finding-id>…        # likewise not-a-finding and supersede
-blizzard hub garden-proposal create --title "…" --class remediate --body-file <body.md> --finding <finding-id>…
+blizzard hub garden-proposal create --project blizzard --title "…" --class remediate --body-file <body.md> --finding <finding-id>…
 blizzard hub garden-proposal accept <proposal-id>             # only the proposals the user accepts
 ```
 
