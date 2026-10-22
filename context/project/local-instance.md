@@ -222,6 +222,7 @@ Error: not authenticated — run `blizzard hub login`
 **Set this up once per machine, before anything else in this file:**
 
 ```bash
+export PATH="$PWD/../.venv/bin:$PATH"              # from the workspace root; the venv's binary is on no PATH
 export BZ_HUB_URL=https://blizzard.grosscode.net   # every hub command defaults --hub-url to it
 export FLEET_TENANT=ten_01M4N8ZW1AXGMFD9WCAFJ1FJZB  # the instance's tenant; pass it as --tenant "$FLEET_TENANT"
 blizzard hub login                                  # opens a browser
@@ -236,6 +237,12 @@ sources, and repositories — lives in the `paul-gross` tenant, `ten_01M4N8ZW1AX
 also administers `demo`, so a verb without the flag refuses with `you belong to several tenants` and lists both. The CLI
 keeps no saved tenant and reads no environment variable for it; `FLEET_TENANT` is only a shell convenience. Which verbs
 are hub-level and take no `--tenant` is `blizzard/docs/deployment/tenants.md`'s.
+
+**Pass `--project blizzard` to every project-scoped verb.** The tenant holds two projects, `blizzard` and `winter`, so a
+verb acting on one project's records — `hub finding list` among them — refuses without the flag with
+`this tenant holds several projects`. A list verb that takes `--project` only as a filter — `hub routine list`,
+`hub scope list`, `hub garden-proposal list` — does not refuse: it shows every project's rows, each naming its
+`project_slug`.
 
 ## Redeploy + restart runbook — moving the instance onto a release
 
