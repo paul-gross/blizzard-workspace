@@ -26,7 +26,9 @@ ingests it by hand.
    carries. Every id must be unacquired.
 3. **Link** chunks that are separable but would collide — they edit the same files, or one builds on what the other
    introduces: `hub chunk depend <dependent> <prerequisite>`. The foundation goes first, or else the smaller. A resting
-   chunk that would collide with in-flight work depends on that in-flight chunk.
+   chunk that would collide with in-flight work depends on that in-flight chunk. Every GitHub **blocked by** link on a
+   chunk's issue becomes an edge, and every edge added here is written back as a blocked-by link
+   ([contributing.md § Issue dependencies](../contributing.md#issue-dependencies)), so the hub and the issues agree.
 4. **Promote in priority order** with `hub chunk promote <chunk-id>`, most urgent first. Defects that operators or the
    fleet hit come before latent ones, and both come before prose. `blizzard-context:/domain/work/ranking.md` owns how
    promotion places a chunk in `ready`; promote in the intended order. A dependent rests there, blocked, until its
