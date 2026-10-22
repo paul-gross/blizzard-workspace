@@ -1,16 +1,17 @@
 # Proposal review
 
-How the user works the hub's open garden proposals with an agent: read every one, sort them into three tiers, and
-settle the tiers in order, cheapest first. What a proposal is, and what passing or accepting one does, is
+How the user works the hub's open garden proposals with an agent: read every one, sort them into three tiers, and settle
+the tiers in order, cheapest first. What a proposal is, and what passing or accepting one does, is
 `blizzard-context:/domain/findings-and-proposals.md`'s; this file owns only the session.
 
 **Read this when** told to run a proposal review, or to go through, triage, or decide the hub's proposals. The findings
-sweep (`blizzard-context:/workflows/findings-sweep.md`) opens by deciding every open proposal: this is how that gets
-done.
+sweep ([workflows/findings-sweep.md](./workflows/findings-sweep.md)) opens by deciding every open proposal: this is how
+that gets done.
 
 **Scope.** An operator session against the instance's hub. Every verb needs `$BZ_HUB_URL`, a session, and
-`--tenant "$FLEET_TENANT"` ([local-instance.md § The operator CLI needs a session](./local-instance.md#the-operator-cli-needs-a-session)).
-The review only reads code, and nothing is written to the hub until the user approves it.
+`--tenant "$FLEET_TENANT"`
+([local-instance.md § The operator CLI needs a session](./local-instance.md#the-operator-cli-needs-a-session)). The
+review only reads code, and nothing is written to the hub until the user approves it.
 
 ## 1. Inventory
 
@@ -41,26 +42,27 @@ still holds. Anything that fails drops to **for consideration**, with the reason
 Put the surviving list to the user. Accept only what they approve:
 `blizzard hub garden-proposal accept --tenant "$FLEET_TENANT" <proposal-id>`. Every accept and pass reason names the
 review and its date, so the closure reads as one session's decision. Every accept mints a chunk, and minting owes the
-marshal steps at once (`blizzard-context:/workflows/marshalling.md`).
+marshal steps at once ([workflows/marshalling.md](./workflows/marshalling.md)).
 
 **Group liberally when marshalling a review's chunks.** One accepted proposal is often a small fix, and a lane given
 only that underuses its agent: mid-sized chunks do well. Group small chunks that share an area (one package, one feature
-folder, one seam) into one lane, even when they are separable. Stop short of a sprawling PR. Keep a chunk standalone only
-when it is already large, such as a broad mechanical sweep, and `depend` what still collides across groups. Promote the
-lanes in priority order once the user approves the grouping. A later tier's accepts join a lane that is still unacquired,
-or depend on it, and are promoted as they are marshalled.
+folder, one seam) into one lane, even when they are separable. Stop short of a sprawling PR. Keep a chunk standalone
+only when it is already large, such as a broad mechanical sweep, and `depend` what still collides across groups. Promote
+the lanes in priority order once the user approves the grouping. A later tier's accepts join a lane that is still
+unacquired, or depend on it, and are promoted as they are marshalled.
 
 ## 4. Walk the consideration tier
 
 Present the tier five proposals at a time. Give each a short paragraph covering what is wrong, what the fix is, what it
 costs, and a recommendation. Write for a senior software engineer, not an architect: say what the code does and why it
-hurts, and leave out the harness's rule ids and layering vocabulary unless they carry the point. The user calls each
-one *do* or *don't*, often with a reshaping:
+hurts, and leave out the harness's rule ids and layering vocabulary unless they carry the point. The user calls each one
+*do* or *don't*, often with a reshaping:
 
 - **Do.** Accept the proposal. When the user reshapes it, edit its title, body, and findings first, so the minted item
-  carries the decision. Fold a proposal the user calls answered by another into that one, and pass it with a note
-  naming where it went.
-- **Don't.** Pass it with the user's reason, because a pass is what stops a later run from raising the same proposal again.
+  carries the decision. Fold a proposal the user calls answered by another into that one, and pass it with a note naming
+  where it went.
+- **Don't.** Pass it with the user's reason, because a pass is what stops a later run from raising the same proposal
+  again.
 
 ## 5. Take the heavy thinkers one at a time
 
