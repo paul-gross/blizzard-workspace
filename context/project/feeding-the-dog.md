@@ -38,25 +38,14 @@ which directories under `src/blizzard/hub/graphs/` the range changed; each is re
 
 ## 4. Move the hub
 
-`blizzard-infra`'s `deploy/release.env` pins releases only — its contract test refuses a `sha-` tag — so the hub takes a
-dogfood build through the operator **hold**: `BLIZZARD_HUB_IMAGE=<image>:sha-<full sha>@<digest>` in the host's
-`/srv/blizzard/deploy/.env`, which wins over the pin. `blizzard-infra`'s `docs/rollback.md` § The hold and § The hand
-procedure own what the hold is and how the hub is recreated under it.
-
-The hand procedure skips what the updater (`deploy/bin/blizzard-update`, whose header comment lists its steps) does for
-a pin, so do those by hand, on the host over SSM (`deploy.sh`'s instance id, region, and profile):
-
-- take the updater's lock, so its timer cannot run mid-move;
-- pull the image by digest first, so the outage is only the recreate;
-- refuse an image that does not know the store's revision (`migrate --knows`, against `/api/ready`'s `store_revision`);
-- with the hub stopped, copy `hub.db` (and any `hub.db-wal`) out to `state/pre-update/`, and record the outgoing digest
-  in `state/previous-digest`;
-- replace any hold line rather than appending a second, and recreate the hub alone (`--no-deps`), never Caddy.
+`blizzard-infra`'s `deploy/release.env` pins a dogfood build the same way it pins a release:
+`BLIZZARD_HUB_IMAGE=ghcr.io/paul-gross/blizzard-hub:sha-<full sha>@sha256:<index digest>`. Move the hub as
+[local-instance.md § The hub's pin](./local-instance.md#the-hubs-pin) describes — change that line on `blizzard-infra`'s
+`master`, then run `scripts/deploy.sh` — and the updater does the move with its own safeguards: the store snapshot, the
+revision check, the fence on a digest that fails readiness.
 
 **Proof:** `/api/ready` reports ready with `store_revision` equal to `expected_revision`, and
 `https://blizzard.grosscode.net/api/health` reports the wheel's version. Without both, stop before the runner host.
-While the hold stands, the updater logs `held at …; release pin … not applied` every run; the next move onto a release
-removes the hold.
 
 ## 5. Move the runner host
 
@@ -86,5 +75,5 @@ move.
 
 Runner host first, hub after. The runner host goes back as
 [local-instance.md § Going back](./local-instance.md#going-back) describes, onto the previous build's wheel. The hub
-goes back by holding it on `state/previous-digest` the way `docs/rollback.md`'s hand procedure does, after that file's
-schema-delta check; the copy of `hub.db` step 4 took is the store to restore if its downgrade fails.
+goes back by pinning the previous build again and deploying, after `blizzard-infra`'s `docs/rollback.md` schema-delta
+check; the updater downgrades the store on the outgoing image and restores its own snapshot if that fails.
