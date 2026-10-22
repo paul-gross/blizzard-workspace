@@ -442,7 +442,7 @@ simultaneously, and each service is owned by whichever orchestrator's manifest d
 - **`winter-service-process-compose`** — runs services as processes under one headless process-compose daemon per scope;
   reads the same manifest as tmux and reports real readiness, without needing tmux.
 
-Both can be active at once, each managing the services declared in its manifest. (Each orchestrator's specific strengths
+Any of them can be active at once, each managing the services declared in its manifest. (Each orchestrator's specific strengths
 are covered later, from its own docs, when we map services to orchestrators.)"
 
 **Check first:** run `winter capabilities` to see which orchestrators are currently installed and bound to the `service`
