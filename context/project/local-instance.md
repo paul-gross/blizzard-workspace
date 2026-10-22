@@ -24,7 +24,7 @@ reaches the instance only once the user moves it onto a build that carries it.
 | Hub deployment  | Owned end to end by the **`paul-gross/blizzard-infra`** repo (private; worktreed here only on a machine whose `config.local.toml` declares it). It holds the host, the image channel, the updater, rollback, and the operator entry points. Go there for anything about the host — none of it is restated here |
 | Runner host     | One host, `xps`, running two runners split by harness — see [The host and its runners](#the-host-and-its-runners) for its ids, workspaces, envs, tokens, and unit                                                                                                                                              |
 | Venv            | `../.venv` — the `blizzard` binary the host runs, and the operator CLI; installed from the **build's wheel** — a release's, or a dogfood build's `push`-run wheel — never a local build or an editable install                                                                                                 |
-| Release         | **dogfood `0.3.0.dev948+65bc1dc7f`** (`master` at `65bc1dc7f`) — the exact build both halves run: the venv holds that commit's `push`-run wheel, and the hub runs its `sha-` image by digest, pinned as [The hub's pin](#the-hubs-pin) describes                                                               |
+| Release         | **dogfood `0.3.0.dev952+b7c02acb3`** (`master` at `b7c02acb3`) — the exact build both halves run: the venv holds that commit's `push`-run wheel, and the hub runs its `sha-` image by digest, pinned as [The hub's pin](#the-hubs-pin) describes                                                               |
 | Forge           | **real GitHub** — owner `paul-gross`; the hub's token lives on the host, never in this repo                                                                                                                                                                                                                    |
 | Supervision     | one systemd **user** unit, `blizzard-blizzard-runner.service` (unit file and drop-ins in `~/.config/systemd/user/`)                                                                                                                                                                                            |
 | Trace collector | `../otel-collector` — a docker compose OpenTelemetry Collector on `127.0.0.1:4318` that forwards both runners' spans to Honeycomb; see [The runners' trace collector](#the-runners-trace-collector)                                                                                                            |
@@ -51,16 +51,20 @@ holding both runners, and it reports both workspaces and both subscriptions to t
 | Name                           | `r-claude`                                  | `r-chatgpt`                                                                            |
 | Workspace (`[[workspace]] id`) | `blizzard-claude`                           | `blizzard-chatgpt`                                                                     |
 | Envs (`[[workspace]] envs`)    | `r-claude-1`–`r-claude-6`                   | `r-chatgpt-1`–`r-chatgpt-4`                                                            |
-| Agents (binding `agents`)      | 2 on `blizzard`, 1 on `winter`              | 1 on `blizzard`, 1 on `winter`                                                         |
+| Agents (`[[runner]] agents`)   | 3, shared by `blizzard` and `winter`        | 2, shared by `blizzard` and `winter`                                                   |
 | Harness                        | `[runner.opencode] enabled = false`         | `[runner.claude_code] enabled = false`                                                 |
 | Subscription spent             | `anthropic`                                 | `openai`                                                                               |
 | Worker config                  | `../runner/worker-settings.json`            | `../runner/runners/r-chatgpt/` — `worker-settings.json`, `opencode-worker-config.json` |
 | Hub token                      | `BZ_HUB_TOKEN_R_CLAUDE` in `../runner/.env` | `BZ_HUB_TOKEN_R_CHATGPT` in `../runner/.env`                                           |
 
 Both runners also serve the hub's **`winter` project** (every `paul-gross/winter*` source and repo), each through a
-second binding of 1 agent to one shared `[[workspace]]`, `winter`: root `~/projects/winter-workspace`, envs `bz1`–`bz4`,
-one pool for both runners. Its envs are hyphen-free because that workspace's per-env Postgres slice puts the env name
-into a SQL identifier (`wts_<env>`), and its hand-used `alpha`–`epsilon` envs are never in the pool.
+second binding to one shared `[[workspace]]`, `winter`: root `~/projects/winter-workspace`, envs `bz1`–`bz4`, one pool
+for both runners. Its envs are hyphen-free because that workspace's per-env Postgres slice puts the env name into a SQL
+identifier (`wts_<env>`), and its hand-used `alpha`–`epsilon` envs are never in the pool.
+
+**A runner's agents are one count across its bindings.** A free agent takes the next ready chunk, in the hub's
+ready-queue order, of any bound project whose workspace has a free env, and holds that env for its lifetime. Set it as
+`[[runner]] agents`; a per-binding `agents` is deprecated, and the host logs a warning while one remains.
 
 Both blizzard workspaces share `root` = this workspace and `base_branch = master`, and each is named for the runner
 bound to it; the host sets `hub_url = "https://blizzard.grosscode.net"` for both runners, and runs the venv. The host
