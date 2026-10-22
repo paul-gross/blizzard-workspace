@@ -55,6 +55,14 @@ lands in a different repo than the one tracking it, **scope the reference** with
 `Closes paul-gross/blizzard-context#21` to close it (cross-repo auto-close works given push access to the target repo)
 or `Refs paul-gross/blizzard-context#21` to link without closing.
 
+## Issue titles
+
+An issue whose work breaks a surface a supported release ships — what counts is the `blizzard` repo's
+`docs/versioning.md`, judged by `bzh:released-surface-additive` — carries `(BREAK)` in its title, after any `[EPIC]` /
+`[<TAG>]` prefix and before the description: `[ACTIONS] (BREAK) Retire the marker routes and step span`. It is the
+issue's counterpart of the commit's `!`, which the commit that closes it still carries.
+`gh issue list -R paul-gross/blizzard --search 'in:title BREAK'` lists them.
+
 ## Checks before pushing
 
 `blizzard-context` owns what a change is held to and how it is proven: its
@@ -109,8 +117,8 @@ tells a clearer story than landing the commits flat.
 **Push directly to `origin/master` only when the user explicitly asks.** Curate the same way first; with no PR, nothing
 gates the push but your local checks, and post-delivery is owed just the same.
 
-See [`workspace:/context/winter/worktree-ops.md`](../winter/worktree-ops.md) for the exact git commands per worktree (sync, push,
-complete).
+See [`workspace:/context/winter/worktree-ops.md`](../winter/worktree-ops.md) for the exact git commands per worktree
+(sync, push, complete).
 
 ## Release publishing
 
