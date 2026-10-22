@@ -67,6 +67,22 @@ that work lands; the removal the deprecation leaves is a standalone `(BREAK)` is
 in `related`, but no sub-issue of it and carrying no `[<TAG>]`. It waits on GitHub, uningested, until an operator
 decides a release may carry the break ([workflows/marshalling.md](./workflows/marshalling.md)).
 
+## Issue dependencies
+
+An issue that builds on another is **blocked by** it on GitHub, so the order lives with the issues and not only in the
+hub. Whoever files an issue links every prerequisite they can name — the previous child in an epic's landing order, a
+child of another epic, or work already in flight — and an epic's follow-up `(BREAK)` cleanup is blocked by the epic's
+last child. The link is keyed by the blocking issue's REST database id, not its number:
+
+```bash
+gh api -X POST repos/paul-gross/blizzard/issues/<N>/dependencies/blocked_by \
+  -F issue_id=$(gh api repos/paul-gross/blizzard/issues/<prerequisite-N> --jq .id)
+gh api repos/paul-gross/blizzard/issues/<N>/dependencies/blocked_by --jq '[.[].number]'   # read them back
+```
+
+Marshalling turns these links into the hub's dependency edges and writes back any edge it adds
+([workflows/marshalling.md](./workflows/marshalling.md)), so the two never disagree.
+
 ## Checks before pushing
 
 `blizzard-context` owns what a change is held to and how it is proven: its
