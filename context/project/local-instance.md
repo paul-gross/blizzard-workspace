@@ -239,10 +239,10 @@ are hub-level and take no `--tenant` is `blizzard/docs/deployment/tenants.md`'s.
 
 ## Redeploy + restart runbook — moving the instance onto a release
 
-This is the instance's binding of `bzh:release-deploy` (`blizzard-context:/workflows/release-deploy.md`), which owns the
-sequence — read the range's **Upgrade notes** first, move the hub before the runner host going forward and after it
-going back, and prove each half before touching the next. What follows is where each half's pin lives and this machine's
-commands for it.
+This is the instance's binding of [workflows/release-deploy.md](./workflows/release-deploy.md), which owns the sequence
+— read the range's **Upgrade notes** first, move the hub before the runner host going forward and after it going back,
+and prove each half before touching the next. What follows is where each half's pin lives and this machine's commands
+for it.
 
 ### The hub's pin
 
@@ -341,8 +341,8 @@ of what the older release expects, so before its wheel is installed, with the un
 3. Install the older wheel, check the directory, and restart, as in a forward move.
 
 A downgrade that fails leaves the unit stopped on the current venv, which is restarted unchanged. The hub's way back —
-its store downgraded on the outgoing image before the swap — is `bzh:release-deploy`'s and the `blizzard` repo's
-`docs/rollback.md`'s.
+its store downgraded on the outgoing image before the swap — is
+[workflows/release-deploy.md](./workflows/release-deploy.md)'s and the `blizzard` repo's `docs/rollback.md`'s.
 
 ### Re-minting changed graphs
 
@@ -422,8 +422,8 @@ Ingest takes a source-native token — prefer `blizzard:26`, `blizzard#26`, or t
 
 ### Marshalling the backlog
 
-Marshalling, and the steps every chunk-minting verb above owes at once, is owned by blizzard-context
-([workflows/marshalling.md](../../.winter/ext/context/workflows/marshalling.md), `bzh:marshal`).
+Marshalling, and the steps every chunk-minting verb above owes at once, is owned by
+[workflows/marshalling.md](./workflows/marshalling.md).
 
 ## Developing a feature env against this instance's data
 
