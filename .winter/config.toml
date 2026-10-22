@@ -124,14 +124,14 @@ layout = "repos-as-rows"
 # multi-provider workspace dispatch matches nothing and exits non-zero. blizzard's
 # app stack is per-env by design, so winter-service-tmux's workspace `shell` is
 # the workspace scope's sole tenant and what keeps that ensure-step exit 0.
-# See workspace:/context/winter-cli/configuration/capabilities.md.
+# See workspace:/context/winter/cli/configuration/capabilities.md.
 # ---------------------------------------------------------------------------
 
 [capabilities]
 service = ["winter-service-docker", "winter-service-tmux"]
 
 # ---------------------------------------------------------------------------
-# Env variable bands (see context/winter-cli/configuration/ports-and-environments.md).
+# Env variable bands (see context/winter/cli/configuration/ports-and-environments.md).
 # The env-provisioner resolves these per scope and injects them into service
 # providers. A feature env gets the workspace band unioned with the feature band.
 #
