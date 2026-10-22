@@ -55,11 +55,12 @@ from its own setup guide. At this step you only install.
 
 Resolve each chosen orchestrator's install coordinates:
 
-| Orchestrator               | Repository URL                                        | `path`                                                                                        |
-| -------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `winter-service-tmux`      | `git@github.com:paul-gross/winter-service-tmux.git`   | `.winter/ext/service-tmux`                                                                    |
-| `winter-service-docker`    | `git@github.com:paul-gross/winter-service-docker.git` | `.winter/ext/service-docker`                                                                  |
-| custom (user-supplied URL) | the git URL the user gave in the parent step          | `.winter/ext/<name>` — `<name>` = last URL segment, `.git` stripped; confirm it with the user |
+| Orchestrator                     | Repository URL                                                 | `path`                                                                                        |
+| -------------------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `winter-service-tmux`            | `git@github.com:paul-gross/winter-service-tmux.git`            | `.winter/ext/service-tmux`                                                                    |
+| `winter-service-docker`          | `git@github.com:paul-gross/winter-service-docker.git`          | `.winter/ext/service-docker`                                                                  |
+| `winter-service-process-compose` | `git@github.com:paul-gross/winter-service-process-compose.git` | `.winter/ext/service-process-compose`                                                         |
+| custom (user-supplied URL)       | the git URL the user gave in the parent step                   | `.winter/ext/<name>` — `<name>` = last URL segment, `.git` stripped; confirm it with the user |
 
 For each chosen orchestrator, tell the user what's about to happen, then append its entry to
 `workspace:/.winter/config.toml`:

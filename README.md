@@ -122,6 +122,8 @@ implementations you can study and adapt each ship as their own repos, and compos
   and agents alike a view of the running applications
 - **[winter-service-docker](https://github.com/paul-gross/winter-service-docker)** — docker compose-based service
   orchestration with per-env isolation and real container healthchecks
+- **[winter-service-process-compose](https://github.com/paul-gross/winter-service-process-compose)** — process-compose
+  service orchestration: one headless daemon per scope, with the tmux manifest schema and real readiness probes
 - **[winter-product](https://github.com/paul-gross/winter-product)** — a basic git-backed product backlog for refining
   ideas, product plans, technical plans, and phase documents; forkable, so you can keep your own product history
 - **[winter-github](https://github.com/paul-gross/winter-github)** — product planning and an agentic feedback mechanism

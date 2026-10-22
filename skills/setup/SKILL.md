@@ -439,6 +439,8 @@ simultaneously, and each service is owned by whichever orchestrator's manifest d
 
 - **`winter-service-tmux`** — runs services as processes in tmux panes; suited to local application processes.
 - **`winter-service-docker`** — runs services as containers via `docker compose`; suited to shared infrastructure.
+- **`winter-service-process-compose`** — runs services as processes under one headless process-compose daemon per scope;
+  reads the same manifest as tmux and reports real readiness, without needing tmux.
 
 Both can be active at once, each managing the services declared in its manifest. (Each orchestrator's specific strengths
 are covered later, from its own docs, when we map services to orchestrators.)"
@@ -461,6 +463,8 @@ are shown for context.)
 - `winter-service-tmux` — tmux pane-based management for local application services [already installed / not installed]
 - `winter-service-docker` — docker compose-based container management for shared infrastructure [already installed / not
   installed]
+- `winter-service-process-compose` — headless process-compose daemons with real readiness probes for local application
+  services [already installed / not installed]
 - Specify my own service orchestration extension (explicit URL) — provide a git URL for a third-party extension that
   implements winter's `service` capability
 - None — nothing to add right now"**
