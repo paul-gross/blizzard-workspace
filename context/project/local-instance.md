@@ -51,7 +51,7 @@ holding both runners, and it reports both workspaces and both subscriptions to t
 | Name                           | `r-claude`                                  | `r-chatgpt`                                                                            |
 | Workspace (`[[workspace]] id`) | `blizzard-claude`                           | `blizzard-chatgpt`                                                                     |
 | Envs (`[[workspace]] envs`)    | `r-claude-1`–`r-claude-6`                   | `r-chatgpt-1`–`r-chatgpt-4`                                                            |
-| Agents (binding `agents`)      | 2, on its one `default` binding             | 1, on its one `default` binding                                                        |
+| Agents (binding `agents`)      | 2 on `blizzard`, 1 on `winter`              | 1 on `blizzard`, 1 on `winter`                                                         |
 | Harness                        | `[runner.opencode] enabled = false`         | `[runner.claude_code] enabled = false`                                                 |
 | Subscription spent             | `anthropic`                                 | `openai`                                                                               |
 | Worker config                  | `../runner/worker-settings.json`            | `../runner/runners/r-chatgpt/` — `worker-settings.json`, `opencode-worker-config.json` |
@@ -84,7 +84,7 @@ accepting only `opencode` to `r-chatgpt`, and one accepting both to whichever cl
 set runs under the claiming runner's default — its one enabled harness — so it too goes to whichever claims first.
 
 **Adding a runner** is
-`blizzard runner add <name> --project default --workspace <workspace-id> --agents <n> --dir
+`blizzard runner add <name> --project blizzard --workspace <workspace-id> --agents <n> --dir
 ../runner`, under the host's
 own token with no sign-in. It mints the runner under `xps` at the hub, writes its `BZ_HUB_TOKEN_<NAME>` to
 `../runner/.env`, creates `../runner/runners/<name>/`, and appends its `[[runner]]`. A new workspace is a
@@ -232,7 +232,7 @@ every `blizzard hub …` command falls back to its built-in default of `http://1
 above.
 
 **Pass `--tenant "$FLEET_TENANT"` to every tenant-scoped verb.** The instance's fleet — its runners, chunks, graphs,
-sources, and repositories — lives in the `default` tenant, `ten_01M4N8ZW1AXGMFD9WCAFJ1FJZB`, and the operator account
+sources, and repositories — lives in the `paul-gross` tenant, `ten_01M4N8ZW1AXGMFD9WCAFJ1FJZB`, and the operator account
 also administers `demo`, so a verb without the flag refuses with `you belong to several tenants` and lists both. The CLI
 keeps no saved tenant and reads no environment variable for it; `FLEET_TENANT` is only a shell convenience. Which verbs
 are hub-level and take no `--tenant` is `blizzard/docs/deployment/tenants.md`'s.
@@ -383,7 +383,7 @@ Which repos the hub ingests from and delivers to are records in its store — wo
 naming the stored secret `github-forge` that holds the forge PAT. `blizzard`, `blizzard-mock`, `blizzard-infra`, and
 `blizzard-context` are configured for blizzard. Change them through the hub, with `blizzard hub source …`,
 `blizzard hub repo …`, and `blizzard hub secret set github-forge` — no host operation and no restart. They are linked to
-the `default` project; the thirteen `winter*` sources and repos, all with `annotate true`, are linked to the `winter`
+the `blizzard` project; the thirteen `winter*` sources and repos, all with `annotate true`, are linked to the `winter`
 project. The hub refuses to start while its config declares a `[[work_source]]` block or its environment sets a
 `BZ_FORGE_*` variable, so neither ever goes back into `blizzard-infra`'s `deploy/`.
 
