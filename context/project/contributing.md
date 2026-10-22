@@ -109,7 +109,7 @@ tells a clearer story than landing the commits flat.
 **Push directly to `origin/master` only when the user explicitly asks.** Curate the same way first; with no PR, nothing
 gates the push but your local checks, and post-delivery is owed just the same.
 
-See [`workspace:/context/worktree-ops.md`](../worktree-ops.md) for the exact git commands per worktree (sync, push,
+See [`workspace:/context/winter/worktree-ops.md`](../winter/worktree-ops.md) for the exact git commands per worktree (sync, push,
 complete).
 
 ## Release publishing
