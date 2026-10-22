@@ -5,29 +5,29 @@ development (the `r-claude-1`–`r-claude-6` and `r-chatgpt-1`–`r-chatgpt-4` e
 against the **real** GitHub forge. **The instance** is what this file calls that deployment, and what "redeploy and
 restart the instance" means — **not** a feature env, and not the per-feature-env verification stacks.
 
-Its two halves run in different places, and that governs everything below. Both run one pinned **release**, never
-`master`: a landing reaches the instance only once a release carries it and someone moves the instance onto that
-release.
+Its two halves run in different places, and that governs everything below. Both run one pinned **build** — a release, or
+a dogfood build that [feeding-the-dog](./feeding-the-dog.md) moves them onto — never whatever `master` holds: a landing
+reaches the instance only once the user moves it onto a build that carries it.
 
-| Half            | Where                                                                | Who moves it                                    |
-| --------------- | -------------------------------------------------------------------- | ----------------------------------------------- |
-| **Hub**         | hosted, `https://blizzard.grosscode.net`                             | the operator, by moving its pin onto a release  |
-| **Runner host** | this machine, beside the workspace — one daemon running both runners | **you**, by hand, onto the release the hub runs |
+| Half            | Where                                                                | Who moves it                                  |
+| --------------- | -------------------------------------------------------------------- | --------------------------------------------- |
+| **Hub**         | hosted, `https://blizzard.grosscode.net`                             | the operator, by moving its pin or its hold   |
+| **Runner host** | this machine, beside the workspace — one daemon running both runners | **you**, by hand, onto the build the hub runs |
 
 ## Deployed surface
 
 `../runner` is a sibling of the directory holding `.winter/config.toml`. Paths below are relative to the workspace root.
 
-| Piece           | Location / value                                                                                                                                                                                                                                                                                               |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Hub**         | **`https://blizzard.grosscode.net`** — health `GET /api/health`, readiness `GET /api/ready`. GitHub OAuth; reads need a session                                                                                                                                                                                |
-| Hub deployment  | Owned end to end by the **`paul-gross/blizzard-infra`** repo (private; worktreed here only on a machine whose `config.local.toml` declares it). It holds the host, the image channel, the updater, rollback, and the operator entry points. Go there for anything about the host — none of it is restated here |
-| Runner host     | One host, `xps`, running two runners split by harness — see [The host and its runners](#the-host-and-its-runners) for its ids, workspaces, envs, tokens, and unit                                                                                                                                              |
-| Venv            | `../.venv` — the `blizzard` binary the host runs, and the operator CLI; installed from the **release's wheel**, never a build or an editable install                                                                                                                                                           |
-| Release         | **`v0.2.0`** — the exact release both halves run: the venv holds its GitHub Release wheel, and the hub runs its image by digest, pinned as [The hub's pin](#the-hubs-pin) describes                                                                                                                            |
-| Forge           | **real GitHub** — owner `paul-gross`; the hub's token lives on the host, never in this repo                                                                                                                                                                                                                    |
-| Supervision     | one systemd **user** unit, `blizzard-blizzard-runner.service` (unit file and drop-ins in `~/.config/systemd/user/`)                                                                                                                                                                                            |
-| Trace collector | `../otel-collector` — a docker compose OpenTelemetry Collector on `127.0.0.1:4318` that forwards both runners' spans to Honeycomb; see [The runners' trace collector](#the-runners-trace-collector)                                                                                                            |
+| Piece           | Location / value                                                                                                                                                                                                                                                                                                     |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hub**         | **`https://blizzard.grosscode.net`** — health `GET /api/health`, readiness `GET /api/ready`. GitHub OAuth; reads need a session                                                                                                                                                                                      |
+| Hub deployment  | Owned end to end by the **`paul-gross/blizzard-infra`** repo (private; worktreed here only on a machine whose `config.local.toml` declares it). It holds the host, the image channel, the updater, rollback, and the operator entry points. Go there for anything about the host — none of it is restated here       |
+| Runner host     | One host, `xps`, running two runners split by harness — see [The host and its runners](#the-host-and-its-runners) for its ids, workspaces, envs, tokens, and unit                                                                                                                                                    |
+| Venv            | `../.venv` — the `blizzard` binary the host runs, and the operator CLI; installed from the **build's wheel** — a release's, or a dogfood build's `push`-run wheel — never a local build or an editable install                                                                                                       |
+| Release         | **dogfood `0.3.0.dev948+65bc1dc7f`** (`master` at `65bc1dc7f`) — the exact build both halves run: the venv holds that commit's `push`-run wheel, and the hub runs its `sha-` image by digest under the operator hold, as [feeding-the-dog](./feeding-the-dog.md) describes; `deploy/release.env` still pins `v0.2.0` |
+| Forge           | **real GitHub** — owner `paul-gross`; the hub's token lives on the host, never in this repo                                                                                                                                                                                                                          |
+| Supervision     | one systemd **user** unit, `blizzard-blizzard-runner.service` (unit file and drop-ins in `~/.config/systemd/user/`)                                                                                                                                                                                                  |
+| Trace collector | `../otel-collector` — a docker compose OpenTelemetry Collector on `127.0.0.1:4318` that forwards both runners' spans to Honeycomb; see [The runners' trace collector](#the-runners-trace-collector)                                                                                                                  |
 
 ### The host and its runners
 
@@ -250,8 +250,10 @@ The hub runs the release `blizzard-infra`'s `deploy/release.env` pins, by versio
 change to that file on `blizzard-infra`'s `master`, then `scripts/deploy.sh` from a `blizzard-infra` worktree: the
 install syncs the pin to the host and runs the updater, which converges the hub on it, forward or back. Merging the
 change moves nothing until the deploy runs. A `BLIZZARD_HUB_IMAGE` line in the host's `/srv/blizzard/deploy/.env` is a
-hold that wins over the pin — the updater logs `held at …; release pin … not applied` — and is normally absent.
-`blizzard-infra`'s `docs/deployment.md` §The pin and the hold and `docs/rollback.md` own the commands and the way back.
+hold that wins over the pin — the updater logs `held at …; release pin … not applied` — and is absent while the instance
+runs a release. A dogfood build is held there by [feeding-the-dog](./feeding-the-dog.md), since the pin takes releases
+only; moving the hub onto a release removes that hold. `blizzard-infra`'s `docs/deployment.md` §The pin and the hold and
+`docs/rollback.md` own the commands and the way back.
 
 Moving the hub needs the operator's `blizzard-prod-admin` session, which no fleet worker holds: an agent driving the
 move asks for `! aws sso login --profile blizzard-prod-admin` to be run, and stops if it is not. **Proof:**
