@@ -142,8 +142,8 @@ body. An ordering only prose knows is an ordering the next agent picks up out of
 `winter-github:/context/issue-format.md` owns the issue body format and `winter-github:/context/epics.md` owns the epic
 mechanics — the `[EPIC]` / `[<TAG>]` prefixes, the `type:epic` label, the metadata keys, and the sub-issue link.
 `winter-github:/context/gh-cli.md` owns the `gh` invocations both need, including the child's REST database id and the
-`sub_issues` link that consumes it. `workspace:/context/github.md` owns the label set and which repo an issue belongs
-to. Read them rather than reproducing what they say.
+`sub_issues` link that consumes it, and the canonical label set. `winter-github:/context/repo-selection.md` owns which
+repo an issue belongs to. Read them rather than reproducing what they say.
 
 The one call no owner covers yet is the dependency edge, which takes the same REST database id:
 
