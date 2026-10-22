@@ -129,4 +129,4 @@ package-index publish. Nothing of this workspace's follows `edge`: its instance 
 dogfood build's `sha-` image and wheel — and reaches one only when the user moves the instance onto it by hand
 ([local-instance.md](./local-instance.md), [feeding-the-dog.md](./feeding-the-dog.md)) — neither a push nor a `v*` tag
 deploys anywhere on its own. The tag fan-out and what `latest` tracks are the `blizzard` repo's `docs/versioning.md`.
-See `blizzard-context:/workflows/release.md` for the sequence.
+See [workflows/release.md](./workflows/release.md) for the sequence.
