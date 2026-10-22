@@ -58,10 +58,14 @@ or `Refs paul-gross/blizzard-context#21` to link without closing.
 ## Issue titles
 
 An issue whose work breaks a surface a supported release ships — what counts is the `blizzard` repo's
-`docs/versioning.md`, judged by `bzh:released-surface-additive` — carries `(BREAK)` in its title, after any `[EPIC]` /
-`[<TAG>]` prefix and before the description: `[ACTIONS] (BREAK) Retire the marker routes and step span`. It is the
-issue's counterpart of the commit's `!`, which the commit that closes it still carries.
-`gh issue list -R paul-gross/blizzard --search 'in:title BREAK'` lists them.
+`docs/versioning.md`, judged by `bzh:released-surface-additive` — leads its title with `(BREAK)`:
+`(BREAK) Retire the marker routes and step span`. It is the issue's counterpart of the commit's `!`, which the commit
+that closes it still carries. `gh issue list -R paul-gross/blizzard --search 'in:title BREAK'` lists them.
+
+A `(BREAK)` issue belongs to no epic. An epic holds only additive work, deprecating what it replaces, so it closes when
+that work lands; the removal the deprecation leaves is a standalone `(BREAK)` issue, filed beside the epic and naming it
+in `related`, but no sub-issue of it and carrying no `[<TAG>]`. It waits on GitHub, uningested, until an operator
+decides a release may carry the break ([workflows/marshalling.md](./workflows/marshalling.md)).
 
 ## Checks before pushing
 
