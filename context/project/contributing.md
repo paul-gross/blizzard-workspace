@@ -100,7 +100,7 @@ By default, work lands through a pull request the agent drives to completion:
    `master` moved, rebase again, force-push, and watch again, so what lands is what CI proved. Not `--squash`: it
    rewrites the commit message from the PR title and collapses deliberately separate commits. Afterward the landed
    commits carry new SHAs, so resync the worktree from `origin/master` rather than pushing the old branch again.
-5. **Read post-delivery once it lands** — a landing deploys nothing to the instance, which runs a pinned release;
+5. **Read post-delivery once it lands** — a landing deploys nothing to the instance, which runs a pinned build;
    [post-delivery.md](./post-delivery.md) owns what it does owe.
 
 A merge commit (`--merge`) is the exception, not the default: take one only when grouping a multi-commit branch under it
@@ -117,7 +117,8 @@ complete).
 No deploys and no changelog. A push to `master` publishes two dogfood artifacts: a dev-build wheel as a workflow
 artifact, and a multi-arch hub image to GHCR on the `edge` / `sha-<full-git-sha>` channel. A `v*` tag *is* the release:
 it runs the full suite, publishes the release image tags, and attaches the wheel to a GitHub Release — there is no
-package-index publish. Nothing of this workspace's follows `edge`: its instance runs one pinned release, and a release
-reaches it only when the instance is moved onto it by hand ([local-instance.md](./local-instance.md)) — neither a push
-nor a `v*` tag deploys anywhere on its own. The tag fan-out and what `latest` tracks are the `blizzard` repo's
-`docs/versioning.md`. See `blizzard-context:/workflows/release.md` for the sequence.
+package-index publish. Nothing of this workspace's follows `edge`: its instance runs one pinned build — a release, or a
+dogfood build's `sha-` image and wheel — and reaches one only when the user moves the instance onto it by hand
+([local-instance.md](./local-instance.md), [feeding-the-dog.md](./feeding-the-dog.md)) — neither a push nor a `v*` tag
+deploys anywhere on its own. The tag fan-out and what `latest` tracks are the `blizzard` repo's `docs/versioning.md`.
+See `blizzard-context:/workflows/release.md` for the sequence.

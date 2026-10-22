@@ -20,14 +20,15 @@ world. This file is about **this workspace's own dogfooding deployment**, which 
 ## The rule: a landing owes the instance nothing
 
 A live blizzard hub and one local host of two runners drive blizzard's own development — the **instance**, whose
-deployed surface and commands are in [local-instance.md](./local-instance.md). Both halves run one pinned **release**,
-never `master`: the hub runs a release's image by digest, and the runners — `r-claude` (Claude Code) and `r-chatgpt`
-(OpenCode), one host daemon and one venv between them — run that release's wheel.
+deployed surface and commands are in [local-instance.md](./local-instance.md). Both halves run one pinned **build**: a
+release, or a dogfood build — one `master` commit whose `push` run went green, moved onto by
+[feeding-the-dog](./feeding-the-dog.md). The hub runs that build's image by digest, and the runners — `r-claude` (Claude
+Code) and `r-chatgpt` (OpenCode), one host daemon and one venv between them — run its wheel.
 
-**Delivery ends at landing.** A landed change reaches the instance only once a release carries it and someone moves the
-instance onto that release. **Do not rebuild or reinstall the runner host from `master` after a landing** — that
-replaces the release the instance is pinned to with a build no release carries, and the instance no longer runs what its
-**Release** row says.
+**Delivery ends at landing.** A landed change reaches the instance only once the user moves the instance onto a build
+that carries it — a release, or a dogfood build through feeding-the-dog. **Do not rebuild or reinstall the runner host
+from `master` after a landing** — a build from a source checkout is one no `push` run proved, and the instance no longer
+runs what its **Release** row says.
 
 Moving the instance onto a release is the **redeploy + restart runbook** in [local-instance.md](./local-instance.md) —
 it owns the sequence, and this file does not restate it. What follows is what that runbook cannot tell you: what to read
@@ -50,11 +51,12 @@ A release that asks for nothing beyond the standard move leaves the runbook as i
 
 ## Confirm you are installing the release you mean
 
-Install the wheel the release itself published — `gh release download`, never a build from `projects/blizzard`. A build
-from a source checkout still reports success at every step — the install succeeds, the runners come up healthy — while
-running code no release carries. The host reports what it runs once it restarts: a release wheel reports the release
-exactly (`GET /api/health` → `0.2.0rc2` for `v0.2.0-rc.2`), and a `+` local segment means the venv holds a build. Check
-it against the **Release** row before you trust the move.
+Install the wheel the release itself published — `gh release download` — or, for feeding-the-dog, the dogfood build's
+`push`-run wheel; never a build from `projects/blizzard`. A build from a source checkout still reports success at every
+step — the install succeeds, the runners come up healthy — while running code nothing proved. The host reports what it
+runs once it restarts: a release wheel reports the release exactly (`GET /api/health` → `0.2.0rc2` for `v0.2.0-rc.2`),
+and a dogfood wheel its dev version with its commit (`0.3.0.dev948+65bc1dc7f`). Check it against the **Release** row
+before you trust the move.
 
 ## Why the runner restarts go last
 
