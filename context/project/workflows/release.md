@@ -12,12 +12,8 @@ only on a stable one.
 
 - Pick the version from the `blizzard` repo's `docs/versioning.md` — it solely owns the version scheme, what counts as
   breaking, and the supported hub↔runner skew; pick there, never restate it.
-- Run `blizzard:e2e` and `blizzard:crash-sweep` locally — the tag run is the only remote execution of the e2e tier and
-  the FULL crash sweep, so the tag build must never be their first execution.
-- Rehearse `blizzard:journey`, the capstone journey — no CI workflow runs it, so the rehearsal is its only pre-release
-  execution.
-- Run the local-only `blizzard:image-smoke` and `blizzard:compose-smoke` — nothing in CI ever boots the image it
-  publishes, so they are its only pre-publish runtime proof.
+- Let the cut pull request prove the full suite, including e2e, the full crash sweep, the journey, both container
+  smokes, and the upgrade rehearsal. These checks run on the pull request; no separate local tier run is required.
 
 ## The cut commit
 
@@ -28,12 +24,20 @@ release workflow's `build` job asserts that the tag and that value agree (`scrip
 the tag with any `-rc.K` suffix removed), failing before anything is built.
 
 - Open the cut commit as a pull request against the branch the cut lands on — that section's table names it, `master`
-  for a minor's first candidate — and rebase-merge it once its checks pass, so the commit carrying the trailer itself
-  lands on the branch and gets its own `push` run; a merge commit would leave the cut commit with none. Opening one is
-  an attended step, never a fleet chunk's work.
-- Tag only a state the remote gate already proved: the landed cut commit's `push`-workflow run is green (`blizzard:ci`,
-  `blizzard-context:/verification/blizzard.md`) and the worktree sits at exactly that commit — nothing local or
-  unpushed. A landing after the cut commit belongs to the next release and is not carried.
+  for a minor's first candidate — and rebase-merge it only once all its checks, including
+  `upgrade rehearsal (release cut)`, pass. Opening one is an attended step, never a fleet chunk's work.
+- Tag only a state the remote gate already proved, and the worktree sits at exactly that commit — nothing local or
+  unpushed. A landing after the cut commit belongs to the next release and is not carried. The gate depends on where the
+  cut landed:
+  - **On `master`**: the landed cut commit's `push`-workflow run is green (`blizzard:ci`,
+    `blizzard-context:/verification/blizzard.md`). Rebase-merge puts the commit carrying the trailer itself on the
+    branch so it gets its own `push` run; a merge commit would leave it with none.
+  - **On `release/X.Y`**: a push to a release branch runs nothing, so the gate is the cut pull request's `pr` run, green
+    on every job including `line provenance` and `upgrade rehearsal (release cut)`. Rebase-merge rewrites the commit, so
+    tie that run to what landed: right before merging, the pull request head must sit on the current `release/X.Y` tip
+    (if the branch moved, rebase and let the run go again), and after landing, the cut commit's tree
+    (`git rev-parse <sha>^{tree}`) must equal the tree of the pull request head that run proved. The `release/*` ruleset
+    requires neither status checks nor an up-to-date branch, so this check is the operator's.
 
 Before tagging, run `uv run blizzard-compat --tag <version>` over the cut commit's tree, the check the release workflow
 runs again at the tag. A failure routes to `blizzard-context:/workflows/judging-a-break.md`.
