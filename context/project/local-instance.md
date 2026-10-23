@@ -6,8 +6,8 @@ against the **real** GitHub forge. **The instance** is what this file calls that
 restart the instance" means — **not** a feature env, and not the per-feature-env verification stacks.
 
 Its two halves run in different places, and that governs everything below. Both run one pinned **build** — a release, or
-a dogfood build that [feeding-the-dog](./feeding-the-dog.md) moves them onto — never whatever `master` holds: a landing
-reaches the instance only once the user moves it onto a build that carries it.
+a dogfood build that [feeding-the-dog](./workflows/feeding-the-dog.md) moves them onto — never whatever `master` holds:
+a landing reaches the instance only once the user moves it onto a build that carries it.
 
 | Half            | Where                                                                | Who moves it                                  |
 | --------------- | -------------------------------------------------------------------- | --------------------------------------------- |
