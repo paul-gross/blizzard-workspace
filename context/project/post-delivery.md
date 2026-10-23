@@ -22,8 +22,8 @@ world. This file is about **this workspace's own dogfooding deployment**, which 
 A live blizzard hub and one local host of two runners drive blizzard's own development — the **instance**, whose
 deployed surface and commands are in [local-instance.md](./local-instance.md). Both halves run one pinned **build**: a
 release, or a dogfood build — one `master` commit whose `push` run went green, moved onto by
-[feeding-the-dog](./feeding-the-dog.md). The hub runs that build's image by digest, and the runners — `r-claude` (Claude
-Code) and `r-chatgpt` (OpenCode), one host daemon and one venv between them — run its wheel.
+[feeding-the-dog](./workflows/feeding-the-dog.md). The hub runs that build's image by digest, and the runners —
+`r-claude` (Claude Code) and `r-chatgpt` (OpenCode), one host daemon and one venv between them — run its wheel.
 
 **Delivery ends at landing.** A landed change reaches the instance only once the user moves the instance onto a build
 that carries it — a release, or a dogfood build through feeding-the-dog. **Do not rebuild or reinstall the runner host
