@@ -5,12 +5,12 @@ the tiers in order, cheapest first. What a proposal is, and what passing or acce
 `blizzard-context:/domain/findings-and-proposals.md`'s; this file owns only the session.
 
 **Read this when** told to run a proposal review, or to go through, triage, or decide the hub's proposals. The findings
-sweep ([workflows/findings-sweep.md](./workflows/findings-sweep.md)) opens by deciding every open proposal: this is how
-that gets done.
+sweep ([workflows/findings-sweep.md](./findings-sweep.md)) opens by deciding every open proposal: this is how that gets
+done.
 
 **Scope.** An operator session against the instance's hub. Every verb needs `$BZ_HUB_URL`, a session, and
 `--tenant "$FLEET_TENANT"`
-([local-instance.md § The operator CLI needs a session](./local-instance.md#the-operator-cli-needs-a-session)). The
+([local-instance.md § The operator CLI needs a session](../local-instance.md#the-operator-cli-needs-a-session)). The
 review only reads code, and nothing is written to the hub until the user approves it.
 
 ## 1. Inventory
@@ -42,7 +42,7 @@ still holds. Anything that fails drops to **for consideration**, with the reason
 Put the surviving list to the user. Accept only what they approve:
 `blizzard hub garden-proposal accept --tenant "$FLEET_TENANT" <proposal-id>`. Every accept and pass reason names the
 review and its date, so the closure reads as one session's decision. Every accept mints a chunk, and minting owes the
-marshal steps at once ([workflows/marshalling.md](./workflows/marshalling.md)).
+marshal steps at once ([workflows/marshalling.md](./marshalling.md)).
 
 **Group liberally when marshalling a review's chunks.** One accepted proposal is often a small fix, and a lane given
 only that underuses its agent: mid-sized chunks do well. Group small chunks that share an area (one package, one feature
