@@ -1,0 +1,156 @@
+# Declarative manifest for winter-service-process-compose.
+# See winter-service-process-compose:/workflow/config.toml.example for annotated schema docs.
+#
+# This provider carries the blizzard from-source services — the per-env verification
+# stack of blizzard-discovery:/implementation/verification.md: the mock GitHub forge,
+# the blizzard hub, and the blizzard runner, plus the web dev servers. One headless
+# process-compose daemon runs per env; `winter service up <env> --wait` brings the trio
+# up in order (forge -> hub -> runner) via depends_on. Postgres runs under
+# winter-service-docker, not here; each daemon uses its embedded sqlite store, so
+# postgres is not on the up path.
+
+# ---------------------------------------------------------------------------
+# Workspace scope anchor
+#
+# `winter service up <env>` ensures the workspace scope first, and — because blizzard
+# binds TWO providers (docker + process-compose) — that ensure-step needs at least one
+# provider to own a `workspace`-scoped service, or the multi-provider dispatch matches
+# nothing and every `up <env>` exits non-zero. blizzard's app stack is per-env by
+# design, so this idle process is the workspace scope's sole tenant. process-compose
+# refuses an empty `cmd`, so it idles rather than leaving a prompt.
+# ---------------------------------------------------------------------------
+[[service]]
+name = "workspace-anchor"
+scope = "workspace"
+cmd = "exec sleep infinity"
+
+# ---------------------------------------------------------------------------
+# From-source per-env services — the verification stack (forge -> hub -> runner).
+#
+# Each binds a stable port from workspace:/.winter/config.toml [env.feature.vars]
+# (BZ_FORGE_PORT / BZ_HUB_PORT / BZ_RUNNER_PORT) and reads its runtime seams from the
+# injected env band. depends_on orders a `--wait` up so each starts after its
+# dependency is ready.
+# ---------------------------------------------------------------------------
+
+# --- Mock GitHub forge (blizzard-mock) — the PM + delivery seams -------------
+# Runs the forge from the env's blizzard-mock worktree. It reads BZ_FORGE_PORT
+# (band +1) and BZ_FORGE_REPOS_DIR (the fixture workspace's per-env bare origins)
+# from the injected feature-env band, so no flags are needed. The forge 404s until a
+# fixture is minted, so readiness is "answers HTTP at all" — curl without -f.
+[[service]]
+name = "forge"
+cwd = "blizzard-mock"
+cmd = "uv run blizzard-mock-forge"
+port = "WINTER_PORT_BASE + 1"
+
+[service.health]
+type = "cmd"
+target = 'curl -s -o /dev/null "http://localhost:${BZ_FORGE_PORT}/"'
+
+# --- blizzard hub (blizzard) — the code under test ---------------------------
+# Runs the hub daemon from the env's blizzard worktree over a disposable per-env
+# sqlite runtime (BZ_HUB_RUNTIME), through hub-host.sh: `init` scaffolds config +
+# migrates the store (idempotent), `host` serves on BZ_HUB_PORT (band +2), and once
+# it answers the script seeds the forge records — work sources and repositories for
+# the fixture's toy-api / toy-web, aimed at the mock forge on BZ_FORGE_PORT. The hub
+# refuses to start with BZ_FORGE_* set, so the forge is never wired through the env.
+# Ordered after the forge so a `--wait` up brings the git truth up first.
+[[service]]
+name = "hub"
+cwd = "blizzard"
+cmd = 'exec sh ../../.winter/config/winter-service-process-compose/hub-host.sh'
+port = "WINTER_PORT_BASE + 2"
+depends_on = ["forge"]
+
+[service.health]
+type = "url"
+target = "http://localhost:${BZ_HUB_PORT}/api/health"
+
+# --- blizzard runner (blizzard) — the code under test ------------------------
+# The reconciliation-loop daemon: it drives the per-env blizzard-mock fixture
+# workspace (BZ_WORKSPACE_ROOT) and spawns the fenced mock-claude-code façade for
+# build workers (design/runner/loop.md; blizzard-discovery:/implementation/verification.md).
+# BZ_HARNESS_BINARY must be an absolute path (the runner spawns the worker with the
+# acquired env dir as cwd), so it is resolved from the sibling blizzard-mock worktree
+# here; the remaining loop seams (workspace root, env pool, hub url, base branch) ride
+# the injected env into `runner init`'s scaffold. The stale tomls are cleared first so
+# each `up` re-derives config from the current env — the host file too, which a host
+# build writes beside it and a pre-host build never reads. The runtime dir outlives a reset
+# of the env's hub data, so init runs with --allow-readd: a hub that no longer knows
+# the token in the runtime dir's .env adds the runner afresh. The scaffolded
+# `anthropic` subscription is then re-declared under provider "none", which binds no
+# sampler: left as `anthropic`, it reads the developer's real ~/.claude/.credentials.json
+# and polls Anthropic's usage endpoint with it every five minutes, sharing that
+# endpoint's per-account rate limit with the live instance's runners — enough
+# feature envs up at once get the instance's samples refused (429), and a stale
+# sample brakes its throttle. Ordered after the hub.
+[[service]]
+name = "runner"
+cwd = "blizzard"
+cmd = '''export BZ_HARNESS_BINARY="$(cd ../blizzard-mock && pwd)/.venv/bin/mock-claude-code"; rm -f "$BZ_RUNNER_RUNTIME/blizzard-runner.toml" "$BZ_RUNNER_RUNTIME/blizzard-host.toml"; uv run blizzard runner init --allow-readd "$BZ_RUNNER_RUNTIME" && sed -i 's/^provider = "anthropic"$/provider = "none"/' "$BZ_RUNNER_RUNTIME/blizzard-host.toml" && exec uv run blizzard runner host --dir "$BZ_RUNNER_RUNTIME" --host 127.0.0.1 --port "$BZ_RUNNER_PORT"'''
+port = "WINTER_PORT_BASE + 3"
+depends_on = ["hub"]
+
+[service.health]
+type = "url"
+target = "http://localhost:${BZ_RUNNER_PORT}/api/health"
+
+# ---------------------------------------------------------------------------
+# Web dev servers — the HMR surface for the two Angular apps, plus the workshop.
+#
+# Each daemon above already serves its app's BUILT bundle from the wheel's package
+# data (src/blizzard/static/<app>, mounted at / by foundation/web.py), so the board
+# is reachable without these — but only as of the last `mise run web-build`. These
+# two slots add the `ng serve` twins that rebuild on save.
+#
+# There are two because there are two apps talking to two different daemons: the
+# hub board reaches hubApi, the runner panel reaches runnerApi, and both generated
+# clients carry an empty baseUrl — so each requests the same same-origin `/api/*`
+# prefix but must land on a different daemon. Each app therefore gets its own
+# proxy file (blizzard:web/proxy.conf.{hub,runner}.js), which reads the target port
+# from the injected band rather than pinning a literal.
+# ---------------------------------------------------------------------------
+
+# --- The hub board (projects/hub) --------------------------------------------
+# `ng serve` on the band's +4 port, proxying /api -> BZ_HUB_PORT. proxyConfig is
+# declared in angular.json's hub:serve options, so a bare `npm start` picks the same
+# proxy up; only the port needs passing here. Ordered after the hub so a `--wait` up
+# has the proxy's target listening before the dev server accepts a request.
+[[service]]
+name = "web-hub"
+cwd = "blizzard/web"
+cmd = 'exec npx ng serve hub --port "$BZ_HUB_WEB_PORT"'
+port = "WINTER_PORT_BASE + 4"
+depends_on = ["hub"]
+
+[service.health]
+type = "url"
+target = "http://localhost:${BZ_HUB_WEB_PORT}/"
+
+# --- The runner local panel (projects/runner) --------------------------------
+# The twin of web-hub, aimed at the runner: /api -> BZ_RUNNER_PORT via
+# proxy.conf.runner.js (runner:serve options in angular.json).
+[[service]]
+name = "web-runner"
+cwd = "blizzard/web"
+cmd = 'exec npx ng serve runner --port "$BZ_RUNNER_WEB_PORT"'
+port = "WINTER_PORT_BASE + 5"
+depends_on = ["runner"]
+
+[service.health]
+type = "url"
+target = "http://localhost:${BZ_RUNNER_WEB_PORT}/"
+
+# --- The workshop (Storybook over projects/fleet) ------------------------------
+# `npm run storybook` on the band's +6 port. No depends_on: the workshop renders the
+# kit from source and reaches no daemon, so it is up even when the stack is not.
+[[service]]
+name = "storybook"
+cwd = "blizzard/web"
+cmd = "exec npm run storybook"
+port = "WINTER_PORT_BASE + 6"
+
+[service.health]
+type = "url"
+target = "http://localhost:${BZ_STORYBOOK_PORT}/index.json"
