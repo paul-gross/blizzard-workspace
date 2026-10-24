@@ -27,3 +27,8 @@
 # Fleet-worker scratch files (drafts, notes) — the graph prompts route these to
 # `winter space scratch` instead of loose files in environment roots.
 /.winter/scratch/
+
+# winter-service-process-compose runtime state for the workspace scope (socket, lock,
+# generated config, daemon and service logs). Feature-env state lives under the
+# env's own ignored directory; the workspace scope's lands at the workspace root.
+/.winter/process-compose/
