@@ -9,6 +9,11 @@ waits for the word.
 that collide are grouped or linked before then, two lanes edit the same files in parallel and one of them lands into a
 conflict.
 
+**A chain is ingested whole.** A chunk need not be claimable today to be ingested: an issue whose prerequisites are all
+landed or filed is ingested with the rest of its chain, each link resting in `ready` behind the one before it. An epic's
+intake note that holds a child back until a sibling lands is met by a dependency edge instead. Only an issue waiting on
+an event no chunk stands for — a release cut, a by-hand deployment step — stays uningested until that event happens.
+
 **Breaking work waits on GitHub.** An issue whose title carries `(BREAK)`
 ([contributing.md § Issue titles](../contributing.md#issue-titles)) is never ingested while marshalling or minting work,
 and neither is anything that depends on one: ingesting a chain stops short of its first `(BREAK)`. The issue stays on
