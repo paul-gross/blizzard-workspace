@@ -22,11 +22,11 @@ cat > "$records" <<EOF
 version: 1
 secrets: [mock-forge]
 work_sources:
-  - {name: toy-api, provider: github, locator: blizzard/toy-api, api_base: "${forge_url}", secret: mock-forge, annotate: false}
-  - {name: toy-web, provider: github, locator: blizzard/toy-web, api_base: "${forge_url}", secret: mock-forge, annotate: false}
+  - {slug: toy-api, name: toy-api, provider: github, locator: blizzard/toy-api, api_base: "${forge_url}", secret: mock-forge, annotate: false}
+  - {slug: toy-web, name: toy-web, provider: github, locator: blizzard/toy-web, api_base: "${forge_url}", secret: mock-forge, annotate: false}
 repositories:
-  - {name: toy-api, forge_api_url: "${forge_url}", owner: blizzard, repo: toy-api, base_branch: "${BZ_BASE_BRANCH}", secret_name: mock-forge}
-  - {name: toy-web, forge_api_url: "${forge_url}", owner: blizzard, repo: toy-web, base_branch: "${BZ_BASE_BRANCH}", secret_name: mock-forge}
+  - {slug: toy-api, name: toy-api, forge_api_url: "${forge_url}", owner: blizzard, repo: toy-api, base_branch: "${BZ_BASE_BRANCH}", secret_name: mock-forge}
+  - {slug: toy-web, name: toy-web, forge_api_url: "${forge_url}", owner: blizzard, repo: toy-web, base_branch: "${BZ_BASE_BRANCH}", secret_name: mock-forge}
 projects:
   - {slug: default, name: Default, sources: [toy-api, toy-web], repositories: [toy-api, toy-web]}
 EOF
