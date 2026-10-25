@@ -10,8 +10,8 @@ done.
 
 **Scope.** An operator session against the instance's hub. Every verb needs `$BZ_HUB_URL`, a session, and
 `--tenant "$FLEET_TENANT"`
-([local-instance.md § The operator CLI needs a session](../local-instance.md#the-operator-cli-needs-a-session)). The
-review only reads code, and nothing is written to the hub until the user approves it.
+([singleton-instance.md § The operator CLI needs a session](../singleton-instance.md#the-operator-cli-needs-a-session)).
+The review only reads code, and nothing is written to the hub until the user approves it.
 
 ## 1. Inventory
 

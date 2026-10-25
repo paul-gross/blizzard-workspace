@@ -147,6 +147,6 @@ artifact, and a multi-arch hub image to GHCR on the `edge` / `sha-<full-git-sha>
 it runs the full suite, publishes the release image tags, and attaches the wheel to a GitHub Release — there is no
 package-index publish. Nothing of this workspace's follows `edge`: its instance runs one pinned build — a release, or a
 dogfood build's `sha-` image and wheel — and reaches one only when the user moves the instance onto it by hand
-([local-instance.md](./local-instance.md), [feeding-the-dog.md](./workflows/feeding-the-dog.md)) — neither a push nor a
-`v*` tag deploys anywhere on its own. The tag fan-out and what `latest` tracks are the `blizzard` repo's
+([singleton-instance.md](./singleton-instance.md), [feeding-the-dog.md](./workflows/feeding-the-dog.md)) — neither a
+push nor a `v*` tag deploys anywhere on its own. The tag fan-out and what `latest` tracks are the `blizzard` repo's
 `docs/versioning.md`. See [workflows/release.md](./workflows/release.md) for the sequence.
