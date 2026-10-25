@@ -51,7 +51,7 @@ holding both runners, and it reports both workspaces and both subscriptions to t
 | Name                           | `r-claude`                                  | `r-chatgpt`                                                                            |
 | Workspace (`[[workspace]] id`) | `blizzard-claude`                           | `blizzard-chatgpt`                                                                     |
 | Envs (`[[workspace]] envs`)    | `r-claude-1`–`r-claude-6`                   | `r-chatgpt-1`–`r-chatgpt-4`                                                            |
-| Agents (`[[runner]] agents`)   | 3, shared by `blizzard` and `winter`        | 1, shared by `blizzard` and `winter`                                                   |
+| Agents (`[[runner]] agents`)   | 3, shared by `blizzard` and `winter`        | 3, shared by `blizzard` and `winter`                                                   |
 | Harness                        | `[runner.opencode] enabled = false`         | `[runner.claude_code] enabled = false`                                                 |
 | Subscription spent             | `anthropic`                                 | `openai`                                                                               |
 | Worker config                  | `../runner/worker-settings.json`            | `../runner/runners/r-chatgpt/` — `worker-settings.json`, `opencode-worker-config.json` |
