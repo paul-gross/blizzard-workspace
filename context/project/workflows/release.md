@@ -14,13 +14,26 @@ only on a stable one.
   breaking, and the supported hub↔runner skew; pick there, never restate it.
 - Let the cut pull request prove the full suite, including e2e, the full crash sweep, the journey, both container
   smokes, and the upgrade rehearsal. These checks run on the pull request; no separate local tier run is required.
+- For a release that opens a line (`X.Y.0` before 1.0, `X.0.0` after), preview the crossing with
+  `uv run blizzard-change-notes guide <line>` — the `blizzard` repo's `changes/README.md` §Cutting and rendering owns
+  what it reads and refuses.
 
 ## The cut commit
 
 A candidate is tagged at a **cut commit**, as `blizzard-product:/plans/release-engineering/release-lines/spec/train.md`
 §The cut commit defines it: the commit that sets `pyproject.toml`'s `[project] version` to the version being cut,
-carries the `Release-Cut: <X.Y.Z>` trailer, and runs the steps that section names, each as far as it has landed. The
-release workflow's `build` job asserts that the tag and that value agree (`scripts/check-version-tag.sh`, which reads
+carries the `Release-Cut: <X.Y.Z>` trailer, and runs two steps, both of which must pass before it merges:
+
+```bash
+uv run blizzard-change-notes cut <X.Y.Z>                  # moves changes/unreleased/ into changes/<X.Y.Z>/
+uv run blizzard-flag-lifecycle cut --base origin/<branch> # the branch the cut lands on
+```
+
+`cut` also moves each `docs/upgrade.md` section the moved notes name under `## Upgrading to <X.Y.Z>`, and runs
+`blizzard-compat --tag <X.Y.Z>`; a refusal names the offending notes and writes nothing — fix them on the branch, never
+by hand-moving files. Commit what it moved with the version bump. The cut pull request's `flag lifecycle` job re-runs
+the second step in `cut` mode. `changes/README.md` §Cutting and rendering and `docs/ci.md` own both tools' rules. The
+release workflow's `build` job asserts that the tag and the version agree (`scripts/check-version-tag.sh`, which reads
 the tag with any `-rc.K` suffix removed), failing before anything is built.
 
 - Open the cut commit as a pull request against the branch the cut lands on — that section's table names it, `master`
@@ -88,11 +101,18 @@ Push the mock's stable tag first, on the commit the candidate's mock tag sits on
 - Confirm the image with an anonymous `docker pull ghcr.io/paul-gross/blizzard-hub:0.2.0-rc.1` — the GHCR push has no
   local proof, and package visibility is a one-time repo setting no workflow can assert — see `docs/ci.md` §Trigger
   workflows: a documented gap proven by each real cut, never invented around.
-- The generated notes (`scripts/release-notes.sh`) always hold a placeholder **Upgrade notes** heading after any
-  **Breaking changes**; when the release asks something of the operator (`docs/versioning.md` names what counts),
-  replace it with real prose — `gh release edit v0.2.0-rc.1 --repo paul-gross/blizzard --notes-file <edited-notes.md>`,
-  or the web UI. For a release that crosses a boundary, that prose points to the release's section of `docs/upgrade.md`
-  — `## Upgrading to 0.2.0` for a `0.2.0` candidate — rather than restating the boundary.
+- The published body is final as published: `release.yml` renders it from the tag's change notes. Confirm it against a
+  local render at the tag, with the run's compatibility report:
+
+  ```bash
+  gh run download <release-run-id> --repo paul-gross/blizzard --name compat-breaks --dir <scratch>
+  git checkout v0.2.0-rc.1
+  diff <(uv run blizzard-change-notes render v0.2.0-rc.1 --breaks <scratch>/compat-breaks.json) \
+       <(gh release view v0.2.0-rc.1 --repo paul-gross/blizzard --json body -q .body)
+  ```
+
+  A difference is a fault to diagnose, never one to hand-edit away. The body changes after publishing only to re-render
+  a released note's corrected body (`gh release edit --notes-file`), or for a red run's warning below.
 
 ## A red run
 
