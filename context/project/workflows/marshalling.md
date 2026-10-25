@@ -21,7 +21,7 @@ GitHub as the record of what a deprecation still owes, until an operator decides
 ingests it by hand.
 
 **Scope.** An operator session against the instance's hub. Every `blizzard hub` verb needs `$BZ_HUB_URL` and a session
-([local-instance.md § The operator CLI needs a session](../local-instance.md#the-operator-cli-needs-a-session)).
+([singleton-instance.md § The operator CLI needs a session](../singleton-instance.md#the-operator-cli-needs-a-session)).
 
 1. **Map the ground.** For each `not_ready` chunk, read its work item and locate the code and docs it will change on
    `origin/master`. Map every unfinished chunk too — `ready`, `running`, `delivering` — since a resting chunk can

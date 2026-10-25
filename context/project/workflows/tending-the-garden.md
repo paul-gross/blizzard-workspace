@@ -10,8 +10,8 @@ replacement). Without a standing pass, the routines nobody remembers go unswept 
 
 **Scope.** An operator session against the instance's hub. Every `blizzard hub` verb needs `$BZ_HUB_URL`, a session,
 `--tenant`, and, for `routine run` and `routine sweeps`, `--project`
-([local-instance.md § The operator CLI needs a session](../local-instance.md#the-operator-cli-needs-a-session)). This
-pass mints runs and never fixes code itself. Each verb's `--help` owns its flags.
+([singleton-instance.md § The operator CLI needs a session](../singleton-instance.md#the-operator-cli-needs-a-session)).
+This pass mints runs and never fixes code itself. Each verb's `--help` owns its flags.
 
 ## 1. Inventory
 

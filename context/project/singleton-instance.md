@@ -1,22 +1,37 @@
-# The instance
+# The singleton instance
 
 This workspace **dogfoods blizzard**: a real blizzard hub and one runner host of two runners drive blizzard's own
 development (the `r-claude-1`–`r-claude-6` and `r-chatgpt-1`–`r-chatgpt-4` envs), and winter's from a sibling workspace,
 against the **real** GitHub forge. **The instance** is what this file calls that deployment, and what "redeploy and
 restart the instance" means — **not** a feature env, and not the per-feature-env verification stacks.
 
-Its two halves run in different places, and that governs everything below. Both run one pinned **build** — a release, or
-a dogfood build that [feeding-the-dog](./workflows/feeding-the-dog.md) moves them onto — never whatever `master` holds:
-a landing reaches the instance only once the user moves it onto a build that carries it.
+The instance is a **singleton**, and no checkout's own: every clone of this workspace works against the same one hub and
+the same one runner host. Both run one pinned **build** — a release, or a dogfood build that
+[feeding-the-dog](./workflows/feeding-the-dog.md) moves them onto — never whatever `master` holds: a landing reaches the
+instance only once the user moves it onto a build that carries it.
 
-| Half            | Where                                                                | Who moves it                                  |
-| --------------- | -------------------------------------------------------------------- | --------------------------------------------- |
-| **Hub**         | hosted, `https://blizzard.grosscode.net`                             | the operator, by moving its pin               |
-| **Runner host** | this machine, beside the workspace — one daemon running both runners | **you**, by hand, onto the build the hub runs |
+## Where it runs
+
+Its two halves run in different places, and that governs everything below.
+
+| Half                  | Where                                                                                | Who moves it                                  | Reachable from                       |
+| --------------------- | ------------------------------------------------------------------------------------ | --------------------------------------------- | ------------------------------------ |
+| **Hub**               | hosted, `https://blizzard.grosscode.net`                                             | the operator, by moving its pin               | any checkout, through its API        |
+| **Runner host `xps`** | the machine `xps`, a Dell XPS, beside its checkout — one daemon running both runners | **you**, by hand, onto the build the hub runs | the checkout on `xps`, and none else |
+
+**Your `AGENTS.local.md` names the machine you are on.** A checkout on `xps` holds the runner host, and all of this file
+is its to act on. Any other checkout — one whose `AGENTS.local.md` names another machine, or that has none — holds no
+part of the instance: the `../runner`, `../.venv`, `../hub`, and `../otel-collector` paths below name nothing there.
+Refuse every runner-host task on it and hand it to the user to run on `xps`: moving the instance onto a build, by the
+[runbook](#redeploy--restart-runbook--moving-the-instance-onto-a-release) or by
+[feeding-the-dog](./workflows/feeding-the-dog.md); restarting or reconfiguring the host; adding, renaming, or retiring a
+runner; operating its trace collector. Hub-API work — the [operator CLI](#the-operator-cli-needs-a-session),
+marshalling, the sweeps — runs from any checkout.
 
 ## Deployed surface
 
-`../runner` is a sibling of the directory holding `.winter/config.toml`. Paths below are relative to the workspace root.
+Paths below are `xps`'s, relative to its workspace root; `../runner` is a sibling of the directory holding
+`.winter/config.toml`.
 
 | Piece           | Location / value                                                                                                                                                                                                                                                                                               |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -131,8 +146,8 @@ them.
 
 Both runners tell their closed leases into the hub's step traces (`blizzard/docs/deployment/tracing.md` §Runner spans).
 The hosted hub's collector accepts only the hub on its own compose network, so the runners send to a collector of their
-own on this machine, which forwards to the same Honeycomb `blizzard` environment as the hub's. The runner spans land in
-the `blizzard-runner` dataset beside the hub's `blizzard-hub`.
+own on `xps`, which forwards to the same Honeycomb `blizzard` environment as the hub's. The runner spans land in the
+`blizzard-runner` dataset beside the hub's `blizzard-hub`.
 
 **Keep it up.** A runner whose collector is down keeps claiming and working — tracing never blocks a tick — so a dead
 collector fails silently: spans stop arriving and nothing else changes. Each failed export reaches the hub's event log
@@ -142,7 +157,7 @@ as `trace-export-failed`, and the sweep's cursor holds until the collector is ba
 | ----------- | ------------------------------------------------------------------------------------------------------------ |
 | Runtime dir | `../otel-collector` — `compose.yaml`, `otel-collector.yaml`, `collector.env`                                 |
 | Image       | `otel/opentelemetry-collector:0.162.0`, pinned to match `blizzard-infra`'s hosted collector                  |
-| Listens     | `127.0.0.1:4318`, OTLP over HTTP — loopback only, nothing off this machine reaches it                        |
+| Listens     | `127.0.0.1:4318`, OTLP over HTTP — loopback only, nothing off `xps` reaches it                               |
 | Secret      | `HONEYCOMB_API_KEY` in `collector.env` (mode `0600`), an ingest key for the Honeycomb `blizzard` environment |
 | Supervision | docker `restart: unless-stopped`; `docker.service` is enabled, so it comes back after a reboot on its own    |
 | Senders     | the host's `.env` sets `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` for both runners                  |
@@ -182,7 +197,7 @@ healthy.
 `blizzard runner traces replay --dir ../runner --runner <name|id> --since … --until …`. The backend dedupes on span ids,
 so overlapping a window that already arrived is harmless.
 
-### Traps on this machine
+### Traps on `xps`
 
 **`blizzard-blizzard-hub.service` is stopped and `disable`d — do not start it.** `../hub/` still exists on disk, but
 `../hub/data/hub.db` is a copy frozen at the migration, not what the fleet reads. Starting it serves that frozen state
@@ -205,7 +220,7 @@ origin is what that browser follows; a phone or laptop following a loopback orig
 
 Widening it is `blizzard/docs/deployment/human-auth.md` §Runner-side federation, which owns the whole procedure — the
 origin classes that can complete a bounce, the exact-match rule, and the two proxy settings an off-host origin needs.
-Two facts are local to this machine rather than that doc's:
+Two facts are local to `xps` rather than that doc's:
 
 - **The host is already reachable on the tailnet.** `tailscale serve` fronts 8431 and preserves the browser's `Host`,
   and its `public_url` carries the tailnet origin plus `trusted_proxies = ["127.0.0.1"]` for the address `serve`
@@ -232,6 +247,9 @@ export FLEET_TENANT=ten_01M4N8ZW1AXGMFD9WCAFJ1FJZB  # the instance's tenant; pas
 blizzard hub login                                  # opens a browser
 ```
 
+The `PATH` line is `xps`'s. Elsewhere there is no `../.venv`: put a `blizzard` CLI of the **Release** row's build on
+`PATH` instead.
+
 **Export `BZ_HUB_URL` — treat it as a prerequisite, not a convenience.** With it unset and no explicit `--hub-url`,
 every `blizzard hub …` command falls back to its built-in default of `http://127.0.0.1:8421`, which is the dead port
 above.
@@ -252,8 +270,9 @@ verb acting on one project's records — `hub finding list` among them — refus
 
 This is the instance's binding of [workflows/release-deploy.md](./workflows/release-deploy.md), which owns the sequence
 — read the range's **Upgrade notes** first, move the hub before the runner host going forward and after it going back,
-and prove each half before touching the next. What follows is where each half's pin lives and this machine's commands
-for it.
+and prove each half before touching the next. What follows is where each half's pin lives and `xps`'s commands for it.
+**It runs on `xps` only**: anywhere else, refuse the whole move before touching the hub — the hub moved alone leaves the
+instance split across two builds ([Where it runs](#where-it-runs)).
 
 ### The hub's pin
 
@@ -402,10 +421,10 @@ reads as a missing issue — re-scope the token before adding the source.
 
 ## Operating the fleet
 
-Drive the hub with the venv binary (`../.venv/bin/blizzard`). **Every command below needs `$BZ_HUB_URL` exported, a
-session, and `--tenant "$FLEET_TENANT"`** — see [The operator CLI needs a session](#the-operator-cli-needs-a-session).
-Operator verbs are grouped under a noun — `hub chunk …`, `hub runner …`, `hub graph …` — so the bare `hub <verb>` forms
-do not exist:
+Drive the hub with the operator CLI — `../.venv/bin/blizzard` on `xps`. **Every command below needs `$BZ_HUB_URL`
+exported, a session, and `--tenant "$FLEET_TENANT"`** — see
+[The operator CLI needs a session](#the-operator-cli-needs-a-session). Operator verbs are grouped under a noun —
+`hub chunk …`, `hub runner …`, `hub graph …` — so the bare `hub <verb>` forms do not exist:
 
 | Intent                                                                            | Command                                                                                                                             |
 | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
