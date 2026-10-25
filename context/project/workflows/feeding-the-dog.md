@@ -6,14 +6,20 @@ A release is a promise to other operators; a dogfood build is the user's own cho
 breaking change or a manual migration, without waiting for a release to carry it.
 
 **Read this when** told to run feeding-the-dog, or to move the instance onto a `master` commit. Moving onto a release is
-the [redeploy + restart runbook](../local-instance.md#redeploy--restart-runbook--moving-the-instance-onto-a-release)
+the [redeploy + restart runbook](../singleton-instance.md#redeploy--restart-runbook--moving-the-instance-onto-a-release)
 instead. Feeding-the-dog keeps that runbook's shape — read what the range asks, hub first, prove each half before the
 next — and differs only where a dogfood build is not a release.
 
 **Scope.** An operator session. The hub half needs the `blizzard-prod-admin` AWS session — ask for
 `! aws sso login --profile blizzard-prod-admin` and stop without it — and minting graphs needs a hub session
-([local-instance.md § The operator CLI needs a session](../local-instance.md#the-operator-cli-needs-a-session)). No
-fleet worker holds either, so feeding-the-dog is never a chunk's work.
+([singleton-instance.md § The operator CLI needs a session](../singleton-instance.md#the-operator-cli-needs-a-session)).
+No fleet worker holds either, so feeding-the-dog is never a chunk's work.
+
+**It presumes the singleton.** Feeding-the-dog moves the whole instance — the hub and its one runner host — in one
+sitting, so it runs only on `xps`, the machine beside that host
+([singleton-instance.md § Where it runs](../singleton-instance.md#where-it-runs)). Anywhere else, refuse it before step
+1: the hub moved without the runner host leaves the instance split across two builds. An instance whose runner hosts
+span more than one machine has no session that can move it whole, and this workflow does not apply to it.
 
 ## 1. Pick the commit
 
@@ -23,10 +29,11 @@ gate, the upper tiers, and the upgrade rehearsal pass. While the newest run is s
 
 ## 2. Read what the range asks
 
-The range runs from the build in the **Release** row of [local-instance.md](../local-instance.md#deployed-surface) to
-the target. Read every `## Upgrade` section among the change notes the target carries in `changes/unreleased/`, and
-those of any release the range crosses, and carry each step out before installing anything — a step that fails is a
-stop. Note which directories under `src/blizzard/hub/graphs/` the range changed; each is re-minted in step 5.
+The range runs from the build in the **Release** row of
+[singleton-instance.md](../singleton-instance.md#deployed-surface) to the target. Read every `## Upgrade` section among
+the change notes the target carries in `changes/unreleased/`, and those of any release the range crosses, and carry each
+step out before installing anything — a step that fails is a stop. Note which directories under
+`src/blizzard/hub/graphs/` the range changed; each is re-minted in step 5.
 
 ## 3. Fetch the build
 
@@ -40,7 +47,7 @@ stop. Note which directories under `src/blizzard/hub/graphs/` the range changed;
 
 `blizzard-infra`'s `deploy/release.env` pins a dogfood build the same way it pins a release:
 `BLIZZARD_HUB_IMAGE=ghcr.io/paul-gross/blizzard-hub:sha-<full sha>@sha256:<index digest>`. Move the hub as
-[local-instance.md § The hub's pin](../local-instance.md#the-hubs-pin) describes — change that line on
+[singleton-instance.md § The hub's pin](../singleton-instance.md#the-hubs-pin) describes — change that line on
 `blizzard-infra`'s `master`, then run `scripts/deploy.sh` — and the updater does the move with its own safeguards: the
 store snapshot, the revision check, the fence on a digest that fails readiness.
 
@@ -54,8 +61,8 @@ runbook's steps 3–6 with the dogfood wheel: install it into `../.venv`, migrat
 `host ok`, and re-mint each graph step 2 found, from the installed venv. Start the unit only once all of that passed.
 
 A failure leaves the host stopped: put the previous build back — its wheel, and a store downgrade if the migration ran,
-as [local-instance.md § Going back](../local-instance.md#going-back) describes — and start it on that. Never start the
-host on an install that did not check.
+as [singleton-instance.md § Going back](../singleton-instance.md#going-back) describes — and start it on that. Never
+start the host on an install that did not check.
 
 **Proof** is the runbook's own: the host's `/api/health` reports the wheel's version, `/api/ready` lists both runners
 `serving`, the journal shows `tick end` events, and `runner status` and `runner traces status` show each runner
@@ -67,13 +74,13 @@ Stopping the host interrupts every in-flight worker, and each resumes in place o
 
 ## 6. Record the move
 
-Change the **Release** row in [local-instance.md](../local-instance.md#deployed-surface) to the dogfood build — its
-version and its commit — in a workspace commit, so the row and the running instance never disagree for longer than one
-move.
+Change the **Release** row in [singleton-instance.md](../singleton-instance.md#deployed-surface) to the dogfood build —
+its version and its commit — in a workspace commit, so the row and the running instance never disagree for longer than
+one move.
 
 ## Going back
 
 Runner host first, hub after. The runner host goes back as
-[local-instance.md § Going back](../local-instance.md#going-back) describes, onto the previous build's wheel. The hub
-goes back by pinning the previous build again and deploying, after `blizzard-infra`'s `docs/rollback.md` schema-delta
-check; the updater downgrades the store on the outgoing image and restores its own snapshot if that fails.
+[singleton-instance.md § Going back](../singleton-instance.md#going-back) describes, onto the previous build's wheel.
+The hub goes back by pinning the previous build again and deploying, after `blizzard-infra`'s `docs/rollback.md`
+schema-delta check; the updater downgrades the store on the outgoing image and restores its own snapshot if that fails.
