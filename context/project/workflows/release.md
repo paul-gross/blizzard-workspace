@@ -31,10 +31,14 @@ uv run blizzard-flag-lifecycle cut --base origin/<branch> # the branch the cut l
 
 `cut` also moves each `docs/upgrade.md` section the moved notes name under `## Upgrading to <X.Y.Z>`, and runs
 `blizzard-compat --tag <X.Y.Z>`; a refusal names the offending notes and writes nothing — fix them on the branch, never
-by hand-moving files. Commit what it moved with the version bump. The cut pull request's `flag lifecycle` job re-runs
-the second step in `cut` mode. `changes/README.md` §Cutting and rendering and `docs/ci.md` own both tools' rules. The
-release workflow's `build` job asserts that the tag and the version agree (`scripts/check-version-tag.sh`, which reads
-the tag with any `-rc.K` suffix removed), failing before anything is built.
+by hand-moving files. A refusal over a compat break no note names is judged by
+`blizzard-context:/workflows/judging-a-break.md` before any note changes. Commit what it moved with the version bump,
+together with the two other files that carry the version: `uv.lock`, which `uv run` re-locks, and the OpenAPI documents,
+re-exported by `uv run blizzard-export-openapi --out-dir openapi` — the gate's OpenAPI drift check fails without them.
+The cut pull request's `flag lifecycle` job re-runs the second step in `cut` mode. `changes/README.md` §Cutting and
+rendering and `docs/ci.md` own both tools' rules. The release workflow's `build` job asserts that the tag and the
+version agree (`scripts/check-version-tag.sh`, which reads the tag with any `-rc.K` suffix removed), failing before
+anything is built.
 
 - Open the cut commit as a pull request against the branch the cut lands on — that section's table names it, `master`
   for a minor's first candidate — and rebase-merge it only once all its checks, including
@@ -60,13 +64,18 @@ runs again at the tag. A failure routes to `blizzard-context:/workflows/judging-
 The candidate tag names the cut commit's version with its candidate suffix, and sits on that commit:
 
 ```bash
-git tag v0.2.0-rc.1
+git tag -s v0.2.0-rc.1 -m v0.2.0-rc.1
 git push origin v0.2.0-rc.1
 ```
 
-The `release` workflow checks out the `blizzard-mock` tag of the same name, so push that tag first, at the commit
-`blizzard-product:` `mock.md` §Branches and tags names. For a candidate cut on `master` that is the mock sha the cut
-commit's `push` run recorded:
+Every release tag, stable or candidate, in `blizzard` and `blizzard-mock` alike, is a signed annotated tag made this
+way: the `v*` tag ruleset on both repositories requires a signed tag, admits only the repository admin role to create
+one, and refuses any update or deletion. The signature is the operator's GPG key, whose email must be verified on their
+GitHub account, or GitHub refuses the push.
+
+The `release` workflow checks out the `blizzard-mock` tag of the same name, so push that tag first, the same way, at the
+commit `blizzard-product:` `mock.md` §Branches and tags names. For a candidate cut on `master` that is the mock sha the
+cut commit's `push` run recorded:
 
 ```bash
 gh run download <run-id> --repo paul-gross/blizzard --name proven-against
@@ -84,11 +93,13 @@ commit: the stable tag is pushed only at the commit its newest candidate was tag
 by assumption:
 
 ```bash
-test "$(git rev-list -n1 v0.2.0-rc.1)" = "$(git rev-parse HEAD)" && git tag v0.2.0 && git push origin v0.2.0
+test "$(git rev-list -n1 v0.2.0-rc.1)" = "$(git rev-parse HEAD)" && git tag -s v0.2.0 -m v0.2.0 && git push origin v0.2.0
 ```
 
-Push the mock's stable tag first, on the commit the candidate's mock tag sits on. A promotion writes no cut commit:
-`pyproject.toml` already names the stable version, and the notes were final at the candidate.
+`git rev-list -n1` peels the annotated candidate tag to its commit; compare a tag's commit any other way only through
+`<tag>^{commit}`. Push the mock's stable tag first, the same way, on the commit the candidate's mock tag peels to. A
+promotion writes no cut commit: `pyproject.toml` already names the stable version, and the notes were final at the
+candidate.
 
 ## Confirm the cut
 
@@ -112,7 +123,9 @@ Push the mock's stable tag first, on the commit the candidate's mock tag sits on
   ```
 
   A difference is a fault to diagnose, never one to hand-edit away. The body changes after publishing only to re-render
-  a released note's corrected body (`gh release edit --notes-file`), or for a red run's warning below.
+  a released note's corrected body (`gh release edit --notes-file`), for a red run's warning below, or to mark a
+  candidate set aside ([release-train.md](./release-train.md#1-promote-or-set-aside)) — a first line opening
+  `**Set aside.**`, the rest of the body as published.
 
 ## A red run
 
