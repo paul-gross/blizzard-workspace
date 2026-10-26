@@ -31,6 +31,14 @@ cmd = "exec sleep infinity"
 # (BZ_FORGE_PORT / BZ_HUB_PORT / BZ_RUNNER_PORT) and reads its runtime seams from the
 # injected env band. depends_on orders a `--wait` up so each starts after its
 # dependency is ready.
+#
+# Every from-source cmd leads with `eval "$(mise env -s bash)"`. The daemon inherits
+# the `winter` shim's PATH, which `mise -C tools/winter-cli exec` fronts with
+# winter-cli's own toolchain (uv 0.9.27), and a non-interactive `bash -c` never
+# re-resolves it — so `uv` trips blizzard's `required-version = "==0.11.21"` and the
+# hub exits before it serves. The eval re-resolves the toolchain from the service's
+# own cwd, where each project's mise.toml pin lives — the same fix provision's
+# `mise exec --` makes in workspace:/.winter/config.toml.
 # ---------------------------------------------------------------------------
 
 # --- Mock GitHub forge (blizzard-mock) — the PM + delivery seams -------------
@@ -41,7 +49,7 @@ cmd = "exec sleep infinity"
 [[service]]
 name = "forge"
 cwd = "blizzard-mock"
-cmd = "uv run blizzard-mock-forge"
+cmd = 'eval "$(mise env -s bash)"; exec uv run blizzard-mock-forge'
 port = "WINTER_PORT_BASE + 1"
 
 [service.health]
@@ -59,7 +67,7 @@ target = 'curl -s -o /dev/null "http://localhost:${BZ_FORGE_PORT}/"'
 [[service]]
 name = "hub"
 cwd = "blizzard"
-cmd = 'exec sh ../../.winter/config/winter-service-process-compose/hub-host.sh'
+cmd = 'eval "$(mise env -s bash)"; exec sh ../../.winter/config/winter-service-process-compose/hub-host.sh'
 port = "WINTER_PORT_BASE + 2"
 depends_on = ["forge"]
 
@@ -88,7 +96,7 @@ target = "http://localhost:${BZ_HUB_PORT}/api/health"
 [[service]]
 name = "runner"
 cwd = "blizzard"
-cmd = '''export BZ_HARNESS_BINARY="$(cd ../blizzard-mock && pwd)/.venv/bin/mock-claude-code"; rm -f "$BZ_RUNNER_RUNTIME/blizzard-runner.toml" "$BZ_RUNNER_RUNTIME/blizzard-host.toml"; uv run blizzard runner init --allow-readd "$BZ_RUNNER_RUNTIME" && sed -i 's/^provider = "anthropic"$/provider = "none"/' "$BZ_RUNNER_RUNTIME/blizzard-host.toml" && exec uv run blizzard runner host --dir "$BZ_RUNNER_RUNTIME" --host 127.0.0.1 --port "$BZ_RUNNER_PORT"'''
+cmd = '''eval "$(mise env -s bash)"; export BZ_HARNESS_BINARY="$(cd ../blizzard-mock && pwd)/.venv/bin/mock-claude-code"; rm -f "$BZ_RUNNER_RUNTIME/blizzard-runner.toml" "$BZ_RUNNER_RUNTIME/blizzard-host.toml"; uv run blizzard runner init --allow-readd "$BZ_RUNNER_RUNTIME" && sed -i 's/^provider = "anthropic"$/provider = "none"/' "$BZ_RUNNER_RUNTIME/blizzard-host.toml" && exec uv run blizzard runner host --dir "$BZ_RUNNER_RUNTIME" --host 127.0.0.1 --port "$BZ_RUNNER_PORT"'''
 port = "WINTER_PORT_BASE + 3"
 depends_on = ["hub"]
 
@@ -120,7 +128,7 @@ target = "http://localhost:${BZ_RUNNER_PORT}/api/health"
 [[service]]
 name = "web-hub"
 cwd = "blizzard/web"
-cmd = 'exec npx ng serve hub --port "$BZ_HUB_WEB_PORT"'
+cmd = 'eval "$(mise env -s bash)"; exec npx ng serve hub --port "$BZ_HUB_WEB_PORT"'
 port = "WINTER_PORT_BASE + 4"
 depends_on = ["hub"]
 
@@ -134,7 +142,7 @@ target = "http://localhost:${BZ_HUB_WEB_PORT}/"
 [[service]]
 name = "web-runner"
 cwd = "blizzard/web"
-cmd = 'exec npx ng serve runner --port "$BZ_RUNNER_WEB_PORT"'
+cmd = 'eval "$(mise env -s bash)"; exec npx ng serve runner --port "$BZ_RUNNER_WEB_PORT"'
 port = "WINTER_PORT_BASE + 5"
 depends_on = ["runner"]
 
@@ -148,7 +156,7 @@ target = "http://localhost:${BZ_RUNNER_WEB_PORT}/"
 [[service]]
 name = "storybook"
 cwd = "blizzard/web"
-cmd = "exec npm run storybook"
+cmd = 'eval "$(mise env -s bash)"; exec npm run storybook'
 port = "WINTER_PORT_BASE + 6"
 
 [service.health]
