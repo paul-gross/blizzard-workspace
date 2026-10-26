@@ -148,7 +148,12 @@ A fix the week finds for the waiting candidate's line — `release/X.Y` with no 
 1. Carry each fix onto the line by [release-patch.md § 3. Carry the fix](./release-patch.md#3-carry-the-fix) and
    [§ 4. Prove and merge it](./release-patch.md#4-prove-and-merge-it), in every repository it touched.
 2. Open the cut commit against `release/X.Y` by [release.md § The cut commit](./release.md#the-cut-commit), its version
-   unchanged: `pyproject.toml` stays `X.Y.0` and the trailer is `Release-Cut: X.Y.0`.
+   unchanged: `pyproject.toml` stays `X.Y.0` and the trailer is `Release-Cut: X.Y.0`. When neither cut step moves
+   anything, it is an empty commit (`git commit --allow-empty`), and GitHub's rebase-merge drops an empty commit while
+   still marking the pull request merged. Land it instead by pushing the proven commit itself through the admin bypass,
+   once its pull request run is green and its parent is still the branch tip:
+   `test "$(git rev-parse <sha>^)" = "$(git rev-parse origin/release/X.Y)" && git push origin "<full-sha>:refs/heads/release/X.Y"`.
+   The landed commit is then the one the run proved, with nothing to compare.
 3. Tag `vX.Y.0-rc.(K+1)` by [release.md § Tag and watch](./release.md#tag-and-watch): the mock's at its `release/X.Y`
    tip first, `blizzard`'s at the landed cut commit last; then [§ Confirm the cut](./release.md#confirm-the-cut), and
    offer the instance's move as step 2.8 does.
