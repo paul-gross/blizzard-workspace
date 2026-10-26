@@ -393,7 +393,7 @@ def test_codex_render_produces_valid_toml() -> None:
     doc = tomllib.loads(r.text)
     assert doc["name"] == "developer"
     assert doc["description"] == "General-purpose developer agent."
-    assert doc["model"] == "gpt-5.6-terra"  # sonnet tier → codex id
+    assert doc["model"] == "gpt-6.1-terra"  # sonnet tier → codex id
 
 
 def test_codex_render_roundtrip_toml() -> None:

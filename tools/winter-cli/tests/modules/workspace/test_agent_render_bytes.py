@@ -130,7 +130,7 @@ def test_model_code_default() -> None:
     assert fs.read_text(CODEX_DEST) == (
         'name = "reviewer"\n'
         'description = "Reviews code changes"\n'
-        'model = "gpt-5.6-terra"\n'
+        'model = "gpt-6.1-terra"\n'
         'developer_instructions = "You are a code reviewer.\\n"\n'
     )
     assert fs.read_text(OPENCODE_DEST) == (
@@ -273,7 +273,7 @@ def test_model_tier_string_override_builtin_label() -> None:
     assert fs.read_text(CODEX_DEST) == (
         'name = "reviewer"\n'
         'description = "Reviews code changes"\n'
-        'model = "gpt-6-sol"\n'
+        'model = "gpt-6.1-sol"\n'
         'developer_instructions = "You are a code reviewer.\\n"\n'
     )
     assert fs.read_text(OPENCODE_DEST) == (
@@ -355,7 +355,7 @@ def test_effort_native_key_only() -> None:
     assert fs.read_text(CODEX_DEST) == (
         'name = "reviewer"\n'
         'description = "Reviews code changes"\n'
-        'model = "gpt-5.6-terra"\n'
+        'model = "gpt-6.1-terra"\n'
         'model_reasoning_effort = "high"\n'
         'sandbox_mode = "workspace-write"\n'
         'developer_instructions = "You are a code reviewer.\\n"\n'
@@ -395,7 +395,7 @@ def test_effort_workspace_overwrites_native_key() -> None:
     assert fs.read_text(CODEX_DEST) == (
         'name = "reviewer"\n'
         'description = "Reviews code changes"\n'
-        'model = "gpt-5.6-terra"\n'
+        'model = "gpt-6.1-terra"\n'
         'model_reasoning_effort = "low"\n'
         'sandbox_mode = "workspace-write"\n'
         'developer_instructions = "You are a code reviewer.\\n"\n'
@@ -435,7 +435,7 @@ def test_effort_workspace_without_native_key() -> None:
     assert fs.read_text(CODEX_DEST) == (
         'name = "reviewer"\n'
         'description = "Reviews code changes"\n'
-        'model = "gpt-5.6-terra"\n'
+        'model = "gpt-6.1-terra"\n'
         'model_reasoning_effort = "medium"\n'
         'developer_instructions = "You are a code reviewer.\\n"\n'
     )
@@ -528,7 +528,7 @@ def test_effort_only_profile() -> None:
     assert fs.read_text(CODEX_DEST) == (
         'name = "reviewer"\n'
         'description = "Reviews code changes"\n'
-        'model = "gpt-5.6-terra"\n'
+        'model = "gpt-6.1-terra"\n'
         'sandbox_mode = "workspace-write"\n'
         'model_reasoning_effort = "max"\n'
         'developer_instructions = "You are a code reviewer.\\n"\n'

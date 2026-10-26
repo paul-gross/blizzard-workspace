@@ -66,11 +66,11 @@ MODEL_TIER_IDS: dict[tuple[ModelTier, str], str] = {
     # Codex: the astra > sol > terra > luna ranking and this tier mapping are
     # workspace-declared, not vendor-published; Codex exposes no machine-readable
     # capability order. Each tier maps to its own rank, most- to least-capable.
-    # Each id was verified present in the local Codex catalog (2026-09-27, codex
-    # 0.157.1). The gpt-6 series has no terra release, so the sonnet tier stays on 5.6.
+    # Model ids are defaults for their declared ranks; verify against the live
+    # vendor catalog when editing them.
     (ModelTier.fable, "codex"): "gpt-6-astra",
-    (ModelTier.opus, "codex"): "gpt-6-sol",
-    (ModelTier.sonnet, "codex"): "gpt-5.6-terra",
+    (ModelTier.opus, "codex"): "gpt-6.1-sol",
+    (ModelTier.sonnet, "codex"): "gpt-6.1-terra",
     (ModelTier.haiku, "codex"): "gpt-6-luna",
     # OpenCode: format per opencode.ai/docs/agents (provider/model-id).
     # The 5-series ids carry no date suffix; verifiable via 'opencode models'.
