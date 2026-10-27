@@ -9,7 +9,3 @@
 
 # User/machine-specific overrides imported from AGENTS.md
 /AGENTS.local.md
-
-# Machine-specific winter-service-tmux overrides (overlaid on setup-tmux.sh)
-/context/project/setup-tmux.local.sh
-/context/project/workflow.local.sh
