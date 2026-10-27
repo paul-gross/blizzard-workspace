@@ -105,10 +105,10 @@ codex = { model = "gpt-6-luna" }
 [agent_model_overrides.winter-architect]
 codex = { model = "gpt-6-sol" }
 
-# Dashboard default layout: render the env/repo matrix with repos as rows
-# (envs as columns). `t` cycles layouts live for the session.
+# Dashboard default layout: render the env/repo matrix with repos as columns
+# (envs as rows). `t` cycles layouts live for the session.
 [tui.dashboard]
-layout = "repos-as-rows"
+layout = "repos-as-columns"
 
 # ---------------------------------------------------------------------------
 # Service orchestration — two providers, bound explicitly. winter-service-docker
