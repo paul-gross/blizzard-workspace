@@ -1,6 +1,6 @@
 # Winter CLI — Install
 
-Installing the `winter` CLI.
+Installing the `winter` CLI requires Python 3.13 or newer, `mise`, and `uv`.
 
 ## Installation
 

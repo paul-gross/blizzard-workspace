@@ -397,7 +397,8 @@ regardless of orchestrator quality:
 - **3** — recognized-but-unimplemented action: the orchestrator knows the action but refuses to execute it (refuse-all
   stub). Both 2 and 3 are accepted by `winter ext verify` as valid refusal codes.
 - **Other** — the orchestrator's exit code becomes `winter`'s exit code unmodified.
-- `-f` interrupted by Ctrl-C: exit 130 (and the child receives the signal naturally).
+- `-f` interrupted by Ctrl-C: exit 130. Core terminates and reaps follower process groups, not the observed services;
+  provider cleanup must not rely on receiving SIGINT.
 - **`status` conformance failure:** if the orchestrator's stdout is not a conformant status document, winter exits
   non-zero even if the orchestrator itself exited 0. The rule: the orchestrator's own non-zero exit code wins; if the
   orchestrator exited 0, winter synthesises exit code 1. The actionable error is written to stderr.

@@ -70,8 +70,8 @@ Three config paths connect the interface to an implementation:
 
 How these bindings resolve into a dispatch target, and how the deprecated `orchestrate_services` manifest alias is
 normalised, is owned by [Capability registry](#capability-registry) above. For dispatch-time multi-provider fan-out
-(`up` aborts on first failure, `down` best-effort, the ownership index for targeted `logs`/`restart`, the `logs -f`
-single-owner restriction, and merged `status`), see [../usage/service.md](../usage/service.md).
+(`up` aborts on first failure, `down` best-effort, the ownership index for targeted `logs`/`restart`, concurrent
+`logs -f`, and merged `status`), see [../usage/service.md](../usage/service.md).
 
 ### Entrypoint contract
 

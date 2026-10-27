@@ -35,7 +35,13 @@ class IStreamingProcess(Protocol):
     @property
     def stdout_lines(self) -> Iterator[str]: ...
 
-    def wait(self) -> int: ...
+    def wait(self) -> int:
+        """Return the original exit status repeatedly; managed cleanup may happen later."""
+        ...
+
+    def terminate(self) -> None:
+        """Stop and reap the process, bounded and idempotent; wait remains repeatable."""
+        ...
 
 
 class ISubprocessRunner(Protocol):
@@ -80,4 +86,7 @@ class ISubprocessRunner(Protocol):
         env: Mapping[str, str] | None = None,
         shell: bool = False,
         merge_stderr: bool = True,
-    ) -> AbstractContextManager[IStreamingProcess]: ...
+        manage_process_group: bool = False,
+    ) -> AbstractContextManager[IStreamingProcess]:
+        """Managed handles clean up their process group on every context exit."""
+        ...

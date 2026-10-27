@@ -546,8 +546,11 @@ class _CountingSubprocessRunner:
         env: Mapping[str, str] | None = None,
         shell: bool = False,
         merge_stderr: bool = True,
+        manage_process_group: bool = False,
     ) -> AbstractContextManager[IStreamingProcess]:
-        return self._inner.popen(cmd, cwd=cwd, env=env, shell=shell, merge_stderr=merge_stderr)
+        return self._inner.popen(
+            cmd, cwd=cwd, env=env, shell=shell, merge_stderr=merge_stderr, manage_process_group=manage_process_group
+        )
 
 
 def test_ignore_resolution_cost_scales_with_batches_not_candidates(

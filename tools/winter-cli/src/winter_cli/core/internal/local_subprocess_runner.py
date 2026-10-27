@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
-from collections.abc import Iterator, Mapping
-from contextlib import AbstractContextManager, contextmanager
+import threading
+import time
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import AbstractContextManager, contextmanager, suppress
 from pathlib import Path
+from types import FrameType
 
 from winter_cli.core.subprocess_runner import IStreamingProcess, ISubprocessRunner, SubprocessResult
 from winter_cli.core.tracing import ITracePropagator
@@ -19,6 +23,48 @@ TRACESTATE_ENV = "TRACESTATE"
 NON_INTERACTIVE_ENV: dict[str, str] = {"GIT_TERMINAL_PROMPT": "0"}
 
 
+@contextmanager
+def _defer_acquisition_sigint(enabled: bool) -> Iterator[None]:
+    """Keep a newly spawned group owned until its cleanup is registered."""
+    if not enabled or threading.current_thread() is not threading.main_thread():
+        yield
+        return
+    original = signal.getsignal(signal.SIGINT)
+    pending: tuple[int, FrameType | None] | None = None
+
+    def defer(signum: int, frame: FrameType | None) -> None:
+        nonlocal pending
+        pending = (signum, frame)
+
+    signal.signal(signal.SIGINT, defer)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, original)
+        if pending is not None:
+            if callable(original):
+                original(*pending)
+            elif original == signal.SIG_DFL:
+                signal.raise_signal(signal.SIGINT)
+
+
+def _cleanup_unwrapped_group(proc: subprocess.Popen[str]) -> None:
+    """Reap a group whose streaming handle could not be constructed."""
+    deferred: BaseException | None = None
+    for action in (lambda: os.killpg(proc.pid, signal.SIGKILL), proc.wait):
+        while True:
+            try:
+                action()
+                break
+            except ProcessLookupError:
+                break
+            except (KeyboardInterrupt, SystemExit) as exc:
+                if deferred is None:
+                    deferred = exc
+    if deferred is not None:
+        raise deferred
+
+
 class _StreamingProcess:
     """Wraps `subprocess.Popen` so callers see only `stdout_lines` + `wait()`.
 
@@ -26,8 +72,13 @@ class _StreamingProcess:
     consumer in winter wants interleaved output through a single reporter.
     """
 
-    def __init__(self, proc: subprocess.Popen[str]) -> None:
+    def __init__(self, proc: subprocess.Popen[str], *, managed: bool) -> None:
         self._proc = proc
+        self._managed = managed
+        self._termination_lock = threading.Lock()
+        self._terminated = False
+        self._group_active = managed
+        self._returncode: int | None = None
 
     @property
     def stdout_lines(self) -> Iterator[str]:
@@ -37,7 +88,88 @@ class _StreamingProcess:
             yield line.rstrip("\n")
 
     def wait(self) -> int:
-        return self._proc.wait()
+        if not self._managed:
+            return self._proc.wait()
+        while True:
+            with self._termination_lock:
+                if self._returncode is not None:
+                    return self._returncode
+                if not self._group_active:
+                    self._returncode = self._proc.wait()
+                    return self._returncode
+                result = os.waitid(os.P_PID, self._proc.pid, os.WEXITED | os.WNOWAIT | os.WNOHANG)
+                if result is not None:
+                    self._returncode = result.si_status if result.si_code == os.CLD_EXITED else -result.si_status
+                    return self._returncode
+            time.sleep(0.01)
+
+    def terminate(self) -> None:
+        if self._managed:
+            self._terminate_group()
+            return
+        with self._termination_lock:
+            if self._terminated:
+                return
+            if self._proc.poll() is None:
+                self._proc.terminate()
+            with suppress(subprocess.TimeoutExpired):
+                self._proc.wait(timeout=0.5)
+            if self._proc.poll() is None:
+                self._proc.kill()
+            self._proc.wait()
+            self._terminated = True
+
+    def _terminate_group(self) -> None:
+        deferred: BaseException | None = None
+
+        def attempt(action: Callable[[], object]) -> None:
+            nonlocal deferred
+            # Interruptions can land at any blocking operation. Retry those;
+            # other errors are retained while the remaining cleanup proceeds.
+            while True:
+                try:
+                    action()
+                    return
+                except (KeyboardInterrupt, SystemExit) as exc:
+                    if deferred is None:
+                        deferred = exc
+                except Exception as exc:
+                    if deferred is None or isinstance(deferred, (KeyboardInterrupt, SystemExit)):
+                        deferred = exc
+                    return
+
+        attempt(self._termination_lock.acquire)
+        try:
+            if not self._terminated:
+                if self._group_active:
+                    deadline = time.monotonic() + 0.5
+                    attempt(lambda: self._signal_group(signal.SIGTERM))
+
+                    def grace() -> None:
+                        remaining = deadline - time.monotonic()
+                        if remaining > 0:
+                            time.sleep(remaining)
+
+                    attempt(grace)
+                    attempt(lambda: self._signal_group(signal.SIGKILL))
+                    # Never signal this PID again once reaping can begin.
+                    self._group_active = False
+
+                def reap() -> None:
+                    code = self._proc.wait()
+                    if self._returncode is None:
+                        self._returncode = code
+                    self._terminated = True
+
+                attempt(reap)
+        finally:
+            self._termination_lock.release()
+        if deferred is not None:
+            raise deferred
+
+    def _signal_group(self, sig: signal.Signals) -> None:
+        with suppress(ProcessLookupError):
+            os.killpg(self._proc.pid, sig)
 
 
 class LocalSubprocessRunner:
@@ -156,28 +288,44 @@ class LocalSubprocessRunner:
         env: Mapping[str, str] | None,
         shell: bool,
         merge_stderr: bool,
+        manage_process_group: bool,
     ) -> Iterator[IStreamingProcess]:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(cwd) if cwd is not None else None,
-            env=self._env(env),
-            shell=shell,
-            stdin=self._stdin(),
-            stdout=subprocess.PIPE,
-            # When merge_stderr=True (default), merge stderr into stdout so
-            # callers see a single interleaved stream (init/destroy hook flow).
-            # When merge_stderr=False, leave stderr=None so it inherits the
-            # parent's stderr fd — the orchestrator's diagnostics reach the
-            # terminal without corrupting the NDJSON stdout (logs flow).
-            stderr=subprocess.STDOUT if merge_stderr else None,
-            text=True,
-            bufsize=1,
-        )
+        proc: subprocess.Popen[str] | None = None
+        handle: _StreamingProcess | None = None
         try:
-            yield _StreamingProcess(proc)
+            with _defer_acquisition_sigint(manage_process_group):
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(cwd) if cwd is not None else None,
+                    env=self._env(env),
+                    shell=shell,
+                    stdin=self._stdin(),
+                    stdout=subprocess.PIPE,
+                    # When merge_stderr=True (default), merge stderr into stdout so
+                    # callers see a single interleaved stream (init/destroy hook flow).
+                    # When merge_stderr=False, leave stderr=None so it inherits the
+                    # parent's stderr fd — the orchestrator's diagnostics reach the
+                    # terminal without corrupting the NDJSON stdout (logs flow).
+                    stderr=subprocess.STDOUT if merge_stderr else None,
+                    text=True,
+                    bufsize=1,
+                    start_new_session=manage_process_group,
+                )
+                handle = _StreamingProcess(proc, managed=manage_process_group)
+            yield handle
         finally:
-            if proc.poll() is None:
-                proc.wait()
+            if proc is not None:
+                try:
+                    if manage_process_group:
+                        if handle is None:
+                            _cleanup_unwrapped_group(proc)
+                        else:
+                            handle.terminate()
+                    elif proc.poll() is None:
+                        proc.wait()
+                finally:
+                    if proc.stdout is not None:
+                        proc.stdout.close()
 
     def popen(
         self,
@@ -187,9 +335,14 @@ class LocalSubprocessRunner:
         env: Mapping[str, str] | None = None,
         shell: bool = False,
         merge_stderr: bool = True,
+        manage_process_group: bool = False,
     ) -> AbstractContextManager[IStreamingProcess]:
-        return self._popen_cm(cmd, cwd, env, shell, merge_stderr)
+        return self._popen_cm(cmd, cwd, env, shell, merge_stderr, manage_process_group)
 
 
 def _conforms_local_subprocess_runner(x: LocalSubprocessRunner) -> ISubprocessRunner:
+    return x
+
+
+def _conforms_streaming_process(x: _StreamingProcess) -> IStreamingProcess:
     return x

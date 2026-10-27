@@ -246,9 +246,13 @@ Any failure exits non-zero without dispatching anything.
 - **`restart`** — a provider that emits no valid describe document is **hard-rejected at index-build time**, and the
   command exits non-zero immediately.
 
-`logs -f` (follow mode) is supported only when the matched services resolve to **a single owning provider**. If the
-selection would span multiple providers, winter writes an actionable error to stderr and returns 1 without opening any
-stream. Non-follow `logs` works across all providers (the streams are merged into a single output).
+`logs -f` follows all matched owning providers concurrently. Complete lines are merged in the order winter observes
+them, preserving each provider's order; they are not sorted by timestamp. A provider's exit does not stop its peers.
+When multiple owning providers match, each nonzero provider exit is reported to stderr, and once all streams finish
+winter returns the first observed nonzero status, or 0 if all succeeded. Ctrl-C stops following, leaves services
+running, and returns 130. The provider cleanup requirements are defined in the
+[service orchestrator contract](../contracts/service-orchestrator.md). Non-follow `logs` processes providers
+sequentially and merges their output.
 
 ### `status` (multi-provider)
 

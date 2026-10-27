@@ -16,6 +16,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from tests.conftest import (
     FakeConfigFileReader,
     FakeFilesystem,
@@ -552,8 +554,22 @@ def test_logs_follow_single_owner_streams() -> None:
     assert "follow-line" in combined
 
 
-def test_logs_follow_multi_provider_errors_with_actionable_message() -> None:
-    """follow=True spanning multiple owning providers → error with actionable message, no stream."""
+@pytest.mark.parametrize("multiple", [False, True])
+def test_logs_follow_single_owner_failure_preserves_direct_behavior(multiple: bool) -> None:
+    registry, resolver = _make_two_provider_registry() if multiple else _make_single_provider_registry()
+    runner = FakeSubprocessRunner(
+        run_responses={
+            f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("frontend")),
+            f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("backend")),
+        },
+        popen_responses={f"{ENTRYPOINT_A} logs alpha/frontend --tail 200 --follow": ([], 7)},
+    )
+    logs, reporter = _make_logs(runner, registry, resolver)
+    assert logs.stream(_log_opts(patterns=("alpha/frontend",), follow=True), reporter) == 7
+    assert reporter.log_provider_failed_calls == []
+
+
+def test_logs_follow_multi_provider_routes_both() -> None:
     registry, resolver = _make_two_provider_registry()
 
     runner = FakeSubprocessRunner(
@@ -561,21 +577,27 @@ def test_logs_follow_multi_provider_errors_with_actionable_message() -> None:
             f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("frontend")),
             f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("backend")),
         },
-        # No popen_responses: opening any stream should raise AssertionError.
+        popen_responses={
+            f"{ENTRYPOINT_A} logs alpha/frontend --tail 200 --follow": (
+                ['{"env":"alpha","svc":"frontend","msg":"first"}'],
+                0,
+            ),
+            f"{ENTRYPOINT_B} logs alpha/backend --tail 200 --follow": (
+                ['{"env":"alpha","svc":"backend","msg":"second"}'],
+                0,
+            ),
+        },
     )
     logs, reporter = _make_logs(runner, registry, resolver)
     code = logs.stream(_log_opts(patterns=("alpha/frontend", "alpha/backend"), follow=True), reporter)
 
-    assert code == 1
-    # Error message should be recorded on the reporter.
-    assert len(reporter.follow_multi_provider_error_calls) == 1
-    # The reporter receives the provider_names string; the full message is in the reporter impl.
-    # No stream should have been opened.
-    assert len(runner.popen_calls) == 0
+    assert code == 0
+    assert len(runner.popen_calls) == 2
+    assert "first" in "\n".join(reporter.log_lines)
+    assert "second" in "\n".join(reporter.log_lines)
 
 
-def test_logs_follow_multi_provider_error_mentions_providers() -> None:
-    """The D2 error message names the conflicting providers."""
+def test_logs_follow_multi_provider_reports_failed_provider() -> None:
     registry, resolver = _make_two_provider_registry()
 
     runner = FakeSubprocessRunner(
@@ -583,14 +605,16 @@ def test_logs_follow_multi_provider_error_mentions_providers() -> None:
             f"{ENTRYPOINT_A} describe": _describe_result(_describe_json("frontend")),
             f"{ENTRYPOINT_B} describe": _describe_result(_describe_json("backend")),
         },
+        popen_responses={
+            f"{ENTRYPOINT_A} logs alpha/frontend --tail 200 --follow": ([], 7),
+            f"{ENTRYPOINT_B} logs alpha/backend --tail 200 --follow": ([], 0),
+        },
     )
     logs, reporter = _make_logs(runner, registry, resolver)
-    logs.stream(_log_opts(patterns=("alpha/frontend", "alpha/backend"), follow=True), reporter)
+    code = logs.stream(_log_opts(patterns=("alpha/frontend", "alpha/backend"), follow=True), reporter)
 
-    assert len(reporter.follow_multi_provider_error_calls) == 1
-    provider_names = reporter.follow_multi_provider_error_calls[0]
-    assert "provider-a" in provider_names
-    assert "provider-b" in provider_names
+    assert code == 7
+    assert reporter.log_provider_failed_calls == [("provider-a", 7)]
 
 
 def test_logs_single_provider_no_describe_call() -> None:

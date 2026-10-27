@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
+import pytest
+
 from tests.conftest import FakeFilesystem
 from winter_cli.config.models import WorkspaceConfig
 from winter_cli.core.config_file import IConfigFileReader
@@ -41,6 +43,17 @@ def _build_service(fs: FakeFilesystem) -> CoreProbeService:
         worktree_repo=cast(IReadWorkspaceRepository, None),
         repo_repo=cast(IWriteRepoRepository, None),
     )
+
+
+@pytest.mark.parametrize("version,status", [((3, 12, 9), ProbeStatus.fail), ((3, 13, 0), ProbeStatus.pass_)])
+def test_python_probe_enforces_minimum(
+    monkeypatch: pytest.MonkeyPatch, version: tuple[int, ...], status: ProbeStatus
+) -> None:
+    monkeypatch.setattr("winter_cli.modules.doctor.core_probe_service.sys.version_info", version)
+    result = _build_service(FakeFilesystem())._probe_python()
+    assert result.status == status
+    if status == ProbeStatus.fail:
+        assert "3.13" in result.message or (result.remediation is not None and "3.13" in result.remediation)
 
 
 def test_claude_symlinks_probe_returns_none_when_directories_absent() -> None:

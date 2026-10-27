@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import threading
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -24,6 +25,17 @@ from winter_cli.core.subprocess_runner import SubprocessResult
 from winter_cli.core.tracing import AttributeValue, IOperationHandle, IOperationTracer, ISessionTracer
 from winter_cli.modules.workspace.models import RepoError
 from winter_cli.modules.workspace.models.domain_model import LockEntry, RefKind
+
+_PS_POPEN = subprocess.Popen
+
+
+def process_running(pid: int) -> bool:
+    """Treat a zombie as stopped, on both Linux and macOS."""
+    with _PS_POPEN(["ps", "-o", "stat=", "-p", str(pid)], stdout=subprocess.PIPE, text=True) as proc:
+        output, _ = proc.communicate(timeout=3)
+    if proc.returncode not in (0, 1):
+        raise RuntimeError(f"ps failed with status {proc.returncode}")
+    return bool(output.strip()) and not output.strip().startswith("Z")
 
 
 def make_workspace_config(**overrides: Any) -> WorkspaceConfig:
@@ -182,7 +194,7 @@ class FakeServiceReporter:
         self.log_lines: list[str] = []
         self.no_services_called: int = 0
         self.no_service_matched_calls: list[str] = []
-        self.follow_multi_provider_error_calls: list[str] = []
+        self.log_provider_failed_calls: list[tuple[str, int]] = []
         self.status_parse_error_calls: list[tuple[str, str, str]] = []
         self.describe_parse_error_calls: list[tuple[str, str]] = []
         self.timestamps_warning_called: int = 0
@@ -203,8 +215,8 @@ class FakeServiceReporter:
     def no_service_matched(self, token_list: str) -> None:
         self.no_service_matched_calls.append(token_list)
 
-    def follow_multi_provider_error(self, provider_names: str) -> None:
-        self.follow_multi_provider_error_calls.append(provider_names)
+    def log_provider_failed(self, provider_name: str, exit_code: int) -> None:
+        self.log_provider_failed_calls.append((provider_name, exit_code))
 
     def status_parse_error(self, entrypoint: str, prefix: str, detail: str) -> None:
         self.status_parse_error_calls.append((entrypoint, prefix, detail))
@@ -436,6 +448,9 @@ class FakeStreamingProcess:
     def wait(self) -> int:
         return self._returncode
 
+    def terminate(self) -> None:
+        pass
+
 
 class FakeSubprocessRunner:
     """ISubprocessRunner fake — records every invocation; canned responses.
@@ -506,6 +521,7 @@ class FakeSubprocessRunner:
         env: Any = None,
         shell: bool = False,
         merge_stderr: bool = True,
+        manage_process_group: bool = False,
     ) -> Iterator[FakeStreamingProcess]:
         self.popen_calls.append((cmd, cwd))
         self.popen_envs.append(env)

@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+from contextlib import ExitStack
+from dataclasses import dataclass
 from pathlib import Path
+from queue import Full, Queue
+from threading import Event
 
+from winter_cli.core.context_thread_pool import ContextThreadPoolExecutor
 from winter_cli.core.extension_invocation import build_extension_env
-from winter_cli.core.subprocess_runner import ISubprocessRunner
+from winter_cli.core.subprocess_runner import IStreamingProcess, ISubprocessRunner
 from winter_cli.modules.capability.models import ResolvedCapability
 from winter_cli.modules.service.log_stream_processor import LogStreamProcessor
 from winter_cli.modules.service.models import LogOptions
@@ -11,6 +16,14 @@ from winter_cli.modules.service.orchestrator_resolver import ServiceOrchestrator
 from winter_cli.modules.service.provider_invocation import service_matches_pattern
 from winter_cli.modules.service.service_provider_index import ServiceDescribeService
 from winter_cli.modules.service.service_reporter import IServiceReporter
+
+
+@dataclass(frozen=True)
+class _StreamEvent:
+    provider: str
+    line: str | None = None
+    code: int | None = None
+    error: BaseException | None = None
 
 
 class ServiceLogsService:
@@ -37,10 +50,7 @@ class ServiceLogsService:
     provider are merged through a shared ``LogStreamProcessor`` so the caller sees
     a single unified stream.
 
-    Follow mode (D2): ``-f`` / ``follow=True`` is supported only when the matched
-    services resolve to a **single** owning provider. When a follow request would
-    span multiple owning providers, this method writes an actionable error to stderr
-    and returns 1 without opening any stream.
+    Follow mode merges concurrent provider streams in observed line order.
 
     Returns the orchestrator's exit code (worst across providers), or 130 if
     interrupted by KeyboardInterrupt.
@@ -120,11 +130,8 @@ class ServiceLogsService:
             for p in providers:
                 provider_patterns_map[p.extension_name] = []
 
-        # D2: -f with multiple owning providers is an error.
         if options.follow and len(owning_providers) > 1:
-            provider_names = ", ".join(p.extension_name for p in owning_providers)
-            reporter.follow_multi_provider_error(provider_names)
-            return 1
+            return self._follow_many(owning_providers, provider_patterns_map, options, reporter)
 
         # Fan out: drain each owning provider through the shared processor.
         processor = LogStreamProcessor(options)
@@ -167,6 +174,43 @@ class ServiceLogsService:
         fan-out), accumulates into the shared processor without finalizing (the
         caller handles that).
         """
+        cmd, extra_env = self._invocation(provider, options, patterns)
+
+        own_processor = processor is None
+        if own_processor:
+            processor = LogStreamProcessor(options)
+
+        exit_code = 0
+        try:
+            with self._subprocess_runner.popen(
+                cmd,
+                cwd=self._workspace_root,
+                env=extra_env,
+                merge_stderr=False,
+                manage_process_group=options.follow,
+            ) as proc:
+                try:
+                    for rendered in processor.process_lines(proc.stdout_lines):
+                        reporter.log_line(rendered)
+                    if own_processor:
+                        for rendered in processor.finalize():
+                            reporter.log_line(rendered)
+                    exit_code = proc.wait()
+                except BaseException:
+                    if options.follow:
+                        proc.terminate()
+                    raise
+        except KeyboardInterrupt:
+            return 130
+
+        if own_processor:
+            self._emit_warnings(processor, reporter)
+
+        return exit_code
+
+    def _invocation(
+        self, provider: ResolvedCapability, options: LogOptions, patterns: tuple[str, ...]
+    ) -> tuple[list[str], dict[str, str]]:
         cmd = [str(provider.entrypoint), "logs", *patterns]
         # Render options ride on argv as the canonical orchestrator contract:
         # --tail always (resolved N|all); --since/--until only when non-empty;
@@ -189,33 +233,126 @@ class ServiceLogsService:
             service_prefix=self._service_prefix,
         )
 
-        own_processor = processor is None
-        if own_processor:
-            processor = LogStreamProcessor(options)
+        return cmd, extra_env
 
-        exit_code = 0
-        try:
-            with self._subprocess_runner.popen(
-                cmd, cwd=self._workspace_root, env=extra_env, merge_stderr=False
-            ) as proc:
+    def _follow_many(
+        self,
+        providers: list[ResolvedCapability],
+        patterns: dict[str, list[str]],
+        options: LogOptions,
+        reporter: IServiceReporter,
+    ) -> int:
+        events: Queue[_StreamEvent] = Queue(maxsize=256)
+        cancelled = Event()
+        processes: list[IStreamingProcess] = []
+        processor = LogStreamProcessor(options)
+
+        def publish(event: _StreamEvent) -> bool:
+            while not cancelled.is_set():
                 try:
-                    for rendered in processor.process_lines(proc.stdout_lines):
+                    events.put(event, timeout=0.1)
+                    return True
+                except Full:
+                    continue
+            return False
+
+        def read(provider: str, proc: IStreamingProcess) -> None:
+            try:
+                for line in proc.stdout_lines:
+                    if not publish(_StreamEvent(provider, line=line)):
+                        return
+                publish(_StreamEvent(provider, code=proc.wait()))
+            except BaseException as exc:
+                publish(_StreamEvent(provider, error=exc))
+
+        stack = ExitStack()
+        pool = ContextThreadPoolExecutor(max_workers=len(providers))
+        primary: BaseException | None = None
+        result = 0
+        try:
+            for provider in providers:
+                selected = tuple(patterns[provider.extension_name]) or options.patterns
+                cmd, env = self._invocation(provider, options, selected)
+                proc = stack.enter_context(
+                    self._subprocess_runner.popen(
+                        cmd,
+                        cwd=self._workspace_root,
+                        env=env,
+                        merge_stderr=False,
+                        manage_process_group=True,
+                    )
+                )
+                processes.append(proc)
+                pool.submit(read, provider.extension_name, proc)
+            remaining = len(providers)
+            while remaining:
+                event = events.get()
+                if event.error is not None:
+                    raise event.error
+                if event.line is not None:
+                    for rendered in processor.process_lines([event.line]):
                         reporter.log_line(rendered)
-                except KeyboardInterrupt:
-                    return 130
-
-                if own_processor:
-                    for rendered in processor.finalize():
-                        reporter.log_line(rendered)
-
-                exit_code = proc.wait()
-        except KeyboardInterrupt:
-            return 130
-
-        if own_processor:
+                elif event.code is not None:
+                    remaining -= 1
+                    if event.code:
+                        reporter.log_provider_failed(event.provider, event.code)
+                        if not result:
+                            result = event.code
+            for rendered in processor.finalize():
+                reporter.log_line(rendered)
             self._emit_warnings(processor, reporter)
+        except BaseException as exc:
+            primary = exc
 
-        return exit_code
+        # Release publishers before touching processes: a reader may be blocked on
+        # the bounded queue rather than on its pipe. Visit every handle before
+        # retrying failures, so one interrupted termination cannot strand a peer.
+        cancelled.set()
+        if primary is not None:
+            failed: list[IStreamingProcess] = []
+            for proc in processes:
+                try:
+                    proc.terminate()
+                except BaseException:
+                    failed.append(proc)
+            for proc in failed:
+                while True:
+                    try:
+                        proc.terminate()
+                        break
+                    except KeyboardInterrupt:
+                        continue
+                    except BaseException:
+                        break  # The managed context gets another cleanup attempt.
+
+        # Context finalizers run before joining readers. ExitStack removes callbacks
+        # as it invokes them; retry close after an interrupt to drain remaining ones.
+        while True:
+            try:
+                stack.close()
+                break
+            except KeyboardInterrupt as exc:
+                if primary is None:
+                    primary = exc
+            except BaseException as exc:
+                if primary is None:
+                    primary = exc
+                break
+
+        # A signal during join must not cause an early return with live readers.
+        while True:
+            try:
+                pool.shutdown(wait=True)
+                break
+            except KeyboardInterrupt as exc:
+                if primary is None:
+                    primary = exc
+
+        if isinstance(primary, KeyboardInterrupt):
+            return 130
+        if primary is not None:
+            raise primary
+        return result
 
     def _emit_warnings(self, processor: LogStreamProcessor, reporter: IServiceReporter) -> None:
         """Emit accumulated processor warnings to stderr (once each)."""

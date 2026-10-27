@@ -318,6 +318,7 @@ class _InterruptOnIterRunner:
         env: Any = None,
         shell: bool = False,
         merge_stderr: bool = True,
+        manage_process_group: bool = False,
     ) -> Iterator[Any]:
         yield _InterruptOnIterProcess()
 
@@ -330,6 +331,9 @@ class _InterruptOnIterProcess:
 
     def wait(self) -> int:
         return 0
+
+    def terminate(self) -> None:
+        pass
 
 
 class _InterruptOnPopenRunner:
@@ -357,6 +361,7 @@ class _InterruptOnPopenRunner:
         env: Any = None,
         shell: bool = False,
         merge_stderr: bool = True,
+        manage_process_group: bool = False,
     ) -> Iterator[Any]:
         raise KeyboardInterrupt
         yield  # type: ignore[misc]  # unreachable — makes this function a generator

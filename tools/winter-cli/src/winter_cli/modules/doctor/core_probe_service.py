@@ -22,7 +22,7 @@ CORE_SOURCE = "core"
 
 # Floors chosen to match what every supported workflow exercises.
 MIN_GIT_VERSION = (2, 20)
-MIN_PYTHON_VERSION = (3, 11)
+MIN_PYTHON_VERSION = (3, 13)
 
 _GIT_VERSION_RE = re.compile(r"git version (\d+)\.(\d+)")
 

@@ -31,7 +31,7 @@ class IServiceReporter(Protocol):
     def log_line(self, rendered: str) -> None: ...
     def no_services(self) -> None: ...
     def no_service_matched(self, token_list: str) -> None: ...
-    def follow_multi_provider_error(self, provider_names: str) -> None: ...
+    def log_provider_failed(self, provider_name: str, exit_code: int) -> None: ...
     def status_parse_error(self, entrypoint: str, prefix: str, detail: str) -> None: ...
     def describe_parse_error(self, provider_name: str, detail: str) -> None: ...
     def env_provision_error(self, scope: str, detail: str) -> None: ...
@@ -96,14 +96,8 @@ class StreamServiceReporter:
     def no_service_matched(self, token_list: str) -> None:
         self._click.echo(f"no service matched {token_list}", err=True)
 
-    def follow_multi_provider_error(self, provider_names: str) -> None:
-        self._click.echo(
-            f"error: --follow (-f) cannot span multiple service providers "
-            f"({provider_names}). "
-            f"Narrow your selection to services owned by a single provider, "
-            f"or omit -f to merge non-follow logs across providers.",
-            err=True,
-        )
+    def log_provider_failed(self, provider_name: str, exit_code: int) -> None:
+        self._click.echo(f"error: log provider {provider_name!r} exited with status {exit_code}", err=True)
 
     def status_parse_error(self, entrypoint: str, prefix: str, detail: str) -> None:
         self._click.echo(
@@ -187,14 +181,8 @@ class JsonServiceReporter:
     def no_service_matched(self, token_list: str) -> None:
         self._click.echo(f"no service matched {token_list}", err=True)
 
-    def follow_multi_provider_error(self, provider_names: str) -> None:
-        self._click.echo(
-            f"error: --follow (-f) cannot span multiple service providers "
-            f"({provider_names}). "
-            f"Narrow your selection to services owned by a single provider, "
-            f"or omit -f to merge non-follow logs across providers.",
-            err=True,
-        )
+    def log_provider_failed(self, provider_name: str, exit_code: int) -> None:
+        self._click.echo(f"error: log provider {provider_name!r} exited with status {exit_code}", err=True)
 
     def status_parse_error(self, entrypoint: str, prefix: str, detail: str) -> None:
         self._click.echo(

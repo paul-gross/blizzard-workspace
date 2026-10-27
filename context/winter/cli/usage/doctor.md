@@ -11,7 +11,7 @@ Runs preflight checks for the workspace and every installed extension. Each prob
 a one-line message and an optional remediation hint shown under failures. Exit code is `0` when nothing failed (warnings
 allowed), `1` if any probe failed.
 
-**Built-in core probes** cover `git --version`, the running python version (>=3.11), `.winter/config.toml` parses, every
+**Built-in core probes** cover `git --version`, the running python version (>=3.13), `.winter/config.toml` parses, every
 declared project repo exists at `projects/<name>/`, every declared standalone repo exists at its configured path, every
 feature env's per-repo worktrees exist on the env-named branch, the extension skill symlinks (contributed by extensions,
 under `.claude/skills` and `.codex/skills`) resolve to existing targets, the **port-allocation invariant**
