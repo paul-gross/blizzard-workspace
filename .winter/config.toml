@@ -29,48 +29,48 @@ env_aliases = [
 opencode = "openai/gpt-6-astra"
 
 [model_tiers.opus]
-opencode = "openai/gpt-6-sol"
+opencode = "openai/gpt-6.1-sol"
 
 [model_tiers.sonnet]
-opencode = "openai/gpt-6-sol"
+opencode = "openai/gpt-6.1-terra"
 
 [model_tiers.haiku]
 opencode = "openai/gpt-6-luna"
 
 [agent_model_overrides.ice-carver]
 claude = { model = "opus", effort = "low" }
-codex = { model = "gpt-6-sol", effort = "medium" }
-opencode = { model = "openai/gpt-6-sol", effort = "medium" }
+codex = { effort = "low" }
+opencode = { effort = "low" }
 
 [agent_model_overrides.cold-reviewer]
-claude = { model = "opus", effort = "medium" }
-codex = { model = "gpt-6-sol", effort = "medium" }
-opencode = { model = "openai/gpt-6-sol", effort = "medium" }
+claude = { effort = "medium" }
+codex = { effort = "medium" }
+opencode = { effort = "medium" }
 
 [agent_model_overrides.plan-reviewer]
-claude = { model = "opus", effort = "medium" }
-codex = { model = "gpt-6-sol", effort = "medium" }
-opencode = { model = "openai/gpt-6-sol", effort = "medium" }
+claude = { effort = "medium" }
+codex = { effort = "medium" }
+opencode = { effort = "medium" }
 
 [agent_model_overrides.harness-reviewer]
-claude = { model = "opus", effort = "medium" }
-codex = { model = "gpt-6-sol", effort = "medium" }
-opencode = { model = "openai/gpt-6-sol", effort = "medium" }
+claude = { effort = "medium" }
+codex = { effort = "medium" }
+opencode = { effort = "medium" }
 
 [agent_model_overrides.faceted-reviewer]
-claude = { model = "opus", effort = "medium" }
-codex = { model = "gpt-6-sol", effort = "medium" }
-opencode = { model = "openai/gpt-6-sol", effort = "medium" }
+claude = { effort = "medium" }
+codex = { effort = "medium" }
+opencode = { effort = "medium" }
 
 [agent_model_overrides.documentation-reviewer]
-claude = { model = "opus", effort = "low" }
+claude = { effort = "low" }
 codex = { model = "gpt-6-luna", effort = "max" }
 opencode = { model = "openai/gpt-6-luna", effort = "max" }
 
 [agent_model_overrides.context-reviewer]
-claude = { model = "opus", effort = "low" }
-codex = { model = "gpt-6-luna", effort = "max" }
-opencode = { model = "openai/gpt-6-luna", effort = "max" }
+claude = { effort = "low" }
+codex = { model = "gpt-6.1-terra", effort = "high" }
+opencode = { model = "openai/gpt-6.1-terra", effort = "high" }
 
 [agent_model_overrides.diff-classifier]
 claude = { model = "sonnet", effort = "medium" }
@@ -84,7 +84,7 @@ opencode = { model = "openai/gpt-6-luna", effort = "high" }
 
 [agent_model_overrides.distiller]
 claude = { model = "opus", effort = "high" }
-codex = { model = "gpt-6-sol" }
+codex = { model = "gpt-6.1-sol" }
 
 [agent_model_overrides.arctic-explorer]
 codex = { model = "gpt-6-luna" }
@@ -92,18 +92,9 @@ codex = { model = "gpt-6-luna" }
 [agent_model_overrides.backend-verifier]
 codex = { model = "gpt-6-luna" }
 
-[agent_model_overrides.app-runner]
-codex = { model = "gpt-6-luna" }
-
-[agent_model_overrides.verify-finale]
-codex = { model = "gpt-6-sol" }
-
 [agent_model_overrides.frontend-verifier]
 claude = { model = "opus", effort = "low" }
 codex = { model = "gpt-6-luna" }
-
-[agent_model_overrides.winter-architect]
-codex = { model = "gpt-6-sol" }
 
 # Dashboard default layout: render the env/repo matrix with repos as columns
 # (envs as rows). `t` cycles layouts live for the session.
