@@ -47,9 +47,9 @@ marshal steps at once ([workflows/marshalling.md](./marshalling.md)).
 **Group liberally when marshalling a review's chunks.** One accepted proposal is often a small fix, and a lane given
 only that underuses its agent: mid-sized chunks do well. Group small chunks that share an area (one package, one feature
 folder, one seam) into one lane, even when they are separable. Stop short of a sprawling PR. Keep a chunk standalone
-only when it is already large, such as a broad mechanical sweep, and `depend` what still collides across groups. Promote
-the lanes in priority order once the user approves the grouping. A later tier's accepts join a lane that is still
-unacquired, or depend on it, and are promoted as they are marshalled.
+only when it is already large, such as a broad mechanical sweep, and `depend` across groups only where marshalling's bar
+for an edge is met. Promote the lanes in priority order once the user approves the grouping. A later tier's accepts join
+a lane that is still unacquired, or depend on it, and are promoted as they are marshalled.
 
 ## 4. Walk the consideration tier
 
