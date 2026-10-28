@@ -33,12 +33,12 @@ cmd = "exec sleep infinity"
 # dependency is ready.
 #
 # Every from-source cmd leads with `eval "$(mise env -s bash)"`. The daemon inherits
-# the `winter` shim's PATH, which `mise -C tools/winter-cli exec` fronts with
-# winter-cli's own toolchain (uv 0.9.27), and a non-interactive `bash -c` never
-# re-resolves it — so `uv` trips blizzard's `required-version = "==0.11.21"` and the
-# hub exits before it serves. The eval re-resolves the toolchain from the service's
-# own cwd, where each project's mise.toml pin lives — the same fix provision's
-# `mise exec --` makes in workspace:/.winter/config.toml.
+# the `winter` shim's PATH, which carries the host's ambient uv, and a non-interactive
+# `bash -c` never activates mise on its own — so a bare `uv` trips blizzard's
+# `[tool.uv] required-version` pin and the hub exits before it serves. The eval
+# resolves the toolchain from the service's own cwd, where each project's mise.toml
+# pin lives — the same fix provision's `mise exec --` makes in
+# workspace:/.winter/config.toml.
 # ---------------------------------------------------------------------------
 
 # --- Mock GitHub forge (blizzard-mock) — the PM + delivery seams -------------

@@ -204,15 +204,14 @@ BLIZZARD_MOCK_HARNESS_FENCE = "1"
 # CLIs resolve. Scoped to the blizzard-mock worktree; other repos gain their
 # own handlers as later phases (P5+) land.
 #
-# Every `uv` below is invoked through `mise exec --` deliberately. The `winter`
-# shim execs itself under `mise -C tools/winter-cli`, so winter and every
-# handler subprocess it spawns inherit *winter-cli's* pinned uv (0.9.27) rather
-# than the provisioned project's own. That went unnoticed while it merely meant
-# syncing with the wrong uv, and became fatal when blizzard#298 landed
-# `[tool.uv] required-version = "==0.11.21"`: uv 0.9.27 refuses the pin, the
-# dependency sub-target aborts, and no env can be prepared — so the fleet
-# claims nothing. `mise exec --` re-resolves the toolchain from the handler's
-# own worktree, which is where each project's mise.toml pin lives.
+# Every `uv` below is invoked through `mise exec --` deliberately. Winter runs on
+# the host's ambient uv, and every handler subprocess it spawns inherits that
+# PATH, so a bare `uv` is whatever version the machine happens to carry rather
+# than the provisioned project's own. blizzard pins its uv in mise.toml and
+# enforces it with `[tool.uv] required-version`; any other uv refuses the pin,
+# the dependency sub-target aborts, and no env can be prepared — so the fleet
+# claims nothing. `mise exec --` resolves the toolchain from the handler's own
+# worktree, which is where each project's mise.toml pin lives.
 #
 # `mise trust` leads both handlers because mise's trust store is keyed by
 # absolute path, so every freshly-init'd env's worktrees are untrusted and mise
