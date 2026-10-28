@@ -72,7 +72,10 @@ decides a release may carry the break ([workflows/marshalling.md](./workflows/ma
 An issue that builds on another is **blocked by** it on GitHub, so the order lives with the issues and not only in the
 hub. Whoever files an issue links every prerequisite they can name — the previous child in an epic's landing order, a
 child of another epic, or work already in flight — and an epic's follow-up `(BREAK)` cleanup is blocked by the epic's
-last child. The link is keyed by the blocking issue's REST database id, not its number:
+last child. A prerequisite is work the issue builds on, or work that rewrites the same files so heavily that the second
+to land could not rebase; an issue that merely touches the same files is not one
+([marshalling.md](./workflows/marshalling.md) owns the bar). The link is keyed by the blocking issue's REST database id,
+not its number:
 
 ```bash
 gh api -X POST repos/paul-gross/blizzard/issues/<N>/dependencies/blocked_by \
