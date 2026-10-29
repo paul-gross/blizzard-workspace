@@ -8,6 +8,9 @@ itself owns is below.
 **Do not develop against the hosted hub, `https://blizzard.grosscode.net`** — it is the real, public fleet, and
 `ng serve` is a real client against it. [hub-data-modes.md](./hub-data-modes.md) owns the safe alternatives.
 
+**A fleet worker never edits `blizzard-product`, and never plans an edit to it** — it reads it to plan, and names a
+change it needs for the operator. [repos.md](./repos.md) owns why.
+
 | Topic                                            | When to read                                                                                                                                                                                                                                                                          |
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | [repos.md](./repos.md)                           | You need to know which repo owns what, or what a worktree in a feature env is for                                                                                                                                                                                                     |
