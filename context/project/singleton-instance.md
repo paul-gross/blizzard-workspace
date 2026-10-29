@@ -409,12 +409,16 @@ a fleet worker (restarting the host terminates the agents both runners are runni
 ## The hub's work sources
 
 Which repos the hub ingests from and delivers to are records in its store — work sources and repository records, each
-naming the stored secret `github-forge` that holds the forge PAT. `blizzard`, `blizzard-mock`, `blizzard-infra`, and
-`blizzard-context` are configured for blizzard. Change them through the hub, with `blizzard hub source …`,
-`blizzard hub repo …`, and `blizzard hub secret set github-forge` — no host operation and no restart. They are linked to
-the `blizzard` project; the thirteen `winter*` sources and repos, all with `annotate true`, are linked to the `winter`
-project. The hub refuses to start while its config declares a `[[work_source]]` block or its environment sets a
-`BZ_FORGE_*` variable, so neither ever goes back into `blizzard-infra`'s `deploy/`.
+naming the forge `github` and the stored secret `github-forge` that holds the forge PAT. `github` is the tenant's one
+forge, the record that holds GitHub's addresses; no source or repo carries an address of its own. `blizzard`,
+`blizzard-mock`, `blizzard-infra`, and `blizzard-context` are configured for blizzard. Change them through the hub, with
+`blizzard hub forge …`, `blizzard hub source …`, `blizzard hub repo …`, and `blizzard hub secret set github-forge` — no
+host operation and no restart. Name the forge with `--forge github`, never `--forge-api-url`, `--api-base`, or
+`--web-base`: the hub still accepts those, but warns and records a `config-old-field-used` event each time. A
+configuration document is version 2, as `blizzard hub config export` prints it. They are linked to the `blizzard`
+project; the `winter*` sources and repos, all with `annotate true`, are linked to the `winter` project. The hub refuses
+to start while its config declares a `[[work_source]]` block or its environment sets a `BZ_FORGE_*` variable, so neither
+ever goes back into `blizzard-infra`'s `deploy/`.
 
 **The PAT selects its repos explicitly.** A source whose repo the token does not cover fails at ingest with a 404 that
 reads as a missing issue — re-scope the token before adding the source.
