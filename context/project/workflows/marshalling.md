@@ -22,6 +22,12 @@ and neither is anything that depends on one: ingesting a chain stops short of it
 GitHub as the record of what a deprecation still owes, until an operator decides a release may carry the break and
 ingests it by hand.
 
+**Manual work is never ingested.** A `blizzard:manual` issue
+([contributing.md § Fleet-fulfillable issues](../contributing.md#fleet-fulfillable-issues)) is a human operator's, never
+ingested while marshalling or minting work, by any path. A fleet issue blocked by an open `blizzard:manual` issue is
+waiting on an event no chunk stands for, so it stays uningested until the manual issue closes. The label is this
+workspace's alone; the operator's agent applies this rule, and blizzard reads no labels.
+
 **Scope.** An operator session against the instance's hub. Every `blizzard hub` verb needs `$BZ_HUB_URL` and a session
 ([singleton-instance.md § The operator CLI needs a session](../singleton-instance.md#the-operator-cli-needs-a-session)).
 
@@ -47,7 +53,8 @@ ingests it by hand.
    prerequisites finish. A `(BREAK)` chunk an operator ingested by hand is theirs to promote, never promoted here.
 5. **Reorder** only where the new work must jump chunks already `ready`: `hub queue move <chunk-id> <position>`.
 6. **Report** each group, edge, and reorder with its reason — for an edge, what the dependent builds on or which files
-   both rewrite — and each `(BREAK)` issue left uningested.
+   both rewrite — each `(BREAK)` issue left uningested, and each `blizzard:manual` issue left uningested, with the fleet
+   issues it holds back.
 
 ## Don't
 
@@ -59,3 +66,5 @@ ingests it by hand.
 - Move a `ready` chunk merely to re-express the order already established by promotion.
 - Ingest or promote a `(BREAK)` issue, or anything that depends on one, even told to marshal: when a break may land is a
   release's question, and an operator's call.
+- Ingest a `blizzard:manual` issue, or a fleet issue blocked by an open one, even told to marshal: the fleet cannot do
+  operator work, and the hub would close the issue on merge with it undone.
