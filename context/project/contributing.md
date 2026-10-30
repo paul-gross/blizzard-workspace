@@ -86,6 +86,26 @@ gh api repos/paul-gross/blizzard/issues/<N>/dependencies/blocked_by --jq '[.[].n
 Marshalling turns these links into the hub's dependency edges and writes back any edge it adds
 ([workflows/marshalling.md](./workflows/marshalling.md)), so the two never disagree.
 
+## Fleet-fulfillable issues
+
+Every acceptance criterion on an issue meant for the fleet is one a fleet worker can satisfy by committing in the repos
+its environment holds. The fleet ingests whatever it is handed, a plan rewords a criterion it cannot reach, and the hub
+closes the issue on merge with that criterion unmet — so whoever files the issue, slicing an epic or not, keeps the
+unreachable work off it. A criterion is unfulfillable when it is:
+
+- **an operator-only action** — *"branch protection requires the new check on `master`"*, or a by-hand deployment step;
+- **an edit in a repo the environment has no worktree for** — *"the epic's entry in `blizzard-product` is marked
+  delivered"*, or a change to the workspace root ([repos.md](./repos.md));
+- **PR-body content** — *"the PR description lists the migrated routes"*: the hub's `deliver` node writes the PR body
+  from a fixed template, so no worker can put text in it.
+
+That work is filed as its own issue, labelled `blizzard:manual`, and a `blizzard:manual` issue is never meant for the
+fleet: marshalling never ingests one ([workflows/marshalling.md](./workflows/marshalling.md)). The label is this
+workspace's convention alone — blizzard knows nothing of it. It links to the fleet issue it relates to by
+[§ Issue dependencies](#issue-dependencies): manual work the fleet issue needs first — a secret provisioned, a setting
+flipped — **blocks** the fleet issue; manual work that follows the fleet issue's landing — a deployment step, a
+protection rule on the new check — is **blocked by** it.
+
 ## Checks before pushing
 
 `blizzard-context` owns what a change is held to and how it is proven: its
