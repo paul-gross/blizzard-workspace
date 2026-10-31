@@ -6,9 +6,8 @@ itself is always cut by [release.md](./release.md), and every train in between r
 [release-train.md](./release-train.md).
 
 **Why.** A major gathers its removals on `master` for a bounded window, and its last candidate still runs on the fleet
-for a week like any other. The contract — the schedule, the window, the major's candidates, the cut — is
-`blizzard-product:/plans/release-engineering/release-lines/spec/majors.md`, and the window file's keys are the
-`blizzard` repo's `docs/versioning.md` §The hub↔runner skew window's; this procedure restates neither.
+for a week like any other. The window file's keys are the `blizzard` repo's `docs/versioning.md` §The hub↔runner skew
+window's; this procedure does not restate them.
 
 **Scope.** Past 1.0 only, for a major whose date `D` the `blizzard` repo's `docs/versioning.md` §Schedule publishes.
 With no date published there, nothing here runs. 1.0 itself opens no window: it is cut by
