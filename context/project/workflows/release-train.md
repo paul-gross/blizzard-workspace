@@ -5,9 +5,8 @@
 condition that fails. A tag itself is always cut by [release.md](./release.md).
 
 **Why.** The train is the only road from `master` to a release, and it runs often enough that an agent, and later a
-routine, carries it; a step read from memory is a step a routine cannot repeat. What the train is — its day, its names,
-promotion, setting aside — is `blizzard-product:/plans/release-engineering/release-lines/spec/train.md`, and its
-published promise is the `blizzard` repo's `docs/versioning.md` §The train; this procedure restates neither.
+routine, carries it; a step read from memory is a step a routine cannot repeat. The train's published promise is the
+`blizzard` repo's `docs/versioning.md` §The train; this procedure does not restate it.
 
 **Scope.** An operator session, or an agent told by name to run it, from a provisioned feature environment holding
 `blizzard` and `blizzard-mock` worktrees, never the source checkouts. Creating a `v*` tag — signed, by

@@ -20,9 +20,8 @@ only on a stable one.
 
 ## The cut commit
 
-A candidate is tagged at a **cut commit**, as `blizzard-product:/plans/release-engineering/release-lines/spec/train.md`
-§The cut commit defines it: the commit that sets `pyproject.toml`'s `[project] version` to the version being cut,
-carries the `Release-Cut: <X.Y.Z>` trailer, and runs two steps, both of which must pass before it merges:
+A candidate is tagged at a **cut commit**: the commit that sets `pyproject.toml`'s `[project] version` to the version
+being cut, carries the `Release-Cut: <X.Y.Z>` trailer, and runs two steps, both of which must pass before it merges:
 
 ```bash
 uv run blizzard-change-notes cut <X.Y.Z>                  # moves changes/unreleased/ into changes/<X.Y.Z>/
@@ -74,8 +73,8 @@ one, and refuses any update or deletion. The signature is the operator's GPG key
 GitHub account, or GitHub refuses the push.
 
 The `release` workflow checks out the `blizzard-mock` tag of the same name, so push that tag first, the same way, at the
-commit `blizzard-product:` `mock.md` §Branches and tags names. For a candidate cut on `master` that is the mock sha the
-cut commit's `push` run recorded:
+commit that proved the candidate: on `release/X.Y`, the mock branch's tip; for a candidate cut on `master`, the mock sha
+the cut commit's `push` run recorded:
 
 ```bash
 gh run download <run-id> --repo paul-gross/blizzard --name proven-against
@@ -87,10 +86,9 @@ which proves what was published; `docs/ci.md` owns the release workflow's jobs.
 
 ## Promoting a candidate
 
-When a candidate is promoted, and what must hold before it is, is release-lines'
-(`blizzard-product:/plans/release-engineering/release-lines/spec/train.md` §Promotion). What this procedure holds is the
-commit: the stable tag is pushed only at the commit its newest candidate was tagged at, confirmed before the push, never
-by assumption:
+When a candidate is promoted, and what must hold before it is, is the train's ([release-train.md](./release-train.md)).
+What this procedure holds is the commit: the stable tag is pushed only at the commit its newest candidate was tagged at,
+confirmed before the push, never by assumption:
 
 ```bash
 test "$(git rev-list -n1 v0.2.0-rc.1)" = "$(git rev-parse HEAD)" && git tag -s v0.2.0 -m v0.2.0 && git push origin v0.2.0

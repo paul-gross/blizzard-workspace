@@ -4,9 +4,7 @@
 as a pull request merged before the train cuts its candidate. It is an attended step, never a fleet chunk's work: the
 floor is a fact `blizzard-compat` reports, and a fold deletes released history.
 
-**Why.** Every supported release carries a revision tree the candidate need not keep rebuilding. The contract — when a
-fold happens, what the baseline holds, how an older store is turned away — is
-`blizzard-product:/plans/release-engineering/release-lines/spec/fold.md`; this procedure restates none of it.
+**Why.** Every supported release carries a revision tree the candidate need not keep rebuilding.
 
 ## Steps
 
