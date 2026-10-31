@@ -6,8 +6,7 @@ cherry-pick, or written on the line alone when `master` no longer has the code, 
 [release.md](./release.md).
 
 **Why.** An operator who pinned a line pinned a promise that nothing but the fix moves. The contract — which lines are
-patched, what a patch may carry, how a fix is carried back and proven — is
-`blizzard-product:/plans/release-engineering/release-lines/spec/patches.md`, published as the `blizzard` repo's
+patched, what a patch may carry, how a fix is carried back and proven — is published as the `blizzard` repo's
 `docs/versioning.md` §Support and held by `blizzard-context:/standards/patch-scope.md` (`bzh:patch-scope`); this
 procedure restates none of it.
 
