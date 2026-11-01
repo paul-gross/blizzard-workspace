@@ -303,11 +303,6 @@ url = "git@github.com:paul-gross/winter-workflow.git"
 path = ".winter/ext/workflow"
 
 [[standalone_repository]]
-name = "winter-service-tmux"
-url = "git@github.com:paul-gross/winter-service-tmux.git"
-path = ".winter/ext/service-tmux"
-
-[[standalone_repository]]
 name = "winter-service-docker"
 url = "git@github.com:paul-gross/winter-service-docker.git"
 path = ".winter/ext/service-docker"
