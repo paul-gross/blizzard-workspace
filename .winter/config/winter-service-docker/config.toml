@@ -18,9 +18,9 @@
 # Only per-env services are declared here, so only the per-env compose file is
 # set; this provider owns no workspace singletons, so no workspace_compose_file
 # (docker's workspace scope is empty). The implicit `up workspace` sweep that
-# `up <env>` runs first is still satisfied — the tmux provider owns the
-# workspace-scoped `shell`, so the two-provider workspace dispatch matches a
-# real cell and exits 0. (With no provider owning a workspace service, that
+# `up <env>` runs first is still satisfied — the process-compose provider owns
+# the workspace-scoped `workspace-anchor`, so the two-provider workspace dispatch
+# matches a real cell and exits 0. (With no provider owning a workspace service, that
 # sweep would match nothing and `up <env>` would exit non-zero.)
 environment_compose_file = "environment-compose.yaml"
 
@@ -35,8 +35,9 @@ name = "postgres"
 # scope = "project"  # default — per-env in bws-<env>
 
 # ---------------------------------------------------------------------------
-# Future per-env services (mock GitHub forge, blizzard hub, blizzard runner)
-# run FROM SOURCE under winter-service-tmux, not docker — their slots live in
-# workspace:/.winter/config/winter-service-tmux/config.toml. Only the dockerized
-# Postgres daemon lives here.
+# The other per-env services (mock GitHub forge, blizzard hub, blizzard runner,
+# the web dev servers, storybook) run FROM SOURCE under
+# winter-service-process-compose, not docker — their slots live in
+# workspace:/.winter/config/winter-service-process-compose/config.toml. Only the
+# dockerized Postgres daemon lives here.
 # ---------------------------------------------------------------------------

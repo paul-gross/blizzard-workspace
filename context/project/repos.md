@@ -13,6 +13,6 @@ it, so a chunk cannot declare a commit there, and a worktree of it a worker make
 delivery. Read it to plan; when the work shows product intent is stale or wrong, name the change in the chunk's
 retrospective for the operator to make.
 
-The winter-* extensions (`winter-canon`, `winter-github`, `winter-workflow`, `winter-service-tmux`,
-`winter-service-docker`) are the same repos that serve the winter workspace, installed under `.winter/ext/` — see the
-`# Winter Extensions` block in the workspace `CLAUDE.md`.
+The winter-* extensions (`winter-canon`, `winter-github`, `winter-workflow`, `winter-service-docker`,
+`winter-service-process-compose`) are the same repos that serve the winter workspace, installed under `.winter/ext/` —
+see the `# Winter Extensions` block in the workspace `CLAUDE.md`.
