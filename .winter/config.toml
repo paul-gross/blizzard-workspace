@@ -187,10 +187,14 @@ BZ_BASE_BRANCH    = "main"        # the origins' default branch the fixture seed
 # ~/.claude/projects — pinning it per env keeps a feature env's mock-minted
 # transcripts out of that real store.
 BZ_TRANSCRIPTS_ROOT = "${BLIZZARD_MOCK_SCRATCH_ROOT}/${WINTER_ENV}/transcripts"
-# Disposable per-env runtime roots for the hub and runner daemons (sqlite stores +
-# scaffolded config), under the system temp dir so they never touch the worktree.
-BZ_HUB_RUNTIME    = "/tmp/blizzard/${WINTER_ENV}/hub"
-BZ_RUNNER_RUNTIME = "/tmp/blizzard/${WINTER_ENV}/runner"
+# Per-env runtime roots for the hub and runner daemons (sqlite stores + scaffolded
+# config), under the env's own ignored `.winter/state/` — on disk, not the tmpfs
+# /tmp, where a hub store holding a copy of real data would sit in RAM. The
+# workspace root comes from a command entry (it runs at the workspace root, and
+# only on `service up`), since the token grammar carries no workspace path.
+BZ_WORKSPACE_DIR  = { command = "pwd" }
+BZ_HUB_RUNTIME    = "${BZ_WORKSPACE_DIR}/${WINTER_ENV}/.winter/state/hub"
+BZ_RUNNER_RUNTIME = "${BZ_WORKSPACE_DIR}/${WINTER_ENV}/.winter/state/runner"
 # Unfences the mock coding-harness façade the runner spawns (mock-claude-code): the
 # runner passes its own environment to the worker, so this rides into the spawn. The
 # companion marker file is dropped in the fixture tree when it is minted (the
