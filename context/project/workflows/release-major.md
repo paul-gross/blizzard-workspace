@@ -44,11 +44,11 @@ it has found that `master` moved:
 
 1. **The cut commit**, `(X+1).0.0`, against `master`, by [release.md § The cut commit](./release.md#the-cut-commit).
 2. **Its `push` run is green**, and its `proven-against` artifact names it and `<mock>`, as
-   [release-train.md](./release-train.md#2-cut-the-next-candidate) steps 2.3 and 2.4 read them.
+   [release-train.md](./release-train.md#2-cut-the-next-candidate) steps 2.4 and 2.5 read them.
 3. **Tag `v(X+1).0.0-rc.K`**, `K` one more than the highest `git tag -l 'v(X+1).0.0-rc.*'` holds, or `1`: by
    [release.md § Tag and watch](./release.md#tag-and-watch), the mock's at `<mock>` first, `blizzard`'s at the cut
    commit last; no branch is created. Then [§ Confirm the cut](./release.md#confirm-the-cut), and offer the instance's
-   move as [release-train.md](./release-train.md#2-cut-the-next-candidate) step 2.8 does.
+   move as [release-train.md](./release-train.md#2-cut-the-next-candidate) step 2.9 does.
 
 ## 4. Cut the major
 
@@ -57,7 +57,7 @@ On `D` − 1w, whether or not `master` moved:
 1. **The cut commit**, `(X+1).0.0`, against `master`, by [release.md § The cut commit](./release.md#the-cut-commit),
    removing `opening` from `window.toml` in the same commit.
 2. **Its `push` run, `proven-against`, and `release/(X+1).0` in both repositories**, as
-   [release-train.md](./release-train.md#2-cut-the-next-candidate) steps 2.3–2.5 do for `release/X.N`.
+   [release-train.md](./release-train.md#2-cut-the-next-candidate) steps 2.4–2.6 do for `release/X.N`.
 3. **Tag `v(X+1).0.0-rc.K`** at both branches' tips, the mock's first, as step 3.3 numbers it, by
    [release.md § Tag and watch](./release.md#tag-and-watch) and [§ Confirm the cut](./release.md#confirm-the-cut).
 
