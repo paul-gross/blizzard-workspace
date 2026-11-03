@@ -14,9 +14,16 @@ floor is a fact `blizzard-compat` reports, and a fold deletes released history.
    GitHub checkout). It writes each tree's baseline over the floor revision's file, deletes the absorbed revisions and
    the colocated tests that pin them, and leaves every revision above the floor alone. A tree already folded to that
    floor is left as it is; a tag with no `contracts/store/<tree>.json` is refused, naming both.
-3. **Retire every test that pins an absorbed revision.** The default suite fails on the tests that name a deleted
-   revision as input — a test that seeds a store at one, downgrades to one, or replays a chain through one. Retire or
-   re-point each; a test that proves a kept revision stays.
+3. **Clear every name of an absorbed revision.** Grep `src/`, `tests/` (the service tier and its Playwright specs
+   included), `scripts/`, and `docs/` for each deleted revision's id; the default suite alone misses the service tier.
+   - In `src/`, a constant naming an absorbed revision as a threshold for `reaches()` or a downgrade target silently
+     changes behavior once the id is gone. Re-point it to the tree's baseline, which every store this build accepts
+     has reached.
+   - A test that seeds a store at one, downgrades to one, or replays a chain through one: re-point it to the baseline
+     or a kept revision, seeding the baseline's required columns; retire it when the state it proves can no longer
+     exist above the floor. A test that proves a kept revision stays.
+   - Delete the support modules and helpers left with no caller once those tests go.
+   - Stage the deletions (`git add -A`) before the gate: its pointer check walks `git ls-files`.
 4. **Regenerate nothing.** The head is unchanged, so `blizzard:store-contract` stays green with `contracts/store/`
    untouched. A diff there means the fold touched a revision above the floor; stop and find it.
 5. **Prove it.** Run `blizzard:store-baseline` (`mise run store-baseline`) with `BLIZZARD_STORE_BASELINE_PG_URL` set,
