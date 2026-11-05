@@ -10,6 +10,8 @@
 # links, so unlinked fixtures would refuse every ingest. `config apply` is idempotent,
 # so every `up` re-asserts the records and links and a restart rewrites nothing.
 #
+# The document is version 2: one `mock` forge, named by every source and repository.
+#
 # Runs with cwd at the env's blizzard worktree (the hub service's `cwd`).
 set -eu
 
@@ -19,14 +21,16 @@ records="${BZ_HUB_RUNTIME}/forge-records.yaml"
 uv run blizzard hub init "$BZ_HUB_RUNTIME"
 
 cat > "$records" <<EOF
-version: 1
+version: 2
+forges:
+  - {slug: mock, kind: github, api_base: "${forge_url}"}
 secrets: [mock-forge]
 work_sources:
-  - {slug: toy-api, name: toy-api, provider: github, locator: blizzard/toy-api, api_base: "${forge_url}", secret: mock-forge, annotate: false}
-  - {slug: toy-web, name: toy-web, provider: github, locator: blizzard/toy-web, api_base: "${forge_url}", secret: mock-forge, annotate: false}
+  - {slug: toy-api, name: toy-api, provider: github, locator: blizzard/toy-api, forge: mock, secret: mock-forge, annotate: false}
+  - {slug: toy-web, name: toy-web, provider: github, locator: blizzard/toy-web, forge: mock, secret: mock-forge, annotate: false}
 repositories:
-  - {slug: toy-api, name: toy-api, forge_api_url: "${forge_url}", owner: blizzard, repo: toy-api, base_branch: "${BZ_BASE_BRANCH}", secret_name: mock-forge}
-  - {slug: toy-web, name: toy-web, forge_api_url: "${forge_url}", owner: blizzard, repo: toy-web, base_branch: "${BZ_BASE_BRANCH}", secret_name: mock-forge}
+  - {slug: toy-api, name: toy-api, forge: mock, owner: blizzard, repo: toy-api, base_branch: "${BZ_BASE_BRANCH}", secret_name: mock-forge}
+  - {slug: toy-web, name: toy-web, forge: mock, owner: blizzard, repo: toy-web, base_branch: "${BZ_BASE_BRANCH}", secret_name: mock-forge}
 projects:
   - {slug: default, name: Default, sources: [toy-api, toy-web], repositories: [toy-api, toy-web]}
 EOF
