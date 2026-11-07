@@ -31,13 +31,13 @@ In both worktrees, `git fetch origin --tags`. Then:
 The line is **unpromoted** — its newest candidate **waiting** — when no `vX.Y.0` tag exists and `vX.Y.0-rc.K`'s body
 does not open with `**Set aside.**`
 (`gh release view vX.Y.0-rc.K --repo paul-gross/blizzard --json body -q .body | head -1`; a candidate with no GitHub
-Release is not set aside). Otherwise there is nothing to promote. A cut (step 2) runs this step first: an unpromoted line
-is never skipped, but promoted, set aside, or slipped here, or it waits and the cut waits with it.
+Release is not set aside). Otherwise there is nothing to promote. A cut (step 2) runs this step first: an unpromoted
+line is never skipped, but promoted, set aside, or slipped here, or it waits and the cut waits with it.
 
 Check, in order:
 
-1. **It has baked.** The cut's tag, `vX.Y.0-rc.1`, is at least seven days old, and the newest candidate was tagged before
-   today. A tag's UTC date is its tagger date, or the commit date for an older lightweight tag:
+1. **It has baked.** The cut's tag, `vX.Y.0-rc.1`, is at least seven days old, and the newest candidate was tagged
+   before today. A tag's UTC date is its tagger date, or the commit date for an older lightweight tag:
 
    ```bash
    tagged() { TZ=UTC git for-each-ref "refs/tags/$1" \
