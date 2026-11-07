@@ -17,11 +17,11 @@ floor is a fact `blizzard-compat` reports, and a fold deletes released history.
 3. **Clear every name of an absorbed revision.** Grep `src/`, `tests/` (the service tier and its Playwright specs
    included), `scripts/`, and `docs/` for each deleted revision's id; the default suite alone misses the service tier.
    - In `src/`, a constant naming an absorbed revision as a threshold for `reaches()` or a downgrade target silently
-     changes behavior once the id is gone. Re-point it to the tree's baseline, which every store this build accepts
-     has reached.
-   - A test that seeds a store at one, downgrades to one, or replays a chain through one: re-point it to the baseline
-     or a kept revision, seeding the baseline's required columns; retire it when the state it proves can no longer
-     exist above the floor. A test that proves a kept revision stays.
+     changes behavior once the id is gone. Re-point it to the tree's baseline, which every store this build accepts has
+     reached.
+   - A test that seeds a store at one, downgrades to one, or replays a chain through one: re-point it to the baseline or
+     a kept revision, seeding the baseline's required columns; retire it when the state it proves can no longer exist
+     above the floor. A test that proves a kept revision stays.
    - Delete the support modules and helpers left with no caller once those tests go.
    - Stage the deletions (`git add -A`) before the gate: its pointer check walks `git ls-files`.
 4. **Regenerate nothing.** The head is unchanged, so `blizzard:store-contract` stays green with `contracts/store/`
