@@ -5,8 +5,8 @@ its scopes was last swept, recommends which pairs to run, and runs the pairs the
 those runs mint into `ready`. The user approves twice: **which runs to start**, and **whether the proposed grouping and
 promotion order may be applied**. Nothing is written to the hub before each approval.
 
-**Why.** The hub has no scheduler, so a routine runs only when someone starts it (`epic:cadence` is the planned
-replacement). Without a standing pass, the routines nobody remembers go unswept the longest.
+**Why.** A cadence keeps a routine on its own schedule, but a routine no cadence keeps runs only when someone starts it.
+Without a standing pass, the routines nobody remembers go unswept the longest.
 
 **Scope.** An operator session against the instance's hub. Every `blizzard hub` verb needs `$BZ_HUB_URL`, a session,
 `--tenant`, and, for `routine run` and `routine sweeps`, `--project`
@@ -21,6 +21,11 @@ This pass mints runs and never fixes code itself. Each verb's `--help` owns its 
   its default scope. `hub routine sweeps <name> --since <90 days ago> --until <now> --json` returns the routine's
   last-swept table. That table ignores the window and covers every linked scope, showing either the produced-at instant
   and recorded revisions or `never`. The window bounds only the measurement series that follows the table.
+- **Cadence-kept pairs.** `hub cadence list --json` lists the live cadences. For each one,
+  `hub cadence get <slug> --json` names each chore's routine, and `hub cadence errands <slug> --json` lists its errands,
+  one per chore and scope, with each one's state, last run, and `due_at`. A pair with an errand is kept by its cadence
+  and is not one to start by hand. Both verbs say on stderr when the hub's `cadences` flag is off; then a cadence mints
+  nothing, and no pair is kept.
 - **Runs in flight.** `hub run list --since <14 days ago> --json` lists recent runs. A run that has not delivered is
   still in flight, and its routine/scope pair is not run again in this pass.
 - **Check every call.** A failed call prints nothing, and that looks exactly like a routine with no sweeps. Check each
@@ -29,8 +34,8 @@ This pass mints runs and never fixes code itself. Each verb's `--help` owns its 
 ## 2. Show everything, then recommend
 
 Show the user one table with every routine/scope pair: routine, scope, last swept (or `never`), the age of that sweep,
-and whether a run is in flight. Sort it oldest first, with `never` at the top. Show every pair, including the ones you
-don't recommend.
+whether a run is in flight, and the cadence that keeps it with its `due_at`. Sort it oldest first, with `never` at the
+top. Show every pair, including the ones you don't recommend.
 
 Then recommend which pairs to run, giving each recommendation its reason. Weigh these:
 
@@ -42,8 +47,9 @@ Then recommend which pairs to run, giving each recommendation its reason. Weigh 
   changed standard reopens judgment on code that didn't change, so the run is `--mode full`.
 - **Age.** Use age when nothing else separates two pairs.
 
-The default mode is `delta` for any pair that has a baseline. Leave out pairs whose run is still in flight, and pairs
-with no ground and no criteria change since their last sweep.
+The default mode is `delta` for any pair that has a baseline. Leave out pairs whose run is still in flight, pairs a
+cadence keeps, and pairs with no ground and no criteria change since their last sweep. A cadence-kept errand that is
+stopped, named by its attention, is the user's to look into on the board; name it rather than running its pair by hand.
 
 **Ask: which ones do we run?** Offer the recommended set, and accept any subset or addition from the full table. The
 user's pick is final.
@@ -88,4 +94,5 @@ The runs' findings arrive on the hub as each run delivers. Draining them belongs
 
 - Hide pairs that you don't recommend. The user picks from the whole table.
 - Treat a failed inventory call as `never`, or start a second run on a pair whose run is still in flight.
+- Recommend starting a pair a cadence keeps by hand.
 - Start a run, group a chunk, or promote one before the user approves that step.
