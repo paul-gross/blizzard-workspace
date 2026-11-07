@@ -57,8 +57,9 @@ store snapshot, the revision check, the fence on a digest that fails readiness.
 ## 5. Move the runner host
 
 Stop `blizzard-blizzard-runner.service` first, so nothing runs while the venv changes under it. Then follow the
-runbook's steps 3–6 with the dogfood wheel: install it into `../.venv`, migrate, `runner host --check` until it prints
-`host ok`, and re-mint each graph step 2 found, from the installed venv. Start the unit only once all of that passed.
+runbook's steps 3–6 with the dogfood wheel: install it into `~/projects/blizzard-blizzard/.venv`, migrate,
+`runner host --check` until it prints `host ok`, and re-mint each graph step 2 found, from the installed venv. Start the
+unit only once all of that passed.
 
 A failure leaves the host stopped: put the previous build back — its wheel, and a store downgrade if the migration ran,
 as [singleton-instance.md § Going back](../singleton-instance.md#going-back) describes — and start it on that. Never

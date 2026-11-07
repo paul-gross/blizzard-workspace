@@ -1,9 +1,9 @@
 # The singleton instance
 
 This workspace **dogfoods blizzard**: a real blizzard hub and one runner host of two runners drive blizzard's own
-development (the `r-claude-1`–`r-claude-6` and `r-chatgpt-1`–`r-chatgpt-4` envs), and winter's from a sibling workspace,
-against the **real** GitHub forge. **The instance** is what this file calls that deployment, and what "redeploy and
-restart the instance" means — **not** a feature env, and not the per-feature-env verification stacks.
+development (the `bz1`–`bz8` envs), and winter's from a sibling workspace, against the **real** GitHub forge. **The
+instance** is what this file calls that deployment, and what "redeploy and restart the instance" means — **not** a
+feature env, and not the per-feature-env verification stacks.
 
 The instance is a **singleton**, and no checkout's own: every clone of this workspace works against the same one hub and
 the same one runner host. Both run one pinned **build** — a release, or a dogfood build that
@@ -21,7 +21,8 @@ Its two halves run in different places, and that governs everything below.
 
 **Your `AGENTS.local.md` names the machine you are on.** A checkout on `xps` holds the runner host, and all of this file
 is its to act on. Any other checkout — one whose `AGENTS.local.md` names another machine, or that has none — holds no
-part of the instance: the `../runner`, `../.venv`, `../hub`, and `../otel-collector` paths below name nothing there.
+part of the instance: the `~/projects/blizzard-blizzard/runner`, `~/projects/blizzard-blizzard/.venv`,
+`~/projects/blizzard-blizzard/hub`, and `~/projects/blizzard-blizzard/otel-collector` paths below name nothing there.
 Refuse every runner-host task on it and hand it to the user to run on `xps`: moving the instance onto a build, by the
 [runbook](#redeploy--restart-runbook--moving-the-instance-onto-a-release) or by
 [feeding-the-dog](./workflows/feeding-the-dog.md); restarting or reconfiguring the host; adding, renaming, or retiring a
@@ -30,19 +31,20 @@ marshalling, the sweeps — runs from any checkout.
 
 ## Deployed surface
 
-Paths below are `xps`'s, relative to its workspace root; `../runner` is a sibling of the directory holding
-`.winter/config.toml`.
+Paths below are `xps`'s. The instance directory, `~/projects/blizzard-blizzard`, holds the venv, the host directory, and
+the collector; this workspace sits beside it at `~/projects/blizzard-workspace`, outside it so the env tree's unix
+sockets stay under the 108-byte `sun_path` limit.
 
 | Piece           | Location / value                                                                                                                                                                                                                                                                                               |
 | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Hub**         | **`https://blizzard.grosscode.net`** — health `GET /api/health`, readiness `GET /api/ready`. GitHub OAuth; reads need a session                                                                                                                                                                                |
 | Hub deployment  | Owned end to end by the **`paul-gross/blizzard-infra`** repo (private; worktreed here only on a machine whose `config.local.toml` declares it). It holds the host, the image channel, the updater, rollback, and the operator entry points. Go there for anything about the host — none of it is restated here |
 | Runner host     | One host, `xps`, running two runners split by harness — see [The host and its runners](#the-host-and-its-runners) for its ids, workspaces, envs, tokens, and unit                                                                                                                                              |
-| Venv            | `../.venv` — the `blizzard` binary the host runs, and the operator CLI; installed from the **build's wheel** — a release's, or a dogfood build's `push`-run wheel — never a local build or an editable install                                                                                                 |
+| Venv            | `~/projects/blizzard-blizzard/.venv` — the `blizzard` binary the host runs, and the operator CLI; installed from the **build's wheel** — a release's, or a dogfood build's `push`-run wheel — never a local build or an editable install                                                                       |
 | Release         | **dogfood `0.5.0.dev1293+867f76048`** (`master` at `867f76048`) — the exact build both halves run: the venv holds that commit's `push`-run wheel, and the hub runs its `sha-` image by digest, pinned as [The hub's pin](#the-hubs-pin) describes                                                              |
 | Forge           | **real GitHub** — owner `paul-gross`; the hub's token lives on the host, never in this repo                                                                                                                                                                                                                    |
 | Supervision     | one systemd **user** unit, `blizzard-blizzard-runner.service` (unit file and drop-ins in `~/.config/systemd/user/`)                                                                                                                                                                                            |
-| Trace collector | `../otel-collector` — a docker compose OpenTelemetry Collector on `127.0.0.1:4318` that forwards both runners' spans to Honeycomb; see [The runners' trace collector](#the-runners-trace-collector)                                                                                                            |
+| Trace collector | `~/projects/blizzard-blizzard/otel-collector` — a docker compose OpenTelemetry Collector on `127.0.0.1:4318` that forwards both runners' spans to Honeycomb; see [The runners' trace collector](#the-runners-trace-collector)                                                                                  |
 
 ### The host and its runners
 
@@ -51,31 +53,33 @@ plan's quota runs out the hub brakes only the runner spending it, and the other 
 host**, `xps`: one daemon, one host directory, one store, one port, and one unit. The host is a hub record of its own
 holding both runners, and it reports both workspaces and both subscriptions to the hub on every host tick.
 
-|                     | Host `xps`                                                              |
-| ------------------- | ----------------------------------------------------------------------- |
-| Hub id              | `hs_01M521395MMCN3ANGMJVQPG1YK`                                         |
-| Host directory      | `../runner` — `blizzard-host.toml`, store `data/host.db`, `.env`        |
-| Port / `public_url` | `127.0.0.1:8431`, plus the tailnet origin                               |
-| Systemd unit        | `blizzard-blizzard-runner.service`                                      |
-| Host token          | `BZ_HOST_TOKEN` in `../runner/.env` (unit drop-in `EnvironmentFile`)    |
-| Trace export        | `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` in `../runner/.env` |
+|                     | Host `xps`                                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------------------- |
+| Hub id              | `hs_01M521395MMCN3ANGMJVQPG1YK`                                                                   |
+| Host directory      | `~/projects/blizzard-blizzard/runner` — `blizzard-host.toml`, store `data/host.db`, `.env`        |
+| Port / `public_url` | `127.0.0.1:8431`, plus the tailnet origin                                                         |
+| Systemd unit        | `blizzard-blizzard-runner.service`                                                                |
+| Host token          | `BZ_HOST_TOKEN` in `~/projects/blizzard-blizzard/runner/.env` (unit drop-in `EnvironmentFile`)    |
+| Trace export        | `OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4318` in `~/projects/blizzard-blizzard/runner/.env` |
 
-|                                | Claude Code runner                          | OpenCode runner                                                                        |
-| ------------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------- |
-| Hub id                         | `rn_01M3MY1NGQR8WE1ZBRKNREFNE4`             | `rn_01M3JK4RX4BQJ74W7T3CK4NQ1B`                                                        |
-| Name                           | `r-claude`                                  | `r-chatgpt`                                                                            |
-| Workspace (`[[workspace]] id`) | `blizzard-claude`                           | `blizzard-chatgpt`                                                                     |
-| Envs (`[[workspace]] envs`)    | `r-claude-1`–`r-claude-6`                   | `r-chatgpt-1`–`r-chatgpt-4`                                                            |
-| Agents (`[[runner]] agents`)   | 3, shared by `blizzard` and `winter`        | 1, shared by `blizzard` and `winter`                                                   |
-| Harness                        | `[runner.opencode] enabled = false`         | `[runner.claude_code] enabled = false`                                                 |
-| Subscription spent             | `anthropic`                                 | `openai`                                                                               |
-| Worker config                  | `../runner/worker-settings.json`            | `../runner/runners/r-chatgpt/` — `worker-settings.json`, `opencode-worker-config.json` |
-| Hub token                      | `BZ_HUB_TOKEN_R_CLAUDE` in `../runner/.env` | `BZ_HUB_TOKEN_R_CHATGPT` in `../runner/.env`                                           |
+|                                | Claude Code runner                                                    | OpenCode runner                                                                                                  |
+| ------------------------------ | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Hub id                         | `rn_01M3MY1NGQR8WE1ZBRKNREFNE4`                                       | `rn_01M3JK4RX4BQJ74W7T3CK4NQ1B`                                                                                  |
+| Name                           | `r-claude`                                                            | `r-chatgpt`                                                                                                      |
+| Workspace (`[[workspace]] id`) | `blizzard`, shared                                                    | `blizzard`, shared                                                                                               |
+| Envs (`[[workspace]] envs`)    | `bz1`–`bz8`, one pool for both runners                                | `bz1`–`bz8`, one pool for both runners                                                                           |
+| Agents (`[[runner]] agents`)   | 3, shared by `blizzard` and `winter`                                  | 1, shared by `blizzard` and `winter`                                                                             |
+| Harness                        | `[runner.opencode] enabled = false`                                   | `[runner.claude_code] enabled = false`                                                                           |
+| Subscription spent             | `anthropic`                                                           | `openai`                                                                                                         |
+| Worker config                  | `~/projects/blizzard-blizzard/runner/worker-settings.json`            | `~/projects/blizzard-blizzard/runner/runners/r-chatgpt/` — `worker-settings.json`, `opencode-worker-config.json` |
+| Hub token                      | `BZ_HUB_TOKEN_R_CLAUDE` in `~/projects/blizzard-blizzard/runner/.env` | `BZ_HUB_TOKEN_R_CHATGPT` in `~/projects/blizzard-blizzard/runner/.env`                                           |
 
-Both runners also serve the hub's **`winter` project** (every `paul-gross/winter*` source and repo), each through a
-second binding to one shared `[[workspace]]`, `winter`: root `~/projects/winter-workspace`, envs `bz1`–`bz4`, one pool
-for both runners. Its envs are hyphen-free because that workspace's per-env Postgres slice puts the env name into a SQL
-identifier (`wts_<env>`), and its hand-used `alpha`–`epsilon` envs are never in the pool.
+Both runners serve the hub's **`blizzard` project** through one shared `[[workspace]]`, `blizzard`: root
+`~/projects/blizzard-workspace`, envs `bz1`–`bz8`, one pool for both runners. They also serve the **`winter` project**
+(every `paul-gross/winter*` source and repo), each through a second binding to one shared `[[workspace]]`, `winter`:
+root `~/projects/winter-workspace`, envs `bz1`–`bz4`, one pool for both runners. Its envs are hyphen-free because that
+workspace's per-env Postgres slice puts the env name into a SQL identifier (`wts_<env>`), and its hand-used
+`alpha`–`epsilon` envs are never in the pool.
 
 **A runner's agents are one count across its bindings.** A free agent takes the next ready chunk, in the hub's
 ready-queue order, of any bound project whose workspace has a free env, and holds that env for its lifetime. Set it as
@@ -104,35 +108,37 @@ set runs under the claiming runner's default — its one enabled harness — so 
 
 **Adding a runner** is
 `blizzard runner add <name> --project blizzard --workspace <workspace-id> --agents <n> --dir
-../runner`, under the
-host's own token with no sign-in. It mints the runner under `xps` at the hub, writes its `BZ_HUB_TOKEN_<NAME>` to
-`../runner/.env`, creates `../runner/runners/<name>/`, and appends its `[[runner]]`. A new workspace is a
-`[[workspace]]` you add to the host file first. `blizzard/docs/deployment/runner-auth.md` §Adding and retiring a host's
-runners owns the rest. **Pause it before the host restart that starts it** — `hub runner pause <id>` takes a runner that
-has never connected, so it boots braked rather than claiming on its first tick. Resume it once `hub runner list` shows
-it `online`.
+~/projects/blizzard-blizzard/runner`,
+under the host's own token with no sign-in. It mints the runner under `xps` at the hub, writes its `BZ_HUB_TOKEN_<NAME>`
+to `~/projects/blizzard-blizzard/runner/.env`, creates `~/projects/blizzard-blizzard/runner/runners/<name>/`, and
+appends its `[[runner]]`. A new workspace is a `[[workspace]]` you add to the host file first.
+`blizzard/docs/deployment/runner-auth.md` §Adding and retiring a host's runners owns the rest. **Pause it before the
+host restart that starts it** — `hub runner pause <id>` takes a runner that has never connected, so it boots braked
+rather than claiming on its first tick. Resume it once `hub runner list` shows it `online`.
 
 **Renaming a runner** is editing its `[[runner]] name` and renaming its `BZ_HUB_TOKEN_<NAME>` in `.env` together, then
 restarting the host — the id stays; rename one without the other and the host finds no token for the runner. The restart
 terminates the fleet workers both runners hold ([post-delivery.md](./post-delivery.md#the-restart-is-fleet-wide)).
 
-**Retiring a runner** is `blizzard runner retire --runner <name|id> --dir ../runner`: it retires the runner at the hub
-under the host's token, forgets its identity in the host's store, and removes its `[[runner]]`. Expect it to refuse
-listing held chunks even when every one is `done`: a chunk that finishes normally never releases its route. Confirm each
-listed chunk is `done` or `stopped` in `hub status`, then re-run with `--force` — on a terminal chunk the release only
-records itself, while a `running` one would go back to the queue. Then delete the runner's token line from `.env` rather
-than leaving its revoked token on disk. **Never `hub runner-host retire` the host** to take one runner out: it retires
-every runner the host holds.
+**Retiring a runner** is `blizzard runner retire --runner <name|id> --dir ~/projects/blizzard-blizzard/runner`: it
+retires the runner at the hub under the host's token, forgets its identity in the host's store, and removes its
+`[[runner]]`. Expect it to refuse listing held chunks even when every one is `done`: a chunk that finishes normally
+never releases its route. Confirm each listed chunk is `done` or `stopped` in `hub status`, then re-run with `--force` —
+on a terminal chunk the release only records itself, while a `running` one would go back to the queue. Then delete the
+runner's token line from `.env` rather than leaving its revoked token on disk. **Never `hub runner-host retire` the
+host** to take one runner out: it retires every runner the host holds.
 
 #### What the consolidation left behind
 
 The two runners ran as two hosts of one until they were gathered into `xps`. What that left is kept only to go back by:
 
-- `../runner-opencode` — r-chatgpt's former host directory. Its store is set aside as `data/host.db.<timestamp>`, its
-  token is gone from its `.env`, and its `blizzard-host.toml` still names a runner that would halt for want of a token.
+- `~/projects/blizzard-blizzard/runner-opencode` — r-chatgpt's former host directory. Its store is set aside as
+  `data/host.db.<timestamp>`, its token is gone from its `.env`, and its `blizzard-host.toml` still names a runner that
+  would halt for want of a token.
 - `blizzard-blizzard-runner-opencode.service` — its former unit, stopped and `disable`d. Do not start it.
 - `backup-host-consolidation-*/` in both directories — each store, host file, `.env`, worker config, and unit as they
-  stood just before the gathering; `../runner/.env.pre-consolidation-*` is `../runner/.env` before the host token.
+  stood just before the gathering; `~/projects/blizzard-blizzard/runner/.env.pre-consolidation-*` is
+  `~/projects/blizzard-blizzard/runner/.env` before the host token.
 - The pre-host `blizzard-runner.toml.graduated` and `backup-host-graduation-*/`, from the graduation before that.
 
 Going back from the gathering is: stop the unit, restore both directories from `backup-host-consolidation-*/`, re-enable
@@ -155,7 +161,7 @@ as `trace-export-failed`, and the sweep's cursor holds until the collector is ba
 
 | Piece       | Value                                                                                                        |
 | ----------- | ------------------------------------------------------------------------------------------------------------ |
-| Runtime dir | `../otel-collector` — `compose.yaml`, `otel-collector.yaml`, `collector.env`                                 |
+| Runtime dir | `~/projects/blizzard-blizzard/otel-collector` — `compose.yaml`, `otel-collector.yaml`, `collector.env`       |
 | Image       | `otel/opentelemetry-collector:0.162.0`, pinned to match `blizzard-infra`'s hosted collector                  |
 | Listens     | `127.0.0.1:4318`, OTLP over HTTP — loopback only, nothing off `xps` reaches it                               |
 | Secret      | `HONEYCOMB_API_KEY` in `collector.env` (mode `0600`), an ingest key for the Honeycomb `blizzard` environment |
@@ -166,7 +172,7 @@ as `trace-export-failed`, and the sweep's cursor holds until the collector is ba
 `compose.yaml` is that repo's `otel-collector` service with `ports: ["127.0.0.1:4318:4318"]` in place of `expose` and no
 network. Recreate the dir from there if it is ever lost; never commit `collector.env`.
 
-Operate it from `../otel-collector`:
+Operate it from `~/projects/blizzard-blizzard/otel-collector`:
 
 ```bash
 docker compose up -d                       # bring it up (also after editing either yaml)
@@ -184,7 +190,7 @@ is different: the host reads its environment only at startup, so it takes a host
 **Confirm both runners are reporting:**
 
 ```bash
-for r in r-claude r-chatgpt; do ../.venv/bin/blizzard runner traces status --dir ../runner --runner "$r"; done
+for r in r-claude r-chatgpt; do ~/projects/blizzard-blizzard/.venv/bin/blizzard runner traces status --dir ~/projects/blizzard-blizzard/runner --runner "$r"; done
 ```
 
 Each should read `tracing: on, exporting to http://127.0.0.1:4318`, with a recent `last export` and `last error: none`.
@@ -194,14 +200,15 @@ healthy.
 
 **After an outage longer than the sweep's lag cap**, the runner skips the window it fell behind on and reports
 `trace-window-skipped`. Tell it again with
-`blizzard runner traces replay --dir ../runner --runner <name|id> --since … --until …`. The backend dedupes on span ids,
-so overlapping a window that already arrived is harmless.
+`blizzard runner traces replay --dir ~/projects/blizzard-blizzard/runner --runner <name|id> --since … --until …`. The
+backend dedupes on span ids, so overlapping a window that already arrived is harmless.
 
 ### Traps on `xps`
 
-**`blizzard-blizzard-hub.service` is stopped and `disable`d — do not start it.** `../hub/` still exists on disk, but
-`../hub/data/hub.db` is a copy frozen at the migration, not what the fleet reads. Starting it serves that frozen state
-on `127.0.0.1:8421` and looks entirely healthy doing so. Nothing refreshes it, and it drifts further every day.
+**`blizzard-blizzard-hub.service` is stopped and `disable`d — do not start it.** `~/projects/blizzard-blizzard/hub/`
+still exists on disk, but `~/projects/blizzard-blizzard/hub/data/hub.db` is a copy frozen at the migration, not what the
+fleet reads. Starting it serves that frozen state on `127.0.0.1:8421` and looks entirely healthy doing so. Nothing
+refreshes it, and it drifts further every day.
 
 **`127.0.0.1:8421` answers nothing.** Any tool or dev surface still aimed there fails to connect rather than silently
 reaching the wrong fleet.
@@ -241,14 +248,14 @@ Error: not authenticated — run `blizzard hub login`
 **Set this up once per machine, before anything else in this file:**
 
 ```bash
-export PATH="$PWD/../.venv/bin:$PATH"              # from the workspace root; the venv's binary is on no PATH
+export PATH="$HOME/projects/blizzard-blizzard/.venv/bin:$PATH"              # from the workspace root; the venv's binary is on no PATH
 export BZ_HUB_URL=https://blizzard.grosscode.net   # every hub command defaults --hub-url to it
 export FLEET_TENANT=ten_01M4N8ZW1AXGMFD9WCAFJ1FJZB  # the instance's tenant; pass it as --tenant "$FLEET_TENANT"
 blizzard hub login                                  # opens a browser
 ```
 
-The `PATH` line is `xps`'s. Elsewhere there is no `../.venv`: put a `blizzard` CLI of the **Release** row's build on
-`PATH` instead.
+The `PATH` line is `xps`'s. Elsewhere there is no `~/projects/blizzard-blizzard/.venv`: put a `blizzard` CLI of the
+**Release** row's build on `PATH` instead.
 
 **Export `BZ_HUB_URL` — treat it as a prerequisite, not a convenience.** With it unset and no explicit `--hub-url`,
 every `blizzard hub …` command falls back to its built-in default of `http://127.0.0.1:8421`, which is the dead port
@@ -304,22 +311,22 @@ curl -s https://blizzard.grosscode.net/api/health | jq -r .version
 gh release download v<version> --repo paul-gross/blizzard --pattern 'blizzard-*.whl' --dir <scratch>
 
 # 3. install it into the runtime venv
-uv pip install --python ../.venv --reinstall <scratch>/blizzard-*.whl
+uv pip install --python ~/projects/blizzard-blizzard/.venv --reinstall <scratch>/blizzard-*.whl
 
 # 4. migrate the host's store, data/host.db (idempotent — safe every move). There is
 #    no local hub store to migrate; the hosted hub migrates itself on boot.
-../.venv/bin/blizzard runner migrate --dir ../runner
+~/projects/blizzard-blizzard/.venv/bin/blizzard runner migrate --dir ~/projects/blizzard-blizzard/runner
 
 # 5. check the host directory: loads blizzard-host.toml, verifies the store's revision
 #    and that it names each configured runner, and resolves each token at the hub, starting
 #    nothing. It must print `host ok`; a refusal is a stop — restart nothing.
-../.venv/bin/blizzard runner host --check --dir ../runner
+~/projects/blizzard-blizzard/.venv/bin/blizzard runner host --check --dir ~/projects/blizzard-blizzard/runner
 
 # 6. re-mint every graph the release range changed — see below. Reads the graph from the
 #    LOCAL venv and posts it to the HOSTED hub, so it needs $BZ_HUB_URL and a
 #    login. Sits BEFORE the runner restarts (which terminate fleet workers).
-../.venv/bin/blizzard hub graph mint --hub-url "$BZ_HUB_URL" --tenant "$FLEET_TENANT" \
-  ../.venv/lib/python3*/site-packages/blizzard/hub/graphs/<graph>/graph.yaml
+~/projects/blizzard-blizzard/.venv/bin/blizzard hub graph mint --hub-url "$BZ_HUB_URL" --tenant "$FLEET_TENANT" \
+  ~/projects/blizzard-blizzard/.venv/lib/python3*/site-packages/blizzard/hub/graphs/<graph>/graph.yaml
 
 # 7. restart the host. A fleet-worker shell has no user session bus, so
 #    systemctl --user fails there ("Failed to connect to bus") until these are set:
@@ -346,15 +353,16 @@ actually reaching the hub — a runner that cannot reach it still reports health
 
 ```bash
 journalctl --user -u blizzard-blizzard-runner.service --since "-2 min" | grep -c '"event": "tick end"'
-for r in r-claude r-chatgpt; do ../.venv/bin/blizzard runner status --dir ../runner --runner "$r" | head -5; done
+for r in r-claude r-chatgpt; do ~/projects/blizzard-blizzard/.venv/bin/blizzard runner status --dir ~/projects/blizzard-blizzard/runner --runner "$r" | head -5; done
 ```
 
 `blizzard runner status --runner <name|id>` opens with the runner's name and hub id; `not registered` in place of the id
 means the hub has not accepted its token.
 
 Last, confirm both runners still export traces — `blizzard runner traces status --runner` on each, per
-[Confirm both runners are reporting](#the-runners-trace-collector) — and that `docker compose ps` in `../otel-collector`
-shows the collector up. A host restart never touches the collector, but it is the moment a dropped `.env` line shows.
+[Confirm both runners are reporting](#the-runners-trace-collector) — and that `docker compose ps` in
+`~/projects/blizzard-blizzard/otel-collector` shows the collector up. A host restart never touches the collector, but it
+is the moment a dropped `.env` line shows.
 
 Once both halves are proven, record the move: the **Release** row above changes in a workspace commit, so the row and
 the running instance never disagree for longer than one move.
@@ -367,7 +375,7 @@ of what the older release expects, so before its wheel is installed, with the un
 1. Read the head revision the older release expects: install its wheel into a throwaway venv and run
    `blizzard runner migrate --head` from it.
 2. Downgrade on the **current** venv, which holds the downgrade code:
-   `../.venv/bin/blizzard runner migrate --dir ../runner --down <revision>`.
+   `~/projects/blizzard-blizzard/.venv/bin/blizzard runner migrate --dir ~/projects/blizzard-blizzard/runner --down <revision>`.
 3. Install the older wheel, check the directory, and restart, as in a forward move.
 
 A downgrade that fails leaves the unit stopped on the current venv, which is restarted unchanged. The hub's way back —
@@ -425,23 +433,23 @@ reads as a missing issue — re-scope the token before adding the source.
 
 ## Operating the fleet
 
-Drive the hub with the operator CLI — `../.venv/bin/blizzard` on `xps`. **Every command below needs `$BZ_HUB_URL`
-exported, a session, and `--tenant "$FLEET_TENANT"`** — see
+Drive the hub with the operator CLI — `~/projects/blizzard-blizzard/.venv/bin/blizzard` on `xps`. **Every command below
+needs `$BZ_HUB_URL` exported, a session, and `--tenant "$FLEET_TENANT"`** — see
 [The operator CLI needs a session](#the-operator-cli-needs-a-session). Operator verbs are grouped under a noun —
 `hub chunk …`, `hub runner …`, `hub graph …` — so the bare `hub <verb>` forms do not exist:
 
-| Intent                                                                            | Command                                                                                                                             |
-| --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| See every chunk and its derived status                                            | `hub status`                                                                                                                        |
-| Ingest an issue as a chunk                                                        | `hub chunk ingest blizzard:<issue-number>`                                                                                          |
-| Make an ingested chunk claimable                                                  | `hub chunk promote <chunk-id>`                                                                                                      |
-| Pin a chunk to a graph (and/or model)                                             | `hub chunk set <chunk-id> --graph <graph-id>`                                                                                       |
-| Inspect one chunk in full                                                         | `hub chunk show <chunk-id>`                                                                                                         |
-| Every runner, its id, liveness, and brakes                                        | `hub runner list`                                                                                                                   |
-| Stop a runner claiming new work — e.g. `r-chatgpt` when the OpenAI quota runs out | `hub runner pause <id>`                                                                                                             |
-| Let it claim again                                                                | `hub runner resume <id>`                                                                                                            |
-| One runner's liveness + paused state                                              | `hub runner show <id>`                                                                                                              |
-| Retire a runner for good — revoke its token, refuse its claims                    | `blizzard runner retire --runner <id> --dir ../runner` — read [The host and its runners](#the-host-and-its-runners) for its refusal |
+| Intent                                                                            | Command                                                                                                                                                       |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| See every chunk and its derived status                                            | `hub status`                                                                                                                                                  |
+| Ingest an issue as a chunk                                                        | `hub chunk ingest blizzard:<issue-number>`                                                                                                                    |
+| Make an ingested chunk claimable                                                  | `hub chunk promote <chunk-id>`                                                                                                                                |
+| Pin a chunk to a graph (and/or model)                                             | `hub chunk set <chunk-id> --graph <graph-id>`                                                                                                                 |
+| Inspect one chunk in full                                                         | `hub chunk show <chunk-id>`                                                                                                                                   |
+| Every runner, its id, liveness, and brakes                                        | `hub runner list`                                                                                                                                             |
+| Stop a runner claiming new work — e.g. `r-chatgpt` when the OpenAI quota runs out | `hub runner pause <id>`                                                                                                                                       |
+| Let it claim again                                                                | `hub runner resume <id>`                                                                                                                                      |
+| One runner's liveness + paused state                                              | `hub runner show <id>`                                                                                                                                        |
+| Retire a runner for good — revoke its token, refuse its claims                    | `blizzard runner retire --runner <id> --dir ~/projects/blizzard-blizzard/runner` — read [The host and its runners](#the-host-and-its-runners) for its refusal |
 
 Every one of these is a pure hub-API client and takes `--hub-url` (default `$BZ_HUB_URL`) — not `--url`. A runner's
 `<id>` is its hub id; [The host and its runners](#the-host-and-its-runners) lists both.
