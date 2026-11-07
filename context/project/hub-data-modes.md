@@ -11,15 +11,16 @@ hub**; the hosted one is for operator-driven inspection only, and needs `blizzar
 ## What data is actually reachable
 
 **There is no local hub DB.** The live hub store is on the EC2 host and is not reachable as a file from any checkout. On
-`xps` ([singleton-instance.md § Where it runs](./singleton-instance.md#where-it-runs)), `../hub/data/hub.db` exists but
-is a **frozen snapshot** — the fleet as it stood at the migration, not as it is — and `../runner/data/host.db`, the
-runner host's store holding both runners' rows, is the only live database beside the checkout. Anywhere else there is
-neither.
+`xps` ([singleton-instance.md § Where it runs](./singleton-instance.md#where-it-runs)),
+`~/projects/blizzard-blizzard/hub/data/hub.db` exists but is a **frozen snapshot** — the fleet as it stood at the
+migration, not as it is — and `~/projects/blizzard-blizzard/runner/data/host.db`, the runner host's store holding both
+runners' rows, is the only live database beside the checkout. Anywhere else there is neither.
 
 **Hard constraint (runner only, on `xps`):** SQLite is single-writer. The systemd host holds its store —
-`../runner/data/host.db` (`blizzard-blizzard-runner.service`) — and runs migrations on boot, so a second daemon writing
-it concurrently risks lock contention / corruption. **Do not point a live feature-env runner at the host's store while
-its unit is up.** This is a data-safety constraint, not a tooling gap — no config mechanism relaxes it.
+`~/projects/blizzard-blizzard/runner/data/host.db` (`blizzard-blizzard-runner.service`) — and runs migrations on boot,
+so a second daemon writing it concurrently risks lock contention / corruption. **Do not point a live feature-env runner
+at the host's store while its unit is up.** This is a data-safety constraint, not a tooling gap — no config mechanism
+relaxes it.
 
 Port 8421 answers **nothing** — on `xps`, the old local hub unit is stopped and disabled. A dev surface still aimed
 there fails to connect rather than quietly reaching the wrong fleet.
@@ -45,13 +46,13 @@ at different data.
    `BZ_HUB_PORT` band, so `npm start` proxies to it with no extra configuration (`npm start` errors out if the var is
    unset rather than serving a board whose every read 404s). Data is whatever that env's store holds — seed it (mode 2
    or 3) when the empty board is not enough.
-2. **Snapshot hub — realistic shape, zero live risk; `xps` only.** `../hub/` is a point-in-time copy of the fleet,
-   frozen at the migration. Host a hub on a **copy of the copy** at a free port, migrating it first — the venv's wheel
-   advances with every release the instance moves onto while that store does not, and a hub fails fast on a store behind
-   its code:
+2. **Snapshot hub — realistic shape, zero live risk; `xps` only.** `~/projects/blizzard-blizzard/hub/` is a
+   point-in-time copy of the fleet, frozen at the migration. Host a hub on a **copy of the copy** at a free port,
+   migrating it first — the venv's wheel advances with every release the instance moves onto while that store does not,
+   and a hub fails fast on a store behind its code:
 
    ```text
-   mkdir -p /tmp/hub-snap && cp -r ../hub/* /tmp/hub-snap/
+   mkdir -p /tmp/hub-snap && cp -r ~/projects/blizzard-blizzard/hub/* /tmp/hub-snap/
    blizzard hub migrate --dir /tmp/hub-snap
    blizzard hub host --dir /tmp/hub-snap --port 4599
    ```
