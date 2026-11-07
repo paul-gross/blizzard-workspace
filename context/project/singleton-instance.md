@@ -130,23 +130,13 @@ host** to take one runner out: it retires every runner the host holds.
 
 #### What the consolidation left behind
 
-The two runners ran as two hosts of one until they were gathered into `xps`. What that left is kept only to go back by:
+The two runners ran as two hosts until they were gathered into `xps`. r-chatgpt's former host directory and its unit are
+gone, so the gathering is not undone; what remains is a record of this host's side only:
 
-- `~/projects/blizzard-blizzard/runner-opencode` — r-chatgpt's former host directory. Its store is set aside as
-  `data/host.db.<timestamp>`, its token is gone from its `.env`, and its `blizzard-host.toml` still names a runner that
-  would halt for want of a token.
-- `blizzard-blizzard-runner-opencode.service` — its former unit, stopped and `disable`d. Do not start it.
-- `backup-host-consolidation-*/` in both directories — each store, host file, `.env`, worker config, and unit as they
-  stood just before the gathering; `~/projects/blizzard-blizzard/runner/.env.pre-consolidation-*` is
+- `~/projects/blizzard-blizzard/runner/backup-host-consolidation-*/` — the store, host file, `.env`, worker config, and
+  unit as they stood just before the gathering; `~/projects/blizzard-blizzard/runner/.env.pre-consolidation-*` is
   `~/projects/blizzard-blizzard/runner/.env` before the host token.
 - The pre-host `blizzard-runner.toml.graduated` and `backup-host-graduation-*/`, from the graduation before that.
-
-Going back from the gathering is: stop the unit, restore both directories from `backup-host-consolidation-*/`, re-enable
-and start the second unit, and release both runners from the host at the hub
-(`hub runner-host release
-hs_01M521395MMCN3ANGMJVQPG1YK <runner_id>`, once per runner) — never `hub runner-host retire`.
-It is clean only before the runners do work in `xps`; past that, the restored stores are older than the hub's view of
-them.
 
 ### The runners' trace collector
 
