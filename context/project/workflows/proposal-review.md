@@ -13,6 +13,33 @@ done.
 ([singleton-instance.md § The operator CLI needs a session](../singleton-instance.md#the-operator-cli-needs-a-session)).
 The review only reads code, and nothing is written to the hub until the user approves it.
 
+## Roles and handoff
+
+The main agent orchestrates the review and owns the conversation and decision record. Explain the proposals with the
+context, costs, tradeoffs, and recommendations the stages below require, and wait for the user's decisions. Delegate
+inventory and verification to read-only review agents; delegate approved proposal edits, accepts and passes, immediate
+marshalling, and verification of the resulting hub state to a dedicated execution subagent.
+
+Keep the next batch or heavy question prepared, including required verification, before the current answer arrives; hold
+only one discussion ahead privately. On the user's answer, present that prepared next discussion immediately first, then
+dispatch approved execution, verification, and further reads in the background. Execution handoffs, progress reports,
+and grouping or promotion checkpoints must not delay the next discussion. Collect explicit grouping and promotion
+approvals at a natural checkpoint after presenting it, batching pending rollouts where appropriate; waiting work remains
+unauthorized until approved. Nonblocking completion notices must not repeatedly replace the pending question with
+status-only turns.
+
+Each execution handoff includes:
+
+- Exact proposal IDs and session labels, the approved decisions and reshaping, and explicit exclusions.
+- The review date and required closure reasons, plus shared manifest and notes paths for decisions and results.
+- Current grouping and promotion authorization, including which lanes and additions it covers.
+
+The execution agent applies only that authorization: no decisions on unapproved proposals, new scope, or inferred
+promotion. It returns grouping proposals, uncertainties, blockers, and verified hub results to the main agent, not to
+the user in a parallel conversation. The main agent relays material issues and approval requests, tracks pending versus
+completed work, and keeps the review moving five at a time or one heavy decision at a time rather than ending with a
+rollout status. Distinguish handed-off work from execution actually started and results verified.
+
 ## 1. Inventory
 
 `blizzard hub garden-proposal list --tenant "$FLEET_TENANT" --json` lists every proposal, newest first. The open ones
@@ -48,15 +75,22 @@ marshal steps at once ([workflows/marshalling.md](./marshalling.md)).
 only that underuses its agent: mid-sized chunks do well. Group small chunks that share an area (one package, one feature
 folder, one seam) into one lane, even when they are separable. Stop short of a sprawling PR. Keep a chunk standalone
 only when it is already large, such as a broad mechanical sweep, and `depend` across groups only where marshalling's bar
-for an edge is met. Promote the lanes in priority order once the user approves the grouping. A later tier's accepts join
-a lane that is still unacquired, or depend on it, and are promoted as they are marshalled.
+for an edge is met. Promote the lanes in priority order only with the user's grouping and promotion approval. A later
+tier's accepts join a lane that is still unacquired, or depend on it, within the authorized grouping. Bring additions
+outside that scope back for approval; joining an already-ready lane also needs promotion authorization for the added
+work, since grouping must not bypass that gate.
 
 ## 4. Walk the consideration tier
 
-Present the tier five proposals at a time. Give each a short paragraph covering what is wrong, what the fix is, what it
-costs, and a recommendation. Write for a senior software engineer, not an architect: say what the code does and why it
-hurts, and leave out the harness's rule ids and layering vocabulary unless they carry the point. The user calls each one
-*do* or *don't*, often with a reshaping:
+While the current five await the user's decisions, delegate read-only preparation of the next five to a review agent.
+Keep only one batch ahead, hold its prepared material privately, and present it after the user answers the current
+batch, not alongside it. This preparation is separate from approved background execution and confers no approval or
+authority to mutate proposals or the hub.
+
+Present the tier five proposals at a time. Give each a short paragraph covering what is wrong, what the fix is, its
+costs and tradeoffs, and a recommendation. Write for a senior software engineer, not an architect: say what the code
+does and why it hurts, and leave out the harness's rule ids and layering vocabulary unless they carry the point. The
+user calls each one *do* or *don't*, often with a reshaping:
 
 - **Do.** Accept the proposal. When the user reshapes it, edit its title, body, and findings first, so the minted item
   carries the decision. Fold a proposal the user calls answered by another into that one, and pass it with a note naming
@@ -83,11 +117,14 @@ The outcome is usually one of these:
 
 ## 6. Report
 
-Report the open count before and after, what was accepted with the lanes it was marshalled into, what was passed and
-why, the issues filed, and what was left open and why.
+Reconcile execution results with the shared manifest. Report the open count before and after, what was accepted with the
+lanes it was marshalled into, what was passed and why, the issues filed, and what was left open and why. Name any
+pending execution or blockers separately from completed changes.
 
 ## Don't
 
 - Accept or pass any proposal before the user has approved that tier's list.
 - Accept an obvious yes without re-verifying it against `master`, unless the user waived the re-verification.
 - Pass a proposal without a reason.
+- Treat passing a proposal as withdrawing its findings; their lifecycle stays with
+  `blizzard-context:/domain/findings-and-proposals.md`.
