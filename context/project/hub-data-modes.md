@@ -10,8 +10,9 @@ hub**; the hosted one is for operator-driven inspection only, and needs `blizzar
 
 ## What data is actually reachable
 
-**There is no local hub DB.** The live hub store is on the EC2 host and is not reachable as a file from any checkout. On
-`xps` ([singleton-instance.md § Where it runs](./singleton-instance.md#where-it-runs)),
+**There is no local hub DB.** The live hub store is on the EC2 host and is not reachable as a file from any checkout —
+but the host ships a full copy of it to S3 every day, which any machine with the `blizzard-prod-admin` profile can pull
+(mode 2). On `xps` ([singleton-instance.md § Where it runs](./singleton-instance.md#where-it-runs)),
 `~/projects/blizzard-blizzard/hub/data/hub.db` exists but is a **frozen snapshot** — the fleet as it stood at the
 migration, not as it is — and `~/projects/blizzard-blizzard/runner/data/host.db`, the runner host's store holding both
 runners' rows, is the only live database beside the checkout. Anywhere else there is neither.
@@ -46,20 +47,20 @@ at different data.
    `BZ_HUB_PORT` band, so `npm start` proxies to it with no extra configuration (`npm start` errors out if the var is
    unset rather than serving a board whose every read 404s). Data is whatever that env's store holds — seed it (mode 2
    or 3) when the empty board is not enough.
-2. **Snapshot hub — realistic shape, zero live risk; `xps` only.** `~/projects/blizzard-blizzard/hub/` is a
-   point-in-time copy of the fleet, frozen at the migration. Host a hub on a **copy of the copy** at a free port,
-   migrating it first — the venv's wheel advances with every release the instance moves onto while that store does not,
-   and a hub fails fast on a store behind its code:
+2. **Snapshot hub — real fleet data, zero live risk.** The production host ships a full, consistent copy of its store to
+   S3 daily (and on demand); pull one and host it on a free port, on localhost only:
 
    ```text
-   mkdir -p /tmp/hub-snap && cp -r ~/projects/blizzard-blizzard/hub/* /tmp/hub-snap/
-   blizzard hub migrate --dir /tmp/hub-snap
-   blizzard hub host --dir /tmp/hub-snap --port 4599
+   blizzard-infra/scripts/hub-snapshot.sh pull           # the newest; --fresh takes one first
+   blizzard hub init <dest>                              # scaffolds config, migrates the store; never replaces it
+   blizzard hub host --dir <dest> --host 127.0.0.1 --port 4599
    ```
 
-   then `BZ_HUB_PORT=4599 npm start`. The best source of realistically *shaped* data available locally — but it is a
-   fixed snapshot, not current fleet state, and drifts further every day. Nothing refreshes it; a fresh one means
-   dumping the store off the host.
+   `pull` prints `<dest>` (under `~/.cache/blizzard/hub-snapshots/`) and the hub build that wrote the snapshot — the
+   local `blizzard` must be at or above it, since a hub refuses a store ahead of its code. Then
+   `BZ_HUB_PORT=4599 npm start`. The snapshot is the **whole production store, transcripts included**: keep it on the
+   machine and never bind it beyond localhost. Its sealed hub secrets stay sealed — their key is the host's, not in the
+   store. Retention, layout, and the on-host side are owned by `blizzard-infra:README.md` § Store snapshots.
 3. **Seeded mock stack — synthetic worlds.** `blizzard-mock-data reset --store hub --url <sqlite>` returns a scratch hub
    store to clean; richer state seeds through the hub's own HTTP API (ingest → promote, with `blizzard-mock-forge` as
    the work source). The mock-data `fixture` subgroup (named one-command scenarios) is still stubbed — until it lands,
