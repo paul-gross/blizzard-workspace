@@ -76,11 +76,11 @@ holding both runners, and it reports both workspaces and both subscriptions to t
 | Hub token                      | `BZ_HUB_TOKEN_R_CLAUDE` in `~/projects/blizzard-blizzard/runner/.env` | `BZ_HUB_TOKEN_R_CHATGPT` in `~/projects/blizzard-blizzard/runner/.env`                                                                                                                                                                                                      |
 
 Both runners serve the hub's **`blizzard` project** through one shared `[[workspace]]`, `blizzard`: root
-`~/projects/blizzard-workspace`, envs `bz1`–`bz8`, one pool for both runners. They also serve the **`winter` project**
-(every `paul-gross/winter*` source and repo), each through a second binding to one shared `[[workspace]]`, `winter`:
-root `~/projects/winter-workspace`, envs `bz1`–`bz4`, one pool for both runners. Its envs are hyphen-free because that
-workspace's per-env Postgres slice puts the env name into a SQL identifier (`wts_<env>`), and its hand-used
-`alpha`–`epsilon` envs are never in the pool.
+`~/projects/blizzard-workspace`, envs `bz1`–`bz8`, one pool for both runners. They also serve the **`winter` project**,
+each through a second binding to one shared `[[workspace]]`, `winter`: root `~/projects/winter-dev`, envs `bz1`–`bz8`,
+one pool for both runners — `blizzard-host.toml` is the record of its settings. The `blizzard` pool reuses those env
+names under another root, so no worktree is in both. Its `c5xlabs` repo records read their forge token from the secret
+`github-forge-c5xlabs`, not `github-forge`, since a fine-grained token has one resource owner.
 
 **A runner's agents are one count across its bindings.** A free agent takes the next ready chunk, in the hub's
 ready-queue order, of any bound project whose workspace has a free env, and holds that env for its lifetime. Set it as
