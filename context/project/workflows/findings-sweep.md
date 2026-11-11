@@ -16,6 +16,10 @@ hundreds of prose nits.
 **Scope.** An operator session using [our fleet binding](../blizzard-binding.md). The sweep is read-only on code: it
 mints work and never fixes code itself. Each verb's `--help` owns its flags.
 
+Every hub call in this pass takes `--hub-url "$BZ_HUB_URL"` and `--tenant "$FLEET_TENANT"`. The inventory snippets
+starting with `hub` abbreviate the approved `blizzard` executable and those flags; they are not complete shell commands.
+Keep project-scoped reads and proposal creation in the bound `blizzard` project.
+
 ## 1. Inventory
 
 - **Proposals.** List them with `hub garden-proposal list --json`. Use
@@ -74,10 +78,13 @@ Write the draft to a scratch file. Every live finding lands in exactly one bucke
 Once the user approves the draft, write it in this order:
 
 ```bash
-blizzard hub finding confirm-gone --note "…" <finding-id>…
-blizzard hub finding wont-fix --note "…" <finding-id>…        # likewise not-a-finding and supersede
-blizzard hub garden-proposal create --project blizzard --title "…" --class remediate --body-file <body.md> --finding <finding-id>…
-blizzard hub garden-proposal accept <proposal-id>             # only the proposals the user accepts
+blizzard hub finding confirm-gone --hub-url "$BZ_HUB_URL" --tenant "$FLEET_TENANT" --note "…" <finding-id>…
+blizzard hub finding wont-fix --hub-url "$BZ_HUB_URL" --tenant "$FLEET_TENANT" --note "…" <finding-id>…
+# The same target flags apply to not-a-finding and supersede.
+blizzard hub garden-proposal create --hub-url "$BZ_HUB_URL" --tenant "$FLEET_TENANT" --project blizzard \
+  --title "…" --class remediate --body-file <body.md> --finding <finding-id>…
+blizzard hub garden-proposal accept --hub-url "$BZ_HUB_URL" --tenant "$FLEET_TENANT" <proposal-id>
+# Accept only proposals the user approves.
 ```
 
 Prepare accepted work through [shared marshalling](blizzard-usage:/context/workflows/marshalling.md), under
