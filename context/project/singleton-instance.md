@@ -35,16 +35,16 @@ Paths below are `xps`'s. The instance directory, `~/projects/blizzard-blizzard`,
 the collector; this workspace sits beside it at `~/projects/blizzard-workspace`, outside it so the env tree's unix
 sockets stay under the 108-byte `sun_path` limit.
 
-| Piece           | Location / value                                                                                                                                                                                                                                                                                               |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Hub**         | **`https://blizzard.grosscode.net`** — health `GET /api/health`, readiness `GET /api/ready`. GitHub OAuth; reads need a session                                                                                                                                                                                |
-| Hub deployment  | Owned end to end by the **`paul-gross/blizzard-infra`** repo (private; worktreed here only on a machine whose `config.local.toml` declares it). It holds the host, the image channel, the updater, rollback, and the operator entry points. Go there for anything about the host — none of it is restated here |
-| Runner host     | One host, `xps`, running two runners split by harness — see [The host and its runners](#the-host-and-its-runners) for its ids, workspaces, envs, tokens, and unit                                                                                                                                              |
-| Venv            | `~/projects/blizzard-blizzard/.venv` — the `blizzard` binary the host runs, and the operator CLI; installed from the **build's wheel** — a release's, or a dogfood build's `push`-run wheel — never a local build or an editable install                                                                       |
-| Release         | **dogfood `0.5.0.dev1420+aa786ded2`** (`master` at `aa786ded2`) — the exact build both halves run: the venv holds that commit's `push`-run wheel, and the hub runs its `sha-` image by digest, pinned as [The hub's pin](#the-hubs-pin) describes                                                              |
-| Forge           | **real GitHub** — owner `paul-gross`; the hub's token lives on the host, never in this repo                                                                                                                                                                                                                    |
-| Supervision     | one systemd **user** unit, `blizzard-blizzard-runner.service` (unit file and drop-ins in `~/.config/systemd/user/`)                                                                                                                                                                                            |
-| Trace collector | `~/projects/blizzard-blizzard/otel-collector` — a docker compose OpenTelemetry Collector on `127.0.0.1:4318` that forwards both runners' spans to Honeycomb; see [The runners' trace collector](#the-runners-trace-collector)                                                                                  |
+| Piece           | Location / value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Hub**         | **`https://blizzard.grosscode.net`** — health `GET /api/health`, readiness `GET /api/ready`. GitHub OAuth; reads need a session                                                                                                                                                                                                                                                                                                                                                                                                   |
+| Hub deployment  | Owned end to end by the **`paul-gross/blizzard-infra`** repo (private; worktreed here only on a machine whose `config.local.toml` declares it). It holds the host, the image channel, the updater, rollback, and the operator entry points. Go there for anything about the host — none of it is restated here                                                                                                                                                                                                                    |
+| Runner host     | One host, `xps`, running two runners split by harness — see [The host and its runners](#the-host-and-its-runners) for its ids, workspaces, envs, tokens, and unit                                                                                                                                                                                                                                                                                                                                                                 |
+| Venv            | `~/projects/blizzard-blizzard/.venv` — the `blizzard` binary the host runs, and the operator CLI; installed from the **build's wheel** — a release's, or a dogfood build's `push`-run wheel — never a local build or an editable install                                                                                                                                                                                                                                                                                          |
+| Build           | the build `blizzard-infra`'s `deploy/release.env` pins for the hub — a release, or a dogfood build's `sha-` image by digest, as [The hub's pin](#the-hubs-pin) describes — and the venv holds the same build's wheel. Nothing here records which: ask the instance. `curl -s https://blizzard.grosscode.net/api/health \| jq -r .version` for the hub, and `curl -s http://127.0.0.1:8431/api/health \| jq -r .version` on `xps` for the host; a dogfood build reports its dev version with its commit, `0.5.0.dev1420+aa786ded2` |
+| Forge           | **real GitHub** — owner `paul-gross`; the hub's token lives on the host, never in this repo                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Supervision     | one systemd **user** unit, `blizzard-blizzard-runner.service` (unit file and drop-ins in `~/.config/systemd/user/`)                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Trace collector | `~/projects/blizzard-blizzard/otel-collector` — a docker compose OpenTelemetry Collector on `127.0.0.1:4318` that forwards both runners' spans to Honeycomb; see [The runners' trace collector](#the-runners-trace-collector)                                                                                                                                                                                                                                                                                                     |
 
 ### The host and its runners
 
@@ -246,7 +246,7 @@ blizzard hub login                                  # opens a browser
 ```
 
 The `PATH` line is `xps`'s. Elsewhere there is no `~/projects/blizzard-blizzard/.venv`: put a `blizzard` CLI of the
-**Release** row's build on `PATH` instead.
+build the hub reports at `/api/health` on `PATH` instead.
 
 **Export `BZ_HUB_URL` — treat it as a prerequisite, not a convenience.** With it unset and no explicit `--hub-url`,
 every `blizzard hub …` command falls back to its built-in default of `http://127.0.0.1:8421`, which is the dead port
@@ -331,14 +331,14 @@ minting blindly.
 
 Verify the host: the **version stamp is the proof** — a `200` from `/api/health` alone can come from the *old* process
 and has, so it confirms liveness, never the move. A release wheel carries no local segment, so the host reports the
-release exactly, and it must equal the **Release** row's version in PEP 440 normal form:
+release exactly, and it must equal the target release in PEP 440 normal form:
 
 ```bash
 curl -s http://127.0.0.1:8431/api/health | jq -r .version   # -> 0.2.0rc2 for v0.2.0-rc.2
 ```
 
-Any other version — a `+` local segment above all — means the venv runs a build, not the release the row names; stop
-there. Then check `systemctl --user is-active blizzard-blizzard-runner.service` for the unit,
+Any other version — a `+` local segment above all — means the venv runs a build, not the target release; stop there.
+Then check `systemctl --user is-active blizzard-blizzard-runner.service` for the unit,
 `curl -s http://127.0.0.1:8431/api/ready` for both runners `serving` under their hub ids, and that each runner is
 actually reaching the hub — a runner that cannot reach it still reports healthy:
 
@@ -355,13 +355,15 @@ Last, confirm both runners still export traces — `blizzard runner traces statu
 `~/projects/blizzard-blizzard/otel-collector` shows the collector up. A host restart never touches the collector, but it
 is the moment a dropped `.env` line shows.
 
-Once both halves are proven, record the move: the **Release** row above changes in a workspace commit, so the row and
-the running instance never disagree for longer than one move.
+Nothing in this workspace records the move: the hub's pin in `blizzard-infra` is the deployment's record, and each
+half's `/api/health` reports what it actually runs.
 
 ### Going back
 
-Going back is the same move towards an older release, **runner host first and hub after**. The host's store may be ahead
-of what the older release expects, so before its wheel is installed, with the unit stopped throughout:
+Going back is the same move towards an older release, **runner host first and hub after**. The build to go back to is
+the one the hub reported before the move, which `blizzard-infra`'s `deploy/release.env` history also holds. The host's
+store may be ahead of what the older release expects, so before its wheel is installed, with the unit stopped
+throughout:
 
 1. Read the head revision the older release expects: install its wheel into a throwaway venv and run
    `blizzard runner migrate --head` from it.
