@@ -143,15 +143,19 @@ By default, work lands through a pull request the agent drives to completion:
 1. **Curate the branch** — rebase onto the latest `origin/master` and squash to one landed unit of work per commit: one
    feature or one fix. A feature plus the follow-up fixes to it that never landed is *one* unit; a genuinely separate
    concern (a test repair, an unrelated bug) stays its own commit.
-2. **Open the PR** — push the curated branch to a feature branch and `gh pr create --base master`.
-3. **Watch it to completion** — `gh pr checks <pr> --watch`. On a red check, fix it, re-curate, force-push, and watch
+2. **Connect to a feature branch** — `winter ws connect <env> <feature-branch>`, then confirm `winter ws status <env>`
+   shows each worktree tracking `origin/<feature-branch>`, not `origin/master`. An env worktree tracks `master` until
+   connected, and `push.default=upstream` sends an unconnected push straight to `master` — no PR, no CI gate. Never push
+   before this step.
+3. **Open the PR** — `winter ws push <env>`, then `gh pr create --base master --head <feature-branch>`.
+4. **Watch it to completion** — `gh pr checks <pr> --watch`. On a red check, fix it, re-curate, force-push, and watch
    again. A repo that reports no PR checks has nothing to wait on.
-4. **Rebase-merge on green** — `gh pr merge <pr> --rebase`, which puts the branch's curated commits on top of `master`
+5. **Rebase-merge on green** — `gh pr merge <pr> --rebase`, which puts the branch's curated commits on top of `master`
    with no merge commit, so history stays linear. First confirm the branch still sits on the latest `origin/master`; if
    `master` moved, rebase again, force-push, and watch again, so what lands is what CI proved. Not `--squash`: it
    rewrites the commit message from the PR title and collapses deliberately separate commits. Afterward the landed
    commits carry new SHAs, so resync the worktree from `origin/master` rather than pushing the old branch again.
-5. **Read post-delivery once it lands** — a landing deploys nothing to the instance, which runs a pinned build;
+6. **Read post-delivery once it lands** — a landing deploys nothing to the instance, which runs a pinned build;
    [post-delivery.md](./post-delivery.md) owns what it does owe.
 
 A merge commit (`--merge`) is the exception, not the default: take one only when grouping a multi-commit branch under it
