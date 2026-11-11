@@ -13,8 +13,7 @@ Read before any fleet call. General connection and operating guidance belongs to
 | Other project on this fleet | `winter` — select it only for work on that project                      |
 | Human authentication        | GitHub OAuth through `blizzard hub login`; reads also require a session |
 
-The operator also administers the `demo` tenant. Always select our tenant explicitly for tenant-scoped calls and the
-intended project for project-scoped calls; neither an ambiguous membership nor a CLI default selects our fleet.
+Use the tenant above explicitly for tenant-scoped calls and the intended project for project-scoped calls.
 
 Our operator workflows use these shell bindings:
 
