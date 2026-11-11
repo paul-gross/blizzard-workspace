@@ -18,8 +18,10 @@ mints work and never fixes code itself. Each verb's `--help` owns its flags.
 
 ## 1. Inventory
 
-- **Proposals.** List them with `hub garden-proposal list --json`. Decide any still-open proposal first, or leave it and
-  keep its findings out of the draft. Draft no second proposal over findings an open one already cites.
+- **Proposals.** List them with `hub garden-proposal list --json`. Use
+  [shared proposal review](blizzard-usage:/context/workflows/proposal-review.md) to decide any still-open proposal
+  first, or leave it and keep its findings out of the draft. Draft no second proposal over findings an open one already
+  cites.
 - **Live findings.** No verb lists every finding, so enumerate them. For each routine (`hub routine list`) and each
   scope (`hub scope list`), run `hub finding list --routine <routine> --scope <scope> --source routine --json`. For each
   scope, run `hub finding list --source review --scope <scope> --json`. Give every call `--project`, set to its scope
@@ -78,7 +80,8 @@ blizzard hub garden-proposal create --project blizzard --title "…" --class rem
 blizzard hub garden-proposal accept <proposal-id>             # only the proposals the user accepts
 ```
 
-An accept mints a chunk, and minting a chunk owes the marshal steps at once ([marshalling.md](./marshalling.md)).
+Prepare accepted work through [shared marshalling](blizzard-usage:/context/workflows/marshalling.md), under
+[our local work policy](../blizzard-binding.md#local-policy).
 
 ## 6. Re-count, then report
 
