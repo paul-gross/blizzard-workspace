@@ -60,22 +60,24 @@ or `Refs paul-gross/blizzard-context#21` to link without closing.
 An issue whose work breaks a surface a supported release ships — what counts is the `blizzard` repo's
 `docs/versioning.md`, judged by `bzh:released-surface-additive` — leads its title with `(BREAK)`:
 `(BREAK) Retire the marker routes and step span`. It is the issue's counterpart of the commit's `!`, which the commit
-that closes it still carries. `gh issue list -R paul-gross/blizzard --search 'in:title BREAK'` lists them.
+that closes it still carries. `gh issue list -R paul-gross/blizzard --search 'in:title BREAK'` lists them. For a removal
+assigned to a release line, use the title convention in
+[release-train.md § Breaking issues](./workflows/release-train.md#breaking-issues).
 
-A `(BREAK)` issue belongs to no epic. An epic holds only additive work, deprecating what it replaces, so it closes when
-that work lands; the removal the deprecation leaves is a standalone `(BREAK)` issue, filed beside the epic and naming it
+A breaking issue belongs to no epic. An epic holds only additive work, deprecating what it replaces, so it closes when
+that work lands; the removal the deprecation leaves is a standalone breaking issue, filed beside the epic and naming it
 in `related`, but no sub-issue of it and carrying no `[<TAG>]`. It waits on GitHub, uningested, until an operator
-decides a release may carry the break ([workflows/marshalling.md](./workflows/marshalling.md)).
+decides a release may carry the break. Marshalling never ingests breaking issues or work depending on them, whether the
+title uses `(BREAK)` or the release-line form. An operator who ingests one by hand also owns its promotion.
 
 ## Issue dependencies
 
 An issue that builds on another is **blocked by** it on GitHub, so the order lives with the issues and not only in the
 hub. Whoever files an issue links every prerequisite they can name — the previous child in an epic's landing order, a
 child of another epic, or work already in flight — and an epic's follow-up `(BREAK)` cleanup is blocked by the epic's
-last child. A prerequisite is work the issue builds on, or work that rewrites the same files so heavily that the second
-to land could not rebase; an issue that merely touches the same files is not one
-([shared marshalling](blizzard-usage:/context/workflows/marshalling.md#link-genuine-prerequisites) owns the bar). The
-link is keyed by the blocking issue's REST database id, not its number:
+last child. Apply the prerequisite criteria in
+[shared marshalling](blizzard-usage:/context/workflows/marshalling.md#link-genuine-prerequisites). The link is keyed by
+the blocking issue's REST database id, not its number:
 
 ```bash
 gh api -X POST repos/paul-gross/blizzard/issues/<N>/dependencies/blocked_by \
@@ -83,8 +85,8 @@ gh api -X POST repos/paul-gross/blizzard/issues/<N>/dependencies/blocked_by \
 gh api repos/paul-gross/blizzard/issues/<N>/dependencies/blocked_by --jq '[.[].number]'   # read them back
 ```
 
-Marshalling turns these links into the hub's dependency edges and writes back any edge it adds
-([workflows/marshalling.md](./workflows/marshalling.md)), so the two never disagree.
+While marshalling, turn qualifying GitHub links into hub dependency edges, remove links that do not meet the shared
+criteria with a recorded reason, and write every added hub edge back as a GitHub blocked-by link.
 
 ## Fleet-fulfillable issues
 
@@ -99,12 +101,11 @@ unreachable work off it. A criterion is unfulfillable when it is:
 - **PR-body content** — *"the PR description lists the migrated routes"*: the hub's `deliver` node writes the PR body
   from a fixed template, so no worker can put text in it.
 
-That work is filed as its own issue, labelled `blizzard:manual`, and a `blizzard:manual` issue is never meant for the
-fleet: marshalling never ingests one ([workflows/marshalling.md](./workflows/marshalling.md)). The label is this
-workspace's convention alone — blizzard knows nothing of it. It links to the fleet issue it relates to by
-[§ Issue dependencies](#issue-dependencies): manual work the fleet issue needs first — a secret provisioned, a setting
-flipped — **blocks** the fleet issue; manual work that follows the fleet issue's landing — a deployment step, a
-protection rule on the new check — is **blocked by** it.
+That work is filed as its own issue, labelled `blizzard:manual`. Marshalling never ingests one, or fleet work blocked by
+an open one. The label is this workspace's convention alone — blizzard knows nothing of it. It links to the fleet issue
+it relates to by [§ Issue dependencies](#issue-dependencies): manual work the fleet issue needs first — a secret
+provisioned, a setting flipped — **blocks** the fleet issue; manual work that follows the fleet issue's landing — a
+deployment step, a protection rule on the new check — is **blocked by** it.
 
 ## Checks before pushing
 

@@ -54,10 +54,25 @@ singleton split across builds. Host identities, paths, and the deployment runboo
 
 ## Local policy
 
-| Policy                                     | When to read                                                                                        |
-| ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| [Marshalling](./workflows/marshalling.md)  | Minting chunks or ordering the backlog; apply our selection, tracker, priority, and approval policy |
-| [Operator workflows](./workflows/index.md) | Running a named operator pass; its approval checkpoints govern its writes                           |
-| [Contributing](./contributing.md)          | Filing fleet work or delivering workspace/project changes                                           |
-| [Post-delivery](./post-delivery.md)        | Work has landed; a landing does not authorize a deployment                                          |
-| [Hub data modes](./hub-data-modes.md)      | Developing against hub data; our production fleet is not a UI-development target                    |
+Use the [shared operator workflows](blizzard-usage:/context/workflows/index.md) with these local bindings:
+
+| Fact                               | Binding                                                                                                          |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Backlog scope                      | The `blizzard` project's chunks, not the tenant-wide backlog                                                     |
+| Repository base                    | Current `origin/master` in each affected repository                                                              |
+| Garden criteria                    | `blizzard-context:/garden/index.md`                                                                              |
+| Garden inventory windows           | 90 days for sweep measurements; initially 14 days for runs, extended to include older unfinished runs            |
+| Issue filing                       | `/wg-issue`, following [contributing.md](./contributing.md)                                                      |
+| Work eligibility and tracker links | [Contributing](./contributing.md#issue-titles) owns breaking/manual-only exclusions and GitHub dependency policy |
+| Findings drain                     | [Our findings sweep](./workflows/findings-sweep.md)                                                              |
+
+Every newly minted chunk immediately owes the shared marshalling workflow's mapping, grouping, and dependency
+assessment. Promotion needs the user's authorization. A named pass's draft-only or approval checkpoint takes precedence
+over automatic preparation writes.
+
+Our promotion priority is defects operators or the fleet hit, then latent defects, then prose.
+
+| Policy                                | When to read                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| [Post-delivery](./post-delivery.md)   | Work has landed; a landing does not authorize a deployment                       |
+| [Hub data modes](./hub-data-modes.md) | Developing against hub data; our production fleet is not a UI-development target |
