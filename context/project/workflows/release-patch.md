@@ -87,10 +87,10 @@ did not move — `vX.Y.P` is not the release marked latest
 
 ## 7. Move the instance
 
-When the instance runs a release on line `X.Y` — the **Release** row of
-[singleton-instance.md](../singleton-instance.md#deployed-surface) — offer the user the move onto `vX.Y.P` by the
-[runbook](../singleton-instance.md#redeploy--restart-runbook--moving-the-instance-onto-a-release), the instance's
-binding of [release-deploy.md](./release-deploy.md). It runs on `xps` alone.
+When the instance runs a release on line `X.Y` — the version the hub reports, per
+[singleton-instance.md § Deployed surface](../singleton-instance.md#deployed-surface) — offer the user the move onto
+`vX.Y.P` by the [runbook](../singleton-instance.md#redeploy--restart-runbook--moving-the-instance-onto-a-release), the
+instance's binding of [release-deploy.md](./release-deploy.md). It runs on `xps` alone.
 
 ## Don't
 

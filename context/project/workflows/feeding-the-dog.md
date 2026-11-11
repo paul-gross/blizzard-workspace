@@ -29,11 +29,12 @@ gate, the upper tiers, and the upgrade rehearsal pass. While the newest run is s
 
 ## 2. Read what the range asks
 
-The range runs from the build in the **Release** row of
-[singleton-instance.md](../singleton-instance.md#deployed-surface) to the target. Read every `## Upgrade` section among
-the change notes the target carries in `changes/unreleased/`, and those of any release the range crosses, and carry each
-step out before installing anything — a step that fails is a stop. Note which directories under
-`src/blizzard/hub/graphs/` the range changed; each is re-minted in step 5.
+The range runs from the build the instance runs now to the target. Read it from the hub —
+`curl -s https://blizzard.grosscode.net/api/health | jq -r .version`, whose `+` segment names a dogfood build's commit —
+and keep it: it is the previous build that step 5's failure path and [Going back](#going-back) return to. Read every
+`## Upgrade` section among the change notes the target carries in `changes/unreleased/`, and those of any release the
+range crosses, and carry each step out before installing anything — a step that fails is a stop. Note which directories
+under `src/blizzard/hub/graphs/` the range changed; each is re-minted in step 5.
 
 ## 3. Fetch the build
 
@@ -72,12 +73,6 @@ not.
 
 Stopping the host interrupts every in-flight worker, and each resumes in place once it starts
 ([post-delivery.md § The restart is fleet-wide](../post-delivery.md#the-restart-is-fleet-wide)).
-
-## 6. Record the move
-
-Change the **Release** row in [singleton-instance.md](../singleton-instance.md#deployed-surface) to the dogfood build —
-its version and its commit — in a workspace commit, so the row and the running instance never disagree for longer than
-one move.
 
 ## Going back
 

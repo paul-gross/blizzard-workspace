@@ -29,7 +29,7 @@ daemon and one venv between them — run its wheel.
 **Delivery ends at landing.** A landed change reaches the instance only once the user moves the instance onto a build
 that carries it — a release, or a dogfood build through feeding-the-dog. **Do not rebuild or reinstall the runner host
 from `master` after a landing** — a build from a source checkout is one no `push` run proved, and the instance no longer
-runs what its **Release** row says.
+runs the build the hub's pin names.
 
 Moving the instance onto a release is the **redeploy + restart runbook** in
 [singleton-instance.md](./singleton-instance.md) — it owns the sequence, and this file does not restate it. What follows
@@ -57,8 +57,8 @@ Install the wheel the release itself published — `gh release download` — or,
 `push`-run wheel; never a build from `projects/blizzard`. A build from a source checkout still reports success at every
 step — the install succeeds, the runners come up healthy — while running code nothing proved. The host reports what it
 runs once it restarts: a release wheel reports the release exactly (`GET /api/health` → `0.2.0rc2` for `v0.2.0-rc.2`),
-and a dogfood wheel its dev version with its commit (`0.3.0.dev948+65bc1dc7f`). Check it against the **Release** row
-before you trust the move.
+and a dogfood wheel its dev version with its commit (`0.3.0.dev948+65bc1dc7f`). Check it against the target build before
+you trust the move.
 
 ## Why the runner restarts go last
 
