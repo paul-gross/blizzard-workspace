@@ -6,7 +6,8 @@ redeploy runbook, is [singleton-instance.md](./singleton-instance.md).
 **Do not point board or UI development at the hosted hub, `https://blizzard.grosscode.net`.** It is a **public,
 authenticated, real** fleet driving real work, and a board served by `ng serve` is a *real* client: clicking Pause in it
 pauses a real chunk, over the internet, against a hub other people can see. UI work runs against a **local, non-live
-hub**; the hosted one is for operator-driven inspection only, and needs `blizzard hub login` even for that.
+hub**; the hosted one is for operator-driven inspection only, using [our fleet binding](./blizzard-binding.md) and
+[usage connection guidance](../../.winter/ext/usage/context/connection.md).
 
 ## What data is actually reachable
 
@@ -30,7 +31,7 @@ there fails to connect rather than quietly reaching the wrong fleet.
 
 A per-single-env var override — `[env.<name>.vars]` — points one env at a different hub while its siblings keep their
 derived per-env values. Precedence rules, reserved band names, and `source <(winter env <name>)` are owned by
-[ports-and-environments.md](../winter-cli/configuration/ports-and-environments.md).
+[ports-and-environments.md](../winter/cli/configuration/ports-and-environments.md).
 
 What the band is good for here is reaching **another hub on this machine** — a snapshot hub (mode 2 below), or a sibling
 env's. **No band reaches the hosted hub**, which is a hostname rather than a port — and pointing a dev surface at it is
@@ -68,7 +69,7 @@ at different data.
 4. **Avoid:** a second live **runner** against the host's store — it spawns real `claude` or `opencode` workers, mutates
    real worktrees, and claims real chunks from the hosted hub; two runners double-drive the fleet. And avoid client mode
    against `https://blizzard.grosscode.net` for development — see the rule above; operators inspecting live state by
-   hand (`blizzard hub status`, after `blizzard hub login`) are the exception.
+   hand, under the [fleet binding](./blizzard-binding.md), are the exception.
 
 **Resetting an env's own hub store strands its runner.** A `reset` of the store under `BZ_HUB_RUNTIME`, or deleting that
 dir, leaves the runner's runtime dir holding a token the hub no longer knows, and every call it makes is refused.

@@ -4,6 +4,7 @@
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `blizzard`           | The main application — hub, runner, CLI, web board.                                                                                                         |
 | `blizzard-context`   | The blizzard conventions harness — worktreed for editing, and installed as an extension (`.winter/ext/context`) so its rules load into every agent context. |
+| `blizzard-usage`     | Product usage guidance, installed at `.winter/ext/usage`. Workspace-specific deployment bindings stay in [blizzard-binding.md](./blizzard-binding.md).      |
 | `blizzard-mock`      | The mock fleet: mock coding harnesses, mock forge, mock hub/runner, mock-data CLI.                                                                          |
 | `blizzard-discovery` | The design corpus blizzard was built from — history, read-only, not maintained. See [discovery-corpus.md](./discovery-corpus.md).                           |
 | `blizzard-product`   | Live product intent — charter, epics, plans. One copy at `.winter/ext/product`, never worktreed. The operator's alone: see below.                           |

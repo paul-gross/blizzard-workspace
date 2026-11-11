@@ -13,10 +13,8 @@ rest into lane-sized garden proposals or withdrawals. Nothing is written to the 
 Without a standing drain, the live set grows past what anyone reads, and the correctness defects in it sink beneath
 hundreds of prose nits.
 
-**Scope.** An operator session against the instance's hub. Every `blizzard hub` verb needs `$BZ_HUB_URL`, a session,
-`--tenant`, and — for `finding list` and `garden-proposal create` — `--project`
-([singleton-instance.md § The operator CLI needs a session](../singleton-instance.md#the-operator-cli-needs-a-session)).
-The sweep is read-only on code: it mints work and never fixes code itself. Each verb's `--help` owns its flags.
+**Scope.** An operator session using [our fleet binding](../blizzard-binding.md). The sweep is read-only on code: it
+mints work and never fixes code itself. Each verb's `--help` owns its flags.
 
 ## 1. Inventory
 
@@ -37,12 +35,8 @@ The set rarely fits one context, so fan out read-only subagents over batches of 
 locus so a batch shares files. Each subagent classifies its findings and writes the verdicts to a scratch file. It
 replies with counts only.
 
-| Verdict   | Means                                                      |
-| --------- | ---------------------------------------------------------- |
-| `present` | The defect is still there as described                     |
-| `partial` | The code changed, but the concern still partly applies     |
-| `gone`    | The code or text was removed or rewritten past the concern |
-| `unclear` | Not determinable with modest effort                        |
+Use the finding verdicts in the
+[shared proposal-review workflow](blizzard-usage:/context/workflows/proposal-review.md#3-sweep-confirm-the-obvious-yeses).
 
 - Every verdict records its current locus and one line of evidence.
 - Locate each finding by its quoted text and symbols, not its line number. Loci drift and files move.

@@ -12,8 +12,7 @@ next — and differs only where a dogfood build is not a release.
 
 **Scope.** An operator session. The hub half needs the `blizzard-prod-admin` AWS session — ask for
 `! aws sso login --profile blizzard-prod-admin` and stop without it — and minting graphs needs a hub session
-([singleton-instance.md § The operator CLI needs a session](../singleton-instance.md#the-operator-cli-needs-a-session)).
-No fleet worker holds either, so feeding-the-dog is never a chunk's work.
+([our fleet binding](../blizzard-binding.md)). No fleet worker holds either, so feeding-the-dog is never a chunk's work.
 
 **It presumes the singleton.** Feeding-the-dog moves the whole instance — the hub and its one runner host — in one
 sitting, so it runs only on `xps`, the machine beside that host
