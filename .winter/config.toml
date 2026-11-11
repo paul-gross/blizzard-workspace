@@ -274,6 +274,10 @@ name = "blizzard-context"
 url = "git@github.com:paul-gross/blizzard-context.git"
 
 [[project_repository]]
+name = "blizzard-usage"
+url = "git@github.com:paul-gross/blizzard-usage.git"
+
+[[project_repository]]
 name = "blizzard-mock"
 url = "git@github.com:paul-gross/blizzard-mock.git"
 
@@ -293,6 +297,11 @@ url = "git@github.com:paul-gross/blizzard-discovery.git"
 name = "winter-canon"
 url = "git@github.com:paul-gross/winter-canon.git"
 path = ".winter/ext/canon"
+
+[[standalone_repository]]
+name = "winter-context"
+url = "git@github.com:paul-gross/winter-context.git"
+path = ".winter/ext/winter-context"
 
 [[standalone_repository]]
 name = "winter-github"
@@ -318,6 +327,11 @@ path = ".winter/ext/service-process-compose"
 name = "blizzard-context"
 url = "git@github.com:paul-gross/blizzard-context.git"
 path = ".winter/ext/context"
+
+[[standalone_repository]]
+name = "blizzard-usage"
+url = "git@github.com:paul-gross/blizzard-usage.git"
+path = ".winter/ext/usage"
 
 # blizzard-product is the live product-intent repo (roadmap + requirements),
 # the continuation of the frozen blizzard-discovery corpus. Extension, not a
