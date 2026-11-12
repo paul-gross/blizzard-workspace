@@ -19,8 +19,8 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 Types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `perf`, `style`, `ai`. Scope is the **subsystem the change
 touches** — `hub`, `runner`, `cli`, `web` in `blizzard`; `architecture`, `standards`, `verification` in
 `blizzard-context`; and so on. Reach for the repo name (`blizzard`, `blizzard-context`, `blizzard-mock`,
-`blizzard-workspace`, `blizzard-discovery`) only when a change genuinely spans the whole repo and no subsystem fits — a
-bare `feat(blizzard)` on a change that lives in one subsystem is the scope done wrong.
+`blizzard-workspace`) only when a change genuinely spans the whole repo and no subsystem fits — a bare `feat(blizzard)`
+on a change that lives in one subsystem is the scope done wrong.
 
 The `/wf-commit` skill (from the `winter-workflow` extension) generates commits in this exact format — prefer it over
 hand-writing messages.

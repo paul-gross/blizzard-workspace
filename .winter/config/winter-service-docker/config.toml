@@ -2,7 +2,7 @@
 # See winter-service-docker:/workflow/config.toml.example for the annotated schema.
 #
 # Scaffolded for the blizzard verification stack. blizzard's verification model
-# (blizzard-discovery:/implementation/verification.md) runs each feature env's
+# (blizzard-context:/verification/blizzard.md) runs each feature env's
 # stack fully isolated so parallel envs verify in parallel — so Postgres is
 # PER-ENV, not a workspace singleton: every feature env gets its own container on
 # its own band port. Container/network/volume namespacing is automatic via
