@@ -337,6 +337,13 @@ path = ".winter/ext/planning"
 load = "lazy"
 entry = ["README.md"]
 
+# winter-context-planning governs what goes in a requirements repo — the `planning:` rules for
+# epics, requirements, specs, and slices that winter-planning's content is written to.
+[[standalone_repository]]
+name = "winter-context-planning"
+url = "git@github.com:c5xlabs/winter-context-planning.git"
+path = ".winter/ext/planning-context"
+
 # `blizzard-mock`'s two long READMEs are human-facing docs for the fixture
 # harness and its mock-data corpus, over the file-size check's reference
 # threshold. That threshold stands in for an agent's context budget and neither
