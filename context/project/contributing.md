@@ -96,7 +96,7 @@ closes the issue on merge with that criterion unmet — so whoever files the iss
 unreachable work off it. A criterion is unfulfillable when it is:
 
 - **an operator-only action** — *"branch protection requires the new check on `master`"*, or a by-hand deployment step;
-- **an edit in a repo the environment has no worktree for** — *"the epic's entry in `blizzard-product` is marked
+- **an edit in a repo the environment has no worktree for** — *"the epic's plan in winter-planning is marked
   delivered"*, or a change to the workspace root ([repos.md](./repos.md));
 - **PR-body content** — *"the PR description lists the migrated routes"*: the hub's `deliver` node writes the PR body
   from a fixed template, so no worker can put text in it.

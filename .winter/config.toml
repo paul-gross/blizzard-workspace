@@ -328,13 +328,14 @@ name = "blizzard-usage"
 url = "git@github.com:paul-gross/blizzard-usage.git"
 path = ".winter/ext/usage"
 
-# blizzard-product is the live product-intent repo (roadmap + requirements).
-# Extension, not a project repo: product intent must not branch per env — one current copy at
-# the workspace root, read deliberately when planning.
+# winter-planning holds the suite's product intent; blizzard's is under `projects/fleet/`.
+# One current copy, read when planning; never worktreed, and never edited by a fleet worker.
 [[standalone_repository]]
-name = "blizzard-product"
-url = "git@github.com:paul-gross/blizzard-product.git"
-path = ".winter/ext/product"
+name = "winter-planning"
+url = "git@github.com:c5xlabs/winter-planning.git"
+path = ".winter/ext/planning"
+load = "lazy"
+entry = ["README.md"]
 
 # `blizzard-mock`'s two long READMEs are human-facing docs for the fixture
 # harness and its mock-data corpus, over the file-size check's reference
