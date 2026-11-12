@@ -115,8 +115,8 @@ deployment step, a protection rule on the new check — is **blocked by** it.
 each change owes. Run the checks for the repo you touched before you push.
 
 CI runs the merge gate on a pull request to `master` and again on push to `master`. A by-hand PR waits on it before
-landing; a direct push to `master` does not — there CI reports after the fact, so the local run is the only gate there
-is.
+landing. A `hotfix/` PR waits only on lint, and a direct push waits on nothing — the push workflow reports what it
+covers after the fact, so there the local run is the only gate before `master`.
 
 ## Delivery
 
@@ -139,7 +139,16 @@ landing is the branch's own commits with none.
 **Land** names this whole sequence: when the user says to land work, carry it from branch to `master` and through
 post-delivery. **Push** means only the git push it names — never a PR, a merge, or a landing.
 
-By default, work lands through a pull request the agent drives to completion:
+Each repo lands one way:
+
+| Repo                                            | Lands by                                                           | `master`                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `blizzard`, `blizzard-context`, `blizzard-mock` | a PR, by the steps below; `hotfix/` only when the user asks for it | protected — nothing but a merged, green PR, and admins are bound |
+| `blizzard-infra`                                | a direct push to `origin/master`                                   | unprotected — private on a plan without branch protection        |
+| `blizzard-usage`                                | a direct push to `origin/master`                                   | unprotected, and no CI                                           |
+| the workspace repo                              | a direct push to `origin/master`, always                           | unprotected, by choice                                           |
+
+A PR-landed repo's work — and any repo's fleet work — lands through a pull request the agent drives to completion:
 
 1. **Curate the branch** — rebase onto the latest `origin/master` and squash to one landed unit of work per commit: one
    feature or one fix. A feature plus the follow-up fixes to it that never landed is *one* unit; a genuinely separate
@@ -162,7 +171,14 @@ By default, work lands through a pull request the agent drives to completion:
 A merge commit (`--merge`) is the exception, not the default: take one only when grouping a multi-commit branch under it
 tells a clearer story than landing the commits flat.
 
-**Push directly to `origin/master` only when the user explicitly asks.** Curate the same way first; with no PR, nothing
+**The `hotfix/` route** is the fast lane, taken only when the user explicitly asks for a hotfix. Run the same steps with
+a feature branch named `hotfix/<slug>` in the repo itself, never a fork: a PR from `hotfix/*` into `master` runs only
+the repo's lint-class checks, not the whole suite, and the required checks it skips pass as skipped, so it merges as
+soon as lint is green. A hotfix that changes a store revision or cuts a release still runs that proof. Nothing but your
+local checks proves the rest before it lands, so run them first; `master`'s push workflow runs its own gate and tiers on
+the landed commit, and post-delivery is owed just the same. A fleet chunk never takes it.
+
+A direct-push landing curates the same way, then pushes the curated commits to `origin/master`. With no PR, nothing
 gates the push but your local checks, and post-delivery is owed just the same.
 
 See [`workspace:/context/winter/worktree-ops.md`](../winter/worktree-ops.md) for the exact git commands per worktree
