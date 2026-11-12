@@ -6,7 +6,7 @@ allowed-tools: Bash, Read, Grep, Glob, Write, Edit, Agent
 
 Run one retrospective-distillation pass: export the retrospective (and other) artifacts of every chunk closed in a
 range, cluster the recurring complaints, and route each cluster to the store that owns fixing it — a `blizzard-context`
-rule, a `blizzard`/`blizzard-mock` issue, a `blizzard-product` registry entry, or a graph prompt edit. This is
+rule, a `blizzard`/`blizzard-mock` issue, a `winter-planning` product-intent entry, or a graph prompt edit. This is
 deliberately human-on-the-loop: every filing action is drafted here for the operator to approve, never filed silently.
 Parse `$ARGUMENTS` for the range — a natural-language span ("past two weeks"), explicit dates, or empty (defaults to
 since the ledger's last recorded pass).
@@ -22,7 +22,7 @@ The four owner stores a finding cluster can route to, and when each applies:
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `blizzard-context` rule          | The complaint is a recurring convention violation or a missing convention — something a `bzh:<slug>` rule would prevent | Draft the rule per the slot skeleton in `winter-canon:/rule-shape.md`, with a `bzh:<slug>` id per `blizzard-context:/index.md`'s id scheme; the operator commits it in a `blizzard-context` feature environment |
 | `blizzard`/`blizzard-mock` issue | The complaint is a defect or missing capability in the application itself                                               | Draft via the `/wg-issue` skill (`winter-github:/skills/issue/SKILL.md`) — it owns the issue format and repo selection                                                                                          |
-| `blizzard-product` registry      | The complaint reveals a gap in product intent (a missing epic, a milestone that needs re-scoping)                       | Draft per `blizzard-product:/context/index.md`'s authoring conventions; the operator adds it to `milestones.md`/`plans/`                                                                                        |
+| `winter-planning` product intent | The complaint reveals a gap in product intent (a missing epic, a milestone that needs re-scoping)                       | Draft per `winter-planning:/README.md`'s conventions; the operator adds it to `winter-planning:/projects/fleet/milestones.md` or `work/`                                                                        |
 | Graph prompt edit                | The complaint is specific to how a node's prompt asks for work (e.g. a prompt that invites a recurring mistake)         | Draft the prompt diff against `src/blizzard/hub/graphs/*/prompts/*.md` inside a `blizzard` feature environment (e.g. `alpha/blizzard/src/blizzard/hub/graphs/...`)                                              |
 
 This skill drafts every action above; it never runs `gh issue create`, never commits a rule, and never edits a prompt

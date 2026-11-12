@@ -103,7 +103,7 @@ Report these to the user:
 - the withdrawals, by exit kind
 - every finding left live, and why
 
-Closing the loop after delivery belongs to the hub (`blizzard-product:/delivered/garden/machinery.md`).
+Closing the loop after delivery belongs to the hub.
 
 ## Don't
 
