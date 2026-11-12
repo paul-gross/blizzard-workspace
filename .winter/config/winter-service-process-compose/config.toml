@@ -2,7 +2,7 @@
 # See winter-service-process-compose:/workflow/config.toml.example for annotated schema docs.
 #
 # This provider carries the blizzard from-source services — the per-env verification
-# stack of blizzard-discovery:/implementation/verification.md: the mock GitHub forge,
+# stack of blizzard-context:/verification/blizzard.md: the mock GitHub forge,
 # the blizzard hub, and the blizzard runner, plus the web dev servers. One headless
 # process-compose daemon runs per env; `winter service up <env> --wait` brings the trio
 # up in order (forge -> hub -> runner) via depends_on. Postgres runs under
@@ -78,7 +78,7 @@ target = "http://localhost:${BZ_HUB_PORT}/api/health"
 # --- blizzard runner (blizzard) — the code under test ------------------------
 # The reconciliation-loop daemon: it drives the per-env blizzard-mock fixture
 # workspace (BZ_WORKSPACE_ROOT) and spawns the fenced mock-claude-code façade for
-# build workers (design/runner/loop.md; blizzard-discovery:/implementation/verification.md).
+# build workers (design/runner/loop.md; blizzard-context:/verification/blizzard.md).
 # BZ_HARNESS_BINARY must be an absolute path (the runner spawns the worker with the
 # acquired env dir as cwd), so it is resolved from the sibling blizzard-mock worktree
 # here; the remaining loop seams (workspace root, env pool, hub url, base branch) ride

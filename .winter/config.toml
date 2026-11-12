@@ -163,8 +163,7 @@ BZ_HUB_URL     = "http://127.0.0.1:${BZ_HUB_PORT}"
 # credentials/db (blizzard/blizzard) created by the postgres container.
 DATABASE_URL   = "postgresql://blizzard:blizzard@localhost:${BZ_PG_PORT}/blizzard"
 # Fixture-workspace scratch root — shared by the mock forge and the
-# `blizzard-mock-fixture` scaffold so they agree on ONE git truth
-# (blizzard-discovery:/implementation/verification.md). The forge fronts the same
+# `blizzard-mock-fixture` scaffold so they agree on ONE git truth. The forge fronts the same
 # bare origins the fixture workspace pushes to; both derive the per-env origins
 # directory from this root plus WINTER_ENV. Disposable, so it sits under the
 # system temp dir (not the workspace tree). The fixture CLI reads
@@ -281,10 +280,6 @@ url = "git@github.com:paul-gross/blizzard-usage.git"
 name = "blizzard-mock"
 url = "git@github.com:paul-gross/blizzard-mock.git"
 
-[[project_repository]]
-name = "blizzard-discovery"
-url = "git@github.com:paul-gross/blizzard-discovery.git"
-
 # ---------------------------------------------------------------------------
 # Standalone repositories — winter extensions, cloned once under .winter/ext/.
 # The winter-* extensions are the same repos that serve the winter workspace.
@@ -333,25 +328,13 @@ name = "blizzard-usage"
 url = "git@github.com:paul-gross/blizzard-usage.git"
 path = ".winter/ext/usage"
 
-# blizzard-product is the live product-intent repo (roadmap + requirements),
-# the continuation of the frozen blizzard-discovery corpus. Extension, not a
-# project repo: product intent must not branch per env — one current copy at
+# blizzard-product is the live product-intent repo (roadmap + requirements).
+# Extension, not a project repo: product intent must not branch per env — one current copy at
 # the workspace root, read deliberately when planning.
 [[standalone_repository]]
 name = "blizzard-product"
 url = "git@github.com:paul-gross/blizzard-product.git"
 path = ".winter/ext/product"
-
-# ---------------------------------------------------------------------------
-# Lint suppression. `blizzard-discovery` is the frozen design record blizzard was
-# built from — history, not a live artifact (workspace:/context/project/discovery-corpus.md),
-# so its content is never brought into line with winter's conventions. It carries
-# no `winter-ext.toml` to declare that for itself, which is exactly the case the
-# workspace surface exists for, so the whole repo is silenced from here.
-# ---------------------------------------------------------------------------
-
-[lint.ignore]
-repos = ["blizzard-discovery"]
 
 # `blizzard-mock`'s two long READMEs are human-facing docs for the fixture
 # harness and its mock-data corpus, over the file-size check's reference
