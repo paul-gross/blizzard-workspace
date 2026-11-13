@@ -25,6 +25,26 @@ scope = "workspace"
 cmd = "exec sleep infinity"
 
 # ---------------------------------------------------------------------------
+# Live runner auth proxy — workspace-scoped, one per machine, outside every feature env.
+#
+# The one stable local origin (http://localhost:${BZ_LIVE_RUNNER_PROXY_PORT}) the live runner host
+# declares as a `public_url`, so a browser can sign in through it; it holds the minted session and
+# adds it to every request, letting any feature env's runner panel share one live session.
+# Plain node, no install. It idles without binding when no upstream is set — the default,
+# and what `xps` (which hosts the live runner) keeps — so the workspace scope always comes up.
+# workspace:/tools/live-runner-proxy/README.md owns setup and use.
+# ---------------------------------------------------------------------------
+[[service]]
+name = "live-runner-proxy"
+scope = "workspace"
+# Idles, rather than restart-looping, on a machine whose daemon PATH carries no node.
+cmd = 'command -v node >/dev/null && exec node tools/live-runner-proxy/proxy.mjs; echo "no node on PATH — idling"; exec sleep infinity'
+
+[service.restart]
+policy = "on_failure"
+backoff_seconds = 5
+
+# ---------------------------------------------------------------------------
 # From-source per-env services — the verification stack (forge -> hub -> runner).
 #
 # Each binds a stable port from workspace:/.winter/config.toml [env.feature.vars]

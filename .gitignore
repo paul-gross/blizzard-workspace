@@ -28,3 +28,6 @@
 # generated config, daemon and service logs). Feature-env state lives under the
 # env's own ignored directory; the workspace scope's lands at the workspace root.
 /.winter/process-compose/
+
+# The live runner proxy's machine-local upstream URL (tools/live-runner-proxy/README.md).
+/tools/live-runner-proxy/upstream.local
