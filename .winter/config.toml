@@ -133,6 +133,13 @@ service = ["winter-service-docker", "winter-service-process-compose"]
 # from-source services that P4-P6 activate.
 # ---------------------------------------------------------------------------
 
+[env.workspace.vars]
+# The live runner auth proxy's port (workspace band +0 → 4500), a workspace-scoped service in
+# .winter/config/winter-service-process-compose/config.toml. Fixed, because the live runner host
+# declares http://localhost:4500 as a sign-in origin. Its upstream is machine-local, in the
+# gitignored tools/live-runner-proxy/upstream.local; see workspace:/tools/live-runner-proxy/README.md.
+BZ_LIVE_RUNNER_PROXY_PORT = "${WINTER_WORKSPACE_PORT_BASE+0}"
+
 [env.feature.vars]
 # Per-env Postgres host port (band +0 → alpha 4420, beta 4440). The docker
 # environment-compose.yaml publishes Postgres on ${BZ_PG_PORT}.
@@ -155,6 +162,9 @@ BZ_RUNNER_WEB_PORT = "${WINTER_PORT_BASE+5}"  # `ng serve runner` — the panel'
 # The workshop — Storybook over the fleet kit (band +6). Needs no daemon; it compiles the
 # worktree's own web source, so a feature env's workshop shows that env's kit.
 BZ_STORYBOOK_PORT = "${WINTER_PORT_BASE+6}"
+# The runner panel served against the LIVE runner through the live runner proxy (band +7) — started
+# by hand with tools/live-runner-proxy/panel.sh, never by `service up`, so no fleet env reaches it.
+BZ_RUNNER_LIVE_WEB_PORT = "${WINTER_PORT_BASE+7}"
 # The hub URL the runner reconciliation loop points at (same host, band +2). Read by
 # `blizzard runner init`'s scaffold (RunnerConfig, BZ_HUB_URL).
 BZ_HUB_URL     = "http://127.0.0.1:${BZ_HUB_PORT}"
