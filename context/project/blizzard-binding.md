@@ -30,9 +30,15 @@ export HUB_URL="$BZ_HUB_URL" TENANT="$FLEET_TENANT" PROJECT=blizzard
 ## Approved CLI and sign-in
 
 On `xps`, use `~/projects/blizzard-blizzard/.venv/bin/blizzard`. On another machine, use an operator-provided `blizzard`
-on `PATH` matching the hub's live reported build; [singleton-instance.md](./singleton-instance.md#deployed-surface) owns
-the health probes. The runtime venv is not present on other machines. If that CLI is unavailable, ask the operator for
-setup rather than borrowing a feature-env or source-checkout binary.
+on `PATH`; the runtime venv is not present on other machines. If that CLI is unavailable, ask the operator for setup
+rather than borrowing a feature-env or source-checkout binary.
+
+The operator CLI and hub must match in **major version**, and also in **minor version when major is `0`**;
+[singleton-instance.md](./singleton-instance.md#deployed-surface) owns the health probes. Minor-version differences are
+allowed when major is at least `1`. Patch, prerelease, and development-build differences do not block fleet calls. Check
+the relevant command's `--help`; if an operation is unsupported, stop that operation and request a supported invocation
+or CLI upgrade. This is the workspace's version policy for the
+[usage connection check](../../.winter/ext/usage/context/connection.md#check-access-and-scope).
 
 Use our hub URL with the human login flow in
 [usage connection guidance](../../.winter/ext/usage/context/connection.md#check-access-and-scope). Credentials and
