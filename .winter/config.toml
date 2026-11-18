@@ -354,6 +354,13 @@ name = "winter-context-planning"
 url = "git@github.com:c5xlabs/winter-context-planning.git"
 path = ".winter/ext/planning-context"
 
+# winter-strategy holds the platform's strategic direction and design choices: product structure, naming,
+# brand, and presentation. One current copy, read when the work turns on strategy; never worktreed.
+[[standalone_repository]]
+name = "winter-strategy"
+url = "git@github.com:c5xlabs/winter-strategy.git"
+path = ".winter/ext/strategy"
+
 # `blizzard-mock`'s two long READMEs are human-facing docs for the fixture
 # harness and its mock-data corpus, over the file-size check's reference
 # threshold. That threshold stands in for an agent's context budget and neither
