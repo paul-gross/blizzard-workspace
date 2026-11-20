@@ -99,24 +99,14 @@ target = "http://localhost:${BZ_HUB_PORT}/api/health"
 # The reconciliation-loop daemon: it drives the per-env blizzard-mock fixture
 # workspace (BZ_WORKSPACE_ROOT) and spawns the fenced mock-claude-code façade for
 # build workers (design/runner/loop.md; blizzard-context:/verification/blizzard.md).
-# BZ_HARNESS_BINARY must be an absolute path (the runner spawns the worker with the
-# acquired env dir as cwd), so it is resolved from the sibling blizzard-mock worktree
-# here; the remaining loop seams (workspace root, env pool, hub url, base branch) ride
-# the injected env into `runner init`'s scaffold. The stale tomls are cleared first so
-# each `up` re-derives config from the current env — the host file too, which a host
-# build writes beside it and a pre-host build never reads. The runtime dir outlives a reset
-# of the env's hub data, so init runs with --allow-readd: a hub that no longer knows
-# the token in the runtime dir's .env adds the runner afresh. The scaffolded
-# `anthropic` subscription is then re-declared under provider "none", which binds no
-# sampler: left as `anthropic`, it reads the developer's real ~/.claude/.credentials.json
-# and polls Anthropic's usage endpoint with it every five minutes, sharing that
-# endpoint's per-account rate limit with the live instance's runners — enough
-# feature envs up at once get the instance's samples refused (429), and a stale
-# sample brakes its throttle. Ordered after the hub.
+# runner-host.sh scaffolds the host file with `runner init` against the env's hub,
+# declares the env's workspace itself (not through init's scaffold), mutes the
+# scaffolded subscription's sampler, and serves on BZ_RUNNER_PORT (band +3); its
+# header owns why. Ordered after the hub.
 [[service]]
 name = "runner"
 cwd = "blizzard"
-cmd = '''eval "$(mise env -s bash)"; export BZ_HARNESS_BINARY="$(cd ../blizzard-mock && pwd)/.venv/bin/mock-claude-code"; rm -f "$BZ_RUNNER_RUNTIME/blizzard-runner.toml" "$BZ_RUNNER_RUNTIME/blizzard-host.toml"; uv run blizzard runner init --allow-readd "$BZ_RUNNER_RUNTIME" && sed -i 's/^provider = "anthropic"$/provider = "none"/' "$BZ_RUNNER_RUNTIME/blizzard-host.toml" && exec uv run blizzard runner host --dir "$BZ_RUNNER_RUNTIME" --host 127.0.0.1 --port "$BZ_RUNNER_PORT"'''
+cmd = 'eval "$(mise env -s bash)"; exec sh ../../.winter/config/winter-service-process-compose/runner-host.sh'
 port = "WINTER_PORT_BASE + 3"
 depends_on = ["hub"]
 
