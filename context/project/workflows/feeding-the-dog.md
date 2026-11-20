@@ -73,6 +73,9 @@ not.
 Stopping the host interrupts every in-flight worker, and each resumes in place once it starts
 ([post-delivery.md § The restart is fleet-wide](../post-delivery.md#the-restart-is-fleet-wide)).
 
+The move edits no file in this workspace. The hub's pin in `blizzard-infra` is its record, and each half reports what it
+runs ([singleton-instance.md § What it runs now](../singleton-instance.md#what-it-runs-now)).
+
 ## Going back
 
 Runner host first, hub after. The runner host goes back as
