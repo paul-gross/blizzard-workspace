@@ -183,8 +183,9 @@ BZ_FORGE_REPOS_DIR = "${BLIZZARD_MOCK_SCRATCH_ROOT}/${WINTER_ENV}/origins"
 # The winter workspace the runner's provider drives — the per-env blizzard-mock
 # fixture workspace (bare file:// origins + a real winter workspace), minted by
 # `blizzard-mock-fixture` under the same scratch root (one git truth). Read by
-# `blizzard runner init`'s scaffold (BZ_WORKSPACE_ROOT); the runner acquires its
-# inner env pool (BZ_WORKSPACE_ENVS) inside it via `winter ws init`.
+# runner-host.sh, which declares the env's `[[workspace]]` from these three itself,
+# not through `blizzard runner init`'s scaffold; the runner acquires its inner env
+# pool (BZ_WORKSPACE_ENVS) inside it via `winter ws init`.
 BZ_WORKSPACE_ROOT = "${BLIZZARD_MOCK_SCRATCH_ROOT}/${WINTER_ENV}/workspace"
 BZ_WORKSPACE_ENVS = "e1"          # the provider's static inner env pool (D-062)
 BZ_BASE_BRANCH    = "main"        # the origins' default branch the fixture seeds
