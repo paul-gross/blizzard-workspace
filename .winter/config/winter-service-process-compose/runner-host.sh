@@ -14,6 +14,11 @@
 # per-account rate limit with the live instance's runners — enough feature envs up at once get
 # the instance's samples refused (429), and a stale sample brakes its throttle.
 #
+# The claude_code health probe reads the binding as authenticated only when its credentials file
+# holds an OAuth access token, and defaults that file to the developer's real
+# ~/.claude/.credentials.json. The runner is pointed instead at a placeholder in its own runtime
+# dir, rewritten each `up`: the mock needs no credential, and the real one is never read.
+#
 # The stale tomls are cleared first so each `up` re-derives config from the current env — the
 # host file too, which a host build writes beside it and a pre-host build never reads. The
 # runtime dir outlives a reset of the env's hub data, so init runs with --allow-readd: a hub
@@ -32,6 +37,14 @@ rm -f "${BZ_RUNNER_RUNTIME}/blizzard-runner.toml" "$host_file"
 uv run blizzard runner init --allow-readd "$BZ_RUNNER_RUNTIME"
 
 sed -i 's/^provider = "anthropic"$/provider = "none"/' "$host_file"
+
+credentials_file="${BZ_RUNNER_RUNTIME}/claude-credentials.json"
+(umask 077 && printf '%s\n' '{"claudeAiOauth": {"accessToken": "feature-env-placeholder"}}' > "$credentials_file")
+sed -i "s|^# claude_code_credentials_path = .*|claude_code_credentials_path = \"${credentials_file}\"|" "$host_file"
+grep -q "^claude_code_credentials_path = \"${credentials_file}\"$" "$host_file" || {
+  echo "runner-host.sh: init wrote no claude_code_credentials_path line to point at the placeholder" >&2
+  exit 1
+}
 
 # Drop init's [[workspace]] table, up to the next table header.
 awk '
