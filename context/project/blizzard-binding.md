@@ -29,15 +29,16 @@ export HUB_URL="$BZ_HUB_URL" TENANT="$FLEET_TENANT" PROJECT=blizzard
 
 ## Approved CLI and sign-in
 
-On `xps`, use `~/projects/blizzard-blizzard/.venv/bin/blizzard`. On another machine, use an operator-provided `blizzard`
-on `PATH`; the runtime venv is not present on other machines. If that CLI is unavailable, ask the operator for setup
-rather than borrowing a feature-env or source-checkout binary.
+On a machine with a runner host, use that host's venv: `<instance dir>/.venv/bin/blizzard`
+([fleet-machines.md](./fleet-machines.md) names each). On a machine without one, use an operator-provided `blizzard` on
+`PATH`, or run the call on a runner-host machine over `ssh <machine>`. If no such CLI is available, ask the operator for
+setup rather than borrowing a feature-env or source-checkout binary.
 
 The operator CLI and hub must match in **major version**, and also in **minor version when major is `0`**;
-[singleton-instance.md](./singleton-instance.md#deployed-surface) owns the health probes. Minor-version differences are
-allowed when major is at least `1`. Patch, prerelease, and development-build differences do not block fleet calls. Check
-the relevant command's `--help`; if an operation is unsupported, stop that operation and request a supported invocation
-or CLI upgrade. This is the workspace's version policy for the
+[instance.md](./instance.md#deployed-surface) owns the health probes. Minor-version differences are allowed when major
+is at least `1`. Patch, prerelease, and development-build differences do not block fleet calls. Check the relevant
+command's `--help`; if an operation is unsupported, stop that operation and request a supported invocation or CLI
+upgrade. This is the workspace's version policy for the
 [usage connection check](../../.winter/ext/usage/context/connection.md#check-access-and-scope).
 
 Use our hub URL with the human login flow in
@@ -49,13 +50,14 @@ sessions stay outside this repo; the fleet's machine tokens are not operator cre
 `AGENTS.local.md` identifies this session's machine and role. An interactive assistant acts for the operator within the
 user's request; it is not a fleet worker merely because this workspace develops Blizzard.
 
-The runner host is **`xps`**, a Dell XPS. Only its own checkout can operate its runtime, systemd unit, or collector.
-Every other checkout holds no part of the deployment: refuse runner-host operations and hand them to the operator on
-`xps`. Authorized hub-API work can run from any checkout.
+The runner hosts sit on the operator's own machines, joined by one tailnet; [fleet-machines.md](./fleet-machines.md)
+names them and which holds a host. An **operator session** on any of those machines may operate every runner host — its
+runtime, systemd unit, and collector — over `ssh <machine>`, using that machine's own paths. A **fleet worker** operates
+none of them, whichever machine it runs on. Authorized hub-API work can run from any checkout.
 
-Moving the deployment onto a build also runs only on `xps`, including the hub half: moving the hub alone would leave our
-singleton split across builds. Host identities, paths, and the deployment runbook live in
-[singleton-instance.md](./singleton-instance.md).
+Moving the deployment onto a build moves the hub and every runner host in one sitting, from one orchestrating session:
+moving only some would leave the instance split across builds. Host identities, paths, and the deployment runbook live
+in [instance.md](./instance.md).
 
 ## Local policy
 

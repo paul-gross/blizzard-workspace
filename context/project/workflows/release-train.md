@@ -147,8 +147,8 @@ names as 1.0's ([release-major.md](./release-major.md)). Call it `X.N.0` below.
    seven days step 1 counts.
 8. **Finish step 1's set-aside**, if one is pending.
 9. **The instance.** Offer the user the move onto `vX.N.0-rc.1` by the
-   [runbook](../singleton-instance.md#redeploy--restart-runbook--moving-the-instance-onto-a-release); the bake is the
-   instance running the candidate. The move runs on `xps` alone.
+   [runbook](../instance.md#redeploy--restart-runbook--moving-the-instance-onto-a-release); the bake is the instance
+   running the candidate. The move takes the hub and every runner host, from one orchestrating session.
 
 ## A further candidate
 

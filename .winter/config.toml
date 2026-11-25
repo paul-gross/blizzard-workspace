@@ -13,14 +13,16 @@ base_port = 4500
 ports_per_env = 20
 
 # Fixed-index env aliases (slots 1..N in list order). The Greek six alpha..zeta
-# (1-6) are the human's pool; bz1..bz8 (7-14) are the fleet's static pool, shared
-# by both runners (`r-claude` and `r-chatgpt`) — see the `blizzard` workspace's
-# `envs` in ~/projects/blizzard-blizzard/runner/blizzard-host.toml.
+# (1-6) are the human's pool; bz1..bz16 (7-22) are the fleet's static pools, each
+# shared by one host's runners — see the `blizzard` workspace's `envs` in each runner
+# host's blizzard-host.toml (context/project/instance.md): xps declares bz1..bz8,
+# the builder bz1..bz16. Aliasing a name a host leaves undeclared costs nothing.
 # Declaring them as aliases pins each pool to stable, sequential port bands instead
 # of the scattered hash-band slots ad-hoc names would otherwise draw.
 env_aliases = [
     "alpha", "beta", "gamma", "delta", "epsilon", "zeta",
     "bz1", "bz2", "bz3", "bz4", "bz5", "bz6", "bz7", "bz8",
+    "bz9", "bz10", "bz11", "bz12", "bz13", "bz14", "bz15", "bz16",
 ]
 
 [model_tiers.fable]

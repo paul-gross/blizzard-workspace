@@ -31,7 +31,7 @@ cmd = "exec sleep infinity"
 # declares as a `public_url`, so a browser can sign in through it; it holds the minted session and
 # adds it to every request, letting any feature env's runner panel share one live session.
 # Plain node, no install. It idles without binding when no upstream is set — the default,
-# and what `xps` (which hosts the live runner) keeps — so the workspace scope always comes up.
+# and what a runner host's own workspace roots keep — so the workspace scope always comes up.
 # workspace:/tools/live-runner-proxy/README.md owns setup and use.
 # ---------------------------------------------------------------------------
 [[service]]

@@ -12,9 +12,9 @@ What this workspace owes a change once it has landed on `master`.
 
 ## The rule: a landing owes the instance nothing
 
-**Delivery ends at landing.** Our [instance](./singleton-instance.md) runs a pinned build. A landed change reaches it
-only through a separate, user-requested move onto a build that carries the change. Do not rebuild, reinstall, restart,
-or move the deployment's pin as part of landing work.
+**Delivery ends at landing.** Our [instance](./instance.md) runs a pinned build. A landed change reaches it only through
+a separate, user-requested move onto a build that carries the change. Do not rebuild, reinstall, restart, or move the
+deployment's pin as part of landing work.
 
 | Move                                                | When to read                                                       |
 | --------------------------------------------------- | ------------------------------------------------------------------ |
@@ -27,11 +27,12 @@ in the runbook. **Deploy: by hand** excludes fleet-worker execution: report that
 
 Deployment failures are reported, not repaired by editing released code during the move. A code fix belongs to new work
 and a subsequent proven build. Installation, migration, rollback, and health checks belong to the
-[instance runbook](./singleton-instance.md#redeploy--restart-runbook--moving-the-instance-onto-a-release).
+[instance runbook](./instance.md#redeploy--restart-runbook--moving-the-instance-onto-a-release).
 
 ## The restart is fleet-wide
 
-Our host serves both `blizzard` and `winter`; restarting its unit interrupts workers in both projects. Finish durable
-outputs before the authorized restart and account for the whole host, not just this workspace's chunks. General
+Every runner host serves both `blizzard` and `winter`; restarting a host's unit interrupts its workers in both projects,
+and a move onto a build restarts every host ([instance.md](./instance.md#the-hosts-and-their-runners)). Finish durable
+outputs before the authorized restart and account for every host it touches, not just this workspace's chunks. General
 intervention and worker-recovery guidance belongs to
 [blizzard-usage](../../.winter/ext/usage/context/runner-hosts.md#change-a-host-only-with-its-runbook).

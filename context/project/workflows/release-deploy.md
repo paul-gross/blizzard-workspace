@@ -1,14 +1,17 @@
 # Moving our instance onto a release, or back
 
-**Rule.** Move our singleton instance between releases one half at a time, in the order below, proving each half by its
-reported version before touching the next — except where a boundary sequences the move otherwise (step 1); a proof that
-fails stops the procedure where it stands.
+**Rule.** Move our instance between releases one half at a time, in the order below, proving each half by its reported
+version before touching the next — except where a boundary sequences the move otherwise (step 1); a proof that fails
+stops the procedure where it stands.
 
 **Why.** A hub accepts runners of its own line and older ones inside the window, never newer, so the order is what keeps
 every runner working at every moment of the move; the proof is what tells a moved half from one that only restarted.
 
-**Scope.** A user-requested move of our instance, from an operator session on `xps`. Resolve access and authority
-through [our binding](../blizzard-binding.md) first. Product deployment mechanics stay with the application's docs:
+**Scope.** A user-requested move of our instance, from an operator session on any of
+[our machines](../fleet-machines.md), orchestrating the rest. Resolve access and authority through
+[our binding](../blizzard-binding.md) first. "The runner hosts" means every host in
+[our machines' table](../fleet-machines.md#the-machines); they move together, as one half. Product deployment mechanics
+stay with the application's docs:
 
 | Fact                                                         | Owner                                                   |
 | ------------------------------------------------------------ | ------------------------------------------------------- |
@@ -18,8 +21,8 @@ through [our binding](../blizzard-binding.md) first. Product deployment mechanic
 | The skew window, what a tag publishes, and the pin's shape   | `docs/versioning.md`                                    |
 
 Our paths, pins, units, and commands live in the
-[instance runbook](../singleton-instance.md#redeploy--restart-runbook--moving-the-instance-onto-a-release). This
-workflow owns our move's sequencing and stop conditions, not a reusable installation tutorial.
+[instance runbook](../instance.md#redeploy--restart-runbook--moving-the-instance-onto-a-release). This workflow owns our
+move's sequencing and stop conditions, not a reusable installation tutorial.
 
 ## 1. Read the range
 
@@ -34,34 +37,35 @@ Also read the issue-level deployment instructions required by [post-delivery.md]
 
 ## 2. Order the halves
 
-| Direction | First                 | Then                  |
-| --------- | --------------------- | --------------------- |
-| Forward   | the hub               | the `xps` runner host |
-| Back      | the `xps` runner host | the hub               |
+| Direction | First             | Then              |
+| --------- | ----------------- | ----------------- |
+| Forward   | the hub           | every runner host |
+| Back      | every runner host | the hub           |
 
 Honor the application's skew window throughout the move. A boundary in the range takes precedence over this table.
 
 ## 3. Move the hub
 
-Use [the hub's pin](../singleton-instance.md#the-hubs-pin) and `blizzard-infra`'s deployment/rollback procedure. For a
-release move, pin the exact release and index digest, not a moving channel or dogfood tag. Do not operate the hosted
-compose stack through a generic local-install recipe.
+Use [the hub's pin](../instance.md#the-hubs-pin) and `blizzard-infra`'s deployment/rollback procedure. For a release
+move, pin the exact release and index digest, not a moving channel or dogfood tag. Do not operate the hosted compose
+stack through a generic local-install recipe.
 
-Prove the target version and readiness as the runbook requires before moving the runner host.
+Prove the target version and readiness as the runbook requires before moving any runner host.
 
-## 4. Move the runner host
+## 4. Move the runner hosts
 
-Use [the runner-host runbook](../singleton-instance.md#the-runner-host), or its
-[going-back section](../singleton-instance.md#going-back) for rollback. Finish installation, migration, configuration
-checks, and any changed-graph mints before the restart. A failed download, install, migration, or check stops the move:
-never restart onto the failed installation.
+Use [the runner-host runbook](../instance.md#the-runner-hosts) — prepare every host, then the graph mints, then start
+every host — or its [going-back section](../instance.md#going-back) for rollback. Finish every host's installation,
+migration, and configuration check, and any changed-graph mints, before any host restarts. A failed download, install,
+migration, or check stops the move: never restart a host onto a failed installation.
 
-Prove the version, both runners' readiness and registration, and trace export using the runbook's local surfaces.
+Prove, for every host, the version, its runners' readiness and registration, and trace export using the runbook's
+surfaces.
 
 ## 5. Confirm the deployment record
 
-The hub's pin in `blizzard-infra` records the target build. Confirm both halves report that build; the workspace keeps
-no separate deployed-version record.
+The hub's pin in `blizzard-infra` records the target build. Confirm the hub and every runner host report that build; the
+workspace keeps no separate deployed-version record.
 
 ## A failed proof
 

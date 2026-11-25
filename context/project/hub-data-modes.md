@@ -1,7 +1,7 @@
 # Developing a feature env against hub data
 
 Goal: work in a feature env (`alpha`/`beta`/…) but see realistic — or real — fleet data. What is deployed where, and the
-redeploy runbook, is [singleton-instance.md](./singleton-instance.md).
+redeploy runbook, is [instance.md](./instance.md).
 
 **Do not point board or UI development at the hosted hub, `https://blizzard.grosscode.net`.** It is a **public,
 authenticated, real** fleet driving real work, and a board served by `ng serve` is a *real* client: clicking Pause in it
@@ -13,16 +13,16 @@ hub**; the hosted one is for operator-driven inspection only, using [our fleet b
 
 **There is no local hub DB.** The live hub store is on the EC2 host and is not reachable as a file from any checkout —
 but the host ships a full copy of it to S3 every day, which any machine with the `blizzard-prod-admin` profile can pull
-(mode 2). On `xps` ([singleton-instance.md § Where it runs](./singleton-instance.md#where-it-runs)),
-`~/projects/blizzard-blizzard/hub/data/hub.db` exists but is a **frozen snapshot** — the fleet as it stood at the
-migration, not as it is — and `~/projects/blizzard-blizzard/runner/data/host.db`, the runner host's store holding both
-runners' rows, is the only live database beside the checkout. Anywhere else there is neither.
+(mode 2). On a machine with a runner host ([instance.md § Where it runs](./instance.md#where-it-runs)), that host's
+`<instance dir>/runner/data/host.db`, holding its runners' rows, is the only live database beside the checkout. On
+`xps`, `~/projects/blizzard-blizzard/hub/data/hub.db` also exists but is a **frozen snapshot** — the fleet as it stood
+at the migration, not as it is. A machine without a runner host has neither.
 
-**Hard constraint (runner only, on `xps`):** SQLite is single-writer. The systemd host holds its store —
-`~/projects/blizzard-blizzard/runner/data/host.db` (`blizzard-blizzard-runner.service`) — and runs migrations on boot,
-so a second daemon writing it concurrently risks lock contention / corruption. **Do not point a live feature-env runner
-at the host's store while its unit is up.** This is a data-safety constraint, not a tooling gap — no config mechanism
-relaxes it.
+**Hard constraint (runner only, on every runner-host machine):** SQLite is single-writer. The systemd host holds its
+store — `<instance dir>/runner/data/host.db`, under that machine's unit — and runs migrations on boot, so a second
+daemon writing it concurrently risks lock contention / corruption. **Do not point a live feature-env runner at the
+host's store while its unit is up.** This is a data-safety constraint, not a tooling gap — no config mechanism relaxes
+it.
 
 Port 8421 answers **nothing** — on `xps`, the old local hub unit is stopped and disabled. A dev surface still aimed
 there fails to connect rather than quietly reaching the wrong fleet.
