@@ -12,11 +12,11 @@ script for a long move writes a throwaway one in its own scratch space; it is ne
 
 This table is the registry: the record of which machine holds what. A move onto a build moves every runner host in it.
 
-| Machine (tailnet name) | What it is          | Runner host: instance dir, unit, port                                      | Also holds                                                              |
-| ---------------------- | ------------------- | -------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| `xps`                  | Dell XPS 15         | `~/projects/blizzard-blizzard`, `blizzard-blizzard-runner.service`, `8431` | the `blizzard-infra` worktree and the `blizzard-prod-admin` AWS profile |
-| `amd-9950x-fedora`     | Ryzen 9950X desktop | `~/blizzard`, `blizzard-builder-runner.service`, `8431`                    | —                                                                       |
-| `fedora`               | Fedora laptop       | none — development and orchestration only                                  | —                                                                       |
+| Machine (tailnet name) | What it is          | Runner host: name, instance dir, unit, port                                       | Also holds                                                              |
+| ---------------------- | ------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `xps`                  | Dell XPS 15         | `xps`, `~/projects/blizzard-blizzard`, `blizzard-blizzard-runner.service`, `8431` | the `blizzard-infra` worktree and the `blizzard-prod-admin` AWS profile |
+| `amd-9950x-fedora`     | Ryzen 9950X desktop | `amd-9950x`, `~/blizzard`, `blizzard-builder-runner.service`, `8431`              | —                                                                       |
+| `fedora`               | Fedora laptop       | none — development and orchestration only                                         | —                                                                       |
 
 The tailnet is `pufferfish-lungfish.ts.net`; a machine's MagicDNS name is `<name>.pufferfish-lungfish.ts.net`. Each
 host's identities, runners, workspace roots, and env pools are in

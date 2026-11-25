@@ -38,9 +38,9 @@ Each host's runners are split by harness and subscription but share one daemon, 
 General runner inspection and controls belong to
 [usage runner guidance](../../.winter/ext/usage/context/runner-hosts.md).
 
-|                     | Host `xps`                                                                                                               | Host `amd-9950x-fedora`                                                           |
+|                     | Host `xps`                                                                                                               | Host `amd-9950x` (machine `amd-9950x-fedora`)                                     |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| Hub id              | `hs_01M521395MMCN3ANGMJVQPG1YK`                                                                                          | `hs_01M89EHWHP8J01TFZ806P5WC27`                                                   |
+| Hub id              | `hs_01M521395MMCN3ANGMJVQPG1YK`                                                                                          | `hs_01M8A142266H2F6T468TFWFWAH`                                                   |
 | Instance dir        | `~/projects/blizzard-blizzard`                                                                                           | `~/blizzard`                                                                      |
 | Host directory      | `~/projects/blizzard-blizzard/runner` — `blizzard-host.toml`, store `data/host.db`, host key `data/secret-keys/`, `.env` | `~/blizzard/runner`, laid out the same                                            |
 | Port / `public_url` | `127.0.0.1:8431`, plus `https://xps.pufferfish-lungfish.ts.net:8431`                                                     | `127.0.0.1:8431`, plus `https://amd-9950x-fedora.pufferfish-lungfish.ts.net:8431` |
@@ -50,17 +50,20 @@ General runner inspection and controls belong to
 | Workspace roots     | `~/projects/blizzard-workspace`, `~/projects/winter-dev`                                                                 | `~/blizzard/blizzard-workspace`, `~/blizzard/winter-dev`                          |
 | Env pools           | `bz1`–`bz8` in each root                                                                                                 | `bz1`–`bz16` in each root                                                         |
 
-| Runner          | Host               | Hub id                          | Harness           | Subscription | Worker config                                                    |
-| --------------- | ------------------ | ------------------------------- | ----------------- | ------------ | ---------------------------------------------------------------- |
-| `r-claude`      | `xps`              | `rn_01M3MY1NGQR8WE1ZBRKNREFNE4` | Claude Code alone | `anthropic`  | `runner/worker-settings.json`, the file's `worker_settings_path` |
-| `r-chatgpt`     | `xps`              | `rn_01M3JK4RX4BQJ74W7T3CK4NQ1B` | OpenCode alone    | `openai`     | `runner/runners/r-chatgpt/worker-settings.json`                  |
-| `9950x-claude`  | `amd-9950x-fedora` | `rn_01M89EJ22Z8NDNX9N94TK1N2WQ` | Claude Code alone | `anthropic`  | `runner/worker-settings.json`, the file's `worker_settings_path` |
-| `9950x-chatgpt` | `amd-9950x-fedora` | `rn_01M89EK6YTSCNWTXJ5560BTM6J` | OpenCode alone    | `openai`     | `runner/runners/9950x-chatgpt/worker-settings.json`              |
+| Runner      | Host        | Hub id                          | Harness           | Subscription | Worker config                                                    |
+| ----------- | ----------- | ------------------------------- | ----------------- | ------------ | ---------------------------------------------------------------- |
+| `r-claude`  | `xps`       | `rn_01M3MY1NGQR8WE1ZBRKNREFNE4` | Claude Code alone | `anthropic`  | `runner/worker-settings.json`, the file's `worker_settings_path` |
+| `r-chatgpt` | `xps`       | `rn_01M3JK4RX4BQJ74W7T3CK4NQ1B` | OpenCode alone    | `openai`     | `runner/runners/r-chatgpt/worker-settings.json`                  |
+| `r-claude`  | `amd-9950x` | `rn_01M8A14MN9FZJNPKSY754FRQFR` | Claude Code alone | `anthropic`  | `runner/worker-settings.json`, the file's `worker_settings_path` |
+| `r-chatgpt` | `amd-9950x` | `rn_01M8A14WBK9QRVPTMRFH5XASPW` | OpenCode alone    | `openai`     | `runner/runners/r-chatgpt/worker-settings.json`                  |
 
-Worker-config paths are relative to the host's instance directory. An OpenCode runner's turns run on that machine's own
-managed OpenCode service (`opencode service status`), under its login and `~/.config/opencode/opencode.json`, whose
-`model` is the fallback for a launch naming none. Each runner's hub token is sealed in its host's store; replace it with
-`blizzard runner token set --runner <name>`.
+Every host names its runners alike — `r-claude` and `r-chatgpt` — so a runner's name alone never says which one it is:
+name it with its host, as `xps/r-claude` or `amd-9950x/r-claude`, or by its hub id. `blizzard hub runner list` shows
+names without hosts; `blizzard hub runner-host get <host id>` lists a host's own. A host's name is its own, not its
+machine's tailnet name. Worker-config paths are relative to the host's instance directory. An OpenCode runner's turns
+run on that machine's own managed OpenCode service (`opencode service status`), under its login and
+`~/.config/opencode/opencode.json`, whose `model` is the fallback for a launch naming none. Each runner's hub token is
+sealed in its host's store; replace it with `blizzard runner token set --runner <name>`.
 
 Every runner serves the hub's **`blizzard` project** through its host's `[[workspace]]` `blizzard`, and the **`winter`
 project** through its host's `[[workspace]]` `winter`; each host's file is the record of its settings. Within a host,
