@@ -73,3 +73,96 @@ None — first pass.
 153 distinct ids cited (latest epoch per node and asset, all artifact kinds); top 25 shown. 62 of the 198 rules declared
 by heading id went uncited — mostly verification-matrix, e2e and worker-node procedure ids, cited by method name
 instead. Reviewed, not pruned.
+
+## Pass 2 — 2026-10-30T12:00:00Z to 2026-11-25T23:59:59Z (run 2026-11-25)
+
+**Chunks covered:** 553 closed chunks in range (470 with retrospectives; 466 landed). $4,547 total spend; 315 delivery
+bounces.
+
+### Findings dispatched
+
+| Cluster                                                                                             | Chunks | Owner                                         | Action                                                                                    | Status   |
+| --------------------------------------------------------------------------------------------------- | ------ | --------------------------------------------- | ----------------------------------------------------------------------------------------- | -------- |
+| `delivery-findings` / `hub-log.land` is a mid-CI snapshot; a landed chunk has no final check states | ~205   | `blizzard#2439`                               | issue filed                                                                               | approved |
+| The full gate cannot finish inside a node; nodes defer it to each other and CI is the only full run | ~170   | `blizzard-context#748`                        | issue filed (matrix split, CI owns the full run)                                          | approved |
+| Build and pre-push skip cheap deterministic checks; CI catches them a bounce later                  | ~150   | —                                             | a runner-executed deterministic-check node, later; no project-specific prompt text        | declined |
+| Manual methods cannot be staged in feature envs (seeding gaps, harness fence dropped)               | ~140   | `epic:advanced-mocking`; workspace `0783116`  | four open questions on the epic; fence passed to env workers                              | approved |
+| Known reds and flakes on master are re-argued every verify, never filed                             | ~130   | `blizzard#2440`, `#2441`, `#2442`             | registry issue + the two live flakes; the other five named flakes already fixed           | approved |
+| "Pre-existing" red claimed without proof at the base (rule candidate)                               | —      | —                                             | —                                                                                         | declined |
+| `artifact get` returns only the newest epoch; `fail` transitions carry no cause                     | ~120   | `blizzard#2443`, `blizzard#2444`              | issues filed                                                                              | approved |
+| `land` answers `failure` while CI is pending or the PR is behind, naming no check                   | ~70    | `blizzard#2219`                               | comment with evidence; split out "pending is not failure, name the red check"             | approved |
+| The retrospective prompt claims every node produces a retrospective                                 | ~65    | `blizzard#2447`                               | prompt edit (`advanced-development-workflow/prompts/retrospective.md`)                    | approved |
+| `review-findings-delivered` is empty although deferred findings are minted                          | ~48    | `blizzard#2445`                               | issue filed                                                                               | approved |
+| Per-env tools (ruff, pyright, ast-grep, node) missing from the worker's PATH                        | ~48    | —                                             | deferred to the deterministic-check node; `uv run` from `<env>/blizzard` is correct today | declined |
+| A global `blizzard` binary shadows the env's CLI                                                    | 1      | —                                             | covered by `verification/blizzard/manual.md`; fails safe                                  | declined |
+| Resolve routes flakes, CI-infra errors and inherited reds as `broken`                               | ~45    | —                                             | —                                                                                         | declined |
+| Headless workers launch background subagents                                                        | ~44    | —                                             | superseded by `1b5894e90` (Nov 24, harness-neutral rule); watch next pass                 | declined |
+| `APPLICATION_SOURCE_DIGEST` conflicts on every rebase                                               | ~41    | —                                             | already fixed (`4e389c7da`, Nov 10)                                                       | declined |
+| `verification/blizzard.md` overflows a single read                                                  | ~36    | `blizzard-context#748`                        | folded into the matrix split                                                              | approved |
+| Plan nodes plan inline and flag it as a deviation                                                   | ~35    | —                                             | harmless                                                                                  | declined |
+| Env state stale after reset (`tenant_settings`, old hub process, `--tenant`)                        | ~35    | `blizzard-mock#191`                           | already fixed; the rest declined                                                          | declined |
+| Plan manual steps use wrong verbs or flags                                                          | ~31    | —                                             | self-correcting at verify                                                                 | declined |
+| Merges into a rebase-only repo are refused                                                          | ~21    | —                                             | already fixed (`blizzard#2350`)                                                           | declined |
+| `bas-hwf` review leaves worktrees detached; pre-push inherits them                                  | ~22    | `blizzard#2437`                               | issue filed, queued first                                                                 | approved |
+| Workers cannot amend `winter-planning` intent their build departs from                              | ~22    | workspace (`repos.md`, `.winter/config.toml`) | make `winter-planning` a project repo; operator-driven                                    | approved |
+| Verify commits code                                                                                 | 14     | —                                             | already fixed (`9b51b2ea6`, Nov 10)                                                       | declined |
+| Scratch paths and `$BLIZZARD_TMPDIR` socket length                                                  | ~5     | —                                             | socket length fixed in fixtures; rest are tips                                            | declined |
+| `reference-lint` exits 0 without `WINTER_WORKSPACE_DIR`                                             | 17     | `blizzard-context#748`                        | command line sets the variable                                                            | approved |
+| `restatement-check` red on master and run by no CI                                                  | 8      | `blizzard#2446`                               | issue filed (blizzard and blizzard-context CI)                                            | approved |
+
+### Reconciliation (prior pass's findings)
+
+| Prior finding                                             | Fix dispatched                           | Verdict          | Notes                                                                                        |
+| --------------------------------------------------------- | ---------------------------------------- | ---------------- | -------------------------------------------------------------------------------------------- |
+| Retrospective trusts a stale `delivery-findings` snapshot | `blizzard#1682`                          | recurred         | The re-verify half held; the mid-CI snapshot itself recurred (~205), now `blizzard#2439`     |
+| Per-chunk mutation testing measures nothing               | `blizzard#1683`                          | silent-after-fix |                                                                                              |
+| Prose ratchet red on `master` and outside CI              | `blizzard#1688`                          | silent-after-fix | The same shape recurred for `restatement-check`, now `blizzard#2446`                         |
+| Agents guess `artifact read`/`show`                       | `blizzard#1689`                          | silent-after-fix |                                                                                              |
+| Full gate cannot finish in a node                         | `blizzard#1690`                          | recurred         | ~170 gate + ~150 cheap-check complaints; now `blizzard-context#748`                          |
+| Headless workers cannot await background subagents        | `blizzard#1684`                          | recurred         | ~44, steady; the prompt rule was rewritten as a harness-neutral goal in `1b5894e90` (Nov 24) |
+| `finding get` refuses folded work items' findings         | `blizzard#1685`                          | silent-after-fix |                                                                                              |
+| zsh traps in worker Bash                                  | `blizzard#1686`                          | silent-after-fix |                                                                                              |
+| `review-finding-delta` first submitted as prose           | `blizzard#1687`                          | silent-after-fix |                                                                                              |
+| Issues closed with unsatisfiable acceptance criteria      | `blizzard#1691`, `blizzard-workspace#11` | recurred         | Lower rate                                                                                   |
+| "Nothing to land" recorded as `landed`                    | `blizzard#1692`                          | silent-after-fix |                                                                                              |
+| Build pushes from a worktree tracking the base            | `blizzard#1693`, `blizzard#1696`         | silent-after-fix | A related detached-HEAD shape is new, `blizzard#2437`                                        |
+| No branch protection; no `hotfix/` route                  | `blizzard#1694`                          | silent-after-fix |                                                                                              |
+| Review cites project rules almost never                   | `blizzard#1695`                          | silent-after-fix | Review citations rose from 9 to 224                                                          |
+| Verifier tracing leaks spans into the fleet collector     | `winter-context#22`                      | silent-after-fix |                                                                                              |
+| Deferred should-fix findings ship with no owner           | — (declined)                             | recurred         | Findings are minted; the empty asset is now `blizzard#2445`                                  |
+| Resolve cannot re-run a flaky CI job                      | — (declined)                             | recurred         | `blizzard#1503` sends flakes to `broken`; declined again this pass                           |
+
+### `bzh:` citation counts
+
+| Rule                              | Citations this range |
+| --------------------------------- | -------------------- |
+| `bzh:domain-orchestration-split`  | 466                  |
+| `bzh:dependency-injection`        | 455                  |
+| `bzh:branch-name`                 | 358                  |
+| `bzh:frontend-kit-floor`          | 340                  |
+| `bzh:shared-kernel`               | 284                  |
+| `bzh:bulk-reconstitution`         | 279                  |
+| `bzh:change-note`                 | 268                  |
+| `bzh:frontend-wire-conformist`    | 231                  |
+| `bzh:narrow-seams`                | 223                  |
+| `bzh:mirrored-test-layout`        | 219                  |
+| `bzh:domain-package-layers`       | 219                  |
+| `bzh:domain-core`                 | 195                  |
+| `bzh:frontend-open-vocabulary`    | 170                  |
+| `bzh:frontend-domain-boundary`    | 157                  |
+| `bzh:transaction-participation`   | 149                  |
+| `bzh:released-surface-additive`   | 138                  |
+| `bzh:frontend-containers-compose` | 136                  |
+| `bzh:data-roles`                  | 129                  |
+| `bzh:injected-clock`              | 128                  |
+| `bzh:pluggable-seams`             | 127                  |
+| `bzh:strict-types`                | 125                  |
+| `bzh:page-bounded-read`           | 118                  |
+| `bzh:frontend-formatters`         | 117                  |
+| `bzh:open-response-vocabulary`    | 113                  |
+| `bzh:store-exclusive-write`       | 111                  |
+
+213 distinct ids cited (latest epoch per node and asset, all artifact kinds); top 25 shown. 43 of the 224 rules declared
+by heading id went uncited — mostly verification-matrix and worker-node procedure ids, cited by method name instead.
+Pruning candidates to review: `bzh:claim-vocabulary`, `bzh:human-entries`, `bzh:readme-voice`, `bzh:patch-scope`,
+`bzh:mise`, `bzh:operational-event-log`. Reviewed, not pruned.
