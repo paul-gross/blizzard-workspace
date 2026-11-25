@@ -294,6 +294,12 @@ url = "git@github.com:paul-gross/blizzard-usage.git"
 name = "blizzard-mock"
 url = "git@github.com:paul-gross/blizzard-mock.git"
 
+# winter-planning is worktreed so a chunk can amend the product intent its build departs from;
+# a worker edits only `projects/fleet/`. The read-only copy at .winter/ext/planning stays below.
+[[project_repository]]
+name = "winter-planning"
+url = "git@github.com:c5xlabs/winter-planning.git"
+
 # ---------------------------------------------------------------------------
 # Standalone repositories — winter extensions, cloned once under .winter/ext/.
 # The winter-* extensions are the same repos that serve the winter workspace.
@@ -343,7 +349,8 @@ url = "git@github.com:paul-gross/blizzard-usage.git"
 path = ".winter/ext/usage"
 
 # winter-planning holds the suite's product intent; blizzard's is under `projects/fleet/`.
-# One current copy, read when planning; never worktreed, and never edited by a fleet worker.
+# This is the current copy agents and skills load when planning; edits go through a feature
+# env's winter-planning worktree, never this copy.
 [[standalone_repository]]
 name = "winter-planning"
 url = "git@github.com:c5xlabs/winter-planning.git"

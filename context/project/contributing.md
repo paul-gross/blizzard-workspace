@@ -96,8 +96,8 @@ closes the issue on merge with that criterion unmet — so whoever files the iss
 unreachable work off it. A criterion is unfulfillable when it is:
 
 - **an operator-only action** — *"branch protection requires the new check on `master`"*, or a by-hand deployment step;
-- **an edit in a repo the environment has no worktree for** — *"the epic's plan in winter-planning is marked
-  delivered"*, or a change to the workspace root ([repos.md](./repos.md));
+- **an edit in a repo the environment has no worktree for, or a worker may not make** — *"the epic in winter-planning is
+  marked delivered"*, a change to winter-strategy, or a change to the workspace root ([repos.md](./repos.md));
 - **PR-body content** — *"the PR description lists the migrated routes"*: the hub's `deliver` node writes the PR body
   from a fixed template, so no worker can put text in it.
 
@@ -146,6 +146,7 @@ Each repo lands one way:
 | `blizzard`, `blizzard-context`, `blizzard-mock` | a PR, by the steps below; `hotfix/` only when the user asks for it | protected — nothing but a merged, green PR, and admins are bound |
 | `blizzard-infra`                                | a direct push to `origin/master`                                   | unprotected — private on a plan without branch protection        |
 | `blizzard-usage`                                | a direct push to `origin/master`                                   | unprotected, and no CI                                           |
+| `winter-planning`                               | a PR, by the steps below                                           | unprotected; CI runs dprint and rumdl                            |
 | the workspace repo                              | a direct push to `origin/master`, always                           | unprotected, by choice                                           |
 
 A PR-landed repo's work — and any repo's fleet work — lands through a pull request the agent drives to completion:
